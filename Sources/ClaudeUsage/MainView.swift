@@ -1,0 +1,586 @@
+import SwiftUI
+import Charts
+
+struct MainView: View {
+    @ObservedObject var vm: ViewModel
+    var onLogin: () -> Void
+    var onQuit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            topBar
+            Divider().opacity(0.3)
+            ClaudeSection(vm: vm, onLogin: onLogin)
+            Divider().opacity(0.3)
+            CursorSection(vm: vm)
+        }
+        .padding(10)
+        .frame(minWidth: 260)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(
+            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+                .cornerRadius(10)
+        )
+    }
+
+    private var topBar: some View {
+        HStack {
+            Text("Usage")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Spacer()
+            if vm.claudeLoading || vm.cursorLoading {
+                ProgressView().controlSize(.mini)
+            }
+            Menu {
+                Button("지금 새로고침") {
+                    Task { await vm.refreshClaude(); await vm.refreshCursor() }
+                }
+                Divider()
+                Button("Claude 재로그인") { onLogin() }
+                Button("Claude 로그아웃") { vm.claudeLogout() }
+                Divider()
+                Button("종료") { onQuit() }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 12))
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+        }
+    }
+}
+
+// MARK: - Shared helpers
+
+enum SectionFormat {
+    static func pct(_ v: Double?) -> String {
+        guard let v else { return "–" }
+        return "\(Int(v.rounded()))%"
+    }
+
+    static func countdown(_ seconds: TimeInterval) -> String {
+        let s = Int(max(0, seconds))
+        let d = s / 86400
+        let h = (s % 86400) / 3600
+        let m = (s % 3600) / 60
+        let sec = s % 60
+        if d > 0 { return "\(d)d \(h)h" }
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, sec) }
+        return String(format: "%d:%02d", m, sec)
+    }
+
+    static func relative(_ d: Date, now: Date) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f.localizedString(for: d, relativeTo: now)
+    }
+
+    static func barColor(_ v: Double?) -> Color {
+        guard let v else { return .blue }
+        if v >= 80 { return .red }
+        if v >= 60 { return .orange }
+        return .blue
+    }
+}
+
+// MARK: - Claude section
+
+struct ClaudeSection: View {
+    @ObservedObject var vm: ViewModel
+    var onLogin: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            if !vm.claudeCollapsed {
+                if vm.claudeNeedsLogin {
+                    loginPrompt
+                } else {
+                    body5h
+                    sparkline
+                    footer
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        Button {
+            vm.claudeCollapsed.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: vm.claudeCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("Claude")
+                    .font(.system(size: 11, weight: .semibold))
+                if let plan = vm.claudeCurrent?.planName {
+                    PlanBadge(text: plan)
+                }
+                Spacer()
+                if vm.claudeCollapsed {
+                    Text(summary)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var summary: String {
+        if vm.claudeNeedsLogin { return "로그인 필요" }
+        let a = SectionFormat.pct(vm.claudeCurrent?.fiveHourPct)
+        let b = SectionFormat.pct(vm.claudeCurrent?.sevenDayPct)
+        return "5h \(a) · 주간 \(b)"
+    }
+
+    private var loginPrompt: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("claude.ai 로그인이 필요해요")
+                .font(.system(size: 11))
+            Button(action: onLogin) {
+                Text("로그인").frame(maxWidth: .infinity)
+            }
+            .controlSize(.small)
+            .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private var body5h: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                Text(SectionFormat.pct(vm.claudeCurrent?.fiveHourPct))
+                    .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                Text("5시간 창")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let reset = vm.claudeCurrent?.fiveHourResetAt {
+                    Text("⟲ " + SectionFormat.countdown(reset.timeIntervalSince(vm.now)))
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(.secondary.opacity(0.15)))
+                }
+            }
+            ProgressView(value: (vm.claudeCurrent?.fiveHourPct ?? 0) / 100)
+                .progressViewStyle(.linear)
+                .tint(SectionFormat.barColor(vm.claudeCurrent?.fiveHourPct))
+            HStack(spacing: 12) {
+                smallStat("주간", vm.claudeCurrent?.sevenDayPct)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func smallStat(_ label: String, _ value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+            Text(SectionFormat.pct(value))
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .monospacedDigit()
+        }
+    }
+
+
+    private var sparkline: some View {
+        Group {
+            let recent = Array(vm.claudeHistory.suffix(48))
+            if recent.count >= 2 {
+                let values = recent.compactMap { $0.fiveHourPct }
+                let dataMax = values.max() ?? 0
+                let ymax: Double = max(10, (dataMax / 10).rounded(.up) * 10)
+                let step: Double = ymax <= 30 ? 10 : (ymax <= 60 ? 20 : (ymax <= 100 ? 25 : 50))
+                let yValues: [Double] = Array(stride(from: 0.0, through: ymax, by: step))
+                let span = (recent.last!.takenAt.timeIntervalSince(recent.first!.takenAt))
+                let tickFormat: Date.FormatStyle = span < 24 * 3600
+                    ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
+                    : .dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted))
+
+                Chart(recent, id: \.takenAt) { s in
+                    LineMark(
+                        x: .value("t", s.takenAt),
+                        y: .value("v", s.fiveHourPct ?? 0)
+                    )
+                    .interpolationMethod(.monotone)
+                    .foregroundStyle(.blue)
+                }
+                .chartYScale(domain: 0...ymax)
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: yValues) { value in
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.25))
+                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
+                        AxisValueLabel(anchor: .trailing) {
+                            if let v = value.as(Double.self) {
+                                Text("\(Int(v))").font(.system(size: 8)).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 3)) { value in
+                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
+                        AxisValueLabel {
+                            if let d = value.as(Date.self) {
+                                Text(d, format: tickFormat)
+                                    .font(.system(size: 8)).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 44)
+            } else {
+                Color.clear.frame(height: 44)
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            if let t = vm.claudeLastSuccess {
+                Text("갱신 \(SectionFormat.relative(t, now: vm.now))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let err = vm.claudeError, !vm.claudeNeedsLogin {
+                Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
+            }
+        }
+    }
+}
+
+// MARK: - Cursor section
+
+struct CursorSection: View {
+    @ObservedObject var vm: ViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            if !vm.cursorCollapsed {
+                if vm.cursorNeedsSetup {
+                    setupPrompt
+                } else {
+                    usageBody
+                    sparkline
+                    footer
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        Button {
+            vm.cursorCollapsed.toggle()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: vm.cursorCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text("Cursor")
+                    .font(.system(size: 11, weight: .semibold))
+                if let plan = vm.cursorCurrent?.planName, !plan.isEmpty {
+                    PlanBadge(text: prettyCursorPlan(plan))
+                }
+                Spacer()
+                if vm.cursorCollapsed {
+                    Text(summary)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func prettyCursorPlan(_ s: String) -> String {
+        // "ultra" → "Ultra", "pro" → "Pro"
+        guard let first = s.first else { return s }
+        return first.uppercased() + s.dropFirst()
+    }
+
+    private var summary: String {
+        if vm.cursorNeedsSetup { return "앱 로그인 필요" }
+        guard let c = vm.cursorCurrent else { return "–" }
+        if c.plan == .ultra, let cents = c.totalCents {
+            return "$\(dollars(cents)) / $400"
+        }
+        if let req = c.totalRequests {
+            if let max = c.maxRequests, max > 0 {
+                return "\(req) / \(max) req"
+            }
+            return "\(req) req"
+        }
+        return "–"
+    }
+
+    private var setupPrompt: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Cursor 앱에 로그인해주세요.")
+                .font(.system(size: 11))
+            Text("앱 설치/로그인 후 자동 연동됩니다.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var usageBody: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                if let c = vm.cursorCurrent {
+                    if c.plan == .ultra, let cents = c.totalCents {
+                        Text("$\(dollars(cents))")
+                            .font(.system(size: 24, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                        if let maxC = c.maxCents, maxC > 0 {
+                            Text("/ $\(Int(maxC / 100))")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    } else if let req = c.totalRequests {
+                        Text("\(req)")
+                            .font(.system(size: 24, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                        if let max = c.maxRequests, max > 0 {
+                            Text("/ \(max)")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                        Text("req")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if let reset = vm.cursorCurrent?.resetAt {
+                    Text("⟲ " + SectionFormat.countdown(reset.timeIntervalSince(vm.now)))
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(.secondary.opacity(0.15)))
+                }
+            }
+            if let c = vm.cursorCurrent {
+                if c.plan == .ultra, let cents = c.totalCents, let maxC = c.maxCents, maxC > 0 {
+                    let pct = cents / maxC
+                    ProgressView(value: min(1, pct))
+                        .progressViewStyle(.linear)
+                        .tint(SectionFormat.barColor(pct * 100))
+                } else if let req = c.totalRequests, let max = c.maxRequests, max > 0 {
+                    let pct = Double(req) / Double(max)
+                    ProgressView(value: min(1, pct))
+                        .progressViewStyle(.linear)
+                        .tint(SectionFormat.barColor(pct * 100))
+                }
+            }
+        }
+    }
+
+    private func dollars(_ cents: Double) -> String {
+        let d = cents / 100.0
+        return d >= 100 ? String(format: "%.0f", d) : String(format: "%.2f", d)
+    }
+
+    private var sparkline: some View {
+        let isUltra = (vm.cursorCurrent?.plan ?? .unknown) == .ultra
+        return Group {
+            if isUltra {
+                ultraCumulativeChart
+            } else {
+                proRequestsChart
+            }
+        }
+    }
+
+    private func buildCumulativePoints() -> [(Date, Double)] {
+        let periodStart: Date? = {
+            if let r = vm.cursorCurrent?.resetAt,
+               let d = Calendar(identifier: .gregorian).date(byAdding: .month, value: -1, to: r) {
+                return d
+            }
+            return vm.cursorEvents.first?.timestamp
+        }()
+        let events = vm.cursorEvents.sorted { $0.timestamp < $1.timestamp }
+        var points: [(Date, Double)] = []
+        if let start = periodStart { points.append((start, 0)) }
+        var running: Double = 0
+        for e in events {
+            running += e.chargedCents
+            points.append((e.timestamp, running / 100.0))
+        }
+        let nowTotal = (vm.cursorCurrent?.totalCents ?? running) / 100.0
+        points.append((vm.now, max(running / 100.0, nowTotal)))
+        return points
+    }
+
+    // Ultra: 서버 이벤트 기반 누적 $ 차트
+    private var ultraCumulativeChart: some View {
+        let points = buildCumulativePoints()
+        return Group {
+            if points.count >= 2 {
+                let values = points.map(\.1)
+                let dataMax = values.max() ?? 0
+                let target = max(dataMax, 1)
+                let magnitude = pow(10.0, floor(log10(max(target, 1))))
+                let bin = magnitude / 2
+                let ymax = max(bin, (target / bin).rounded(.up) * bin)
+                let yValues: [Double] = [0, ymax / 2, ymax]
+
+                let span = points.last!.0.timeIntervalSince(points.first!.0)
+                let tickFormat: Date.FormatStyle = span < 24 * 3600
+                    ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
+                    : .dateTime.month(.twoDigits).day(.twoDigits)
+
+                Chart(Array(points.enumerated()), id: \.offset) { (_, p) in
+                    LineMark(
+                        x: .value("t", p.0),
+                        y: .value("$", p.1)
+                    )
+                    .interpolationMethod(.stepEnd)
+                    .foregroundStyle(.purple)
+                }
+                .chartYScale(domain: 0...ymax)
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: yValues) { value in
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.25))
+                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
+                        AxisValueLabel(anchor: .trailing) {
+                            if let v = value.as(Double.self) {
+                                Text("$\(Int(v))").font(.system(size: 8)).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 3)) { value in
+                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
+                        AxisValueLabel {
+                            if let d = value.as(Date.self) {
+                                Text(d, format: tickFormat)
+                                    .font(.system(size: 8)).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 44)
+            } else {
+                Color.clear.frame(height: 44)
+            }
+        }
+    }
+
+    // Pro/Free: 폴링 스냅샷의 request 수 기반 차트
+    private var proRequestsChart: some View {
+        Group {
+            let recent = Array(vm.cursorHistory.suffix(96))
+            if recent.count >= 2 {
+                let values: [Double] = recent.map { Double($0.totalRequests ?? 0) }
+                let dataMax = values.max() ?? 0
+                let target = max(dataMax, 1)
+                let magnitude = pow(10.0, floor(log10(max(target, 1))))
+                let bin = magnitude / 2
+                let ymax = max(bin, (target / bin).rounded(.up) * bin)
+                let yValues: [Double] = [0, ymax / 2, ymax]
+
+                let span = recent.last!.takenAt.timeIntervalSince(recent.first!.takenAt)
+                let tickFormat: Date.FormatStyle = span < 24 * 3600
+                    ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
+                    : .dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted))
+
+                Chart(Array(zip(recent, values)), id: \.0.takenAt) { pair in
+                    LineMark(
+                        x: .value("t", pair.0.takenAt),
+                        y: .value("v", pair.1)
+                    )
+                    .interpolationMethod(.monotone)
+                    .foregroundStyle(.purple)
+                }
+                .chartYScale(domain: 0...ymax)
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: yValues) { value in
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.25))
+                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
+                        AxisValueLabel(anchor: .trailing) {
+                            if let v = value.as(Double.self) {
+                                Text("\(Int(v))").font(.system(size: 8)).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 3)) { value in
+                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
+                        AxisValueLabel {
+                            if let d = value.as(Date.self) {
+                                Text(d, format: tickFormat)
+                                    .font(.system(size: 8)).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 44)
+            } else {
+                Color.clear.frame(height: 44)
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            if let t = vm.cursorLastSuccess {
+                Text("갱신 \(SectionFormat.relative(t, now: vm.now))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let err = vm.cursorError, !vm.cursorNeedsSetup {
+                Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
+            }
+        }
+    }
+}
+
+struct PlanBadge: View {
+    var text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(.secondary.opacity(0.15))
+            )
+    }
+}
+
+struct VisualEffectView: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = material
+        v.blendingMode = blendingMode
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+    }
+}
