@@ -2,11 +2,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_NAME="ClaudeUsage"          # 번들 파일명(공백 없이)
-DISPLAY_NAME="Claude Usage"     # Finder 표시명
-BUNDLE_ID="com.dwlee.ClaudeUsage"
-EXECUTABLE="ClaudeUsage"
-VERSION="${VERSION:-0.1.0}"
+APP_NAME="AIUsage"              # 번들 파일명(공백 없이)
+DISPLAY_NAME="AI Usage"         # Finder 표시명
+BUNDLE_ID="com.dwlee.AIUsage"
+EXECUTABLE="AIUsage"            # 실행 파일명 (SwiftPM 산출물은 ClaudeUsage이지만 복사 시 이 이름으로)
+SPM_PRODUCT="ClaudeUsage"       # SwiftPM 타깃 이름 (내부 유지)
+VERSION="${VERSION:-0.1.1}"
 MIN_OS="14.0"
 
 echo "==> swift build -c release"
@@ -19,7 +20,7 @@ mkdir -p "${APP_DIR}/Contents/MacOS"
 mkdir -p "${APP_DIR}/Contents/Resources"
 
 echo "==> assembling bundle at ${APP_DIR}"
-cp ".build/release/${EXECUTABLE}" "${APP_DIR}/Contents/MacOS/${EXECUTABLE}"
+cp ".build/release/${SPM_PRODUCT}" "${APP_DIR}/Contents/MacOS/${EXECUTABLE}"
 
 cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
