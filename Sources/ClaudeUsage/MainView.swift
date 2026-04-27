@@ -93,6 +93,12 @@ enum SectionFormat {
         return .secondary
     }
 
+    static func thresholdLineColor(_ t: Int) -> Color {
+        if t >= 100 { return .red }
+        if t >= 80  { return .orange }
+        return .secondary
+    }
+
     static func paceText(projected: Double?, exhaustionAt: Date?, now: Date) -> String? {
         guard let p = projected else { return nil }
         let pInt = Int(p.rounded())
@@ -252,13 +258,22 @@ struct ClaudeSection: View {
                     ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
                     : .dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted))
 
-                Chart(recent, id: \.takenAt) { s in
-                    LineMark(
-                        x: .value("t", s.takenAt),
-                        y: .value("v", s.fiveHourPct ?? 0)
-                    )
-                    .interpolationMethod(.monotone)
-                    .foregroundStyle(.blue)
+                Chart {
+                    ForEach(recent, id: \.takenAt) { s in
+                        LineMark(
+                            x: .value("t", s.takenAt),
+                            y: .value("v", s.fiveHourPct ?? 0)
+                        )
+                        .interpolationMethod(.monotone)
+                        .foregroundStyle(.blue)
+                    }
+                    if settings.notifyEnabled {
+                        ForEach(settings.notifyThresholds.filter { Double($0) <= ymax }, id: \.self) { t in
+                            RuleMark(y: .value("threshold", Double(t)))
+                                .foregroundStyle(SectionFormat.thresholdLineColor(t).opacity(0.5))
+                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                        }
+                    }
                 }
                 .chartYScale(domain: 0...ymax)
                 .chartYAxis {
@@ -496,13 +511,27 @@ struct CursorSection: View {
                     ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
                     : .dateTime.month(.twoDigits).day(.twoDigits)
 
-                Chart(Array(points.enumerated()), id: \.offset) { (_, p) in
-                    LineMark(
-                        x: .value("t", p.0),
-                        y: .value("$", p.1)
-                    )
-                    .interpolationMethod(.stepEnd)
-                    .foregroundStyle(.purple)
+                let maxDollars = (vm.cursorCurrent?.maxCents ?? 0) / 100.0
+                let thresholdLines: [(Int, Double)] = (settings.notifyEnabled && maxDollars > 0)
+                    ? settings.notifyThresholds.compactMap { t in
+                        let d = Double(t) / 100.0 * maxDollars
+                        return d <= ymax ? (t, d) : nil
+                      }
+                    : []
+                Chart {
+                    ForEach(Array(points.enumerated()), id: \.offset) { (_, p) in
+                        LineMark(
+                            x: .value("t", p.0),
+                            y: .value("$", p.1)
+                        )
+                        .interpolationMethod(.stepEnd)
+                        .foregroundStyle(.purple)
+                    }
+                    ForEach(thresholdLines, id: \.0) { (t, d) in
+                        RuleMark(y: .value("threshold", d))
+                            .foregroundStyle(SectionFormat.thresholdLineColor(t).opacity(0.5))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                    }
                 }
                 .chartYScale(domain: 0...ymax)
                 .chartYAxis {
@@ -552,13 +581,27 @@ struct CursorSection: View {
                     ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
                     : .dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted))
 
-                Chart(Array(zip(recent, values)), id: \.0.takenAt) { pair in
-                    LineMark(
-                        x: .value("t", pair.0.takenAt),
-                        y: .value("v", pair.1)
-                    )
-                    .interpolationMethod(.monotone)
-                    .foregroundStyle(.purple)
+                let maxReq = Double(vm.cursorCurrent?.maxRequests ?? 0)
+                let thresholdLines: [(Int, Double)] = (settings.notifyEnabled && maxReq > 0)
+                    ? settings.notifyThresholds.compactMap { t in
+                        let r = Double(t) / 100.0 * maxReq
+                        return r <= ymax ? (t, r) : nil
+                      }
+                    : []
+                Chart {
+                    ForEach(Array(zip(recent, values)), id: \.0.takenAt) { pair in
+                        LineMark(
+                            x: .value("t", pair.0.takenAt),
+                            y: .value("v", pair.1)
+                        )
+                        .interpolationMethod(.monotone)
+                        .foregroundStyle(.purple)
+                    }
+                    ForEach(thresholdLines, id: \.0) { (t, r) in
+                        RuleMark(y: .value("threshold", r))
+                            .foregroundStyle(SectionFormat.thresholdLineColor(t).opacity(0.5))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                    }
                 }
                 .chartYScale(domain: 0...ymax)
                 .chartYAxis {

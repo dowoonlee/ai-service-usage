@@ -24,9 +24,7 @@ struct SettingsView: View {
             }
             Section("알림") {
                 Toggle("임계치 알림 사용", isOn: $settings.notifyEnabled)
-                Toggle("80% 도달 시", isOn: $settings.notifyAt80)
-                    .disabled(!settings.notifyEnabled)
-                Toggle("95% 도달 시", isOn: $settings.notifyAt95)
+                ThresholdEditor(settings: settings)
                     .disabled(!settings.notifyEnabled)
                 Text("같은 주기 내에서는 임계치별로 한 번만 알림이 옵니다.")
                     .font(.system(size: 10))
@@ -34,7 +32,46 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 360, height: 340)
+        .frame(width: 380, height: 460)
+    }
+}
+
+private struct ThresholdEditor: View {
+    @ObservedObject var settings: Settings
+    @State private var newValue: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(settings.notifyThresholds, id: \.self) { t in
+                HStack {
+                    Text("\(t)%")
+                        .font(.system(size: 12)).monospacedDigit()
+                    Spacer()
+                    Button {
+                        settings.removeThreshold(t)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            HStack {
+                TextField("새 임계치", text: $newValue)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 90)
+                Text("%").font(.system(size: 11)).foregroundStyle(.secondary)
+                Spacer()
+                Button("추가") {
+                    if let v = Int(newValue), v > 0 {
+                        settings.addThreshold(v)
+                        newValue = ""
+                    }
+                }
+                .disabled((Int(newValue) ?? 0) <= 0)
+            }
+            .padding(.top, 4)
+        }
     }
 }
 

@@ -22,22 +22,19 @@ final class NotificationManager {
     }
 
     // value: 0~100, resetAt: 현재 주기의 끝 시각 (주기 식별자로 사용)
-    // title은 알림 제목, body는 본문 (nil이면 자동 생성)
+    // 사용자가 설정한 임계치 리스트 중 v가 막 넘은 가장 높은 값에 대해 발송.
     func evaluate(key: String, value: Double?, resetAt: Date?, title: String, bodyMaker: (Int) -> String) {
         let s = Settings.shared
         guard s.notifyEnabled, let v = value, let reset = resetAt else { return }
-
-        let threshold = pickThreshold(v)
-        guard let t = threshold else { return }
-        if t == 80, !s.notifyAt80 { return }
-        if t == 95, !s.notifyAt95 { return }
+        let thresholds = s.notifyThresholds.sorted()
+        guard !thresholds.isEmpty else { return }
+        guard let t = thresholds.last(where: { Double($0) <= v }) else { return }
 
         let d = UserDefaults.standard
         let resetKey = "notify.\(key).resetAt"
         let thrKey   = "notify.\(key).lastThreshold"
 
         let storedReset = d.object(forKey: resetKey) as? Date
-        let storedThr   = d.integer(forKey: thrKey)
 
         // 새 주기가 시작되었으면 카운터 리셋
         if storedReset == nil || abs((storedReset ?? .distantPast).timeIntervalSince(reset)) > 60 {
@@ -45,17 +42,11 @@ final class NotificationManager {
             d.set(0, forKey: thrKey)
         }
 
-        let effective = (d.object(forKey: thrKey) as? Int) ?? storedThr
+        let effective = d.integer(forKey: thrKey)
         if t <= effective { return }   // 이미 같거나 더 높은 임계치 알림 발송됨
 
         send(title: title, body: bodyMaker(t))
         d.set(t, forKey: thrKey)
-    }
-
-    private func pickThreshold(_ v: Double) -> Int? {
-        if v >= 95 { return 95 }
-        if v >= 80 { return 80 }
-        return nil
     }
 
     private func send(title: String, body: String) {
