@@ -86,6 +86,14 @@ enum SectionFormat {
         return .blue
     }
 
+    // 0% 녹색 → 100% 빨강으로 hue를 선형 보간. 100% 초과는 100%로 cap.
+    static func continuousColor(_ v: Double?) -> Color {
+        guard let v else { return .secondary }
+        let clamped = max(0, min(100, v)) / 100
+        let hue = 0.33 * (1 - clamped)
+        return Color(hue: hue, saturation: 0.75, brightness: 0.9)
+    }
+
     static func paceColor(_ projected: Double?) -> Color {
         guard let p = projected else { return .secondary }
         if p >= 100 { return .red }
@@ -107,6 +115,33 @@ enum SectionFormat {
             return "예상 \(pInt)% · \(countdown(remaining)) 후 한도"
         }
         return "예상 \(pInt)%"
+    }
+}
+
+// 접힌 헤더의 요약 텍스트 뒤에 사용량 비례 게이지를 깐다.
+fileprivate struct CollapsedGauge: View {
+    let text: String
+    let pct: Double?
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10))
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(.secondary.opacity(0.12))
+                        if let p = pct {
+                            RoundedRectangle(cornerRadius: 4)
+                                .fill(SectionFormat.continuousColor(p).opacity(0.45))
+                                .frame(width: geo.size.width * min(1, max(0, p) / 100))
+                        }
+                    }
+                }
+            )
     }
 }
 
@@ -161,10 +196,13 @@ struct ClaudeSection: View {
                 }
                 Spacer()
                 if vm.claudeCollapsed {
-                    Text(summary)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+                    if vm.claudeNeedsLogin {
+                        Text(summary)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        CollapsedGauge(text: summary, pct: collapsedPct)
+                    }
                 }
             }
             .contentShape(Rectangle())
@@ -177,6 +215,12 @@ struct ClaudeSection: View {
         let a = SectionFormat.pct(vm.claudeCurrent?.fiveHourPct)
         let b = SectionFormat.pct(vm.claudeCurrent?.sevenDayPct)
         return "5h \(a) · 주간 \(b)"
+    }
+
+    private var collapsedPct: Double? {
+        [vm.claudeCurrent?.fiveHourPct, vm.claudeCurrent?.sevenDayPct]
+            .compactMap { $0 }
+            .max()
     }
 
     private var loginPrompt: some View {
@@ -356,10 +400,13 @@ struct CursorSection: View {
                 }
                 Spacer()
                 if vm.cursorCollapsed {
-                    Text(summary)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
+                    if vm.cursorNeedsSetup || vm.cursorCurrent == nil {
+                        Text(summary)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        CollapsedGauge(text: summary, pct: vm.cursorCurrentPct)
+                    }
                 }
             }
             .contentShape(Rectangle())
