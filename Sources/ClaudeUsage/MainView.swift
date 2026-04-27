@@ -291,25 +291,37 @@ struct ClaudeSection: View {
     private var sparkline: some View {
         Group {
             let recent = Array(vm.claudeHistory.suffix(48))
-            if recent.count >= 2 {
-                let values = recent.compactMap { $0.fiveHourPct }
+            // nil 또는 0 스냅샷은 차트에서 제외.
+            // fiveHourPct=0은 "5h 창은 활성이지만 사용량 0" — 라인이 중간에 y=0 평지가 되어
+            // AreaMark가 0 높이로 텅 비어 보이는 문제를 일으킴.
+            let validData: [(Date, Double)] = recent.compactMap { s in
+                s.fiveHourPct.flatMap { v in v > 0 ? (s.takenAt, v) : nil }
+            }
+            if validData.count >= 2 {
+                let values = validData.map(\.1)
                 let dataMax = values.max() ?? 0
                 let ymax: Double = max(10, (dataMax / 10).rounded(.up) * 10)
                 let step: Double = ymax <= 30 ? 10 : (ymax <= 60 ? 20 : (ymax <= 100 ? 25 : 50))
                 let yValues: [Double] = Array(stride(from: 0.0, through: ymax, by: step))
-                let span = (recent.last!.takenAt.timeIntervalSince(recent.first!.takenAt))
+                let span = validData.last!.0.timeIntervalSince(validData.first!.0)
                 let tickFormat: Date.FormatStyle = span < 24 * 3600
                     ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
                     : .dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted))
 
                 Chart {
-                    ForEach(recent, id: \.takenAt) { s in
-                        LineMark(
-                            x: .value("t", s.takenAt),
-                            y: .value("v", s.fiveHourPct ?? 0)
+                    ForEach(validData, id: \.0) { item in
+                        AreaMark(
+                            x: .value("t", item.0),
+                            y: .value("v", item.1)
                         )
                         .interpolationMethod(.monotone)
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(claudeTheme.gradient)
+                        LineMark(
+                            x: .value("t", item.0),
+                            y: .value("v", item.1)
+                        )
+                        .interpolationMethod(.monotone)
+                        .foregroundStyle(claudeTheme.lineColor)
                     }
                     if settings.notifyEnabled {
                         ForEach(settings.notifyThresholds.filter { Double($0) <= ymax }, id: \.self) { t in
@@ -371,6 +383,10 @@ struct ClaudeSection: View {
     private var petAnxietyAt: Double {
         guard settings.notifyEnabled, let t = settings.notifyThresholds.first else { return 0.8 }
         return Double(t) / 100
+    }
+
+    private var claudeTheme: PetTheme {
+        settings.themeClaudeOverride ?? PetTheme.defaultFor(settings.petClaudeKind)
     }
 
     private var footer: some View {
@@ -544,20 +560,23 @@ struct CursorSection: View {
     }
 
     private func buildCumulativePoints() -> [(Date, Double)] {
-        let periodStart: Date? = {
-            if let r = vm.cursorCurrent?.resetAt,
-               let d = Calendar(identifier: .gregorian).date(byAdding: .month, value: -1, to: r) {
-                return d
-            }
-            return vm.cursorEvents.first?.timestamp
-        }()
+        // 이전엔 (periodStart, 0) 을 prepend 했지만,
+        // 첫 이벤트까지 라인이 y=0 평지가 되어 area가 텅 비어 보이는 문제 발생.
+        // 차트 x-도메인은 첫 이벤트 ~ vm.now 로 자연스럽게 잡히게 함.
         let events = vm.cursorEvents.sorted { $0.timestamp < $1.timestamp }
         var points: [(Date, Double)] = []
-        if let start = periodStart { points.append((start, 0)) }
         var running: Double = 0
+        var lastTs: Date? = nil
         for e in events {
+            // 동일/더 이른 timestamp 이벤트는 0-width segment를 만들어 차트가 갭처럼 렌더 →
+            // 1ms씩 밀어서 strict ascending 보장.
+            var ts = e.timestamp
+            if let prev = lastTs, ts <= prev {
+                ts = prev.addingTimeInterval(0.001)
+            }
             running += e.chargedCents
-            points.append((e.timestamp, running / 100.0))
+            points.append((ts, running / 100.0))
+            lastTs = ts
         }
         let nowTotal = (vm.cursorCurrent?.totalCents ?? running) / 100.0
         points.append((vm.now, max(running / 100.0, nowTotal)))
@@ -591,12 +610,20 @@ struct CursorSection: View {
                     : []
                 Chart {
                     ForEach(Array(points.enumerated()), id: \.offset) { (_, p) in
+                        AreaMark(
+                            x: .value("t", p.0),
+                            y: .value("$", p.1)
+                        )
+                        // line과 동일한 stepEnd로 통일.
+                        // 다른 보간이면 segment마다 사다리꼴 빈 곳이 생김.
+                        .interpolationMethod(.stepEnd)
+                        .foregroundStyle(cursorTheme.gradient)
                         LineMark(
                             x: .value("t", p.0),
                             y: .value("$", p.1)
                         )
                         .interpolationMethod(.stepEnd)
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(cursorTheme.lineColor)
                     }
                     ForEach(thresholdLines, id: \.0) { (t, d) in
                         RuleMark(y: .value("threshold", d))
@@ -655,8 +682,13 @@ struct CursorSection: View {
     private var proRequestsChart: some View {
         Group {
             let recent = Array(vm.cursorHistory.suffix(96))
-            if recent.count >= 2 {
-                let values: [Double] = recent.map { Double($0.totalRequests ?? 0) }
+            // nil 또는 0 totalRequests 스냅샷 제거.
+            // 0은 라인을 y=0 평지로 만들어 AreaMark가 텅 비어 보임.
+            let validData: [(Date, Double)] = recent.compactMap { s in
+                s.totalRequests.flatMap { v in v > 0 ? (s.takenAt, Double(v)) : nil }
+            }
+            if validData.count >= 2 {
+                let values = validData.map(\.1)
                 let dataMax = values.max() ?? 0
                 let target = max(dataMax, 1)
                 let magnitude = pow(10.0, floor(log10(max(target, 1))))
@@ -664,7 +696,7 @@ struct CursorSection: View {
                 let ymax = max(bin, (target / bin).rounded(.up) * bin)
                 let yValues: [Double] = [0, ymax / 2, ymax]
 
-                let span = recent.last!.takenAt.timeIntervalSince(recent.first!.takenAt)
+                let span = validData.last!.0.timeIntervalSince(validData.first!.0)
                 let tickFormat: Date.FormatStyle = span < 24 * 3600
                     ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
                     : .dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted))
@@ -677,13 +709,19 @@ struct CursorSection: View {
                       }
                     : []
                 Chart {
-                    ForEach(Array(zip(recent, values)), id: \.0.takenAt) { pair in
-                        LineMark(
-                            x: .value("t", pair.0.takenAt),
-                            y: .value("v", pair.1)
+                    ForEach(validData, id: \.0) { item in
+                        AreaMark(
+                            x: .value("t", item.0),
+                            y: .value("v", item.1)
                         )
                         .interpolationMethod(.monotone)
-                        .foregroundStyle(.purple)
+                        .foregroundStyle(cursorTheme.gradient)
+                        LineMark(
+                            x: .value("t", item.0),
+                            y: .value("v", item.1)
+                        )
+                        .interpolationMethod(.monotone)
+                        .foregroundStyle(cursorTheme.lineColor)
                     }
                     ForEach(thresholdLines, id: \.0) { (t, r) in
                         RuleMark(y: .value("threshold", r))
@@ -719,7 +757,7 @@ struct CursorSection: View {
                         GeometryReader { geo in
                             let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
                             WalkingCat(
-                                points: recent.map { ($0.takenAt, Double($0.totalRequests ?? 0)) },
+                                points: validData,
                                 proxy: proxy,
                                 plotOrigin: plotFrame.origin,
                                 kind: settings.petCursorKind,
@@ -741,6 +779,10 @@ struct CursorSection: View {
     private var petAnxietyAt: Double {
         guard settings.notifyEnabled, let t = settings.notifyThresholds.first else { return 0.8 }
         return Double(t) / 100
+    }
+
+    private var cursorTheme: PetTheme {
+        settings.themeCursorOverride ?? PetTheme.defaultFor(settings.petCursorKind)
     }
 
     private var footer: some View {

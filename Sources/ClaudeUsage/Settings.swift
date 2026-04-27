@@ -30,6 +30,13 @@ final class Settings: ObservableObject {
     @Published var petCursorKind: PetKind {
         didSet { UserDefaults.standard.set(petCursorKind.rawValue, forKey: Keys.petCursorKind) }
     }
+    /// nil = 펫 기본 테마 사용
+    @Published var themeClaudeOverride: PetTheme? {
+        didSet { UserDefaults.standard.set(themeClaudeOverride?.rawValue, forKey: Keys.themeClaudeOverride) }
+    }
+    @Published var themeCursorOverride: PetTheme? {
+        didSet { UserDefaults.standard.set(themeCursorOverride?.rawValue, forKey: Keys.themeCursorOverride) }
+    }
     @Published private(set) var launchAtLogin: Bool
 
     private init() {
@@ -41,8 +48,10 @@ final class Settings: ObservableObject {
         self.showPace      = (d.object(forKey: Keys.showPace) as? Bool) ?? true
         self.petClaudeEnabled = (d.object(forKey: Keys.petClaudeEnabled) as? Bool) ?? true
         self.petCursorEnabled = (d.object(forKey: Keys.petCursorEnabled) as? Bool) ?? true
-        self.petClaudeKind = (d.string(forKey: Keys.petClaudeKind).flatMap { PetKind(rawValue: $0) }) ?? .cat
-        self.petCursorKind = (d.string(forKey: Keys.petCursorKind).flatMap { PetKind(rawValue: $0) }) ?? .dog
+        self.petClaudeKind = (d.string(forKey: Keys.petClaudeKind).flatMap { PetKind(rawValue: $0) }) ?? .fox
+        self.petCursorKind = (d.string(forKey: Keys.petCursorKind).flatMap { PetKind(rawValue: $0) }) ?? .wolf
+        self.themeClaudeOverride = d.string(forKey: Keys.themeClaudeOverride).flatMap { PetTheme(rawValue: $0) }
+        self.themeCursorOverride = d.string(forKey: Keys.themeCursorOverride).flatMap { PetTheme(rawValue: $0) }
         self.launchAtLogin = (SMAppService.mainApp.status == .enabled)
     }
 
@@ -81,5 +90,7 @@ final class Settings: ObservableObject {
         static let petCursorEnabled = "settings.petCursorEnabled"
         static let petClaudeKind    = "settings.petClaudeKind"
         static let petCursorKind    = "settings.petCursorKind"
+        static let themeClaudeOverride = "settings.themeClaudeOverride"
+        static let themeCursorOverride = "settings.themeCursorOverride"
     }
 }

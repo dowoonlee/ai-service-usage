@@ -1,17 +1,16 @@
 import SwiftUI
 import Charts
 
-// 차트 라인 위에서 살아있는 듯이 행동하는 펫.
-// 표시는 Tiny Creatures 16x16 sprite (PetSprite),
-// 행동(걷기/앉기/두리번)과 위치 상태는 PetController가 보유.
-// sprite 자체는 단일 프레임이라 walk는 bob+squash로 페이크.
+// 차트 라인 위에서 걷고 쉬고 두리번거리는 펫.
+// 표시는 Animated Wild Animals (CC0) 프레임 strip 기반,
+// 행동/위치/현재 frame은 PetController가 보유.
 struct WalkingCat: View {
     let points: [(Date, Double)]   // 시간순 정렬 가정
     let proxy: ChartProxy
     let plotOrigin: CGPoint
-    var kind: PetKind = .cat
+    var kind: PetKind = .fox
     var mood: PetMood = .neutral
-    var sizePt: CGFloat = 16
+    var displayHeight: CGFloat = 18
 
     @StateObject private var ctrl = PetController()
 
@@ -25,37 +24,93 @@ struct WalkingCat: View {
 
     @ViewBuilder
     private func sprite() -> some View {
-        if let pos = positionFor(xNorm: ctrl.x), let nsImg = PetSprite.image(for: kind) {
-            let now = Date().timeIntervalSinceReferenceDate
-            // 걷는 동안 bob (위아래) + squash (세로 펄스) → 살아있는 느낌
-            let walking = ctrl.action == .walk
-            let bobPhase = sin(now * mood.bobFreq * .pi * 2)
-            let bob: Double = walking ? bobPhase * mood.bobAmplitude : 0
-            let squash: Double = walking ? 1 + bobPhase * 0.10 : 1
+        if let pos = positionFor(xNorm: ctrl.x),
+           let nsImg = PetSprite.image(for: kind, action: ctrl.action, frameIndex: ctrl.frameIndex) {
+            let (cw, ch) = kind.cellSize
+            let aspect = Double(cw) / Double(ch)
+            let w = displayHeight * aspect
+            let h = displayHeight
             // jitter: 불안할수록 매 프레임 위치 떨림
             let jx: Double = mood.jitter > 0 ? Double.random(in: -mood.jitter...mood.jitter) : 0
             let jy: Double = mood.jitter > 0 ? Double.random(in: -mood.jitter...mood.jitter) : 0
-            // scan: 두리번 → 미세 좌우 기울임
-            let tilt: Double = ctrl.action == .scan ? sin(now * 4) * 10 : 0
+
+            // 큰 낙폭 구간 통과 중일 때의 추가 모션 (walk/run 한정)
+            let descent = bigDropDescent(at: ctrl.x)
+            let isMoving = ctrl.action == .walk || ctrl.action == .run
+            let now = Date().timeIntervalSinceReferenceDate
+            // descent > 0: 내려가는 중 → 굴러 떨어짐 (회전)
+            // descent < 0: 올라가는 중 → 점프 (위로 튀어오름)
+            let rollAngle: Double = (isMoving && descent > 0) ? now * 360 * 2 : 0
+            let jumpY: Double = (isMoving && descent < 0) ? abs(sin(now * 5)) * 6 : 0
 
             Image(nsImage: nsImg)
                 .resizable()
                 .interpolation(.none)
-                .frame(width: sizePt, height: sizePt)
-                // SF Symbol과 다르게 시트 sprite는 모두 우측 향함 → 좌측 이동시 반전
-                .scaleEffect(
-                    x: ctrl.facingRight ? 1 : -1,
-                    y: squash,
-                    anchor: .bottom
-                )
-                .rotationEffect(.degrees(tilt), anchor: .bottom)
+                .frame(width: w, height: h)
+                // Wild Animals sprite는 모두 좌향 → 우측 이동시 반전
+                .scaleEffect(x: ctrl.facingRight ? -1 : 1, y: 1, anchor: .center)
+                .rotationEffect(.degrees(rollAngle), anchor: .center)
                 .colorMultiply(mood.tint)
                 .position(
                     x: pos.x + jx,
-                    y: pos.y - sizePt / 2 + bob + jy
+                    y: pos.y - h / 2 + jy - jumpY
                 )
                 .allowsHitTesting(false)
+
+            // 굴러 떨어지는 중(descent > 0)일 때만 우측에 비명 말풍선.
+            // 펫의 rotationEffect와 무관하게 upright 유지하려고 sibling으로 배치.
+            if isMoving && descent > 0 {
+                screamBubble
+                    .position(
+                        x: pos.x + jx + w / 2 + 18,
+                        y: pos.y - h * 0.85 + jy
+                    )
+                    .allowsHitTesting(false)
+            }
         }
+    }
+
+    private var screamBubble: some View {
+        Text("AAAH!")
+            .font(.system(size: 8, weight: .bold, design: .rounded))
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1.5)
+            .background(
+                RoundedRectangle(cornerRadius: 4).fill(Color.white)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.black.opacity(0.7), lineWidth: 0.5)
+            )
+    }
+
+    // 현재 x가 "큰 낙폭 segment" 안에 있고 진행 방향이 그 segment의 흐름과 같으면
+    // descent를 부호로 반환: +1 = 내려가는 중, -1 = 올라가는 중, 0 = 해당 없음.
+    // 임계: |dy| >= 40% × (ymax - ymin)
+    private func bigDropDescent(at xNorm: Double) -> Double {
+        guard points.count >= 2 else { return 0 }
+        let ys = points.map { $0.1 }
+        guard let yMin = ys.min(), let yMax = ys.max(), yMax - yMin > 0 else { return 0 }
+        let threshold = (yMax - yMin) * 0.40
+        let xStart = points.first!.0
+        let xEnd = points.last!.0
+        let span = xEnd.timeIntervalSince(xStart)
+        guard span > 0 else { return 0 }
+        let targetDate = xStart.addingTimeInterval(span * xNorm)
+
+        for i in 1..<points.count {
+            let prev = points[i - 1]
+            let next = points[i]
+            guard targetDate >= prev.0 && targetDate <= next.0 else { continue }
+            let dy = next.1 - prev.1
+            if abs(dy) < threshold { return 0 }
+            // facingRight = 시간 forward, slope < 0이면 내려가는 중
+            // facingLeft  = 시간 backward, slope > 0이면 내려가는 중
+            let descending = (ctrl.facingRight && dy < 0) || (!ctrl.facingRight && dy > 0)
+            return descending ? 1 : -1
+        }
+        return 0
     }
 
     private func positionFor(xNorm: Double) -> CGPoint? {
@@ -90,11 +145,12 @@ struct WalkingCat: View {
 
 @MainActor
 final class PetController: ObservableObject {
-    enum Action { case walk, sit, scan }
+    enum Action: String { case walk, run, sit, scan }
 
     @Published private(set) var x: Double = 0.5             // 0..1 정규화 위치
     @Published private(set) var facingRight: Bool = true
     @Published private(set) var action: Action = .walk
+    @Published private(set) var frameIndex: Int = 0
 
     // body에서 직접 set. @Published 아님 → SwiftUI 경고 안 남.
     var mood: PetMood = .neutral
@@ -102,6 +158,7 @@ final class PetController: ObservableObject {
     private var direction: Double = 1
     private var actionUntil: Date = .distantPast
     private var lastTick: Date = Date()
+    private var frameAccumulator: Double = 0
     private var timer: Timer?
 
     func start() {
@@ -125,12 +182,30 @@ final class PetController: ObservableObject {
         let dt = min(0.1, max(0, now.timeIntervalSince(lastTick)))
         lastTick = now
 
+        // 프레임 진행: 동작별 fps 다름. walk/run은 이동 속도에 살짝 비례.
+        let fps: Double
+        switch action {
+        case .walk: fps = 6 + mood.walkSpeed * 30
+        case .run:  fps = 12 + mood.walkSpeed * 30
+        case .sit:  fps = 3
+        case .scan: fps = 4
+        }
+        let frameDuration = 1.0 / max(1, fps)
+        frameAccumulator += dt
+        while frameAccumulator >= frameDuration {
+            frameAccumulator -= frameDuration
+            frameIndex += 1
+        }
+
         if now >= actionUntil {
             chooseNextAction(now: now)
         }
 
-        if action == .walk {
-            x += direction * mood.walkSpeed * dt
+        if action == .walk || action == .run {
+            let speed = action == .run
+                ? mood.walkSpeed * mood.runSpeedMultiplier
+                : mood.walkSpeed
+            x += direction * speed * dt
             if x >= 1 {
                 x = 1
                 direction = -1
@@ -149,6 +224,7 @@ final class PetController: ObservableObject {
         let r = Double.random(in: 0...1)
         let restEnd = mood.restProbability
         let scanEnd = restEnd + mood.scanProbability
+        let prevAction = action
         if r < restEnd {
             action = .sit
             actionUntil = now.addingTimeInterval(.random(in: mood.restDurationRange))
@@ -156,13 +232,28 @@ final class PetController: ObservableObject {
             action = .scan
             actionUntil = now.addingTimeInterval(.random(in: 0.4...1.2))
         } else {
-            action = .walk
-            actionUntil = now.addingTimeInterval(.random(in: mood.walkDurationRange))
-            // 가끔 시작 시 방향 반전 (불안할수록 자주)
-            if Double.random(in: 0...1) < mood.directionFlipProb {
-                direction = -direction
-                facingRight = direction > 0
+            // walk vs run: mood.runChance에 따라 분기. run은 짧은 burst.
+            if Double.random(in: 0...1) < mood.runChance {
+                action = .run
+                actionUntil = now.addingTimeInterval(.random(in: mood.runDurationRange))
+            } else {
+                action = .walk
+                actionUntil = now.addingTimeInterval(.random(in: mood.walkDurationRange))
             }
+            // 매 walk/run마다 방향 완전 무작위 (가장자리면 안쪽으로 강제) → wandering
+            if x < 0.15 {
+                direction = 1
+            } else if x > 0.85 {
+                direction = -1
+            } else {
+                direction = Bool.random() ? 1 : -1
+            }
+            facingRight = direction > 0
+        }
+        if action != prevAction {
+            // 새 동작 시작 시 frame 리셋 (sheet마다 frame 수가 달라서 인덱스 누수 방지)
+            frameIndex = 0
+            frameAccumulator = 0
         }
     }
 }
@@ -170,17 +261,17 @@ final class PetController: ObservableObject {
 struct PetMood {
     // 이동
     var walkSpeed: Double = 0.06           // 초당 정규화 x-단위 (0.1 = 10초에 끝에서 끝)
+    var runSpeedMultiplier: Double = 2.2   // run 시 walk 대비 배속
     // 표현
-    var bobAmplitude: Double = 0           // y 통통 진폭(pt)
-    var bobFreq: Double = 2                // 초당 통통 횟수
     var jitter: Double = 0                 // 매 프레임 위치 떨림 amplitude(pt)
     var tint: Color = .white               // .colorMultiply 용. white = 변화 없음
     // 행동 분포
     var restProbability: Double = 0.30
     var scanProbability: Double = 0.10
-    var directionFlipProb: Double = 0.20
+    var runChance: Double = 0              // walk 결정 시 run으로 승급할 확률
     var restDurationRange: ClosedRange<TimeInterval> = 1.5...4.0
     var walkDurationRange: ClosedRange<TimeInterval> = 3.0...8.0
+    var runDurationRange: ClosedRange<TimeInterval> = 1.0...2.5
 
     static let neutral = PetMood()
 
@@ -196,29 +287,32 @@ struct PetMood {
         let anxiety = max(0, min(1, (p - anx) / (1 - anx)))
 
         let walkSpeed = 0.04 + excitement * 0.10 + anxiety * 0.04
-        let bob = excitement * 4.0 * (1 - anxiety)
         let jit = anxiety * 1.6
         // colorMultiply: 흰색=원본, 빨강에 가까워질수록 G/B 채널 감쇠
-        let tint = anxiety > 0
+        let tint: Color = anxiety > 0
             ? Color(red: 1, green: 1 - anxiety * 0.55, blue: 1 - anxiety * 0.55)
             : .white
 
         // 차분: 자주 쉼 / 신남: 거의 안 쉼 / 불안: 거의 안 쉬고 자주 두리번
         let restProb = max(0, 0.35 - excitement * 0.30 - anxiety * 0.05)
         let scanProb = anxiety > 0.3 ? 0.18 : 0.08
-        let dirFlip = 0.10 + anxiety * 0.50
+
+        // run: 신남 절정(0.7+) 또는 불안 임계(0.4+)에서 점진 증가
+        let excitementRun = max(0, (excitement - 0.70) / 0.30) * 0.55
+        let anxietyRun    = max(0, (anxiety    - 0.40) / 0.60) * 0.85
+        let runChance = max(excitementRun, anxietyRun)
 
         return PetMood(
             walkSpeed: walkSpeed,
-            bobAmplitude: bob,
-            bobFreq: 2 + excitement * 2,
+            runSpeedMultiplier: 2.2,
             jitter: jit,
             tint: tint,
             restProbability: restProb,
             scanProbability: scanProb,
-            directionFlipProb: dirFlip,
+            runChance: runChance,
             restDurationRange: 1.0...3.5,
-            walkDurationRange: anxiety > 0.5 ? 1.5...3.5 : 3.0...7.0
+            walkDurationRange: anxiety > 0.5 ? 1.5...3.5 : 3.0...7.0,
+            runDurationRange: 0.8...2.2
         )
     }
 }

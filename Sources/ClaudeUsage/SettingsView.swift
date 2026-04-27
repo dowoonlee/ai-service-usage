@@ -24,6 +24,13 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(!settings.petClaudeEnabled)
+                Picker("Claude 테마", selection: $settings.themeClaudeOverride) {
+                    Text("기본 (\(PetTheme.defaultFor(settings.petClaudeKind).displayName))")
+                        .tag(PetTheme?.none)
+                    ForEach(PetTheme.allCases) { t in
+                        Text(t.displayName).tag(PetTheme?.some(t))
+                    }
+                }
                 Toggle("Cursor 차트에 펫 표시", isOn: $settings.petCursorEnabled)
                 Picker("Cursor 펫", selection: $settings.petCursorKind) {
                     ForEach(PetKind.allCases) { k in
@@ -31,6 +38,13 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(!settings.petCursorEnabled)
+                Picker("Cursor 테마", selection: $settings.themeCursorOverride) {
+                    Text("기본 (\(PetTheme.defaultFor(settings.petCursorKind).displayName))")
+                        .tag(PetTheme?.none)
+                    ForEach(PetTheme.allCases) { t in
+                        Text(t.displayName).tag(PetTheme?.some(t))
+                    }
+                }
                 Text("사용량이 많아지면 펫이 신나고, 임계치에 가까워지면 불안해합니다.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)

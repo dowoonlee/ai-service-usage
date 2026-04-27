@@ -1,69 +1,106 @@
 import AppKit
 import SwiftUI
 
-// Tiny Creatures (CC0, Clint Bellanger)에서 잘라낸 16x16 펫 스프라이트.
-// PetKind에 (col, row)를 매핑하고 sheet를 한 번 로드해서 캐시.
-// 시트 자체는 단일 프레임이라 "걷기"는 PetController + bob/squash로 페이크.
+// Animated Wild Animals (CC0, ScratchIO) 스프라이트.
+// 동물별로 cell 사이즈 다름, 동작별로 strip PNG 1개. frame i → x: i*cellW, y: 0.
+// PetController가 (action, frameIndex)를 들고 있고, 여기서는 잘린 프레임을 캐시.
 
 enum PetKind: String, CaseIterable, Identifiable, Codable {
-    case cat
-    case dog
-    case chicken
-    case sheep
+    case fox
+    case wolf
     case bear
-    case squirrel
+    case boar
+    case deer
+    case rabbit
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .cat:      return "고양이"
-        case .dog:      return "강아지"
-        case .chicken:  return "닭"
-        case .sheep:    return "양"
-        case .bear:     return "곰"
-        case .squirrel: return "다람쥐"
+        case .fox:    return "여우"
+        case .wolf:   return "늑대"
+        case .bear:   return "곰"
+        case .boar:   return "멧돼지"
+        case .deer:   return "사슴"
+        case .rabbit: return "토끼"
         }
     }
 
-    /// (col, row) on tilemap_packed.png (10 cols × 18 rows, 16px tiles, 0-indexed).
-    /// tile_NNNN = row * 10 + col + 1.
-    var tile: (col: Int, row: Int) {
+    var cellSize: (w: Int, h: Int) {
         switch self {
-        case .cat:      return (6, 15)   // tile_0157
-        case .dog:      return (6, 17)   // tile_0177
-        case .chicken:  return (0, 15)   // tile_0151
-        case .sheep:    return (3, 15)   // tile_0154
-        case .bear:     return (1, 16)   // tile_0162
-        case .squirrel: return (0, 14)   // tile_0141
+        case .fox:    return (64, 36)
+        case .wolf:   return (64, 40)
+        case .bear:   return (64, 33)
+        case .boar:   return (64, 40)
+        case .deer:   return (72, 52)
+        case .rabbit: return (32, 26)
+        }
+    }
+
+    /// 동작 → 파일 prefix. Rabbit은 Walk 대신 Hop, Wolf는 Idle 대신 Howl.
+    func resourceName(for action: PetController.Action) -> String {
+        let prefix: String
+        switch self {
+        case .fox: prefix = "Fox"
+        case .wolf: prefix = "Wolf"
+        case .bear: prefix = "Bear"
+        case .boar: prefix = "Boar"
+        case .deer: prefix = "Deer"
+        case .rabbit: prefix = "Rabbit"
+        }
+        switch action {
+        case .walk:
+            return self == .rabbit ? "\(prefix)_Hop" : "\(prefix)_Walk"
+        case .run:
+            return "\(prefix)_Run"
+        case .sit, .scan:
+            return self == .wolf ? "\(prefix)_Howl" : "\(prefix)_Idle"
         }
     }
 }
 
 @MainActor
 enum PetSprite {
-    private static var cache: [PetKind: NSImage] = [:]
+    private static var cache: [String: [NSImage]] = [:]
 
-    private static let sheet: CGImage? = {
-        guard let url = Bundle.module.url(forResource: "tiny-creatures", withExtension: "png"),
+    /// 동물+동작에 해당하는 strip을 잘라 frame 배열로 반환. 캐시됨.
+    static func frames(for kind: PetKind, action: PetController.Action) -> [NSImage] {
+        let key = "\(kind.rawValue)/\(action)"
+        if let cached = cache[key] { return cached }
+
+        let name = kind.resourceName(for: action)
+        guard let url = Bundle.module.url(forResource: name, withExtension: "png"),
               let nsImage = NSImage(contentsOf: url),
               let tiff = nsImage.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff)
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let sheet = bitmap.cgImage
         else {
-            DebugLog.log("PetSprite: tiny-creatures.png 로드 실패")
-            return nil
+            DebugLog.log("PetSprite: \(name).png 로드 실패")
+            cache[key] = []
+            return []
         }
-        return bitmap.cgImage
-    }()
 
-    static func image(for kind: PetKind) -> NSImage? {
-        if let cached = cache[kind] { return cached }
-        guard let sheet = sheet else { return nil }
-        let (col, row) = kind.tile
-        let rect = CGRect(x: col * 16, y: row * 16, width: 16, height: 16)
-        guard let cropped = sheet.cropping(to: rect) else { return nil }
-        let img = NSImage(cgImage: cropped, size: NSSize(width: 16, height: 16))
-        cache[kind] = img
-        return img
+        let (w, h) = kind.cellSize
+        let frameCount = max(1, sheet.width / w)
+        var frames: [NSImage] = []
+        frames.reserveCapacity(frameCount)
+        for i in 0..<frameCount {
+            let rect = CGRect(x: i * w, y: 0, width: w, height: h)
+            if let cropped = sheet.cropping(to: rect) {
+                frames.append(NSImage(cgImage: cropped, size: NSSize(width: w, height: h)))
+            }
+        }
+        cache[key] = frames
+        return frames
+    }
+
+    static func image(
+        for kind: PetKind,
+        action: PetController.Action,
+        frameIndex: Int
+    ) -> NSImage? {
+        let f = frames(for: kind, action: action)
+        guard !f.isEmpty else { return nil }
+        return f[frameIndex % f.count]
     }
 }
