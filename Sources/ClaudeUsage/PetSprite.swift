@@ -63,13 +63,23 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
 enum PetSprite {
     private static var cache: [String: [NSImage]] = [:]
 
+    /// SwiftPM 의 자동 생성 Bundle.module 은 .app/<name>.bundle 만 체크하지만
+    /// 표준 .app 은 Contents/Resources/ 아래에 리소스가 들어감 → 둘 다 fallback.
+    private static let resourceBundle: Bundle = {
+        if let url = Bundle.main.url(forResource: "ClaudeUsage_ClaudeUsage", withExtension: "bundle"),
+           let b = Bundle(url: url) {
+            return b
+        }
+        return .module
+    }()
+
     /// 동물+동작에 해당하는 strip을 잘라 frame 배열로 반환. 캐시됨.
     static func frames(for kind: PetKind, action: PetController.Action) -> [NSImage] {
         let key = "\(kind.rawValue)/\(action)"
         if let cached = cache[key] { return cached }
 
         let name = kind.resourceName(for: action)
-        guard let url = Bundle.module.url(forResource: name, withExtension: "png"),
+        guard let url = resourceBundle.url(forResource: name, withExtension: "png"),
               let nsImage = NSImage(contentsOf: url),
               let tiff = nsImage.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),

@@ -7,7 +7,7 @@ DISPLAY_NAME="AI Usage"         # Finder 표시명
 BUNDLE_ID="com.dwlee.AIUsage"
 EXECUTABLE="AIUsage"            # 실행 파일명 (SwiftPM 산출물은 ClaudeUsage이지만 복사 시 이 이름으로)
 SPM_PRODUCT="ClaudeUsage"       # SwiftPM 타깃 이름 (내부 유지)
-VERSION="${VERSION:-0.1.7}"
+VERSION="${VERSION:-0.1.8}"
 MIN_OS="14.0"
 
 # Sparkle 자동 업데이트
