@@ -67,6 +67,16 @@ struct WalkingCat: View {
                     )
                     .allowsHitTesting(false)
             }
+
+            // quote 동작 중이면 펫 위쪽에 명언 말풍선 표시 (5초 고정).
+            if ctrl.action == .quote, let quote = ctrl.currentQuote {
+                quoteBubble(quote)
+                    .position(
+                        x: pos.x + jx,
+                        y: pos.y + jy - h - 18
+                    )
+                    .allowsHitTesting(false)
+            }
         }
     }
 
@@ -81,6 +91,25 @@ struct WalkingCat: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.black.opacity(0.7), lineWidth: 0.5)
+            )
+    }
+
+    private func quoteBubble(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .foregroundStyle(Color.black)
+            .multilineTextAlignment(.center)
+            .lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 140)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2.5)
+            .background(
+                RoundedRectangle(cornerRadius: 5).fill(Color.white)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
                     .stroke(Color.black.opacity(0.7), lineWidth: 0.5)
             )
     }
@@ -145,12 +174,13 @@ struct WalkingCat: View {
 
 @MainActor
 final class PetController: ObservableObject {
-    enum Action: String { case walk, run, sit, scan }
+    enum Action: String { case walk, run, sit, scan, quote }
 
     @Published private(set) var x: Double = 0.5             // 0..1 정규화 위치
     @Published private(set) var facingRight: Bool = true
     @Published private(set) var action: Action = .walk
     @Published private(set) var frameIndex: Int = 0
+    @Published private(set) var currentQuote: String? = nil
 
     // body에서 직접 set. @Published 아님 → SwiftUI 경고 안 남.
     var mood: PetMood = .neutral
@@ -194,6 +224,7 @@ final class PetController: ObservableObject {
         case .run:  fps = 12 + mood.walkSpeed * 30
         case .sit:  fps = 3
         case .scan: fps = 4
+        case .quote: fps = 3
         }
         let frameDuration = 1.0 / max(1, fps)
         frameAccumulator += dt
@@ -229,13 +260,20 @@ final class PetController: ObservableObject {
         let r = Double.random(in: 0...1)
         let restEnd = mood.restProbability
         let scanEnd = restEnd + mood.scanProbability
+        // mood와 무관한 5% 확률로 명언 표시. 7초 고정.
+        let quoteEnd = scanEnd + 0.05
         let prevAction = action
+        currentQuote = nil
         if r < restEnd {
             action = .sit
             actionUntil = now.addingTimeInterval(.random(in: mood.restDurationRange))
         } else if r < scanEnd {
             action = .scan
             actionUntil = now.addingTimeInterval(.random(in: 0.4...1.2))
+        } else if r < quoteEnd {
+            action = .quote
+            currentQuote = Quotes.random()
+            actionUntil = now.addingTimeInterval(7.0)
         } else {
             // walk vs run: mood.runChance에 따라 분기. run은 짧은 burst.
             if Double.random(in: 0...1) < mood.runChance {

@@ -53,7 +53,7 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
             return self == .rabbit ? "\(prefix)_Hop" : "\(prefix)_Walk"
         case .run:
             return "\(prefix)_Run"
-        case .sit, .scan:
+        case .sit, .scan, .quote:
             return self == .wolf ? "\(prefix)_Howl" : "\(prefix)_Idle"
         }
     }
