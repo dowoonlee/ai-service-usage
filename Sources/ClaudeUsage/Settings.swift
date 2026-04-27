@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import ServiceManagement
 
 @MainActor
 final class Settings: ObservableObject {
@@ -20,6 +21,7 @@ final class Settings: ObservableObject {
     @Published var showPace: Bool {
         didSet { UserDefaults.standard.set(showPace, forKey: Keys.showPace) }
     }
+    @Published private(set) var launchAtLogin: Bool
 
     private init() {
         let d = UserDefaults.standard
@@ -28,6 +30,22 @@ final class Settings: ObservableObject {
         self.notifyAt80    = (d.object(forKey: Keys.notifyAt80) as? Bool) ?? true
         self.notifyAt95    = (d.object(forKey: Keys.notifyAt95) as? Bool) ?? true
         self.showPace      = (d.object(forKey: Keys.showPace) as? Bool) ?? true
+        self.launchAtLogin = (SMAppService.mainApp.status == .enabled)
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            let status = SMAppService.mainApp.status
+            if enabled, status != .enabled {
+                try SMAppService.mainApp.register()
+            } else if !enabled, status == .enabled {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            DebugLog.log("LaunchAtLogin failed: \(error.localizedDescription)")
+        }
+        // 실제 시스템 상태로 동기화 (실패 시 토글 원복)
+        launchAtLogin = (SMAppService.mainApp.status == .enabled)
     }
 
     enum Keys {

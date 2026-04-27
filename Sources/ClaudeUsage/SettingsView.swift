@@ -16,6 +16,12 @@ struct SettingsView: View {
                 }
                 Toggle("사용 페이스 예측 표시", isOn: $settings.showPace)
             }
+            Section("시작") {
+                Toggle("로그인 시 자동 시작", isOn: Binding(
+                    get: { settings.launchAtLogin },
+                    set: { settings.setLaunchAtLogin($0) }
+                ))
+            }
             Section("알림") {
                 Toggle("임계치 알림 사용", isOn: $settings.notifyEnabled)
                 Toggle("80% 도달 시", isOn: $settings.notifyAt80)
@@ -28,7 +34,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 360, height: 280)
+        .frame(width: 360, height: 340)
     }
 }
 
