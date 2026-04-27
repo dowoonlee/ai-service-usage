@@ -53,6 +53,19 @@ JSONL append-only files under `~/Library/Application Support/ClaudeUsage/` via `
 
 `ViewModel.projectedPct` / `projectedExhaustionDate` (static, pure, `ViewModel.swift:157-180`) extrapolate linearly from `(current%, elapsed)` to `(projected%, periodEnd)`. They deliberately return `nil` when `elapsed < max(15min, 5% of period)` to avoid noisy startup predictions — keep that guard if you refactor.
 
+### Pet animation
+
+`WalkingCat` (`WalkingCat.swift`) is mounted in each chart's `chartOverlay` and walks along the line. The View struct deliberately mutates `PetController` non-`@Published` fields (`mood`, `speedMultiplier`) directly from `body` each render — this avoids SwiftUI publish-loop warnings while still letting the controller react to chart-driven state. Controller → view goes through `@Published` (`x`, `action`, `frameIndex`, `currentQuote`).
+
+Two behaviors that depend on chart shape live in WalkingCat (not the controller):
+
+- `bigDropDescent(at: ctrl.x)` returns `+1/-1/0` based on whether the segment under the pet is "big" (`|dy| >= 40% × y_range`) and which way the pet is traversing it. `+1` (descending a big drop) → rolling rotation + `screamBubble` "AAAH!". `-1` (ascending it) → vertical bounce (`abs(sin(now * 4)) * 14`) + `cheerBubble` "WHEE!". The two animations are deliberately mirror-image so a segment looks dramatic both ways.
+- While inside such a segment, body sets `ctrl.speedMultiplier = 1/1.5` so the pet lingers there → animation/bubble lasts ~1.5× longer than normal traversal.
+
+`Action` enum has 5 cases: `walk`, `run`, `sit`, `scan`, `quote`. `.quote` fires at 5% probability in `chooseNextAction` (mood-independent), holds for 7s with a randomly-picked one-liner from `Quotes.swift`. The quote bubble uses a `PreferenceKey` to measure itself and clamps inside `plotFrame` (flipping to below the pet if the head-up position would clip the chart top). Adding a new `Action` case requires a corresponding mapping in `PetSprite.resourceName(for:)`.
+
+`WalkingCat` takes `plotFrame: CGRect` (not just `plotOrigin: CGPoint`) precisely so the bubble clamp logic has access to the plot's right/bottom bounds.
+
 ### Notification dedup
 
 `NotificationManager.evaluate` (`NotificationManager.swift:26`) fires at most one alert per metric per reset window. The "current window" is identified by storing `resetAt` in `UserDefaults` under `notify.<key>.resetAt`; `lastThreshold` tracks the highest threshold already fired so re-crossings within the same window are suppressed. The 60-second slack on the `resetAt` comparison is intentional (ISO timestamps drift slightly between polls).
