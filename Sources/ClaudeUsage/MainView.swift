@@ -363,7 +363,7 @@ struct ClaudeSection: View {
                                     s.fiveHourPct.map { (s.takenAt, $0) }
                                 },
                                 proxy: proxy,
-                                plotOrigin: plotFrame.origin,
+                                plotFrame: plotFrame,
                                 kind: settings.petClaudeKind,
                                 mood: PetMood.from(
                                     pct: vm.claudeCurrent?.fiveHourPct,
@@ -661,7 +661,7 @@ struct CursorSection: View {
                             WalkingCat(
                                 points: points,
                                 proxy: proxy,
-                                plotOrigin: plotFrame.origin,
+                                plotFrame: plotFrame,
                                 kind: settings.petCursorKind,
                                 mood: PetMood.from(
                                     pct: vm.cursorCurrentPct,
@@ -759,7 +759,7 @@ struct CursorSection: View {
                             WalkingCat(
                                 points: validData,
                                 proxy: proxy,
-                                plotOrigin: plotFrame.origin,
+                                plotFrame: plotFrame,
                                 kind: settings.petCursorKind,
                                 mood: PetMood.from(
                                     pct: vm.cursorCurrentPct,

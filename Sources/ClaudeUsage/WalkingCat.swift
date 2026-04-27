@@ -1,23 +1,37 @@
 import SwiftUI
 import Charts
 
+// quote 말풍선 크기를 부모로 전달하기 위한 PreferenceKey.
+// GeometryReader로 측정한 사이즈를 onPreferenceChange가 @State로 끌어올린다.
+private struct QuoteBubbleSizeKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
+}
+
 // 차트 라인 위에서 걷고 쉬고 두리번거리는 펫.
 // 표시는 Animated Wild Animals (CC0) 프레임 strip 기반,
 // 행동/위치/현재 frame은 PetController가 보유.
 struct WalkingCat: View {
     let points: [(Date, Double)]   // 시간순 정렬 가정
     let proxy: ChartProxy
-    let plotOrigin: CGPoint
+    let plotFrame: CGRect          // 차트 plot rect (좌표 변환 + 말풍선 클램프 용)
     var kind: PetKind = .fox
     var mood: PetMood = .neutral
     var displayHeight: CGFloat = 18
 
     @StateObject private var ctrl = PetController()
+    @State private var bubbleSize: CGSize = .zero
 
     var body: some View {
         // mood는 매 render마다 컨트롤러에 동기화 (publish 아님 → 경고 없음)
         ctrl.mood = mood
+        // 큰 낙폭 segment 통과 중에는 펫 속도를 1/1.5배로 늦춰서
+        // 굴러떨어짐/점프와 말풍선이 1.5배 더 오래 보이도록.
+        ctrl.speedMultiplier = (bigDropDescent(at: ctrl.x) != 0) ? (1.0 / 1.5) : 1.0
         return sprite()
+            .onPreferenceChange(QuoteBubbleSizeKey.self) { bubbleSize = $0 }
             .onAppear { ctrl.start() }
             .onDisappear { ctrl.stop() }
     }
@@ -38,10 +52,10 @@ struct WalkingCat: View {
             let descent = bigDropDescent(at: ctrl.x)
             let isMoving = ctrl.action == .walk || ctrl.action == .run
             let now = Date().timeIntervalSinceReferenceDate
-            // descent > 0: 내려가는 중 → 굴러 떨어짐 (회전)
-            // descent < 0: 올라가는 중 → 점프 (위로 튀어오름)
+            // descent > 0: 내려가는 중 → 굴러 떨어짐 (회전 + 비명)
+            // descent < 0: 올라가는 중 → 점프 (위로 튀어오름 + 환호)
             let rollAngle: Double = (isMoving && descent > 0) ? now * 360 * 2 : 0
-            let jumpY: Double = (isMoving && descent < 0) ? abs(sin(now * 5)) * 6 : 0
+            let jumpY: Double = (isMoving && descent < 0) ? abs(sin(now * 4)) * 14 : 0
 
             Image(nsImage: nsImg)
                 .resizable()
@@ -68,13 +82,48 @@ struct WalkingCat: View {
                     .allowsHitTesting(false)
             }
 
-            // quote 동작 중이면 펫 위쪽에 명언 말풍선 표시 (5초 고정).
-            if ctrl.action == .quote, let quote = ctrl.currentQuote {
-                quoteBubble(quote)
+            // 점프하며 올라가는 중(descent < 0)일 때 우측에 환호 말풍선.
+            // 펫이 위아래 튀므로 jumpY 만큼 함께 올려서 따라다니게 함.
+            if isMoving && descent < 0 {
+                cheerBubble
                     .position(
-                        x: pos.x + jx,
-                        y: pos.y + jy - h - 18
+                        x: pos.x + jx + w / 2 + 18,
+                        y: pos.y - h * 0.85 + jy - jumpY
                     )
+                    .allowsHitTesting(false)
+            }
+
+            // quote 동작 중이면 명언 말풍선 표시 (7초 고정).
+            // 위치 결정: 기본은 펫 머리 위, plot 좌/우 경계에서는 안쪽으로 시프트,
+            // 머리 위가 plot 윗면을 넘으면 펫 아래로 뒤집음.
+            if ctrl.action == .quote, let quote = ctrl.currentQuote {
+                let bw = bubbleSize.width
+                let bh = bubbleSize.height
+                let petX = pos.x + jx
+                let petY = pos.y + jy
+
+                // 가로: 펫 위 기본, plot 안쪽으로 클램프 (말풍선이 plot보다 넓으면 그대로 둠).
+                let minX = plotFrame.minX + 2 + bw / 2
+                let maxX = plotFrame.maxX - 2 - bw / 2
+                let bx: Double = (minX <= maxX) ? min(maxX, max(minX, petX)) : petX
+
+                // 세로: 머리 위가 윗면을 넘으면 펫 아래로.
+                let aboveCY = petY - h - 4 - bh / 2
+                let belowCY = petY + 2 + bh / 2
+                let by: Double = (bh > 0 && aboveCY - bh / 2 < plotFrame.minY)
+                    ? belowCY
+                    : aboveCY
+
+                quoteBubble(quote)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: QuoteBubbleSizeKey.self,
+                                value: geo.size
+                            )
+                        }
+                    )
+                    .position(x: bx, y: by)
                     .allowsHitTesting(false)
             }
         }
@@ -95,14 +144,27 @@ struct WalkingCat: View {
             )
     }
 
+    private var cheerBubble: some View {
+        Text("WHEE!")
+            .font(.system(size: 8, weight: .bold, design: .rounded))
+            .foregroundStyle(Color.black)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1.5)
+            .background(
+                RoundedRectangle(cornerRadius: 4).fill(Color.white)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.black.opacity(0.7), lineWidth: 0.5)
+            )
+    }
+
     private func quoteBubble(_ text: String) -> some View {
+        // .fixedSize() 로 텍스트 자연 너비에 정확히 hug. 단일 라인.
         Text(text)
             .font(.system(size: 9, weight: .medium, design: .rounded))
             .foregroundStyle(Color.black)
-            .multilineTextAlignment(.center)
-            .lineLimit(3)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: 140)
+            .lineLimit(1)
             .padding(.horizontal, 5)
             .padding(.vertical, 2.5)
             .background(
@@ -112,6 +174,7 @@ struct WalkingCat: View {
                 RoundedRectangle(cornerRadius: 5)
                     .stroke(Color.black.opacity(0.7), lineWidth: 0.5)
             )
+            .fixedSize()
     }
 
     // 현재 x가 "큰 낙폭 segment" 안에 있고 진행 방향이 그 segment의 흐름과 같으면
@@ -152,7 +215,7 @@ struct WalkingCat: View {
         let y = sampleY(at: targetDate)
         guard let xPos = proxy.position(forX: targetDate),
               let yPos = proxy.position(forY: y) else { return nil }
-        return CGPoint(x: plotOrigin.x + xPos, y: plotOrigin.y + yPos)
+        return CGPoint(x: plotFrame.minX + xPos, y: plotFrame.minY + yPos)
     }
 
     // 인접 두 점 사이 선형 보간. 차트가 .monotone이면 약간 어긋날 수 있으나
@@ -184,6 +247,8 @@ final class PetController: ObservableObject {
 
     // body에서 직접 set. @Published 아님 → SwiftUI 경고 안 남.
     var mood: PetMood = .neutral
+    // 1보다 작으면 그 시점 펫 속도가 비례해서 느려짐 (큰 낙폭 구간에서 사용).
+    var speedMultiplier: Double = 1.0
 
     private var direction: Double = 1
     private var actionUntil: Date = .distantPast
@@ -241,7 +306,7 @@ final class PetController: ObservableObject {
             let speed = action == .run
                 ? mood.walkSpeed * mood.runSpeedMultiplier
                 : mood.walkSpeed
-            x += direction * speed * dt
+            x += direction * speed * speedMultiplier * dt
             if x >= 1 {
                 x = 1
                 direction = -1
