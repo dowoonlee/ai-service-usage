@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (without v prefix), e.g. 0.1.2'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # main 브랜치에 appcast 푸시하려면 전체 히스토리 필요
+
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build .app
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          SU_PUBLIC_KEY: ${{ secrets.SU_PUBLIC_KEY }}
+        run: bash scripts/package.sh
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(shasum -a 256 dist/AIUsage.zip | awk '{print $1}')
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Update appcast.xml (Sparkle)
+        env:
+          SU_PRIVATE_KEY: ${{ secrets.SU_PRIVATE_KEY }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SU_PRIVATE_KEY:-}" ]; then
+            echo "::notice::SU_PRIVATE_KEY not set; skipping appcast update."
+            exit 0
+          fi
+          # main의 최신 appcast.xml에 prepend해서 푸시. dist/, .build/ 는 gitignore라 체크아웃 사이에서 보존됨.
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B publish-appcast origin/main
+          bash scripts/update-appcast.sh
+          git add appcast.xml
+          if git diff --cached --quiet; then
+            echo "No appcast changes."
+          else
+            git commit -m "appcast: v${VERSION}"
+            git push origin HEAD:main
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AIUsage-${{ steps.ver.outputs.version }}
+          path: dist/AIUsage.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
+          files: dist/AIUsage.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Bump Homebrew Cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN not set; skipping cask bump."
+            exit 0
+          fi
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/dowoonlee/homebrew-tap.git" tap
+          cd tap
+          mkdir -p Casks
+          cp ../homebrew/aiusage.rb Casks/aiusage.rb
+          /usr/bin/sed -i '' "s/^  version \".*\"/  version \"${VERSION}\"/" Casks/aiusage.rb
+          /usr/bin/sed -i '' "s/^  sha256 \".*\"/  sha256 \"${SHA256}\"/" Casks/aiusage.rb
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/aiusage.rb
+          if git diff --cached --quiet; then
+            echo "No cask changes."
+          else
+            git commit -m "aiusage: ${VERSION}"
+            git push origin HEAD
+          fi

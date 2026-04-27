@@ -5,3 +5,4 @@ dist/
 *.xcworkspace
 .DS_Store
 *.log
+sparkle_private.key
