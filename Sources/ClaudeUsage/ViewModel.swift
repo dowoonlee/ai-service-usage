@@ -58,7 +58,8 @@ final class ViewModel: ObservableObject {
     func startClock() {
         clockTimer?.invalidate()
         clockTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.now = Date() }
+            guard let self else { return }
+            Task { @MainActor in self.now = Date() }
         }
     }
 
