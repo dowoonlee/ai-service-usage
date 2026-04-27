@@ -342,11 +342,35 @@ struct ClaudeSection: View {
                         }
                     }
                 }
+                .chartOverlay { proxy in
+                    if settings.petClaudeEnabled {
+                        GeometryReader { geo in
+                            let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
+                            WalkingCat(
+                                points: recent.compactMap { s in
+                                    s.fiveHourPct.map { (s.takenAt, $0) }
+                                },
+                                proxy: proxy,
+                                plotOrigin: plotFrame.origin,
+                                kind: settings.petClaudeKind,
+                                mood: PetMood.from(
+                                    pct: vm.claudeCurrent?.fiveHourPct,
+                                    anxietyAt: petAnxietyAt
+                                )
+                            )
+                        }
+                    }
+                }
                 .frame(height: 44)
             } else {
                 Color.clear.frame(height: 44)
             }
         }
+    }
+
+    private var petAnxietyAt: Double {
+        guard settings.notifyEnabled, let t = settings.notifyThresholds.first else { return 0.8 }
+        return Double(t) / 100
     }
 
     private var footer: some View {
@@ -603,6 +627,23 @@ struct CursorSection: View {
                         }
                     }
                 }
+                .chartOverlay { proxy in
+                    if settings.petCursorEnabled {
+                        GeometryReader { geo in
+                            let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
+                            WalkingCat(
+                                points: points,
+                                proxy: proxy,
+                                plotOrigin: plotFrame.origin,
+                                kind: settings.petCursorKind,
+                                mood: PetMood.from(
+                                    pct: vm.cursorCurrentPct,
+                                    anxietyAt: petAnxietyAt
+                                )
+                            )
+                        }
+                    }
+                }
                 .frame(height: 44)
             } else {
                 Color.clear.frame(height: 44)
@@ -673,11 +714,33 @@ struct CursorSection: View {
                         }
                     }
                 }
+                .chartOverlay { proxy in
+                    if settings.petCursorEnabled {
+                        GeometryReader { geo in
+                            let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
+                            WalkingCat(
+                                points: recent.map { ($0.takenAt, Double($0.totalRequests ?? 0)) },
+                                proxy: proxy,
+                                plotOrigin: plotFrame.origin,
+                                kind: settings.petCursorKind,
+                                mood: PetMood.from(
+                                    pct: vm.cursorCurrentPct,
+                                    anxietyAt: petAnxietyAt
+                                )
+                            )
+                        }
+                    }
+                }
                 .frame(height: 44)
             } else {
                 Color.clear.frame(height: 44)
             }
         }
+    }
+
+    private var petAnxietyAt: Double {
+        guard settings.notifyEnabled, let t = settings.notifyThresholds.first else { return 0.8 }
+        return Double(t) / 100
     }
 
     private var footer: some View {

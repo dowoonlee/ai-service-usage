@@ -30,6 +30,22 @@ cp ".build/release/${SPM_PRODUCT}" "${APP_DIR}/Contents/MacOS/${EXECUTABLE}"
 # Sparkle.framework 같은 임베드 프레임워크를 dyld가 못 찾아서 실행 시 Library not loaded.
 install_name_tool -add_rpath "@executable_path/../Frameworks" "${APP_DIR}/Contents/MacOS/${EXECUTABLE}" 2>/dev/null || true
 
+# SwiftPM 리소스 번들 (Sources/ClaudeUsage/Resources → ClaudeUsage_ClaudeUsage.bundle)을
+# .app/Contents/Resources/ 로 복사. Bundle.module 이 이 위치를 찾는다.
+RESOURCE_BUNDLE=""
+for cand in \
+  ".build/release/${SPM_PRODUCT}_${SPM_PRODUCT}.bundle" \
+  ".build/arm64-apple-macosx/release/${SPM_PRODUCT}_${SPM_PRODUCT}.bundle" \
+  ".build/x86_64-apple-macosx/release/${SPM_PRODUCT}_${SPM_PRODUCT}.bundle"; do
+  if [ -d "$cand" ]; then RESOURCE_BUNDLE="$cand"; break; fi
+done
+if [ -n "$RESOURCE_BUNDLE" ]; then
+  ditto "$RESOURCE_BUNDLE" "${APP_DIR}/Contents/Resources/$(basename "$RESOURCE_BUNDLE")"
+  echo "    embedded $RESOURCE_BUNDLE"
+else
+  echo "WARNING: resource bundle ${SPM_PRODUCT}_${SPM_PRODUCT}.bundle not found — Bundle.module 리소스 못 읽을 수 있음." >&2
+fi
+
 # Sparkle.framework 임베드: SPM이 .build/release(또는 arch별 release)/Sparkle.framework로 복사함.
 SPARKLE_FW=""
 for cand in \

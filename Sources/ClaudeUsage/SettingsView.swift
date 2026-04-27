@@ -16,6 +16,25 @@ struct SettingsView: View {
                 }
                 Toggle("사용 페이스 예측 표시", isOn: $settings.showPace)
             }
+            Section("펫") {
+                Toggle("Claude 차트에 펫 표시", isOn: $settings.petClaudeEnabled)
+                Picker("Claude 펫", selection: $settings.petClaudeKind) {
+                    ForEach(PetKind.allCases) { k in
+                        Text(k.displayName).tag(k)
+                    }
+                }
+                .disabled(!settings.petClaudeEnabled)
+                Toggle("Cursor 차트에 펫 표시", isOn: $settings.petCursorEnabled)
+                Picker("Cursor 펫", selection: $settings.petCursorKind) {
+                    ForEach(PetKind.allCases) { k in
+                        Text(k.displayName).tag(k)
+                    }
+                }
+                .disabled(!settings.petCursorEnabled)
+                Text("사용량이 많아지면 펫이 신나고, 임계치에 가까워지면 불안해합니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
             Section("시작") {
                 Toggle("로그인 시 자동 시작", isOn: Binding(
                     get: { settings.launchAtLogin },

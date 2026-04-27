@@ -18,6 +18,18 @@ final class Settings: ObservableObject {
     @Published var showPace: Bool {
         didSet { UserDefaults.standard.set(showPace, forKey: Keys.showPace) }
     }
+    @Published var petClaudeEnabled: Bool {
+        didSet { UserDefaults.standard.set(petClaudeEnabled, forKey: Keys.petClaudeEnabled) }
+    }
+    @Published var petCursorEnabled: Bool {
+        didSet { UserDefaults.standard.set(petCursorEnabled, forKey: Keys.petCursorEnabled) }
+    }
+    @Published var petClaudeKind: PetKind {
+        didSet { UserDefaults.standard.set(petClaudeKind.rawValue, forKey: Keys.petClaudeKind) }
+    }
+    @Published var petCursorKind: PetKind {
+        didSet { UserDefaults.standard.set(petCursorKind.rawValue, forKey: Keys.petCursorKind) }
+    }
     @Published private(set) var launchAtLogin: Bool
 
     private init() {
@@ -27,6 +39,10 @@ final class Settings: ObservableObject {
         let storedThresholds = (d.array(forKey: Keys.notifyThresholds) as? [Int]) ?? []
         self.notifyThresholds = storedThresholds.isEmpty ? [80, 95] : storedThresholds.sorted()
         self.showPace      = (d.object(forKey: Keys.showPace) as? Bool) ?? true
+        self.petClaudeEnabled = (d.object(forKey: Keys.petClaudeEnabled) as? Bool) ?? true
+        self.petCursorEnabled = (d.object(forKey: Keys.petCursorEnabled) as? Bool) ?? true
+        self.petClaudeKind = (d.string(forKey: Keys.petClaudeKind).flatMap { PetKind(rawValue: $0) }) ?? .cat
+        self.petCursorKind = (d.string(forKey: Keys.petCursorKind).flatMap { PetKind(rawValue: $0) }) ?? .dog
         self.launchAtLogin = (SMAppService.mainApp.status == .enabled)
     }
 
@@ -61,5 +77,9 @@ final class Settings: ObservableObject {
         static let notifyEnabled    = "settings.notifyEnabled"
         static let notifyThresholds = "settings.notifyThresholds"
         static let showPace         = "settings.showPace"
+        static let petClaudeEnabled = "settings.petClaudeEnabled"
+        static let petCursorEnabled = "settings.petCursorEnabled"
+        static let petClaudeKind    = "settings.petClaudeKind"
+        static let petCursorKind    = "settings.petCursorKind"
     }
 }
