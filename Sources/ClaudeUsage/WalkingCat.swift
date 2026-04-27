@@ -165,8 +165,13 @@ final class PetController: ObservableObject {
         guard timer == nil else { return }
         lastTick = Date()
         actionUntil = lastTick   // 즉시 첫 액션 결정
+        // Timer block은 RunLoop.main 에서 실행되므로 이미 main thread.
+        // Task { @MainActor in ... } 로 hop 하면 strict concurrency 에서 self capture
+        // 위반 → MainActor.assumeIsolated 로 직접 호출.
         let t = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
+            MainActor.assumeIsolated {
+                self?.tick()
+            }
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
