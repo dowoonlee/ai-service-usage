@@ -6,5 +6,15 @@
     <description>Updates for AI Usage.</description>
     <language>en</language>
     <!-- 새 버전은 가장 위에 추가됩니다. -->
+    <item>
+      <title>v0.1.2</title>
+      <pubDate>Mon, 27 Apr 2026 02:02:18 +0000</pubDate>
+      <sparkle:version>0.1.2</sparkle:version>
+      <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/dowoonlee/ai-service-usage/releases/download/v0.1.2/AIUsage.zip"
+                 type="application/octet-stream"
+                 sparkle:edSignature="VdW/9SJD1xFKccoYJw4unbjkDXf+LfudsvI1pZHD2VNKVGZa8O4atpWTQer6bnPP+JkEU4C5z5uHpK7GXuNACQ==" length="1291629" />
+    </item>
   </channel>
 </rss>
