@@ -7,7 +7,7 @@ DISPLAY_NAME="AI Usage"         # Finder 표시명
 BUNDLE_ID="com.dwlee.AIUsage"
 EXECUTABLE="AIUsage"            # 실행 파일명 (SwiftPM 산출물은 ClaudeUsage이지만 복사 시 이 이름으로)
 SPM_PRODUCT="ClaudeUsage"       # SwiftPM 타깃 이름 (내부 유지)
-VERSION="${VERSION:-0.1.2}"
+VERSION="${VERSION:-0.1.3}"
 MIN_OS="14.0"
 
 # Sparkle 자동 업데이트
@@ -25,6 +25,10 @@ mkdir -p "${APP_DIR}/Contents/Resources"
 
 echo "==> assembling bundle at ${APP_DIR}"
 cp ".build/release/${SPM_PRODUCT}" "${APP_DIR}/Contents/MacOS/${EXECUTABLE}"
+
+# SwiftPM CLI 빌드는 @executable_path/../Frameworks rpath를 자동 추가하지 않음 →
+# Sparkle.framework 같은 임베드 프레임워크를 dyld가 못 찾아서 실행 시 Library not loaded.
+install_name_tool -add_rpath "@executable_path/../Frameworks" "${APP_DIR}/Contents/MacOS/${EXECUTABLE}" 2>/dev/null || true
 
 # Sparkle.framework 임베드: SPM이 .build/release(또는 arch별 release)/Sparkle.framework로 복사함.
 SPARKLE_FW=""
