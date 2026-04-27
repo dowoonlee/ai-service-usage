@@ -88,6 +88,7 @@ final class ViewModel: ObservableObject {
             claudeError = nil
             claudeLastSuccess = snap.takenAt
             claudeNeedsLogin = false
+            evaluateClaudeAlerts(snap)
         } catch UsageError.notLoggedIn {
             claudeNeedsLogin = true
             claudeError = "로그인 필요"
@@ -127,6 +128,7 @@ final class ViewModel: ObservableObject {
             cursorError = nil
             cursorLastSuccess = snap.takenAt
             cursorNeedsSetup = false
+            evaluateCursorAlerts(snap)
 
             // Ultra의 경우 이벤트 히스토리 증분 fetch (백그라운드)
             if snap.plan == .ultra {
@@ -144,6 +146,131 @@ final class ViewModel: ObservableObject {
         } catch {
             cursorError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
+    }
+
+    // MARK: - Pace prediction
+
+    // 현재 페이스로 주기 끝까지 갔을 때 예상 사용률(%).
+    // current: 현재 % (0~100), resetAt: 주기 끝, periodLength: 주기 전체 길이(초).
+    // 경과시간이 너무 짧으면 노이즈 → nil.
+    static func projectedPct(current: Double?, resetAt: Date?, periodLength: TimeInterval, now: Date) -> Double? {
+        guard let current, let resetAt else { return nil }
+        let remaining = resetAt.timeIntervalSince(now)
+        let elapsed = periodLength - remaining
+        // 5h 창은 15분 미만, 그 외는 주기의 5% 미만이면 예측 보류
+        let minElapsed = max(15 * 60, periodLength * 0.05)
+        guard elapsed >= minElapsed, elapsed > 0 else { return nil }
+        return current * (periodLength / elapsed)
+    }
+
+    // 페이스가 100%를 초과할 때, 한도 도달 예상 시각.
+    static func projectedExhaustionDate(current: Double?, resetAt: Date?, periodLength: TimeInterval, now: Date) -> Date? {
+        guard let current, current > 0.1, let resetAt else { return nil }
+        let elapsed = periodLength - resetAt.timeIntervalSince(now)
+        let minElapsed = max(15 * 60, periodLength * 0.05)
+        guard elapsed >= minElapsed else { return nil }
+        let rate = current / elapsed                  // %/sec
+        let remainingPct = 100.0 - current
+        guard rate > 0, remainingPct > 0 else { return nil }
+        let secondsToFull = remainingPct / rate
+        let exhaust = now.addingTimeInterval(secondsToFull)
+        // 리셋 이후라면 도달 안 함
+        return exhaust < resetAt ? exhaust : nil
+    }
+
+    var claude5hProjectedPct: Double? {
+        ViewModel.projectedPct(
+            current: claudeCurrent?.fiveHourPct,
+            resetAt: claudeCurrent?.fiveHourResetAt,
+            periodLength: 5 * 3600, now: now
+        )
+    }
+    var claude5hExhaustionAt: Date? {
+        ViewModel.projectedExhaustionDate(
+            current: claudeCurrent?.fiveHourPct,
+            resetAt: claudeCurrent?.fiveHourResetAt,
+            periodLength: 5 * 3600, now: now
+        )
+    }
+    var claude7dProjectedPct: Double? {
+        ViewModel.projectedPct(
+            current: claudeCurrent?.sevenDayPct,
+            resetAt: claudeCurrent?.sevenDayResetAt,
+            periodLength: 7 * 86400, now: now
+        )
+    }
+    var claude7dExhaustionAt: Date? {
+        ViewModel.projectedExhaustionDate(
+            current: claudeCurrent?.sevenDayPct,
+            resetAt: claudeCurrent?.sevenDayResetAt,
+            periodLength: 7 * 86400, now: now
+        )
+    }
+
+    // Cursor: % = 현재 사용 / 한도. Ultra는 cents, Pro는 requests.
+    var cursorCurrentPct: Double? {
+        guard let c = cursorCurrent else { return nil }
+        if c.plan == .ultra, let cents = c.totalCents, let maxC = c.maxCents, maxC > 0 {
+            return cents / maxC * 100
+        }
+        if let req = c.totalRequests, let maxR = c.maxRequests, maxR > 0 {
+            return Double(req) / Double(maxR) * 100
+        }
+        return nil
+    }
+    var cursorPeriodLength: TimeInterval {
+        guard let r = cursorCurrent?.resetAt,
+              let start = Calendar(identifier: .gregorian).date(byAdding: .month, value: -1, to: r)
+        else { return 30 * 86400 }
+        return r.timeIntervalSince(start)
+    }
+    var cursorProjectedPct: Double? {
+        ViewModel.projectedPct(
+            current: cursorCurrentPct,
+            resetAt: cursorCurrent?.resetAt,
+            periodLength: cursorPeriodLength, now: now
+        )
+    }
+    var cursorExhaustionAt: Date? {
+        ViewModel.projectedExhaustionDate(
+            current: cursorCurrentPct,
+            resetAt: cursorCurrent?.resetAt,
+            periodLength: cursorPeriodLength, now: now
+        )
+    }
+
+    // MARK: - Alert evaluation
+
+    private func evaluateClaudeAlerts(_ snap: UsageSnapshot) {
+        NotificationManager.shared.evaluate(
+            key: "claude.5h",
+            value: snap.fiveHourPct,
+            resetAt: snap.fiveHourResetAt,
+            title: "Claude 5시간 창"
+        ) { t in "사용량이 \(t)%를 넘었습니다." }
+        NotificationManager.shared.evaluate(
+            key: "claude.7d",
+            value: snap.sevenDayPct,
+            resetAt: snap.sevenDayResetAt,
+            title: "Claude 주간"
+        ) { t in "주간 사용량이 \(t)%를 넘었습니다." }
+    }
+
+    private func evaluateCursorAlerts(_ snap: CursorSnapshot) {
+        let pct: Double?
+        if snap.plan == .ultra, let c = snap.totalCents, let m = snap.maxCents, m > 0 {
+            pct = c / m * 100
+        } else if let r = snap.totalRequests, let m = snap.maxRequests, m > 0 {
+            pct = Double(r) / Double(m) * 100
+        } else {
+            pct = nil
+        }
+        NotificationManager.shared.evaluate(
+            key: "cursor.month",
+            value: pct,
+            resetAt: snap.resetAt,
+            title: "Cursor 월간"
+        ) { t in "이번 달 사용량이 \(t)%를 넘었습니다." }
     }
 
     private func fetchCursorEventsIncrement(periodStart: Date?) async {

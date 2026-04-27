@@ -4,6 +4,7 @@ import Charts
 struct MainView: View {
     @ObservedObject var vm: ViewModel
     var onLogin: () -> Void
+    var onSettings: () -> Void
     var onQuit: () -> Void
 
     var body: some View {
@@ -36,6 +37,8 @@ struct MainView: View {
                 Button("지금 새로고침") {
                     Task { await vm.refreshClaude(); await vm.refreshCursor() }
                 }
+                Button("업데이트 확인...") { Updater.shared.checkForUpdates() }
+                Button("설정...") { onSettings() }
                 Divider()
                 Button("Claude 재로그인") { onLogin() }
                 Button("Claude 로그아웃") { vm.claudeLogout() }
@@ -82,12 +85,44 @@ enum SectionFormat {
         if v >= 60 { return .orange }
         return .blue
     }
+
+    static func paceColor(_ projected: Double?) -> Color {
+        guard let p = projected else { return .secondary }
+        if p >= 100 { return .red }
+        if p >= 80  { return .orange }
+        return .secondary
+    }
+
+    static func paceText(projected: Double?, exhaustionAt: Date?, now: Date) -> String? {
+        guard let p = projected else { return nil }
+        let pInt = Int(p.rounded())
+        if let exhaust = exhaustionAt {
+            let remaining = exhaust.timeIntervalSince(now)
+            return "예상 \(pInt)% · \(countdown(remaining)) 후 한도"
+        }
+        return "예상 \(pInt)%"
+    }
+}
+
+struct PaceLine: View {
+    var projected: Double?
+    var exhaustionAt: Date?
+    var now: Date
+    var body: some View {
+        if let text = SectionFormat.paceText(projected: projected, exhaustionAt: exhaustionAt, now: now) {
+            Text(text)
+                .font(.system(size: 9))
+                .foregroundStyle(SectionFormat.paceColor(projected))
+                .monospacedDigit()
+        }
+    }
 }
 
 // MARK: - Claude section
 
 struct ClaudeSection: View {
     @ObservedObject var vm: ViewModel
+    @ObservedObject var settings = Settings.shared
     var onLogin: () -> Void
 
     var body: some View {
@@ -172,8 +207,20 @@ struct ClaudeSection: View {
             ProgressView(value: (vm.claudeCurrent?.fiveHourPct ?? 0) / 100)
                 .progressViewStyle(.linear)
                 .tint(SectionFormat.barColor(vm.claudeCurrent?.fiveHourPct))
-            HStack(spacing: 12) {
+            if settings.showPace {
+                PaceLine(projected: vm.claude5hProjectedPct, exhaustionAt: vm.claude5hExhaustionAt, now: vm.now)
+            }
+            HStack(alignment: .top, spacing: 12) {
                 smallStat("주간", vm.claudeCurrent?.sevenDayPct)
+                if settings.showPace,
+                   let _ = vm.claude7dProjectedPct {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("주간 페이스")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                        PaceLine(projected: vm.claude7dProjectedPct, exhaustionAt: vm.claude7dExhaustionAt, now: vm.now)
+                    }
+                }
             }
         }
     }
@@ -262,6 +309,7 @@ struct ClaudeSection: View {
 
 struct CursorSection: View {
     @ObservedObject var vm: ViewModel
+    @ObservedObject var settings = Settings.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -386,6 +434,9 @@ struct CursorSection: View {
                         .progressViewStyle(.linear)
                         .tint(SectionFormat.barColor(pct * 100))
                 }
+            }
+            if settings.showPace {
+                PaceLine(projected: vm.cursorProjectedPct, exhaustionAt: vm.cursorExhaustionAt, now: vm.now)
             }
         }
     }

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @main
@@ -24,11 +25,30 @@ final class FloatingPanel: NSPanel {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var panel: FloatingPanel?
     var loginWC: LoginWindowController?
+    var settingsWC: SettingsWindowController?
     let vm = ViewModel()
+    private var cancellables = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupPanel()
+        bindSettings()
+        NotificationManager.shared.requestAuthorizationIfNeeded()
+        _ = Updater.shared        // Sparkle 시작 (백그라운드 자동 체크)
         vm.startPolling(interval: 300)
+    }
+
+    private func bindSettings() {
+        Settings.shared.$panelOpacity
+            .receive(on: RunLoop.main)
+            .sink { [weak self] value in
+                self?.panel?.alphaValue = CGFloat(value)
+            }
+            .store(in: &cancellables)
+    }
+
+    func presentSettings() {
+        if settingsWC == nil { settingsWC = SettingsWindowController() }
+        settingsWC?.present()
     }
 
     private func setupPanel() {
@@ -65,10 +85,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.hasShadow = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.alphaValue = CGFloat(Settings.shared.panelOpacity)
 
         let root = MainView(
             vm: vm,
             onLogin: { [weak self] in self?.presentLogin() },
+            onSettings: { [weak self] in self?.presentSettings() },
             onQuit: { NSApp.terminate(nil) }
         )
         let host = NSHostingView(rootView: root)
