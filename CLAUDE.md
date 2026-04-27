@@ -66,6 +66,15 @@ JSONL append-only files under `~/Library/Application Support/ClaudeUsage/` via `
 
 The GitHub Actions workflow (`.github/workflows/release.yml`) on tag push: builds → signs the zip with EdDSA (`scripts/update-appcast.sh` calls Sparkle's `sign_update`) → prepends a new `<item>` to `appcast.xml` and pushes to `main` → creates GitHub Release → updates `dowoonlee/homebrew-tap` `Casks/aiusage.rb`. Each step is gated by a secret being set; missing secrets skip rather than fail.
 
+### Homebrew cask
+
+`homebrew/aiusage.rb` in *this* repo is the canonical cask. The release workflow `cp`s it into `dowoonlee/homebrew-tap` and then `sed`s only the `version "..."` and `sha256 "..."` lines in place (`.github/workflows/release.yml:101-103`). Consequences:
+
+- To change cask body (postflight, livecheck, `zap` paths, deps), edit `homebrew/aiusage.rb` here. Direct edits in the tap repo are overwritten on the next release.
+- The `sed` patterns are anchored on `^  version "` / `^  sha256 "`. If you reformat those two lines in the source cask, the workflow silently leaves stale values in the tap.
+- `postflight` runs `xattr -dr com.apple.quarantine` because the app is ad-hoc signed. Removing it brings back the Gatekeeper "unidentified developer" dialog on first install — keep it as long as the app stays unsigned.
+- End-user install command is `brew install --cask dowoonlee/tap/aiusage`; the `dowoonlee/tap` namespace is auto-tapped on first install. `brew upgrade --cask aiusage` for updates.
+
 ## Conventions worth knowing
 
 - All UI strings (and most comments) are Korean. Match that when adding UI text.
