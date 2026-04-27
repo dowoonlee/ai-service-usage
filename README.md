@@ -114,3 +114,17 @@ bash scripts/package.sh      # 릴리스 .app + .zip 생성 → dist/
 ```bash
 git tag v0.1.2 && git push origin v0.1.2
 ```
+
+## 변경 이력
+
+| 버전 | 날짜 | 주요 변경 |
+|---|---|---|
+| v0.1.8 | 2026-04-27 | `.app/Contents/Resources/` 의 SwiftPM 리소스 번들이 로드되지 않아 v0.1.7 이 launch 직후 크래시 → 커스텀 resolver 추가로 hotfix |
+| v0.1.7 | 2026-04-27 | 차트 라인 위에서 walk/run 프레임 애니메이션으로 돌아다니는 픽셀 펫(여우/늑대/곰/멧돼지/사슴/토끼); 사용량에 따른 차분→신남→불안 mood 변화; 잔디밭/들판/황야 테마 그라디언트 fill; 큰 낙폭 segment 통과 시 굴러 떨어지면서 "AAAH!" 말풍선; 차트별 펫·테마 Settings (Sparkle/brew 둘 다 v0.1.7 zip 은 받지 마세요 — 위 hotfix 의 v0.1.8 사용) |
+| v0.1.6 | 2026-04-27 | 접힌 섹션 헤더의 요약 텍스트 뒤에 비례 게이지 표시 |
+| v0.1.5 | 2026-04-27 | 사용자 정의 알림 임계치 + 스파크라인에 임계치 점선 표시 |
+| v0.1.4 | 2026-04-27 | 로그인 시 자동 시작 (`SMAppService`) |
+| v0.1.3 | 2026-04-27 | Sparkle 프레임워크 dyld 로드 경로(`@executable_path/../Frameworks`) 수정 |
+| v0.1.2 | 2026-04-27 | 릴리스 파이프라인의 `update-appcast.sh` portability 수정 |
+| v0.1.1 | 2026-04-24 | 앱 이름 변경: ClaudeUsage → AI Usage |
+| v0.1.0 | 2026-04-24 | 첫 릴리스 |
