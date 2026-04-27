@@ -15,7 +15,7 @@ SU_FEED_URL="${SU_FEED_URL:-https://raw.githubusercontent.com/dowoonlee/ai-servi
 SU_PUBLIC_KEY="${SU_PUBLIC_KEY:-}"   # EdDSA public key (bin/generate_keys로 생성). 비어 있으면 Sparkle 키 검증 실패.
 
 echo "==> swift build -c release"
-swift build -c release >/dev/null
+swift build -c release
 
 DIST_DIR="dist"
 APP_DIR="${DIST_DIR}/${APP_NAME}.app"
