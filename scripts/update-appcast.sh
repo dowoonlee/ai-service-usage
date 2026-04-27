@@ -48,9 +48,13 @@ EOF
 
 # <channel> 안 첫 번째 item으로 삽입 (없으면 channel 닫기 직전)
 TMP=$(mktemp)
-awk -v item="$ITEM" '
-  /<\/channel>/ && !ins { print item; ins=1 }
-  { print }
-' "$APPCAST" > "$TMP"
+INSERTED=0
+while IFS= read -r line; do
+  if [ "$INSERTED" -eq 0 ] && [[ "$line" == *"</channel>"* ]]; then
+    printf '%s\n' "$ITEM"
+    INSERTED=1
+  fi
+  printf '%s\n' "$line"
+done < "$APPCAST" > "$TMP"
 mv "$TMP" "$APPCAST"
 echo "✓ appcast.xml updated for v${VERSION}"
