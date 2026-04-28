@@ -163,21 +163,44 @@ enum Renderer {
         Terminal.clear()
         let now = Date()
 
+        // 양 섹션의 입력을 먼저 빌드해서, 두 섹션 모두에 동일한 tilesW 를 쓸 수 있도록.
+        let sections = [
+            buildClaudeSection(vm: vm, now: now),
+            buildCursorSection(vm: vm),
+        ]
+        let leftPad = "    "
+        let labelW = 6
+        let pctVisible = 4
+        let allRows = sections.flatMap { $0.rows }
+        let maxSuffixW = allRows.map { stripAnsi($0.suffix).count }.max() ?? 0
+        let used = leftPad.count + labelW + pctVisible + maxSuffixW + 4
+        let tilesW = max(8, cols - used)
+
         // Header — 가운데에 시각, 양옆을 ─ 로 채워서 박스처럼.
         let title = " AIUsage TUI "
         let timeStr = " \(timeFmt.string(from: now)) "
         let pad = max(0, cols - title.count - timeStr.count - 2)
-        let leftPad = pad / 2
-        let rightPad = pad - leftPad
-        let line = "\(CYAN)╭\(String(repeating: "─", count: leftPad))\(BOLD)\(title)\(RST)\(CYAN)\(String(repeating: "─", count: rightPad))\(DIM)\(timeStr)\(RST)\(CYAN)╮\(RST)"
-        Terminal.write(line + "\r\n\r\n")
+        let lPad = pad / 2
+        let rPad = pad - lPad
+        Terminal.write("\(CYAN)╭\(String(repeating: "─", count: lPad))\(BOLD)\(title)\(RST)\(CYAN)\(String(repeating: "─", count: rPad))\(DIM)\(timeStr)\(RST)\(CYAN)╮\(RST)\r\n\r\n")
 
-        drawClaude(vm: vm, cols: cols, now: now)
-        Terminal.write("\r\n")
-        drawCursor(vm: vm, cols: cols, now: now)
-        Terminal.write("\r\n")
+        for (idx, section) in sections.enumerated() {
+            drawSectionHeader(section)
+            if let warning = section.warning {
+                Terminal.write("    \(warning)\r\n")
+            } else {
+                for row in section.rows {
+                    drawMetric(row, leftPad: leftPad, labelW: labelW, tilesW: tilesW)
+                }
+                if !section.axisTimes.isEmpty {
+                    drawTickRow(times: section.axisTimes, leftPad: leftPad, labelW: labelW, tilesW: tilesW)
+                }
+            }
+            if idx < sections.count - 1 {
+                Terminal.write("\r\n")
+            }
+        }
 
-        // Footer
         let auto = vm.claudeLoading || vm.cursorLoading ? "갱신 중…" : "5분마다 자동"
         Terminal.write("\r\n \(DIM)[q]\(RST)\(DIM) 종료  ·  \(RST)\(DIM)[r]\(RST)\(DIM) 즉시 갱신  ·  (\(auto))\(RST)\r\n")
         Terminal.write("\(CYAN)╰\(String(repeating: "─", count: max(0, cols - 2)))╯\(RST)\r\n")
@@ -192,22 +215,33 @@ enum Renderer {
         let suffix: String
     }
 
-    private static func drawClaude(vm: ViewModel, cols: Int, now: Date) {
-        Terminal.write(" \(CYAN)●\(RST)  \(BOLD)Claude\(RST)")
-        if let plan = vm.claudeCurrent?.planName {
-            Terminal.write("  \(DIM)\(plan)\(RST)")
-        }
-        Terminal.write("\r\n")
+    /// 한 섹션 (Claude / Cursor) 의 모든 입력. warning 이 있으면 rows 대신 표시.
+    private struct SectionData {
+        let bullet: String     // 색이 입혀진 bullet (예: "\u{1B}[36m●\u{1B}[0m")
+        let title: String
+        let plan: String?
+        let warning: String?   // 로그인 필요 / 로딩 중 등 — 있으면 rows 대신 단일 행 표시
+        let rows: [MetricRow]
+        let axisTimes: [Date]  // tile row 와 1:1 대응되는 timestamp 시계열
+    }
 
+    private static func buildClaudeSection(vm: ViewModel, now: Date) -> SectionData {
+        let bullet = "\(CYAN)●\(RST)"
+        let plan = vm.claudeCurrent?.planName
         if vm.claudeNeedsLogin {
-            Terminal.write("    \(YELL)로그인 필요 — GUI 앱에서 먼저 로그인하세요.\(RST)\r\n")
-            return
+            return SectionData(
+                bullet: bullet, title: "Claude", plan: plan,
+                warning: "\(YELL)로그인 필요 — GUI 앱에서 먼저 로그인하세요.\(RST)",
+                rows: [], axisTimes: []
+            )
         }
         guard let snap = vm.claudeCurrent else {
-            Terminal.write("    \(DIM)로딩 중…\(RST)\r\n")
-            return
+            return SectionData(
+                bullet: bullet, title: "Claude", plan: plan,
+                warning: "\(DIM)로딩 중…\(RST)",
+                rows: [], axisTimes: []
+            )
         }
-
         var rows: [MetricRow] = []
         if let pct = snap.fiveHourPct {
             let history = vm.claudeHistory.compactMap { $0.fiveHourPct }
@@ -219,64 +253,95 @@ enum Renderer {
         if let pct = snap.sevenDayPct {
             rows.append(MetricRow(label: "주간", history: nil, pct: pct, suffix: ""))
         }
-        drawSection(rows: rows, cols: cols)
+        let axisTimes = vm.claudeHistory.map { $0.takenAt }
+        return SectionData(bullet: bullet, title: "Claude", plan: plan, warning: nil, rows: rows, axisTimes: axisTimes)
     }
 
-    private static func drawCursor(vm: ViewModel, cols: Int, now: Date) {
-        Terminal.write(" \(MAG)●\(RST)  \(BOLD)Cursor\(RST)")
-        if let plan = vm.cursorCurrent?.planName {
-            Terminal.write("  \(DIM)\(plan)\(RST)")
-        }
-        Terminal.write("\r\n")
-
+    private static func buildCursorSection(vm: ViewModel) -> SectionData {
+        let bullet = "\(MAG)●\(RST)"
+        let plan = vm.cursorCurrent?.planName
         if vm.cursorNeedsSetup {
-            Terminal.write("    \(YELL)Cursor 앱이 설치/로그인되어 있지 않습니다.\(RST)\r\n")
-            return
+            return SectionData(
+                bullet: bullet, title: "Cursor", plan: plan,
+                warning: "\(YELL)Cursor 앱이 설치/로그인되어 있지 않습니다.\(RST)",
+                rows: [], axisTimes: []
+            )
         }
         guard let snap = vm.cursorCurrent else {
-            Terminal.write("    \(DIM)로딩 중…\(RST)\r\n")
-            return
+            return SectionData(
+                bullet: bullet, title: "Cursor", plan: plan,
+                warning: "\(DIM)로딩 중…\(RST)",
+                rows: [], axisTimes: []
+            )
         }
         let resetSuffix = snap.resetAt.map {
             "   \(DIM)reset \(dateFmt.string(from: $0))\(RST)"
         } ?? ""
-
         var rows: [MetricRow] = []
         if let total = snap.totalCents, let max = snap.maxCents, max > 0 {
             // tile 행은 % 단위로 색을 결정 → cents history 도 % 로 변환.
-            let history = vm.cursorHistory.compactMap { snap -> Double? in
-                guard let c = snap.totalCents else { return nil }
+            let history = vm.cursorHistory.compactMap { s -> Double? in
+                guard let c = s.totalCents else { return nil }
                 return c / max * 100
             }
             let pct = total / max * 100
             let detail = "  \(DIM)$\(Int((total / 100).rounded())) / $\(Int((max / 100).rounded()))\(RST)"
             rows.append(MetricRow(label: "$", history: history, pct: pct, suffix: detail + resetSuffix))
         } else if let req = snap.totalRequests, let max = snap.maxRequests, max > 0 {
-            let history = vm.cursorHistory.compactMap { snap -> Double? in
-                guard let r = snap.totalRequests else { return nil }
+            let history = vm.cursorHistory.compactMap { s -> Double? in
+                guard let r = s.totalRequests else { return nil }
                 return Double(r) / Double(max) * 100
             }
             let pct = Double(req) / Double(max) * 100
             let detail = "  \(DIM)\(req) / \(max)\(RST)"
             rows.append(MetricRow(label: "req", history: history, pct: pct, suffix: detail + resetSuffix))
         }
-        drawSection(rows: rows, cols: cols)
+        let axisTimes = vm.cursorHistory.map { $0.takenAt }
+        return SectionData(bullet: bullet, title: "Cursor", plan: plan, warning: nil, rows: rows, axisTimes: axisTimes)
     }
 
-    /// 섹션의 모든 row 를 같은 tile 폭으로 그려서 % 위치를 column-정렬.
-    /// tilesW 는 row 들 중 가장 긴 suffix 기준으로 산정 → 모든 row 의 % 가 같은 x.
-    private static func drawSection(rows: [MetricRow], cols: Int) {
-        guard !rows.isEmpty else { return }
-        let leftPad = "    "
-        let labelW = 6
-        let pctVisible = 4   // "100%" 까지 4자
-        let maxSuffixW = rows.map { stripAnsi($0.suffix).count }.max() ?? 0
-        let used = leftPad.count + labelW + pctVisible + maxSuffixW + 4
-        let tilesW = max(8, cols - used)
-        for row in rows {
-            drawMetric(row, leftPad: leftPad, labelW: labelW, tilesW: tilesW)
+    private static func drawSectionHeader(_ s: SectionData) {
+        Terminal.write(" \(s.bullet)  \(BOLD)\(s.title)\(RST)")
+        if let plan = s.plan {
+            Terminal.write("  \(DIM)\(plan)\(RST)")
         }
+        Terminal.write("\r\n")
     }
+
+    /// tile row 아래 한 줄에 시각 tick (좌·중·우 timestamp) 을 그린다.
+    /// recent.count < tilesW 이면 좌측 leadingPad 만큼 띄워서 실제 tile 위치와 정렬.
+    private static func drawTickRow(times: [Date], leftPad: String, labelW: Int, tilesW: Int) {
+        guard times.count >= 2, tilesW >= 11 else { return }
+        let recent = Array(times.suffix(tilesW))
+        let leadingPad = max(0, tilesW - recent.count)
+        let activeW = tilesW - leadingPad
+
+        let leftStr = tickFmt.string(from: recent.first!)
+        let rightStr = tickFmt.string(from: recent.last!)
+        let ticks: String
+        if activeW >= 17 && recent.count >= 3 {
+            let midStr = tickFmt.string(from: recent[recent.count / 2])
+            let midStartCol = max(leftStr.count + 1, (activeW - midStr.count) / 2)
+            let leftFill = max(0, midStartCol - leftStr.count)
+            let rightFill = max(0, activeW - midStartCol - midStr.count - rightStr.count)
+            ticks = leftStr + String(repeating: " ", count: leftFill) + midStr + String(repeating: " ", count: rightFill) + rightStr
+        } else if activeW >= 11 {
+            let fill = max(0, activeW - leftStr.count - rightStr.count)
+            ticks = leftStr + String(repeating: " ", count: fill) + rightStr
+        } else {
+            ticks = rightStr
+        }
+
+        let line = String(repeating: " ", count: leadingPad) + ticks
+        let final = String(line.prefix(tilesW))
+        Terminal.write("\(leftPad)\(String(repeating: " ", count: labelW))\(DIM)\(final)\(RST)\r\n")
+    }
+
+    private static let tickFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
 
     private static func drawMetric(_ row: MetricRow, leftPad: String, labelW: Int, tilesW: Int) {
         // 한글(전각) 문자는 monospace 터미널에서 2 cols 폭이라 padding(toLength:) 가
