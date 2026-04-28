@@ -187,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// "C 73 · U 42" 형식. 값 없으면 "—" 로 표시. 둘 다 없으면 앱 이름.
+    /// "Claude 73 · Cursor 42" 형식. 값 없으면 "—" 로 표시. 둘 다 없으면 앱 이름.
     private func refreshMenuBarTitle() {
         guard let button = statusItem?.button else { return }
         func fmt(_ pct: Double?) -> String {
@@ -199,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if c == nil, u == nil {
             button.title = "AIUsage"
         } else {
-            button.title = "C \(fmt(c)) · U \(fmt(u))"
+            button.title = "Claude \(fmt(c)) · Cursor \(fmt(u))"
         }
     }
 

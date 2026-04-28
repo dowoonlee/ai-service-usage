@@ -28,7 +28,7 @@ There is no test target. There is no lint config. Don't invent either.
 
 ### Process shape
 
-- `LSUIElement` (no Dock icon). The primary UI is a `FloatingPanel` (subclass of `NSPanel`) created in `App.swift`. By default closing the panel terminates the app. With `Settings.shared.showMenuBar = true` an `NSStatusItem` (managed in `App.swift`'s `setupMenuBarItem` / `tearDownMenuBarItem`) appears with `"C 73 · U 42"` style title; in that mode `windowShouldClose` returns `false` and just hides the panel — termination only happens via the status menu's "종료" or `Cmd+Q`. If you add other windows, do not let them inherit panel-close → terminate behavior.
+- `LSUIElement` (no Dock icon). The primary UI is a `FloatingPanel` (subclass of `NSPanel`) created in `App.swift`. By default closing the panel terminates the app. With `Settings.shared.showMenuBar = true` an `NSStatusItem` (managed in `App.swift`'s `setupMenuBarItem` / `tearDownMenuBarItem`) appears with `"Claude 73 · Cursor 42"` style title; in that mode `windowShouldClose` returns `false` and just hides the panel — termination only happens via the status menu's "종료" or `Cmd+Q`. If you add other windows, do not let them inherit panel-close → terminate behavior.
 - Single `ViewModel` (`@MainActor ObservableObject`) owns all state; mounted into SwiftUI `MainView` via `NSHostingView`.
 - Polling is a single `Task` loop in `ViewModel.startPolling` (`ViewModel.swift:66`) running `refreshClaude()` then `refreshCursor()` every 300s.
 
