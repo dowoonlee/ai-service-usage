@@ -187,8 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// "[claude] 73 · [cursor] 42" 형식. 16×16 도트 아이콘 (Claude=4갈래 sparkle,
-    /// Cursor=각진 C) 을 inline 으로. 값 없으면 "—". 둘 다 없으면 앱 이름.
+    /// "Claude 73 · Cursor 42" 형식. 값 없으면 "—". 둘 다 없으면 앱 이름.
     private func refreshMenuBarTitle() {
         guard let button = statusItem?.button else { return }
         func fmt(_ pct: Double?) -> String {
@@ -198,88 +197,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let c = vm.claudeCurrent?.fiveHourPct
         let u = vm.cursorCurrentPct
         if c == nil, u == nil {
-            button.attributedTitle = NSAttributedString(string: "AIUsage")
-            return
+            button.title = "AIUsage"
+        } else {
+            button.title = "Claude \(fmt(c)) · Cursor \(fmt(u))"
         }
-        let attr = NSMutableAttributedString()
-        attr.append(iconAttachment(rows: Self.claudeRows))
-        attr.append(NSAttributedString(string: " \(fmt(c))  ·  "))
-        attr.append(iconAttachment(rows: Self.cursorRows))
-        attr.append(NSAttributedString(string: " \(fmt(u))"))
-        button.attributedTitle = attr
     }
-
-    /// 16×16 도트 비트맵을 NSImage로 렌더 후 NSTextAttachment 로 감싼다.
-    /// isTemplate=true 라 메뉴바 light/dark 모드 자동 대응.
-    private func iconAttachment(rows: [String]) -> NSAttributedString {
-        let img = Self.pixelArtImage(rows: rows)
-        let attachment = NSTextAttachment()
-        attachment.image = img
-        // baseline 보정: 16pt 이미지를 텍스트 x-height 근처에 정렬.
-        attachment.bounds = CGRect(x: 0, y: -3, width: img.size.width, height: img.size.height)
-        return NSAttributedString(attachment: attachment)
-    }
-
-    /// "#" = 채움, "." = 빈 픽셀. 모든 row 길이가 같다고 가정.
-    private static func pixelArtImage(rows: [String]) -> NSImage {
-        let height = rows.count
-        let width = rows.first?.count ?? 0
-        let size = NSSize(width: width, height: height)
-        let img = NSImage(size: size)
-        img.lockFocus()
-        NSColor.black.setFill()
-        for (rowIdx, row) in rows.enumerated() {
-            for (colIdx, ch) in row.enumerated() where ch == "#" {
-                // NSImage 좌표는 좌하단 원점이라 y를 뒤집는다.
-                let y = CGFloat(height - 1 - rowIdx)
-                let x = CGFloat(colIdx)
-                NSBezierPath(rect: NSRect(x: x, y: y, width: 1, height: 1)).fill()
-            }
-        }
-        img.unlockFocus()
-        img.isTemplate = true
-        return img
-    }
-
-    // pxArt (1).png 기반. 원본 16×10 → 16×16 으로 위/아래 빈 줄 padding.
-    private static let claudeRows: [String] = [
-        "................",
-        "................",
-        "................",
-        "..############..",
-        "..############..",
-        "..############..",
-        ".###############",
-        "################",
-        "################",
-        "..############..",
-        "..############..",
-        "..##.#...####...",
-        "..##.##..####...",
-        "................",
-        "................",
-        "................",
-    ]
-
-    // pxArt.png 기반. 16×16 그대로 (우측에 노치가 파인 둥근 삼각 C).
-    private static let cursorRows: [String] = [
-        "................",
-        "....########....",
-        "..############..",
-        "..#############.",
-        ".##############.",
-        ".##############.",
-        ".#####......###.",
-        ".######....####.",
-        ".#######...####.",
-        ".#######..#####.",
-        ".#######..#####.",
-        ".#######..#####.",
-        "..######.######.",
-        "..############..",
-        "...##########...",
-        "................",
-    ]
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
         let event = NSApp.currentEvent
