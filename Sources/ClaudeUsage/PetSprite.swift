@@ -7,6 +7,39 @@ import SwiftUI
 // 둘 다 동작별 strip PNG (frame i → x: i*cellW, y: 0). PetController가
 // (action, frameIndex)를 들고 있고, 여기서 잘린 프레임을 캐시.
 
+/// 한 펫 종(kind)의 모든 메타데이터를 한 자리에 모은 레코드.
+/// PetKind 케이스를 추가할 때 `displayName/cellSize/defaultFacingLeft/resourceName`
+/// switch를 따로 늘릴 필요 없이 `PetKind.def` 한 곳만 수정하면 된다.
+struct PetDefinition {
+    /// 파일 prefix (예: "Fox", "MaskDude"). action별 suffix를 붙여 PNG basename을 구성.
+    let prefix: String
+    /// UI에 표시할 한국어 이름.
+    let displayName: String
+    /// 단일 frame 셀 크기. 같은 animation strip은 cellW × frameCount × cellH.
+    let cellSize: (w: Int, h: Int)
+    /// sprite가 기본적으로 좌측을 보고 있는지. 진행 방향과 다르면 가로 반전.
+    /// (Wild Animals=true, Pixel Adventure=false)
+    let defaultFacingLeft: Bool
+    /// 동작별 PNG suffix. 종에 따라 alias가 다르다:
+    ///   - Rabbit walk = "Hop", Wolf idle = "Howl"
+    ///   - Pixel Adventure (Mask Dude/Ninja Frog/Mushroom): walk strip이 없어 "Run"으로 통합
+    ///   - Slime: 모든 action이 한 "IdleRun" strip 공유
+    let walkSuffix: String
+    let runSuffix: String
+    let idleSuffix: String
+
+    /// (action) → 해당 strip PNG의 basename.
+    func resourceName(for action: PetController.Action) -> String {
+        let suffix: String
+        switch action {
+        case .walk:                  suffix = walkSuffix
+        case .run:                   suffix = runSuffix
+        case .sit, .scan, .quote:    suffix = idleSuffix
+        }
+        return "\(prefix)_\(suffix)"
+    }
+}
+
 enum PetKind: String, CaseIterable, Identifiable, Codable {
     // wild-animals
     case fox
@@ -23,82 +56,57 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
 
     var id: String { rawValue }
 
-    var displayName: String {
+    var def: PetDefinition {
         switch self {
-        case .fox:       return "여우"
-        case .wolf:      return "늑대"
-        case .bear:      return "곰"
-        case .boar:      return "멧돼지"
-        case .deer:      return "사슴"
-        case .rabbit:    return "토끼"
-        case .maskDude:  return "마스크 영웅"
-        case .ninjaFrog: return "닌자 개구리"
-        case .mushroom:  return "버섯"
-        case .slime:     return "슬라임"
+        case .fox:
+            return PetDefinition(prefix: "Fox", displayName: "여우",
+                                 cellSize: (64, 36), defaultFacingLeft: true,
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle")
+        case .wolf:
+            return PetDefinition(prefix: "Wolf", displayName: "늑대",
+                                 cellSize: (64, 40), defaultFacingLeft: true,
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Howl")
+        case .bear:
+            return PetDefinition(prefix: "Bear", displayName: "곰",
+                                 cellSize: (64, 33), defaultFacingLeft: true,
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle")
+        case .boar:
+            return PetDefinition(prefix: "Boar", displayName: "멧돼지",
+                                 cellSize: (64, 40), defaultFacingLeft: true,
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle")
+        case .deer:
+            return PetDefinition(prefix: "Deer", displayName: "사슴",
+                                 cellSize: (72, 52), defaultFacingLeft: true,
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle")
+        case .rabbit:
+            return PetDefinition(prefix: "Rabbit", displayName: "토끼",
+                                 cellSize: (32, 26), defaultFacingLeft: true,
+                                 walkSuffix: "Hop", runSuffix: "Run", idleSuffix: "Idle")
+        case .maskDude:
+            return PetDefinition(prefix: "MaskDude", displayName: "마스크 영웅",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle")
+        case .ninjaFrog:
+            return PetDefinition(prefix: "NinjaFrog", displayName: "닌자 개구리",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle")
+        case .mushroom:
+            return PetDefinition(prefix: "Mushroom", displayName: "버섯",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle")
+        case .slime:
+            return PetDefinition(prefix: "Slime", displayName: "슬라임",
+                                 cellSize: (44, 30), defaultFacingLeft: false,
+                                 walkSuffix: "IdleRun", runSuffix: "IdleRun", idleSuffix: "IdleRun")
         }
     }
 
-    var cellSize: (w: Int, h: Int) {
-        switch self {
-        case .fox:       return (64, 36)
-        case .wolf:      return (64, 40)
-        case .bear:      return (64, 33)
-        case .boar:      return (64, 40)
-        case .deer:      return (72, 52)
-        case .rabbit:    return (32, 26)
-        case .maskDude:  return (32, 32)
-        case .ninjaFrog: return (32, 32)
-        case .mushroom:  return (32, 32)
-        case .slime:     return (44, 30)
-        }
-    }
+    var displayName: String { def.displayName }
+    var cellSize: (w: Int, h: Int) { def.cellSize }
+    var defaultFacingLeft: Bool { def.defaultFacingLeft }
 
-    /// sprite가 기본적으로 좌측을 보고 있는지. 우측 이동 시 반전 여부 결정.
-    /// Wild Animals 는 모두 좌향, Pixel Adventure 는 모두 우향.
-    var defaultFacingLeft: Bool {
-        switch self {
-        case .fox, .wolf, .bear, .boar, .deer, .rabbit:
-            return true
-        case .maskDude, .ninjaFrog, .mushroom, .slime:
-            return false
-        }
-    }
-
-    /// 동작 → 파일 basename. 스프라이트 별로 가능한 strip이 달라서 alias 처리:
-    ///   - Rabbit은 Walk 대신 Hop, Wolf는 Idle 대신 Howl
-    ///   - Pixel Adventure 캐릭터들은 Walk strip 자체가 없어 Run으로 대체
-    ///   - Slime은 Idle/Run 한 strip(IdleRun)으로 합쳐져 있음
     func resourceName(for action: PetController.Action) -> String {
-        let prefix: String
-        switch self {
-        case .fox:       prefix = "Fox"
-        case .wolf:      prefix = "Wolf"
-        case .bear:      prefix = "Bear"
-        case .boar:      prefix = "Boar"
-        case .deer:      prefix = "Deer"
-        case .rabbit:    prefix = "Rabbit"
-        case .maskDude:  prefix = "MaskDude"
-        case .ninjaFrog: prefix = "NinjaFrog"
-        case .mushroom:  prefix = "Mushroom"
-        case .slime:     prefix = "Slime"
-        }
-        // Slime은 모든 action이 한 파일.
-        if self == .slime {
-            return "\(prefix)_IdleRun"
-        }
-        switch action {
-        case .walk:
-            switch self {
-            case .rabbit:    return "\(prefix)_Hop"
-            case .maskDude, .ninjaFrog, .mushroom:
-                return "\(prefix)_Run"
-            default:         return "\(prefix)_Walk"
-            }
-        case .run:
-            return "\(prefix)_Run"
-        case .sit, .scan, .quote:
-            return self == .wolf ? "\(prefix)_Howl" : "\(prefix)_Idle"
-        }
+        def.resourceName(for: action)
     }
 }
 
