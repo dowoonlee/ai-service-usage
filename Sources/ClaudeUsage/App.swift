@@ -6,6 +6,11 @@ import SwiftUI
 @MainActor
 struct ClaudeUsageApp {
     static func main() {
+        // CLI 모드: AppKit 안 띄우고 ANSI 기반 dashboard 실행. --help/--tui 만 지원.
+        if CommandLine.arguments.contains("--tui") {
+            TUIApp.run()  // 자체 RunLoop blocks; 여기서 안 돌아옴.
+            return
+        }
         MainActor.assumeIsolated {
             let app = NSApplication.shared
             let delegate = AppDelegate()

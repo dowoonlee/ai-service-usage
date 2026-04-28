@@ -53,6 +53,12 @@ JSONL append-only files under `~/Library/Application Support/ClaudeUsage/` via `
 
 `ViewModel.projectedPct` / `projectedExhaustionDate` (static, pure, `ViewModel.swift:157-180`) extrapolate linearly from `(current%, elapsed)` to `(projected%, periodEnd)`. They deliberately return `nil` when `elapsed < max(15min, 5% of period)` to avoid noisy startup predictions — keep that guard if you refactor.
 
+### TUI mode
+
+Same binary serves both GUI and a terminal dashboard. `App.swift`'s `main()` short-circuits to `TUIApp.run()` when `--tui` is in `CommandLine.arguments`; otherwise the existing `NSApplication.run()` GUI path runs. The TUI lives entirely in `TUI.swift` (~250 lines): `Terminal` for raw-mode + ANSI escape helpers, `Sparkline` for the `▁▂▃▄▅▆▇█` block-drawn line, `Renderer` for the once-per-second redraw, `TUIApp.run()` wiring it all together. Authentication is reused (Keychain `sessionKey` for Claude, Cursor SQLite JWT for Cursor) so first-time Claude users still need the GUI to log in.
+
+Invocation: `swift run ClaudeUsage --tui` in dev, or `/Applications/AIUsage.app/Contents/MacOS/ClaudeUsage --tui` for installed users. Polling cadence (300s) and ViewModel are shared verbatim with the GUI; only rendering differs.
+
 ### Pet animation
 
 `WalkingCat` (`WalkingCat.swift`) is mounted in each chart's `chartOverlay` and walks along the line. The View struct deliberately mutates `PetController` non-`@Published` fields (`mood`, `speedMultiplier`) directly from `body` each render — this avoids SwiftUI publish-loop warnings while still letting the controller react to chart-driven state. Controller → view goes through `@Published` (`x`, `action`, `frameIndex`, `currentQuote`).
