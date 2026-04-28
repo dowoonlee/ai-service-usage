@@ -128,6 +128,16 @@ enum Sparkline {
 
 @MainActor
 enum Renderer {
+    // ANSI 색/스타일 상수.
+    private static let RST   = "\u{1B}[0m"
+    private static let DIM   = "\u{1B}[2m"
+    private static let BOLD  = "\u{1B}[1m"
+    private static let CYAN  = "\u{1B}[36m"
+    private static let MAG   = "\u{1B}[35m"
+    private static let GREEN = "\u{1B}[32m"
+    private static let YELL  = "\u{1B}[33m"
+    private static let RED   = "\u{1B}[31m"
+
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd HH:mm:ss"
@@ -139,98 +149,119 @@ enum Renderer {
         return f
     }()
 
+    /// 사용량(%) 기준 색 — GUI 의 임계치 표시와 같은 traffic-light.
+    private static func levelColor(_ pct: Double) -> String {
+        if pct >= 80 { return RED }
+        if pct >= 50 { return YELL }
+        return GREEN
+    }
+
     static func draw(vm: ViewModel) {
         let (_, cols) = Terminal.size()
         Terminal.clear()
         let now = Date()
 
-        // Header
-        let header = " AIUsage TUI · \(timeFmt.string(from: now))"
-        Terminal.write("\u{1B}[1m\(header)\u{1B}[0m\r\n")
-        Terminal.write(String(repeating: "─", count: cols) + "\r\n\r\n")
+        // Header — 가운데에 시각, 양옆을 ─ 로 채워서 박스처럼.
+        let title = " AIUsage TUI "
+        let timeStr = " \(timeFmt.string(from: now)) "
+        let pad = max(0, cols - title.count - timeStr.count - 2)
+        let leftPad = pad / 2
+        let rightPad = pad - leftPad
+        let line = "\(CYAN)╭\(String(repeating: "─", count: leftPad))\(BOLD)\(title)\(RST)\(CYAN)\(String(repeating: "─", count: rightPad))\(DIM)\(timeStr)\(RST)\(CYAN)╮\(RST)"
+        Terminal.write(line + "\r\n\r\n")
 
         drawClaude(vm: vm, cols: cols, now: now)
         Terminal.write("\r\n")
         drawCursor(vm: vm, cols: cols, now: now)
-        Terminal.write("\r\n\r\n")
+        Terminal.write("\r\n")
 
         // Footer
         let auto = vm.claudeLoading || vm.cursorLoading ? "갱신 중…" : "5분마다 자동"
-        Terminal.write(" \u{1B}[2m[q] 종료   [r] 즉시 갱신   (\(auto))\u{1B}[0m\r\n")
+        Terminal.write("\r\n \(DIM)[q]\(RST)\(DIM) 종료  ·  \(RST)\(DIM)[r]\(RST)\(DIM) 즉시 갱신  ·  (\(auto))\(RST)\r\n")
+        Terminal.write("\(CYAN)╰\(String(repeating: "─", count: max(0, cols - 2)))╯\(RST)\r\n")
     }
 
     private static func drawClaude(vm: ViewModel, cols: Int, now: Date) {
-        Terminal.write(" \u{1B}[1mClaude\u{1B}[0m")
+        Terminal.write(" \(CYAN)●\(RST)  \(BOLD)Claude\(RST)")
         if let plan = vm.claudeCurrent?.planName {
-            Terminal.write("  \u{1B}[2m\(plan)\u{1B}[0m")
+            Terminal.write("  \(DIM)\(plan)\(RST)")
         }
         Terminal.write("\r\n")
 
         if vm.claudeNeedsLogin {
-            Terminal.write("   \u{1B}[33m로그인 필요 — GUI 앱에서 먼저 로그인하세요.\u{1B}[0m\r\n")
+            Terminal.write("    \(YELL)로그인 필요 — GUI 앱에서 먼저 로그인하세요.\(RST)\r\n")
             return
         }
         guard let snap = vm.claudeCurrent else {
-            Terminal.write("   \u{1B}[2m로딩 중…\u{1B}[0m\r\n")
+            Terminal.write("    \(DIM)로딩 중…\(RST)\r\n")
             return
         }
 
-        // 5h: sparkline + 값. GUI 와 동일하게 sparkline 은 5h 만 그리고
-        // 주간은 숫자만 표시.
         if let pct = snap.fiveHourPct {
             let history = vm.claudeHistory.compactMap { $0.fiveHourPct }
-            drawMetricLine(label: "5h", spark: history, value: "\(Int(pct.rounded()))%", cols: cols)
+            let suffix = snap.fiveHourResetAt.map {
+                "   \(DIM)reset \(formatRemaining(from: now, to: $0))\(RST)"
+            } ?? ""
+            drawMetric(label: "5h", spark: history, pct: pct, suffix: suffix, cols: cols)
         }
         if let pct = snap.sevenDayPct {
-            Terminal.write("   주간      \(Int(pct.rounded()))%\r\n")
-        }
-        if let resetAt = snap.fiveHourResetAt {
-            let r = formatRemaining(from: now, to: resetAt)
-            Terminal.write("   \u{1B}[2m5h reset   \(r)\u{1B}[0m\r\n")
+            drawMetric(label: "주간", spark: nil, pct: pct, suffix: "", cols: cols)
         }
     }
 
     private static func drawCursor(vm: ViewModel, cols: Int, now: Date) {
-        Terminal.write(" \u{1B}[1mCursor\u{1B}[0m")
+        Terminal.write(" \(MAG)●\(RST)  \(BOLD)Cursor\(RST)")
         if let plan = vm.cursorCurrent?.planName {
-            Terminal.write("  \u{1B}[2m\(plan)\u{1B}[0m")
+            Terminal.write("  \(DIM)\(plan)\(RST)")
         }
         Terminal.write("\r\n")
 
         if vm.cursorNeedsSetup {
-            Terminal.write("   \u{1B}[33mCursor 앱이 설치/로그인되어 있지 않습니다.\u{1B}[0m\r\n")
+            Terminal.write("    \(YELL)Cursor 앱이 설치/로그인되어 있지 않습니다.\(RST)\r\n")
             return
         }
         guard let snap = vm.cursorCurrent else {
-            Terminal.write("   \u{1B}[2m로딩 중…\u{1B}[0m\r\n")
+            Terminal.write("    \(DIM)로딩 중…\(RST)\r\n")
             return
         }
+        let resetSuffix = snap.resetAt.map {
+            "   \(DIM)reset \(dateFmt.string(from: $0))\(RST)"
+        } ?? ""
 
-        // Ultra: 누적 cents, Pro: 요청 수
         if let total = snap.totalCents, let max = snap.maxCents, max > 0 {
             let history = vm.cursorHistory.compactMap { $0.totalCents }
-            let value = "$\(Int((total / 100).rounded())) / $\(Int((max / 100).rounded()))  (\(String(format: "%.1f", total / max * 100))%)"
-            drawMetricLine(label: "$", spark: history, value: value, cols: cols)
+            let pct = total / max * 100
+            let detail = "  \(DIM)$\(Int((total / 100).rounded())) / $\(Int((max / 100).rounded()))\(RST)"
+            drawMetric(label: "$", spark: history, pct: pct, suffix: detail + resetSuffix, cols: cols)
         } else if let req = snap.totalRequests, let max = snap.maxRequests, max > 0 {
             let history = vm.cursorHistory.compactMap { $0.totalRequests.map(Double.init) }
-            let value = "\(req) / \(max)  (\(String(format: "%.1f", Double(req) / Double(max) * 100))%)"
-            drawMetricLine(label: "req", spark: history, value: value, cols: cols)
-        }
-        if let resetAt = snap.resetAt {
-            Terminal.write("   \u{1B}[2mreset      \(dateFmt.string(from: resetAt))\u{1B}[0m\r\n")
+            let pct = Double(req) / Double(max) * 100
+            let detail = "  \(DIM)\(req) / \(max)\(RST)"
+            drawMetric(label: "req", spark: history, pct: pct, suffix: detail + resetSuffix, cols: cols)
         }
     }
 
-    /// "   <label>   <sparkline>   <value>" 형태로 한 줄 출력.
-    private static func drawMetricLine(label: String, spark: [Double], value: String, cols: Int) {
-        let leftPad = "   "
-        let labelW = 8  // label 영역 폭
-        let valuePad = "  "
+    /// "    <label>  <sparkline>  <pct%>  <suffix>" 형태로 한 줄.
+    /// spark = nil 이면 sparkline 자리 공백.
+    private static func drawMetric(label: String, spark: [Double]?, pct: Double, suffix: String, cols: Int) {
+        let leftPad = "    "
+        let labelW = 6
         let labelStr = label.padding(toLength: labelW, withPad: " ", startingAt: 0)
-        let used = leftPad.count + labelW + valuePad.count + value.count
-        let sparkW = max(8, cols - used - 4)
-        let line = leftPad + labelStr + Sparkline.render(values: spark, width: sparkW) + valuePad + value
-        Terminal.write(line + "\r\n")
+        let pctText = "\(Int(pct.rounded()))%"
+        let pctVisible = pctText.count
+        // sparkline 폭 = 전체 - 좌패딩 - 라벨 - pct - suffix 가시 길이 - 여백
+        let suffixVisible = stripAnsi(suffix).count
+        let used = leftPad.count + labelW + pctVisible + suffixVisible + 6
+        let sparkW = max(8, cols - used)
+
+        let sparkPart: String
+        if let sp = spark {
+            sparkPart = "\(DIM)\(CYAN)\(Sparkline.render(values: sp, width: sparkW))\(RST)"
+        } else {
+            sparkPart = String(repeating: " ", count: sparkW)
+        }
+        let pctPart = "\(BOLD)\(levelColor(pct))\(pctText)\(RST)"
+        Terminal.write("\(leftPad)\(labelStr)\(sparkPart)  \(pctPart)\(suffix)\r\n")
     }
 
     private static func formatRemaining(from now: Date, to target: Date) -> String {
@@ -240,5 +271,23 @@ enum Renderer {
         let m = (secs % 3600) / 60
         if h > 0 { return "in \(h)h \(m)m" }
         return "in \(m)m"
+    }
+
+    /// ANSI escape 시퀀스를 제거한 문자열의 가시 길이 측정용.
+    /// `\u{1B}[...m` 패턴을 모두 떼어낸다.
+    private static func stripAnsi(_ s: String) -> String {
+        var out = ""
+        var iter = s.makeIterator()
+        while let ch = iter.next() {
+            if ch == "\u{1B}" {
+                // [ 다음 문자 m 까지 스킵
+                while let next = iter.next() {
+                    if next == "m" { break }
+                }
+            } else {
+                out.append(ch)
+            }
+        }
+        return out
     }
 }
