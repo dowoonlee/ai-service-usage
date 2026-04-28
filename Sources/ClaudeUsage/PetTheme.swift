@@ -56,20 +56,8 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         )
     }
 
-    /// 펫별 기본 테마 — 자연스러운 서식지 매핑.
-    /// 같은 테마가 두 차트에 겹치지 않게, fox는 grassland로 분리.
+    /// 펫별 기본 테마 — `PetKind.def.defaultTheme` 으로 직접 접근. 호환용 wrapper.
     static func defaultFor(_ kind: PetKind) -> PetTheme {
-        switch kind {
-        case .fox:           return .grassland
-        case .wolf:          return .wilderness
-        case .bear:          return .grassland
-        case .boar:          return .field
-        case .deer:          return .grassland
-        case .rabbit:        return .grassland
-        case .maskDude:      return .wilderness
-        case .ninjaFrog:     return .grassland
-        case .mushroom:      return .field
-        case .slime:         return .wilderness
-        }
+        kind.def.defaultTheme
     }
 }

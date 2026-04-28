@@ -27,6 +27,8 @@ struct PetDefinition {
     let walkSuffix: String
     let runSuffix: String
     let idleSuffix: String
+    /// 펫이 기본 사용할 테마 (사용자가 override 안 했을 때).
+    let defaultTheme: PetTheme
 
     /// (action) → 해당 strip PNG의 basename.
     func resourceName(for action: PetController.Action) -> String {
@@ -61,43 +63,53 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
         case .fox:
             return PetDefinition(prefix: "Fox", displayName: "여우",
                                  cellSize: (64, 36), defaultFacingLeft: true,
-                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle")
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
         case .wolf:
             return PetDefinition(prefix: "Wolf", displayName: "늑대",
                                  cellSize: (64, 40), defaultFacingLeft: true,
-                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Howl")
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Howl",
+                                 defaultTheme: .wilderness)
         case .bear:
             return PetDefinition(prefix: "Bear", displayName: "곰",
                                  cellSize: (64, 33), defaultFacingLeft: true,
-                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle")
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
         case .boar:
             return PetDefinition(prefix: "Boar", displayName: "멧돼지",
                                  cellSize: (64, 40), defaultFacingLeft: true,
-                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle")
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
         case .deer:
             return PetDefinition(prefix: "Deer", displayName: "사슴",
                                  cellSize: (72, 52), defaultFacingLeft: true,
-                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle")
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
         case .rabbit:
             return PetDefinition(prefix: "Rabbit", displayName: "토끼",
                                  cellSize: (32, 26), defaultFacingLeft: true,
-                                 walkSuffix: "Hop", runSuffix: "Run", idleSuffix: "Idle")
+                                 walkSuffix: "Hop", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
         case .maskDude:
             return PetDefinition(prefix: "MaskDude", displayName: "마스크 영웅",
                                  cellSize: (32, 32), defaultFacingLeft: false,
-                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle")
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
         case .ninjaFrog:
             return PetDefinition(prefix: "NinjaFrog", displayName: "닌자 개구리",
                                  cellSize: (32, 32), defaultFacingLeft: false,
-                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle")
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
         case .mushroom:
             return PetDefinition(prefix: "Mushroom", displayName: "버섯",
                                  cellSize: (32, 32), defaultFacingLeft: false,
-                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle")
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
         case .slime:
             return PetDefinition(prefix: "Slime", displayName: "슬라임",
                                  cellSize: (44, 30), defaultFacingLeft: false,
-                                 walkSuffix: "IdleRun", runSuffix: "IdleRun", idleSuffix: "IdleRun")
+                                 walkSuffix: "IdleRun", runSuffix: "IdleRun", idleSuffix: "IdleRun",
+                                 defaultTheme: .wilderness)
         }
     }
 
