@@ -49,7 +49,10 @@ fileprivate extension View {
         points: [(Date, Double)],
         kind: PetKind,
         pct: Double?,
-        anxietyAt: Double
+        anxietyAt: Double,
+        bigDropThreshold: Double,
+        wellnessNudge: String? = nil,
+        onDismissWellness: (() -> Void)? = nil
     ) -> some View {
         chartOverlay { proxy in
             if enabled {
@@ -60,7 +63,10 @@ fileprivate extension View {
                         proxy: proxy,
                         plotFrame: plotFrame,
                         kind: kind,
-                        mood: PetMood.from(pct: pct, anxietyAt: anxietyAt)
+                        mood: PetMood.from(pct: pct, anxietyAt: anxietyAt),
+                        bigDropThreshold: bigDropThreshold,
+                        wellnessNudge: wellnessNudge,
+                        onDismissWellness: onDismissWellness
                     )
                 }
             }
@@ -442,7 +448,10 @@ struct ClaudeSection: View {
                     points: validData,
                     kind: settings.petClaudeKind,
                     pct: vm.claudeCurrent?.fiveHourPct,
-                    anxietyAt: petAnxietyAt
+                    anxietyAt: petAnxietyAt,
+                    bigDropThreshold: settings.bigDropThreshold,
+                    wellnessNudge: vm.wellnessNudge,
+                    onDismissWellness: { vm.dismissWellnessNudge() }
                 )
                 .frame(height: 44)
             } else {
@@ -689,7 +698,10 @@ struct CursorSection: View {
                     points: points,
                     kind: settings.petCursorKind,
                     pct: vm.cursorCurrentPct,
-                    anxietyAt: petAnxietyAt
+                    anxietyAt: petAnxietyAt,
+                    bigDropThreshold: settings.bigDropThreshold,
+                    wellnessNudge: vm.wellnessNudge,
+                    onDismissWellness: { vm.dismissWellnessNudge() }
                 )
                 .frame(height: 44)
             } else {
@@ -752,7 +764,10 @@ struct CursorSection: View {
                     points: validData,
                     kind: settings.petCursorKind,
                     pct: vm.cursorCurrentPct,
-                    anxietyAt: petAnxietyAt
+                    anxietyAt: petAnxietyAt,
+                    bigDropThreshold: settings.bigDropThreshold,
+                    wellnessNudge: vm.wellnessNudge,
+                    onDismissWellness: { vm.dismissWellnessNudge() }
                 )
                 .frame(height: 44)
             } else {

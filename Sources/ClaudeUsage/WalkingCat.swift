@@ -10,6 +10,46 @@ private struct QuoteBubbleSizeKey: PreferenceKey {
     }
 }
 
+private struct WellnessBubbleSizeKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) {
+        value = nextValue()
+    }
+}
+
+// 노란 spiky 말풍선용 별 모양 starburst 외곽선.
+// 짝수 스텝에서 outer 반경, 홀수에서 inner 반경을 찍어 톱니/번개 느낌의 폴리곤을 만든다.
+struct SpikyBubble: Shape {
+    var spikes: Int = 18
+    var spikeDepth: CGFloat = 5
+
+    func path(in rect: CGRect) -> Path {
+        let cx = rect.midX
+        let cy = rect.midY
+        let outerW = rect.width / 2
+        let outerH = rect.height / 2
+        let innerW = max(1, outerW - spikeDepth)
+        let innerH = max(1, outerH - spikeDepth)
+        var path = Path()
+        let steps = spikes * 2
+        for i in 0..<steps {
+            let angle = (Double(i) / Double(steps)) * 2 * .pi - .pi / 2
+            let isOuter = i % 2 == 0
+            let rx = isOuter ? outerW : innerW
+            let ry = isOuter ? outerH : innerH
+            let x = cx + cos(angle) * rx
+            let y = cy + sin(angle) * ry
+            if i == 0 {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
 // 차트 라인 위에서 걷고 쉬고 두리번거리는 펫.
 // 표시는 Animated Wild Animals (CC0) 프레임 strip 기반,
 // 행동/위치/현재 frame은 PetController가 보유.
@@ -20,9 +60,19 @@ struct WalkingCat: View {
     var kind: PetKind = .fox
     var mood: PetMood = .neutral
     var displayHeight: CGFloat = 18
+    // 차트 한 구간이 전체 y-range 대비 이 비율 이상일 때 AAAH/WHEE 말풍선 발동. 낮을수록 자주.
+    var bigDropThreshold: Double = 0.40
+    // ViewModel이 1시간 연속 사용 감지 시 채워주는 휴식 권유 멘트.
+    // nil이면 표시 안 함. tap 시 onDismissWellness 호출.
+    var wellnessNudge: String? = nil
+    var onDismissWellness: (() -> Void)? = nil
 
     @StateObject private var ctrl = PetController()
     @State private var bubbleSize: CGSize = .zero
+    @State private var wellnessBubbleSize: CGSize = .zero
+    // wellness 말풍선 등장 직후 3초간 blink 시키는 opacity 상태.
+    @State private var wellnessOpacity: Double = 1.0
+    @State private var wellnessBlinkTask: Task<Void, Never>?
 
     var body: some View {
         // mood는 매 render마다 컨트롤러에 동기화 (publish 아님 → 경고 없음)
@@ -32,8 +82,34 @@ struct WalkingCat: View {
         ctrl.speedMultiplier = (bigDropDescent(at: ctrl.x) != 0) ? (1.0 / 1.5) : 1.0
         return sprite()
             .onPreferenceChange(QuoteBubbleSizeKey.self) { bubbleSize = $0 }
+            .onPreferenceChange(WellnessBubbleSizeKey.self) { wellnessBubbleSize = $0 }
             .onAppear { ctrl.start() }
-            .onDisappear { ctrl.stop() }
+            .onDisappear {
+                ctrl.stop()
+                wellnessBlinkTask?.cancel()
+            }
+            .onChange(of: wellnessNudge) { _, newValue in
+                wellnessBlinkTask?.cancel()
+                guard newValue != nil else {
+                    wellnessOpacity = 1.0
+                    return
+                }
+                wellnessOpacity = 1.0
+                wellnessBlinkTask = Task { @MainActor in
+                    let start = Date()
+                    // 3초 동안 4Hz blink (50ms 폴링), 끝나면 1.0으로 settle.
+                    while !Task.isCancelled {
+                        let elapsed = Date().timeIntervalSince(start)
+                        if elapsed >= 3.0 {
+                            wellnessOpacity = 1.0
+                            return
+                        }
+                        let phase = (elapsed * 4).truncatingRemainder(dividingBy: 1.0)
+                        wellnessOpacity = phase < 0.5 ? 1.0 : 0.25
+                        try? await Task.sleep(nanoseconds: 50_000_000)
+                    }
+                }
+            }
     }
 
     @ViewBuilder
@@ -70,11 +146,18 @@ struct WalkingCat: View {
                 )
                 .rotationEffect(.degrees(rollAngle), anchor: .center)
                 .colorMultiply(mood.tint)
+                // 작은 sprite(18pt) 위 hover 감지를 쉽게 하려고 32x32 hit area로 확장.
+                .frame(width: max(w, 32), height: max(h, 32))
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    if case .active = phase {
+                        ctrl.startFleeFromMouse()
+                    }
+                }
                 .position(
                     x: pos.x + jx,
                     y: pos.y - h / 2 + jy - jumpY
                 )
-                .allowsHitTesting(false)
 
             // 굴러 떨어지는 중(descent > 0)일 때만 우측에 비명 말풍선.
             // 펫의 rotationEffect와 무관하게 upright 유지하려고 sibling으로 배치.
@@ -139,7 +222,74 @@ struct WalkingCat: View {
                 .position(x: bx, y: by)
                 .allowsHitTesting(false)
             }
+
+            // 마우스 hover로 trigger된 도망 리액션 말풍선. 펫 머리 위에 펫 따라 이동.
+            if ctrl.isFleeing, let reaction = ctrl.currentReaction {
+                bubble(
+                    reaction,
+                    fontSize: 9,
+                    weight: .bold,
+                    cornerRadius: 5,
+                    padH: 5,
+                    padV: 2.5
+                )
+                .fixedSize()
+                .position(
+                    x: pos.x + jx,
+                    y: pos.y - h - 6 + jy - jumpY
+                )
+                .allowsHitTesting(false)
+            }
+
+            // 휴식 권유 말풍선: 노란 spiky 디자인, 클릭 시 dismiss.
+            // 펫의 다른 말풍선들과 독립적으로 항상 펫 머리 위 우선, plot 클램프.
+            if let nudge = wellnessNudge {
+                let bw = wellnessBubbleSize.width
+                let bh = wellnessBubbleSize.height
+                let petX = pos.x + jx
+                let petY = pos.y + jy
+                let minX = plotFrame.minX + 2 + bw / 2
+                let maxX = plotFrame.maxX - 2 - bw / 2
+                let bx: Double = (minX <= maxX) ? min(maxX, max(minX, petX)) : petX
+                let aboveCY = petY - h - 6 - bh / 2
+                let belowCY = petY + 4 + bh / 2
+                let by: Double = (bh > 0 && aboveCY - bh / 2 < plotFrame.minY) ? belowCY : aboveCY
+
+                spikyBubble(nudge)
+                    .fixedSize()
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: WellnessBubbleSizeKey.self,
+                                value: geo.size
+                            )
+                        }
+                    )
+                    .opacity(wellnessOpacity)
+                    .position(x: bx, y: by)
+                    .onTapGesture {
+                        onDismissWellness?()
+                    }
+            }
         }
+    }
+
+    /// 노란 spiky 말풍선. 텍스트는 검정 굵은 글씨, 외곽은 starburst 모양.
+    private func spikyBubble(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .heavy, design: .rounded))
+            .foregroundStyle(Color.black)
+            .lineLimit(1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                SpikyBubble(spikes: 18, spikeDepth: 5)
+                    .fill(Color.yellow)
+            )
+            .overlay(
+                SpikyBubble(spikes: 18, spikeDepth: 5)
+                    .stroke(Color.black, lineWidth: 1.2)
+            )
     }
 
     /// 펫 위에 뜨는 말풍선의 공통 외형 (흰 바탕 + 검정 둥근 테두리, 1줄).
@@ -169,12 +319,12 @@ struct WalkingCat: View {
 
     // 현재 x가 "큰 낙폭 segment" 안에 있고 진행 방향이 그 segment의 흐름과 같으면
     // descent를 부호로 반환: +1 = 내려가는 중, -1 = 올라가는 중, 0 = 해당 없음.
-    // 임계: |dy| >= 40% × (ymax - ymin)
+    // 임계: |dy| >= bigDropThreshold × (ymax - ymin)
     private func bigDropDescent(at xNorm: Double) -> Double {
         guard points.count >= 2 else { return 0 }
         let ys = points.map { $0.1 }
         guard let yMin = ys.min(), let yMax = ys.max(), yMax - yMin > 0 else { return 0 }
-        let threshold = (yMax - yMin) * 0.40
+        let threshold = (yMax - yMin) * bigDropThreshold
         let xStart = points.first!.0
         let xEnd = points.last!.0
         let span = xEnd.timeIntervalSince(xStart)
@@ -234,6 +384,9 @@ final class PetController: ObservableObject {
     @Published private(set) var action: Action = .walk
     @Published private(set) var frameIndex: Int = 0
     @Published private(set) var currentQuote: String? = nil
+    // 마우스 hover로 trigger된 도망 상태. true 동안 reaction 말풍선 표시 + 가속 + 새 액션 선택 차단.
+    @Published private(set) var isFleeing: Bool = false
+    @Published private(set) var currentReaction: String? = nil
 
     // body에서 직접 set. @Published 아님 → SwiftUI 경고 안 남.
     var mood: PetMood = .neutral
@@ -267,6 +420,22 @@ final class PetController: ObservableObject {
         timer = nil
     }
 
+    /// 마우스 hover 시 호출. 이미 도망 중이면 무시. 더 가까운 끝쪽에서 멀어지는 방향으로 3초 run.
+    func startFleeFromMouse() {
+        guard !isFleeing else { return }
+        isFleeing = true
+        // 더 넓게 달릴 수 있는 쪽으로 도망. (마우스는 펫 위에 있으니 위치 자체가 회피 방향 hint)
+        direction = self.x < 0.5 ? 1 : -1
+        facingRight = direction > 0
+        action = .run
+        currentQuote = nil
+        currentReaction = Quotes.randomReaction()
+        let now = Date()
+        actionUntil = now.addingTimeInterval(3.0)
+        frameIndex = 0
+        frameAccumulator = 0
+    }
+
     private func tick() {
         let now = Date()
         let dt = min(0.1, max(0, now.timeIntervalSince(lastTick)))
@@ -289,13 +458,22 @@ final class PetController: ObservableObject {
         }
 
         if now >= actionUntil {
+            if isFleeing {
+                isFleeing = false
+                currentReaction = nil
+            }
             chooseNextAction(now: now)
         }
 
         if action == .walk || action == .run {
-            let speed = action == .run
-                ? mood.walkSpeed * mood.runSpeedMultiplier
-                : mood.walkSpeed
+            let speed: Double
+            if isFleeing {
+                speed = mood.walkSpeed * 3.5   // 도망 시 가속
+            } else if action == .run {
+                speed = mood.walkSpeed * mood.runSpeedMultiplier
+            } else {
+                speed = mood.walkSpeed
+            }
             x += direction * speed * speedMultiplier * dt
             if x >= 1 {
                 x = 1

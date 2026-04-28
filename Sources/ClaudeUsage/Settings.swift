@@ -44,6 +44,20 @@ final class Settings: ObservableObject {
     }
     @Published private(set) var launchAtLogin: Bool
 
+    /// 펫이 차트 위에서 휴식 권유 말풍선을 띄울지 여부.
+    @Published var wellnessEnabled: Bool {
+        didSet { UserDefaults.standard.set(wellnessEnabled, forKey: Keys.wellnessEnabled) }
+    }
+    /// 휴식 권유 말풍선 사이의 최소 간격(분). 이 시간 동안 사용자가 활동했어야 트리거.
+    @Published var wellnessIntervalMinutes: Int {
+        didSet { UserDefaults.standard.set(wellnessIntervalMinutes, forKey: Keys.wellnessIntervalMinutes) }
+    }
+    /// 차트 한 구간의 |dy|가 전체 y-range 대비 이 비율 이상이면 펫이 AAAH/WHEE 말풍선을 띄움.
+    /// 낮을수록 자주 발생, 높을수록 드물게 발생. 기본 0.40.
+    @Published var bigDropThreshold: Double {
+        didSet { UserDefaults.standard.set(bigDropThreshold, forKey: Keys.bigDropThreshold) }
+    }
+
     private init() {
         let d = UserDefaults.standard
         self.panelOpacity  = (d.object(forKey: Keys.panelOpacity) as? Double) ?? 1.0
@@ -59,6 +73,11 @@ final class Settings: ObservableObject {
         self.themeClaudeOverride = d.string(forKey: Keys.themeClaudeOverride).flatMap { PetTheme(rawValue: $0) }
         self.themeCursorOverride = d.string(forKey: Keys.themeCursorOverride).flatMap { PetTheme(rawValue: $0) }
         self.launchAtLogin = (SMAppService.mainApp.status == .enabled)
+        self.wellnessEnabled = (d.object(forKey: Keys.wellnessEnabled) as? Bool) ?? true
+        let storedWellness = (d.object(forKey: Keys.wellnessIntervalMinutes) as? Int) ?? 60
+        self.wellnessIntervalMinutes = max(10, min(240, storedWellness))
+        let storedBigDrop = (d.object(forKey: Keys.bigDropThreshold) as? Double) ?? 0.40
+        self.bigDropThreshold = max(0.10, min(0.80, storedBigDrop))
     }
 
     func addThreshold(_ value: Int) {
@@ -99,5 +118,8 @@ final class Settings: ObservableObject {
         static let petCursorKind    = "settings.petCursorKind"
         static let themeClaudeOverride = "settings.themeClaudeOverride"
         static let themeCursorOverride = "settings.themeCursorOverride"
+        static let wellnessEnabled = "settings.wellnessEnabled"
+        static let wellnessIntervalMinutes = "settings.wellnessIntervalMinutes"
+        static let bigDropThreshold = "settings.bigDropThreshold"
     }
 }

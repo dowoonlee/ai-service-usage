@@ -52,6 +52,29 @@ struct SettingsView: View {
                 Text("사용량이 많아지면 펫이 신나고, 임계치에 가까워지면 불안해합니다.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+                HStack {
+                    Text("펫 반응")
+                    Slider(value: $settings.bigDropThreshold, in: 0.10...0.80, step: 0.05)
+                }
+                Text("차트가 크게 움직일 때 펫이 얼마나 자주 반응할지.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Section("휴식 권유") {
+                Toggle("일정 시간 사용 시 휴식 권유 말풍선", isOn: $settings.wellnessEnabled)
+                Stepper(value: $settings.wellnessIntervalMinutes, in: 10...240, step: 5) {
+                    HStack {
+                        Text("간격")
+                        Spacer()
+                        Text("\(settings.wellnessIntervalMinutes)분")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!settings.wellnessEnabled)
+                Text("이 간격 동안 사용자가 활동했으면 펫이 노란 말풍선으로 휴식을 권유합니다. 클릭하면 사라집니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
             Section("시작") {
                 Toggle("로그인 시 자동 시작", isOn: Binding(

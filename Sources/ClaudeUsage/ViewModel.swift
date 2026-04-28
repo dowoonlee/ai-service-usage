@@ -23,6 +23,11 @@ final class ViewModel: ObservableObject {
     // Shared
     @Published var now: Date = Date()
 
+    // 펫이 외치는 휴식 권유 말풍선. nil이면 표시 안 함.
+    // 최근 1시간 동안 거의 쉬지 않고 사용 중이고, 마지막 표시로부터 1시간 이상 지났을 때 설정됨.
+    @Published var wellnessNudge: String?
+    private var lastWellnessShownAt: Date?
+
     // Section collapse
     @Published var claudeCollapsed: Bool {
         didSet { UserDefaults.standard.set(claudeCollapsed, forKey: "section.claude.collapsed") }
@@ -59,8 +64,47 @@ final class ViewModel: ObservableObject {
         clockTimer?.invalidate()
         clockTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self else { return }
-            Task { @MainActor in self.now = Date() }
+            Task { @MainActor in
+                self.now = Date()
+                self.evaluateWellnessNudge()
+            }
         }
+    }
+
+    // MARK: - Wellness nudge
+
+    // 1시간 동안 거의 쉬지 않고 사용 중이면 휴식 권유 말풍선을 띄운다.
+    // 5분 폴링 간격이라 1시간 = 12 스냅샷, 그 중 flat(델타 < 0.1%)이 2개 이하일 때 "계속 일하는 중"으로 본다.
+    // 한 번 띄우면 1시간 쿨다운.
+    private func evaluateWellnessNudge() {
+        guard wellnessNudge == nil else { return }
+        guard Settings.shared.wellnessEnabled else { return }
+        let intervalSec = TimeInterval(Settings.shared.wellnessIntervalMinutes * 60)
+        if let last = lastWellnessShownAt, now.timeIntervalSince(last) < intervalSec { return }
+
+        // 인터벌 동안 사용자가 활동(델타 > 0.1%)했어야 트리거. 안 쓰던 사람한테 휴식하라고 권할 필요 없음.
+        let windowAgo = now.addingTimeInterval(-intervalSec)
+        let recent = claudeHistory.filter { $0.takenAt >= windowAgo }
+        // 폴링 5분 주기 → 인터벌 동안 최소 2 스냅샷은 있어야 델타 비교 가능
+        guard recent.count >= 2 else {
+            // 히스토리 부족 시: 첫 호출에서 lastWellnessShownAt만 세팅 → 다음 인터벌 후부터 정상 동작
+            if lastWellnessShownAt == nil { lastWellnessShownAt = now }
+            return
+        }
+
+        var hadActivity = false
+        for i in 1..<recent.count {
+            guard let curr = recent[i].fiveHourPct, let prev = recent[i - 1].fiveHourPct else { continue }
+            if curr - prev > 0.1 { hadActivity = true; break }
+        }
+        guard hadActivity else { return }
+
+        wellnessNudge = Quotes.randomWellness()
+        lastWellnessShownAt = now
+    }
+
+    func dismissWellnessNudge() {
+        wellnessNudge = nil
     }
 
     func startPolling(interval: TimeInterval = 300) {

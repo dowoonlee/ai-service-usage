@@ -53,4 +53,46 @@ enum Quotes {
     static func random() -> String {
         all.randomElement() ?? "Hello!"
     }
+
+    // 1시간 동안 쉬지 않고 쓰면 펫이 외치는 휴식 권유 멘트.
+    // 노란 spiky 말풍선으로 표시되며 클릭하면 사라진다.
+    static let wellness: [String] = [
+        "어깨 한번 돌려봐요!",
+        "잠깐 일어나서 스트레칭!",
+        "5분만 멍 때리고 와요!",
+        "물 한 잔 마시고 와요!",
+        "눈 좀 감았다 떠봐요!",
+        "허리 쭉 펴봐요!",
+        "창밖 한 번 보고 와요!",
+        "심호흡 세 번!",
+        "손목 좀 풀어줘요!",
+        "산책 한 바퀴 어때요?",
+    ]
+
+    static func randomWellness() -> String {
+        wellness.randomElement() ?? "쉬어가요!"
+    }
+
+    // 마우스가 펫 위로 hover 했을 때 나오는 리액션. 짧고 귀엽게.
+    static let reactions: [String] = [
+        "돈 땃쥐미!",
+        "오지 마세용!",
+        "건드리지 마!",
+        "어디서 오는 손이고!",
+        "악! 깜짝이야!",
+        "내가 강아지야?",
+        "거리 좀 둬요!",
+        "왜 그러세용 ㅠㅠ",
+        "잡으면 물어요!",
+        "안 잡혀잡혀~",
+        "1m 떨어져!",
+        "스토커 신고함",
+        "허락 없이 만지지 마!",
+        "꺅!",
+        "도망간다!",
+    ]
+
+    static func randomReaction() -> String {
+        reactions.randomElement() ?? "꺅!"
+    }
 }

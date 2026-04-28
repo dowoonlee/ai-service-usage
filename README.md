@@ -119,6 +119,7 @@ git tag v0.1.2 && git push origin v0.1.2
 
 | 버전 | 날짜 | 주요 변경 |
 |---|---|---|
+| v0.1.14 | 2026-04-28 | 펫 휴식 권유 말풍선 (사용자가 일정 시간 연속 활동 시 노란 spiky 디자인으로 등장, 3초 blink, 클릭하면 dismiss; 설정에서 ON/OFF + 간격 10~240분); 펫에 마우스 hover 시 "돈 땃쥐미!" 등 리액션 멘트 + 3초간 가속 도망; AAAH/WHEE 발동 임계치를 설정에서 슬라이더로 조정 가능 |
 | v0.1.13 | 2026-04-28 | 메뉴바 모드 옵션 (Settings 토글로 NSStatusItem 에 `Claude X · Cursor Y` 표시, 패널 close=hide 동작); TUI 모드 (`--tui` 플래그 시 터미널에서 htop 풍 시간축 heatmap + 시각 tick + 색 그라디언트로 사용량 표시) |
 | v0.1.12 | 2026-04-28 | 펫 명언 20→41개 (개발자/AI 밈 추가); 펫·차트 코드 리팩터 (PetDefinition 도입, 차트 헬퍼 통합) |
 | v0.1.11 | 2026-04-28 | Pixel Adventure 캐릭터 4종 추가 (펫 6→10); Claude 차트 펫 x-범위 어긋남 버그 수정 |
