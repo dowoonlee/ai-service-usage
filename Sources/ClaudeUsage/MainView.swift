@@ -1,6 +1,31 @@
 import SwiftUI
 import Charts
 
+// MARK: - Chart axis helpers
+// 세 sparkline (Claude 5h, Cursor Ultra $, Cursor Pro requests)이 동일한 축 스타일을
+// 쓰므로 chartYAxis / chartXAxis 본문을 한 자리에 모은다. 라벨 포맷만 호출부에서 조정.
+fileprivate extension View {
+    /// y축: 좌측 정렬, 회색 grid line + 짧은 tick + 8pt 라벨. format 으로 단위 추가.
+    func sparklineYAxis(
+        values: [Double],
+        format: @escaping (Double) -> String
+    ) -> some View {
+        chartYAxis {
+            AxisMarks(position: .leading, values: values) { value in
+                AxisGridLine().foregroundStyle(.secondary.opacity(0.25))
+                AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
+                AxisValueLabel(anchor: .trailing) {
+                    if let v = value.as(Double.self) {
+                        Text(format(v))
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct MainView: View {
     @ObservedObject var vm: ViewModel
     var onLogin: () -> Void
@@ -332,17 +357,7 @@ struct ClaudeSection: View {
                     }
                 }
                 .chartYScale(domain: 0...ymax)
-                .chartYAxis {
-                    AxisMarks(position: .leading, values: yValues) { value in
-                        AxisGridLine().foregroundStyle(.secondary.opacity(0.25))
-                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
-                        AxisValueLabel(anchor: .trailing) {
-                            if let v = value.as(Double.self) {
-                                Text("\(Int(v))").font(.system(size: 8)).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+                .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 3)) { value in
                         AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
@@ -633,17 +648,7 @@ struct CursorSection: View {
                     }
                 }
                 .chartYScale(domain: 0...ymax)
-                .chartYAxis {
-                    AxisMarks(position: .leading, values: yValues) { value in
-                        AxisGridLine().foregroundStyle(.secondary.opacity(0.25))
-                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
-                        AxisValueLabel(anchor: .trailing) {
-                            if let v = value.as(Double.self) {
-                                Text("$\(Int(v))").font(.system(size: 8)).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+                .sparklineYAxis(values: yValues, format: { "$\(Int($0))" })
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 3)) { value in
                         AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
@@ -731,17 +736,7 @@ struct CursorSection: View {
                     }
                 }
                 .chartYScale(domain: 0...ymax)
-                .chartYAxis {
-                    AxisMarks(position: .leading, values: yValues) { value in
-                        AxisGridLine().foregroundStyle(.secondary.opacity(0.25))
-                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
-                        AxisValueLabel(anchor: .trailing) {
-                            if let v = value.as(Double.self) {
-                                Text("\(Int(v))").font(.system(size: 8)).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+                .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 3)) { value in
                         AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
