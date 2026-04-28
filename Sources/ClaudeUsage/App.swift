@@ -187,8 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// "✨ 73 · ⌖ 42" 형식. SF Symbol 두 개로 Claude/Cursor 구분.
-    /// 값 없으면 "—". 둘 다 없으면 앱 이름.
+    /// "[claude] 73 · [cursor] 42" 형식. 16×16 도트 아이콘 (Claude=4갈래 sparkle,
+    /// Cursor=각진 C) 을 inline 으로. 값 없으면 "—". 둘 다 없으면 앱 이름.
     private func refreshMenuBarTitle() {
         guard let button = statusItem?.button else { return }
         func fmt(_ pct: Double?) -> String {
@@ -202,28 +202,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
         let attr = NSMutableAttributedString()
-        attr.append(symbolAttachment("sparkles"))           // Claude
+        attr.append(iconAttachment(rows: Self.claudeRows))
         attr.append(NSAttributedString(string: " \(fmt(c))  ·  "))
-        attr.append(symbolAttachment("cursorarrow.click.2")) // Cursor
+        attr.append(iconAttachment(rows: Self.cursorRows))
         attr.append(NSAttributedString(string: " \(fmt(u))"))
         button.attributedTitle = attr
     }
 
-    /// SF Symbol 을 status item 폰트 baseline 에 맞춘 NSTextAttachment 로 감싸 반환.
-    /// 시스템 template 이미지라 light/dark 모드 자동 대응.
-    private func symbolAttachment(_ name: String) -> NSAttributedString {
-        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
-        let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
-        img?.isTemplate = true
+    /// 16×16 도트 비트맵을 NSImage로 렌더 후 NSTextAttachment 로 감싼다.
+    /// isTemplate=true 라 메뉴바 light/dark 모드 자동 대응.
+    private func iconAttachment(rows: [String]) -> NSAttributedString {
+        let img = Self.pixelArtImage(rows: rows)
         let attachment = NSTextAttachment()
         attachment.image = img
-        if let size = img?.size {
-            // baseline 보정: 글리프가 약간 아래로 가도록 -2 오프셋.
-            attachment.bounds = CGRect(x: 0, y: -2, width: size.width, height: size.height)
-        }
+        // baseline 보정: 16pt 이미지를 텍스트 x-height 근처에 정렬.
+        attachment.bounds = CGRect(x: 0, y: -3, width: img.size.width, height: img.size.height)
         return NSAttributedString(attachment: attachment)
     }
+
+    /// "#" = 채움, "." = 빈 픽셀. 모든 row 길이가 같다고 가정.
+    private static func pixelArtImage(rows: [String]) -> NSImage {
+        let height = rows.count
+        let width = rows.first?.count ?? 0
+        let size = NSSize(width: width, height: height)
+        let img = NSImage(size: size)
+        img.lockFocus()
+        NSColor.black.setFill()
+        for (rowIdx, row) in rows.enumerated() {
+            for (colIdx, ch) in row.enumerated() where ch == "#" {
+                // NSImage 좌표는 좌하단 원점이라 y를 뒤집는다.
+                let y = CGFloat(height - 1 - rowIdx)
+                let x = CGFloat(colIdx)
+                NSBezierPath(rect: NSRect(x: x, y: y, width: 1, height: 1)).fill()
+            }
+        }
+        img.unlockFocus()
+        img.isTemplate = true
+        return img
+    }
+
+    // 4갈래로 뻗은 sparkle (Anthropic mark 분위기). 16×16.
+    private static let claudeRows: [String] = [
+        "................",
+        ".......##.......",
+        ".......##.......",
+        ".......##.......",
+        "......####......",
+        ".....######.....",
+        "....########....",
+        ".##############.",
+        ".##############.",
+        "....########....",
+        ".....######.....",
+        "......####......",
+        ".......##.......",
+        ".......##.......",
+        ".......##.......",
+        "................",
+    ]
+
+    // 우측 열린 각진 C (Cursor mark 분위기). 16×16.
+    private static let cursorRows: [String] = [
+        "................",
+        "....########....",
+        "...##########...",
+        "..####....####..",
+        "..####..........",
+        "..####..........",
+        "..####..........",
+        "..####..........",
+        "..####..........",
+        "..####..........",
+        "..####..........",
+        "..####..........",
+        "..####....####..",
+        "...##########...",
+        "....########....",
+        "................",
+    ]
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
         let event = NSApp.currentEvent

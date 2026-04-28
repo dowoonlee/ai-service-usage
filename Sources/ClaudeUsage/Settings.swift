@@ -18,7 +18,7 @@ final class Settings: ObservableObject {
     @Published var showPace: Bool {
         didSet { UserDefaults.standard.set(showPace, forKey: Keys.showPace) }
     }
-    /// 메뉴바 status item 표시 여부. true면 메뉴바에 "✨ 73 · ⌖ 42" 형태(SF Symbol)로 노출,
+    /// 메뉴바 status item 표시 여부. true면 메뉴바에 도트 아이콘 + "73 · 42" 형태로 노출,
     /// 패널 close 시 종료 대신 숨김으로 동작 (메뉴바 클릭으로 다시 표시).
     @Published var showMenuBar: Bool {
         didSet { UserDefaults.standard.set(showMenuBar, forKey: Keys.showMenuBar) }
