@@ -79,7 +79,7 @@ struct WalkingCat: View {
             // 굴러 떨어지는 중(descent > 0)일 때만 우측에 비명 말풍선.
             // 펫의 rotationEffect와 무관하게 upright 유지하려고 sibling으로 배치.
             if isMoving && descent > 0 {
-                screamBubble
+                bubble("AAAH!")
                     .position(
                         x: pos.x + jx + w / 2 + 18,
                         y: pos.y - h * 0.85 + jy
@@ -90,7 +90,7 @@ struct WalkingCat: View {
             // 점프하며 올라가는 중(descent < 0)일 때 우측에 환호 말풍선.
             // 펫이 위아래 튀므로 jumpY 만큼 함께 올려서 따라다니게 함.
             if isMoving && descent < 0 {
-                cheerBubble
+                bubble("WHEE!")
                     .position(
                         x: pos.x + jx + w / 2 + 18,
                         y: pos.y - h * 0.85 + jy - jumpY
@@ -119,67 +119,52 @@ struct WalkingCat: View {
                     ? belowCY
                     : aboveCY
 
-                quoteBubble(quote)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: QuoteBubbleSizeKey.self,
-                                value: geo.size
-                            )
-                        }
-                    )
-                    .position(x: bx, y: by)
-                    .allowsHitTesting(false)
+                bubble(
+                    quote,
+                    fontSize: 9,
+                    weight: .medium,
+                    cornerRadius: 5,
+                    padH: 5,
+                    padV: 2.5
+                )
+                .fixedSize()
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: QuoteBubbleSizeKey.self,
+                            value: geo.size
+                        )
+                    }
+                )
+                .position(x: bx, y: by)
+                .allowsHitTesting(false)
             }
         }
     }
 
-    private var screamBubble: some View {
-        Text("AAAH!")
-            .font(.system(size: 8, weight: .bold, design: .rounded))
-            .foregroundStyle(Color.black)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1.5)
-            .background(
-                RoundedRectangle(cornerRadius: 4).fill(Color.white)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(Color.black.opacity(0.7), lineWidth: 0.5)
-            )
-    }
-
-    private var cheerBubble: some View {
-        Text("WHEE!")
-            .font(.system(size: 8, weight: .bold, design: .rounded))
-            .foregroundStyle(Color.black)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1.5)
-            .background(
-                RoundedRectangle(cornerRadius: 4).fill(Color.white)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 4)
-                    .stroke(Color.black.opacity(0.7), lineWidth: 0.5)
-            )
-    }
-
-    private func quoteBubble(_ text: String) -> some View {
-        // .fixedSize() 로 텍스트 자연 너비에 정확히 hug. 단일 라인.
+    /// 펫 위에 뜨는 말풍선의 공통 외형 (흰 바탕 + 검정 둥근 테두리, 1줄).
+    /// scream/cheer는 짧은 의성어 (defaults), quote는 명언 (fontSize/weight/radius/padding 조정).
+    private func bubble(
+        _ text: String,
+        fontSize: CGFloat = 8,
+        weight: Font.Weight = .bold,
+        cornerRadius: CGFloat = 4,
+        padH: CGFloat = 4,
+        padV: CGFloat = 1.5
+    ) -> some View {
         Text(text)
-            .font(.system(size: 9, weight: .medium, design: .rounded))
+            .font(.system(size: fontSize, weight: weight, design: .rounded))
             .foregroundStyle(Color.black)
             .lineLimit(1)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2.5)
+            .padding(.horizontal, padH)
+            .padding(.vertical, padV)
             .background(
-                RoundedRectangle(cornerRadius: 5).fill(Color.white)
+                RoundedRectangle(cornerRadius: cornerRadius).fill(Color.white)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: cornerRadius)
                     .stroke(Color.black.opacity(0.7), lineWidth: 0.5)
             )
-            .fixedSize()
     }
 
     // 현재 x가 "큰 낙폭 segment" 안에 있고 진행 방향이 그 segment의 흐름과 같으면
