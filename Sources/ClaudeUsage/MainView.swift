@@ -40,6 +40,32 @@ fileprivate extension View {
             }
         }
     }
+
+    /// chartOverlay 안에 펫 (WalkingCat)을 마운트하는 공통 블록.
+    /// proxy + GeometryReader 으로 plotFrame 계산해서 WalkingCat 에 넘긴다.
+    /// 차트 라인이 사용하는 것과 동일한 `points`를 넘겨야 펫이 plot 범위를 벗어나지 않는다.
+    func chartPet(
+        enabled: Bool,
+        points: [(Date, Double)],
+        kind: PetKind,
+        pct: Double?,
+        anxietyAt: Double
+    ) -> some View {
+        chartOverlay { proxy in
+            if enabled {
+                GeometryReader { geo in
+                    let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
+                    WalkingCat(
+                        points: points,
+                        proxy: proxy,
+                        plotFrame: plotFrame,
+                        kind: kind,
+                        mood: PetMood.from(pct: pct, anxietyAt: anxietyAt)
+                    )
+                }
+            }
+        }
+    }
 }
 
 /// 데이터 최댓값을 받아 보기 좋은 y-상한과 3-tick (0, ymax/2, ymax)을 계산.
@@ -385,26 +411,16 @@ struct ClaudeSection: View {
                 .chartYScale(domain: 0...ymax)
                 .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
-                .chartOverlay { proxy in
-                    if settings.petClaudeEnabled {
-                        GeometryReader { geo in
-                            let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
-                            // 차트 라인이 그려지는 validData와 동일한 범위를 펫에 전달.
-                            // recent 그대로 넘기면 0% 스냅샷 때문에 펫의 x-도메인이
-                            // 차트 x-도메인보다 넓어져서 plot 좌/우로 빠져나간다.
-                            WalkingCat(
-                                points: validData,
-                                proxy: proxy,
-                                plotFrame: plotFrame,
-                                kind: settings.petClaudeKind,
-                                mood: PetMood.from(
-                                    pct: vm.claudeCurrent?.fiveHourPct,
-                                    anxietyAt: petAnxietyAt
-                                )
-                            )
-                        }
-                    }
-                }
+                // 차트 라인이 그려지는 validData와 동일한 범위를 펫에 전달.
+                // 다른 데이터(예: recent 0% 포함)를 넘기면 펫의 x-도메인이 차트보다 넓어져
+                // plot 좌/우로 빠져나간다.
+                .chartPet(
+                    enabled: settings.petClaudeEnabled,
+                    points: validData,
+                    kind: settings.petClaudeKind,
+                    pct: vm.claudeCurrent?.fiveHourPct,
+                    anxietyAt: petAnxietyAt
+                )
                 .frame(height: 44)
             } else {
                 Color.clear.frame(height: 44)
@@ -661,23 +677,13 @@ struct CursorSection: View {
                 .chartYScale(domain: 0...ymax)
                 .sparklineYAxis(values: yValues, format: { "$\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
-                .chartOverlay { proxy in
-                    if settings.petCursorEnabled {
-                        GeometryReader { geo in
-                            let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
-                            WalkingCat(
-                                points: points,
-                                proxy: proxy,
-                                plotFrame: plotFrame,
-                                kind: settings.petCursorKind,
-                                mood: PetMood.from(
-                                    pct: vm.cursorCurrentPct,
-                                    anxietyAt: petAnxietyAt
-                                )
-                            )
-                        }
-                    }
-                }
+                .chartPet(
+                    enabled: settings.petCursorEnabled,
+                    points: points,
+                    kind: settings.petCursorKind,
+                    pct: vm.cursorCurrentPct,
+                    anxietyAt: petAnxietyAt
+                )
                 .frame(height: 44)
             } else {
                 Color.clear.frame(height: 44)
@@ -734,23 +740,13 @@ struct CursorSection: View {
                 .chartYScale(domain: 0...ymax)
                 .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
-                .chartOverlay { proxy in
-                    if settings.petCursorEnabled {
-                        GeometryReader { geo in
-                            let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
-                            WalkingCat(
-                                points: validData,
-                                proxy: proxy,
-                                plotFrame: plotFrame,
-                                kind: settings.petCursorKind,
-                                mood: PetMood.from(
-                                    pct: vm.cursorCurrentPct,
-                                    anxietyAt: petAnxietyAt
-                                )
-                            )
-                        }
-                    }
-                }
+                .chartPet(
+                    enabled: settings.petCursorEnabled,
+                    points: validData,
+                    kind: settings.petCursorKind,
+                    pct: vm.cursorCurrentPct,
+                    anxietyAt: petAnxietyAt
+                )
                 .frame(height: 44)
             } else {
                 Color.clear.frame(height: 44)
