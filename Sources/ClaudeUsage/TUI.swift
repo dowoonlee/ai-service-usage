@@ -246,7 +246,9 @@ enum Renderer {
     private static func drawMetric(label: String, spark: [Double]?, pct: Double, suffix: String, cols: Int) {
         let leftPad = "    "
         let labelW = 6
-        let labelStr = label.padding(toLength: labelW, withPad: " ", startingAt: 0)
+        // 한글(전각) 문자는 monospace 터미널에서 2 cols 폭이라 padding(toLength:) 가
+        // UTF-16 길이로 세면 정렬이 어긋난다. display-width 기준으로 패딩.
+        let labelStr = padDisplay(label, labelW)
         let pctText = "\(Int(pct.rounded()))%"
         let pctVisible = pctText.count
         // sparkline 폭 = 전체 - 좌패딩 - 라벨 - pct - suffix 가시 길이 - 여백
@@ -271,6 +273,38 @@ enum Renderer {
         let m = (secs % 3600) / 60
         if h > 0 { return "in \(h)h \(m)m" }
         return "in \(m)m"
+    }
+
+    /// 한글/CJK 전각 문자는 2 cols 로 세는 display-width 측정.
+    /// 충분히 일반적인 wide 범위만 다룬다 (Hangul 음절 + CJK Unified + 호환).
+    private static func displayWidth(_ s: String) -> Int {
+        var w = 0
+        for scalar in s.unicodeScalars {
+            let v = scalar.value
+            if (0x1100...0x115F).contains(v) ||
+                (0x2E80...0x303E).contains(v) ||
+                (0x3041...0x33FF).contains(v) ||
+                (0x3400...0x4DBF).contains(v) ||
+                (0x4E00...0x9FFF).contains(v) ||
+                (0xA000...0xA4CF).contains(v) ||
+                (0xAC00...0xD7A3).contains(v) ||
+                (0xF900...0xFAFF).contains(v) ||
+                (0xFE30...0xFE4F).contains(v) ||
+                (0xFF00...0xFF60).contains(v) ||
+                (0xFFE0...0xFFE6).contains(v) {
+                w += 2
+            } else {
+                w += 1
+            }
+        }
+        return w
+    }
+
+    /// display-width 기준으로 우측 공백 패딩.
+    private static func padDisplay(_ s: String, _ targetWidth: Int) -> String {
+        let cur = displayWidth(s)
+        if cur >= targetWidth { return s }
+        return s + String(repeating: " ", count: targetWidth - cur)
     }
 
     /// ANSI escape 시퀀스를 제거한 문자열의 가시 길이 측정용.
