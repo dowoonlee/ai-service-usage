@@ -126,11 +126,36 @@ enum Renderer {
         return f
     }()
 
-    /// 사용량(%) 기준 색 — GUI 의 임계치 표시와 같은 traffic-light.
+    /// GUI 의 `SectionFormat.continuousColor` 와 동일 — HSV 에서 hue 만 0.33(green)
+    /// 에서 0.0(red) 으로 선형 보간, saturation 0.75, brightness 0.9. 24-bit truecolor
+    /// ANSI escape 로 출력. 0% = 초록, 50% = 노랑, 100% = 빨강.
     private static func levelColor(_ pct: Double) -> String {
-        if pct >= 80 { return RED }
-        if pct >= 50 { return YELL }
-        return GREEN
+        let clamped = max(0, min(100, pct)) / 100
+        let hue = 0.33 * (1 - clamped)
+        let (r, g, b) = hsvToRGB(h: hue, s: 0.75, v: 0.9)
+        return "\u{1B}[38;2;\(r);\(g);\(b)m"
+    }
+
+    /// HSV(0..1, 0..1, 0..1) → RGB(0..255, 0..255, 0..255).
+    private static func hsvToRGB(h: Double, s: Double, v: Double) -> (Int, Int, Int) {
+        let h6 = h * 6
+        let c = v * s
+        let x = c * (1 - abs(h6.truncatingRemainder(dividingBy: 2) - 1))
+        let m = v - c
+        let (r1, g1, b1): (Double, Double, Double)
+        switch h6 {
+        case ..<1:    (r1, g1, b1) = (c, x, 0)
+        case ..<2:    (r1, g1, b1) = (x, c, 0)
+        case ..<3:    (r1, g1, b1) = (0, c, x)
+        case ..<4:    (r1, g1, b1) = (0, x, c)
+        case ..<5:    (r1, g1, b1) = (x, 0, c)
+        default:      (r1, g1, b1) = (c, 0, x)
+        }
+        return (
+            Int(((r1 + m) * 255).rounded()),
+            Int(((g1 + m) * 255).rounded()),
+            Int(((b1 + m) * 255).rounded())
+        )
     }
 
     static func draw(vm: ViewModel) {
