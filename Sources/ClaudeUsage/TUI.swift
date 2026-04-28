@@ -99,18 +99,7 @@ enum Terminal {
     }
 }
 
-// MARK: - Bar
-
-enum Bar {
-    /// htop 스타일 가로 바. filled=█, empty=░.
-    /// "[██████████░░░░░]" 형태로 brackets 포함해서 반환.
-    static func render(pct: Double, innerWidth: Int) -> String {
-        let clamped = max(0, min(100, pct))
-        let filled = Int((clamped / 100.0 * Double(innerWidth)).rounded())
-        let empty = max(0, innerWidth - filled)
-        return "[\(String(repeating: "█", count: filled))\(String(repeating: "░", count: empty))]"
-    }
-}
+// (별도 visualization helper 없음 — Renderer 가 직접 tile 행 그림)
 
 // MARK: - Renderer
 
@@ -169,9 +158,11 @@ enum Renderer {
         Terminal.write("\(CYAN)╰\(String(repeating: "─", count: max(0, cols - 2)))╯\(RST)\r\n")
     }
 
-    /// 한 metric row 의 입력. label/pct/suffix 만 외부에서 결정.
+    /// 한 metric row 의 입력. history 가 있으면 시간축 tile 행을 그리고,
+    /// nil 이면 시각화 자리는 비워두고 pct 만 표시.
     private struct MetricRow {
         let label: String
+        let history: [Double]?  // 각 원소는 0..100 의 % 값 (timestep 별 사용량)
         let pct: Double
         let suffix: String
     }
@@ -194,13 +185,14 @@ enum Renderer {
 
         var rows: [MetricRow] = []
         if let pct = snap.fiveHourPct {
+            let history = vm.claudeHistory.compactMap { $0.fiveHourPct }
             let suffix = snap.fiveHourResetAt.map {
                 "   \(DIM)reset \(formatRemaining(from: now, to: $0))\(RST)"
             } ?? ""
-            rows.append(MetricRow(label: "5h", pct: pct, suffix: suffix))
+            rows.append(MetricRow(label: "5h", history: history, pct: pct, suffix: suffix))
         }
         if let pct = snap.sevenDayPct {
-            rows.append(MetricRow(label: "주간", pct: pct, suffix: ""))
+            rows.append(MetricRow(label: "주간", history: nil, pct: pct, suffix: ""))
         }
         drawSection(rows: rows, cols: cols)
     }
@@ -226,56 +218,64 @@ enum Renderer {
 
         var rows: [MetricRow] = []
         if let total = snap.totalCents, let max = snap.maxCents, max > 0 {
+            // tile 행은 % 단위로 색을 결정 → cents history 도 % 로 변환.
+            let history = vm.cursorHistory.compactMap { snap -> Double? in
+                guard let c = snap.totalCents else { return nil }
+                return c / max * 100
+            }
             let pct = total / max * 100
             let detail = "  \(DIM)$\(Int((total / 100).rounded())) / $\(Int((max / 100).rounded()))\(RST)"
-            rows.append(MetricRow(label: "$", pct: pct, suffix: detail + resetSuffix))
+            rows.append(MetricRow(label: "$", history: history, pct: pct, suffix: detail + resetSuffix))
         } else if let req = snap.totalRequests, let max = snap.maxRequests, max > 0 {
+            let history = vm.cursorHistory.compactMap { snap -> Double? in
+                guard let r = snap.totalRequests else { return nil }
+                return Double(r) / Double(max) * 100
+            }
             let pct = Double(req) / Double(max) * 100
             let detail = "  \(DIM)\(req) / \(max)\(RST)"
-            rows.append(MetricRow(label: "req", pct: pct, suffix: detail + resetSuffix))
+            rows.append(MetricRow(label: "req", history: history, pct: pct, suffix: detail + resetSuffix))
         }
         drawSection(rows: rows, cols: cols)
     }
 
-    /// 섹션의 모든 row 를 같은 bar 폭으로 그려서 % 위치를 column-정렬.
-    /// barW 는 row 들 중 가장 긴 suffix 기준으로 산정 → 모든 row 의 % 가 같은 x.
+    /// 섹션의 모든 row 를 같은 tile 폭으로 그려서 % 위치를 column-정렬.
+    /// tilesW 는 row 들 중 가장 긴 suffix 기준으로 산정 → 모든 row 의 % 가 같은 x.
     private static func drawSection(rows: [MetricRow], cols: Int) {
         guard !rows.isEmpty else { return }
         let leftPad = "    "
         let labelW = 6
         let pctVisible = 4   // "100%" 까지 4자
         let maxSuffixW = rows.map { stripAnsi($0.suffix).count }.max() ?? 0
-        // bar 는 brackets 포함이라 외곽 [, ] 2칸 + inner. 여백 3.
-        let used = leftPad.count + labelW + 2 + pctVisible + maxSuffixW + 5
-        let innerW = max(8, cols - used)
+        let used = leftPad.count + labelW + pctVisible + maxSuffixW + 4
+        let tilesW = max(8, cols - used)
         for row in rows {
-            drawMetric(row, leftPad: leftPad, labelW: labelW, innerW: innerW)
+            drawMetric(row, leftPad: leftPad, labelW: labelW, tilesW: tilesW)
         }
     }
 
-    private static func drawMetric(_ row: MetricRow, leftPad: String, labelW: Int, innerW: Int) {
+    private static func drawMetric(_ row: MetricRow, leftPad: String, labelW: Int, tilesW: Int) {
         // 한글(전각) 문자는 monospace 터미널에서 2 cols 폭이라 padding(toLength:) 가
         // UTF-16 길이로 세면 정렬이 어긋난다. display-width 기준으로 패딩.
         let labelStr = padDisplay(row.label, labelW)
-        let pctText = padDisplay("\(Int(row.pct.rounded()))%", 4)  // 우측까지 균등 폭으로
-
-        // bar: 임계치 색으로 채움. brackets 자체는 dim white.
-        let bar = Bar.render(pct: row.pct, innerWidth: innerW)
-        let coloredBar = colorizeBar(bar, pct: row.pct)
+        let pctText = padDisplay("\(Int(row.pct.rounded()))%", 4)
+        let tilesPart: String = (row.history != nil)
+            ? tileRow(values: row.history!, width: tilesW)
+            : String(repeating: " ", count: tilesW)
         let pctPart = "\(BOLD)\(levelColor(row.pct))\(pctText)\(RST)"
-        Terminal.write("\(leftPad)\(labelStr)\(coloredBar)  \(pctPart)\(row.suffix)\r\n")
+        Terminal.write("\(leftPad)\(labelStr)\(tilesPart)  \(pctPart)\(row.suffix)\r\n")
     }
 
-    /// "[██████░░░░]" 의 brackets 는 dim, 채움 부분은 임계치 색.
-    private static func colorizeBar(_ bar: String, pct: Double) -> String {
-        // bar 형식: "[<filled><empty>]"
-        guard bar.count >= 2,
-              let first = bar.first, first == "[",
-              let last = bar.last, last == "]" else {
-            return bar
+    /// 각 timestep 의 % 를 임계치 색의 █ tile 한 칸으로 렌더.
+    /// 데이터가 width 보다 적으면 좌측을 공백으로 패딩 (가장 최근이 우측).
+    private static func tileRow(values: [Double], width: Int) -> String {
+        guard width > 0 else { return "" }
+        let recent = Array(values.suffix(width))
+        let pad = max(0, width - recent.count)
+        var out = String(repeating: " ", count: pad)
+        for v in recent {
+            out += "\(levelColor(v))█\(RST)"
         }
-        let inner = String(bar.dropFirst().dropLast())
-        return "\(DIM)[\(RST)\(levelColor(pct))\(inner)\(RST)\(DIM)]\(RST)"
+        return out
     }
 
     private static func formatRemaining(from now: Date, to target: Date) -> String {
