@@ -42,6 +42,16 @@ fileprivate extension View {
     }
 }
 
+/// 데이터 최댓값을 받아 보기 좋은 y-상한과 3-tick (0, ymax/2, ymax)을 계산.
+/// 자릿수 절반 단위(예: 5, 50, 500)로 올림해서 chart의 y축이 들쭉날쭉하지 않도록.
+fileprivate func niceYMax(dataMax: Double) -> (ymax: Double, ticks: [Double]) {
+    let target = max(dataMax, 1)
+    let magnitude = pow(10.0, floor(log10(target)))
+    let bin = magnitude / 2
+    let ymax = max(bin, (target / bin).rounded(.up) * bin)
+    return (ymax, [0, ymax / 2, ymax])
+}
+
 struct MainView: View {
     @ObservedObject var vm: ViewModel
     var onLogin: () -> Void
@@ -610,13 +620,8 @@ struct CursorSection: View {
         let points = buildCumulativePoints()
         return Group {
             if points.count >= 2 {
-                let values = points.map(\.1)
-                let dataMax = values.max() ?? 0
-                let target = max(dataMax, 1)
-                let magnitude = pow(10.0, floor(log10(max(target, 1))))
-                let bin = magnitude / 2
-                let ymax = max(bin, (target / bin).rounded(.up) * bin)
-                let yValues: [Double] = [0, ymax / 2, ymax]
+                let dataMax = (points.map(\.1).max() ?? 0)
+                let (ymax, yValues) = niceYMax(dataMax: dataMax)
 
                 let span = points.last!.0.timeIntervalSince(points.first!.0)
                 let tickFormat: Date.FormatStyle = span < 24 * 3600
@@ -690,13 +695,8 @@ struct CursorSection: View {
                 s.totalRequests.flatMap { v in v > 0 ? (s.takenAt, Double(v)) : nil }
             }
             if validData.count >= 2 {
-                let values = validData.map(\.1)
-                let dataMax = values.max() ?? 0
-                let target = max(dataMax, 1)
-                let magnitude = pow(10.0, floor(log10(max(target, 1))))
-                let bin = magnitude / 2
-                let ymax = max(bin, (target / bin).rounded(.up) * bin)
-                let yValues: [Double] = [0, ymax / 2, ymax]
+                let dataMax = (validData.map(\.1).max() ?? 0)
+                let (ymax, yValues) = niceYMax(dataMax: dataMax)
 
                 let span = validData.last!.0.timeIntervalSince(validData.first!.0)
                 let tickFormat: Date.FormatStyle = span < 24 * 3600
