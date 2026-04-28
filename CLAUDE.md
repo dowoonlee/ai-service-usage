@@ -64,7 +64,9 @@ Two behaviors that depend on chart shape live in WalkingCat (not the controller)
 
 `Action` enum has 5 cases: `walk`, `run`, `sit`, `scan`, `quote`. `.quote` fires at 5% probability in `chooseNextAction` (mood-independent), holds for 7s with a randomly-picked one-liner from `Quotes.swift`. The quote bubble uses a `PreferenceKey` to measure itself and clamps inside `plotFrame` (flipping to below the pet if the head-up position would clip the chart top). Adding a new `Action` case requires a corresponding mapping in `PetSprite.resourceName(for:)`.
 
-`WalkingCat` takes `plotFrame: CGRect` (not just `plotOrigin: CGPoint`) precisely so the bubble clamp logic has access to the plot's right/bottom bounds.
+`WalkingCat` takes `plotFrame: CGRect` (not just `plotOrigin: CGPoint`) precisely so the bubble clamp logic has access to the plot's right/bottom bounds. Always pass the same `points` to `WalkingCat` that the chart line uses — if the two diverge (e.g., chart uses a filtered subset, pet gets the unfiltered array) the pet's `xNorm ∈ [0,1]` maps to dates outside the chart's x-domain and the pet drifts past the plot edges.
+
+`PetKind` covers two CC0 sprite packs side-by-side: Wild Animals (fox/wolf/bear/boar/deer/rabbit, in `Resources/wild-animals/`) and Pixel Adventure 1 (maskDude/ninjaFrog/mushroom/slime, in `Resources/pixel-adventure/`). The two packs face opposite default directions, so `PetKind.defaultFacingLeft` flag drives the `scaleEffect` flip in `WalkingCat`. Adding a new kind needs entries in `cellSize`, `defaultFacingLeft`, `resourceName(for:)`, and `PetTheme.defaultFor(_:)`. SwiftPM bundles flatten resource paths, so every PNG/LICENSE basename across `Resources/` must be unique (this is why the two LICENSE files are `LICENSE_WildAnimals.txt` / `LICENSE_PixelAdventure.txt`).
 
 ### Notification dedup
 
