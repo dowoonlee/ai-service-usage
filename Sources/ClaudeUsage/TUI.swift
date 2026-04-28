@@ -99,28 +99,16 @@ enum Terminal {
     }
 }
 
-// MARK: - Sparkline
+// MARK: - Bar
 
-enum Sparkline {
-    private static let blocks: [Character] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
-
-    /// 최대 width 길이의 sparkline 문자열. 값이 부족하면 앞쪽을 공백으로 패딩.
-    static func render(values: [Double], width: Int) -> String {
-        guard width > 0 else { return "" }
-        guard !values.isEmpty else { return String(repeating: " ", count: width) }
-        let recent = Array(values.suffix(width))
-        let mn = recent.min() ?? 0
-        let mx = recent.max() ?? 1
-        let range = max(0.001, mx - mn)
-        var out = ""
-        out.reserveCapacity(width)
-        let pad = max(0, width - recent.count)
-        out.append(String(repeating: " ", count: pad))
-        for v in recent {
-            let idx = Int(((v - mn) / range) * Double(blocks.count - 1))
-            out.append(blocks[max(0, min(blocks.count - 1, idx))])
-        }
-        return out
+enum Bar {
+    /// htop 스타일 가로 바. filled=█, empty=░.
+    /// "[██████████░░░░░]" 형태로 brackets 포함해서 반환.
+    static func render(pct: Double, innerWidth: Int) -> String {
+        let clamped = max(0, min(100, pct))
+        let filled = Int((clamped / 100.0 * Double(innerWidth)).rounded())
+        let empty = max(0, innerWidth - filled)
+        return "[\(String(repeating: "█", count: filled))\(String(repeating: "░", count: empty))]"
     }
 }
 
@@ -181,10 +169,9 @@ enum Renderer {
         Terminal.write("\(CYAN)╰\(String(repeating: "─", count: max(0, cols - 2)))╯\(RST)\r\n")
     }
 
-    /// 한 metric row 의 입력. label/spark/pct/suffix 만 외부에서 결정.
+    /// 한 metric row 의 입력. label/pct/suffix 만 외부에서 결정.
     private struct MetricRow {
         let label: String
-        let spark: [Double]?
         let pct: Double
         let suffix: String
     }
@@ -207,14 +194,13 @@ enum Renderer {
 
         var rows: [MetricRow] = []
         if let pct = snap.fiveHourPct {
-            let history = vm.claudeHistory.compactMap { $0.fiveHourPct }
             let suffix = snap.fiveHourResetAt.map {
                 "   \(DIM)reset \(formatRemaining(from: now, to: $0))\(RST)"
             } ?? ""
-            rows.append(MetricRow(label: "5h", spark: history, pct: pct, suffix: suffix))
+            rows.append(MetricRow(label: "5h", pct: pct, suffix: suffix))
         }
         if let pct = snap.sevenDayPct {
-            rows.append(MetricRow(label: "주간", spark: nil, pct: pct, suffix: ""))
+            rows.append(MetricRow(label: "주간", pct: pct, suffix: ""))
         }
         drawSection(rows: rows, cols: cols)
     }
@@ -240,48 +226,56 @@ enum Renderer {
 
         var rows: [MetricRow] = []
         if let total = snap.totalCents, let max = snap.maxCents, max > 0 {
-            let history = vm.cursorHistory.compactMap { $0.totalCents }
             let pct = total / max * 100
             let detail = "  \(DIM)$\(Int((total / 100).rounded())) / $\(Int((max / 100).rounded()))\(RST)"
-            rows.append(MetricRow(label: "$", spark: history, pct: pct, suffix: detail + resetSuffix))
+            rows.append(MetricRow(label: "$", pct: pct, suffix: detail + resetSuffix))
         } else if let req = snap.totalRequests, let max = snap.maxRequests, max > 0 {
-            let history = vm.cursorHistory.compactMap { $0.totalRequests.map(Double.init) }
             let pct = Double(req) / Double(max) * 100
             let detail = "  \(DIM)\(req) / \(max)\(RST)"
-            rows.append(MetricRow(label: "req", spark: history, pct: pct, suffix: detail + resetSuffix))
+            rows.append(MetricRow(label: "req", pct: pct, suffix: detail + resetSuffix))
         }
         drawSection(rows: rows, cols: cols)
     }
 
-    /// 섹션의 모든 row 를 같은 sparkline 폭으로 그려서 % 위치를 column-정렬.
-    /// sparkW 는 row 들 중 가장 긴 suffix 기준으로 산정 → 모든 row 의 % 가 같은 x.
+    /// 섹션의 모든 row 를 같은 bar 폭으로 그려서 % 위치를 column-정렬.
+    /// barW 는 row 들 중 가장 긴 suffix 기준으로 산정 → 모든 row 의 % 가 같은 x.
     private static func drawSection(rows: [MetricRow], cols: Int) {
         guard !rows.isEmpty else { return }
         let leftPad = "    "
         let labelW = 6
         let pctVisible = 4   // "100%" 까지 4자
         let maxSuffixW = rows.map { stripAnsi($0.suffix).count }.max() ?? 0
-        let used = leftPad.count + labelW + pctVisible + maxSuffixW + 6
-        let sparkW = max(8, cols - used)
+        // bar 는 brackets 포함이라 외곽 [, ] 2칸 + inner. 여백 3.
+        let used = leftPad.count + labelW + 2 + pctVisible + maxSuffixW + 5
+        let innerW = max(8, cols - used)
         for row in rows {
-            drawMetric(row, leftPad: leftPad, labelW: labelW, sparkW: sparkW)
+            drawMetric(row, leftPad: leftPad, labelW: labelW, innerW: innerW)
         }
     }
 
-    private static func drawMetric(_ row: MetricRow, leftPad: String, labelW: Int, sparkW: Int) {
+    private static func drawMetric(_ row: MetricRow, leftPad: String, labelW: Int, innerW: Int) {
         // 한글(전각) 문자는 monospace 터미널에서 2 cols 폭이라 padding(toLength:) 가
         // UTF-16 길이로 세면 정렬이 어긋난다. display-width 기준으로 패딩.
         let labelStr = padDisplay(row.label, labelW)
         let pctText = padDisplay("\(Int(row.pct.rounded()))%", 4)  // 우측까지 균등 폭으로
 
-        let sparkPart: String
-        if let sp = row.spark {
-            sparkPart = "\(DIM)\(CYAN)\(Sparkline.render(values: sp, width: sparkW))\(RST)"
-        } else {
-            sparkPart = String(repeating: " ", count: sparkW)
-        }
+        // bar: 임계치 색으로 채움. brackets 자체는 dim white.
+        let bar = Bar.render(pct: row.pct, innerWidth: innerW)
+        let coloredBar = colorizeBar(bar, pct: row.pct)
         let pctPart = "\(BOLD)\(levelColor(row.pct))\(pctText)\(RST)"
-        Terminal.write("\(leftPad)\(labelStr)\(sparkPart)  \(pctPart)\(row.suffix)\r\n")
+        Terminal.write("\(leftPad)\(labelStr)\(coloredBar)  \(pctPart)\(row.suffix)\r\n")
+    }
+
+    /// "[██████░░░░]" 의 brackets 는 dim, 채움 부분은 임계치 색.
+    private static func colorizeBar(_ bar: String, pct: Double) -> String {
+        // bar 형식: "[<filled><empty>]"
+        guard bar.count >= 2,
+              let first = bar.first, first == "[",
+              let last = bar.last, last == "]" else {
+            return bar
+        }
+        let inner = String(bar.dropFirst().dropLast())
+        return "\(DIM)[\(RST)\(levelColor(pct))\(inner)\(RST)\(DIM)]\(RST)"
     }
 
     private static func formatRemaining(from now: Date, to target: Date) -> String {
