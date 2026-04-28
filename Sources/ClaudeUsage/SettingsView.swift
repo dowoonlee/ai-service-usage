@@ -15,6 +15,10 @@ struct SettingsView: View {
                         .frame(width: 40, alignment: .trailing)
                 }
                 Toggle("사용 페이스 예측 표시", isOn: $settings.showPace)
+                Toggle("메뉴바에 % 표시", isOn: $settings.showMenuBar)
+                Text("메뉴바 모드에서는 패널 close 시 종료 대신 숨김으로 동작.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
             Section("펫") {
                 Toggle("Claude 차트에 펫 표시", isOn: $settings.petClaudeEnabled)

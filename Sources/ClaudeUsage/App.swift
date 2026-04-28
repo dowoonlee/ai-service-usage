@@ -22,12 +22,13 @@ final class FloatingPanel: NSPanel {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var panel: FloatingPanel?
     var loginWC: LoginWindowController?
     var settingsWC: SettingsWindowController?
     let vm = ViewModel()
     private var cancellables = Set<AnyCancellable>()
+    private var statusItem: NSStatusItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupPanel()
@@ -42,6 +43,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] value in
                 self?.panel?.alphaValue = CGFloat(value)
+            }
+            .store(in: &cancellables)
+
+        // showMenuBar 토글에 따라 status item 생성/철거.
+        Settings.shared.$showMenuBar
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                if enabled {
+                    self?.setupMenuBarItem()
+                } else {
+                    self?.tearDownMenuBarItem()
+                }
+            }
+            .store(in: &cancellables)
+
+        // ViewModel의 % 변경 시 메뉴바 텍스트 갱신.
+        Publishers.CombineLatest(vm.$claudeCurrent, vm.$cursorCurrent)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _ in
+                self?.refreshMenuBarTitle()
             }
             .store(in: &cancellables)
     }
@@ -118,6 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSWindow.willCloseNotification, object: panel
         )
 
+        // 메뉴바 모드에서 close 버튼이 종료가 아닌 hide 로 동작하도록 delegate 설정.
+        panel.delegate = self
         panel.orderFrontRegardless()
         self.panel = panel
     }
@@ -133,8 +156,105 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func panelWillClose() {
-        // close 버튼 눌러도 앱 종료 — 메뉴바/독 아이콘이 없으므로 이게 자연스러움
+        // 메뉴바 모드가 아니면 close = 종료 (독/메뉴바 아이콘 없으니 자연스러움).
+        // 메뉴바 모드에서는 windowShouldClose 가 false 를 반환해 이 알림이 오지 않는다.
         NSApp.terminate(nil)
+    }
+
+    // MARK: - Menu bar status item
+
+    private func setupMenuBarItem() {
+        guard statusItem == nil else { return }
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.title = "AIUsage"
+            button.target = self
+            button.action = #selector(statusItemClicked(_:))
+            // 좌클릭 = 패널 토글, 우클릭 = 메뉴.
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        }
+        statusItem = item
+        refreshMenuBarTitle()
+    }
+
+    private func tearDownMenuBarItem() {
+        guard let item = statusItem else { return }
+        NSStatusBar.system.removeStatusItem(item)
+        statusItem = nil
+        // 메뉴바 모드를 끄는 순간 패널이 숨겨진 상태였으면 진입점을 잃으므로 다시 보여줌.
+        if let panel = panel, !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
+    }
+
+    /// "C 73 · U 42" 형식. 값 없으면 "—" 로 표시. 둘 다 없으면 앱 이름.
+    private func refreshMenuBarTitle() {
+        guard let button = statusItem?.button else { return }
+        func fmt(_ pct: Double?) -> String {
+            guard let p = pct else { return "—" }
+            return "\(Int(p.rounded()))"
+        }
+        let c = vm.claudeCurrent?.fiveHourPct
+        let u = vm.cursorCurrentPct
+        if c == nil, u == nil {
+            button.title = "AIUsage"
+        } else {
+            button.title = "C \(fmt(c)) · U \(fmt(u))"
+        }
+    }
+
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent
+        if event?.type == .rightMouseUp {
+            showStatusMenu(sender)
+        } else {
+            togglePanel()
+        }
+    }
+
+    private func togglePanel() {
+        guard let panel = panel else { return }
+        if panel.isVisible {
+            panel.orderOut(nil)
+        } else {
+            panel.orderFrontRegardless()
+        }
+    }
+
+    private func showStatusMenu(_ sender: NSStatusBarButton) {
+        let menu = NSMenu()
+        let toggleTitle = (panel?.isVisible == true) ? "패널 숨기기" : "패널 보기"
+        menu.addItem(withTitle: toggleTitle, action: #selector(togglePanelMenuAction), keyEquivalent: "")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "설정…", action: #selector(presentSettingsMenuAction), keyEquivalent: ",")
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "종료", action: #selector(quitMenuAction), keyEquivalent: "q")
+        for menuItem in menu.items where menuItem.action != nil {
+            menuItem.target = self
+        }
+        // status item button 아래로 메뉴를 띄움.
+        menu.popUp(
+            positioning: nil,
+            at: NSPoint(x: 0, y: sender.bounds.height + 4),
+            in: sender
+        )
+    }
+
+    @objc private func togglePanelMenuAction() { togglePanel() }
+    @objc private func presentSettingsMenuAction() { presentSettings() }
+    @objc private func quitMenuAction() { NSApp.terminate(nil) }
+
+    // MARK: - NSWindowDelegate
+
+    /// 메뉴바 모드에선 close = hide. 메뉴바가 없으면 기존대로 종료까지 (panelWillClose).
+    nonisolated func windowShouldClose(_ sender: NSWindow) -> Bool {
+        MainActor.assumeIsolated {
+            if Settings.shared.showMenuBar {
+                sender.orderOut(nil)
+                return false
+            }
+            return true
+        }
     }
 
     private func presentLogin() {

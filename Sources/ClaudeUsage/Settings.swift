@@ -18,6 +18,11 @@ final class Settings: ObservableObject {
     @Published var showPace: Bool {
         didSet { UserDefaults.standard.set(showPace, forKey: Keys.showPace) }
     }
+    /// 메뉴바 status item 표시 여부. true면 메뉴바에 "C 73 · U 42" 형태로 % 노출,
+    /// 패널 close 시 종료 대신 숨김으로 동작 (메뉴바 클릭으로 다시 표시).
+    @Published var showMenuBar: Bool {
+        didSet { UserDefaults.standard.set(showMenuBar, forKey: Keys.showMenuBar) }
+    }
     @Published var petClaudeEnabled: Bool {
         didSet { UserDefaults.standard.set(petClaudeEnabled, forKey: Keys.petClaudeEnabled) }
     }
@@ -46,6 +51,7 @@ final class Settings: ObservableObject {
         let storedThresholds = (d.array(forKey: Keys.notifyThresholds) as? [Int]) ?? []
         self.notifyThresholds = storedThresholds.isEmpty ? [80, 95] : storedThresholds.sorted()
         self.showPace      = (d.object(forKey: Keys.showPace) as? Bool) ?? true
+        self.showMenuBar   = (d.object(forKey: Keys.showMenuBar) as? Bool) ?? false
         self.petClaudeEnabled = (d.object(forKey: Keys.petClaudeEnabled) as? Bool) ?? true
         self.petCursorEnabled = (d.object(forKey: Keys.petCursorEnabled) as? Bool) ?? true
         self.petClaudeKind = (d.string(forKey: Keys.petClaudeKind).flatMap { PetKind(rawValue: $0) }) ?? .fox
@@ -86,6 +92,7 @@ final class Settings: ObservableObject {
         static let notifyEnabled    = "settings.notifyEnabled"
         static let notifyThresholds = "settings.notifyThresholds"
         static let showPace         = "settings.showPace"
+        static let showMenuBar      = "settings.showMenuBar"
         static let petClaudeEnabled = "settings.petClaudeEnabled"
         static let petCursorEnabled = "settings.petCursorEnabled"
         static let petClaudeKind    = "settings.petClaudeKind"
