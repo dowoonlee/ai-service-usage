@@ -225,6 +225,8 @@ struct WalkingCat: View {
 
             // 마우스 hover로 trigger된 도망 리액션 말풍선. 펫 머리 위에 펫 따라 이동.
             if ctrl.isFleeing, let reaction = ctrl.currentReaction {
+                let petX = pos.x + jx
+                let petY = pos.y + jy - jumpY
                 bubble(
                     reaction,
                     fontSize: 9,
@@ -234,10 +236,7 @@ struct WalkingCat: View {
                     padV: 2.5
                 )
                 .fixedSize()
-                .position(
-                    x: pos.x + jx,
-                    y: pos.y - h - 6 + jy - jumpY
-                )
+                .position(x: petX, y: petY - h - 6)
                 .allowsHitTesting(false)
             }
 
