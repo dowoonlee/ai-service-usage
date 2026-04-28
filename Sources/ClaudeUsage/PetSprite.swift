@@ -1,56 +1,99 @@
 import AppKit
 import SwiftUI
 
-// Animated Wild Animals (CC0, ScratchIO) 스프라이트.
-// 동물별로 cell 사이즈 다름, 동작별로 strip PNG 1개. frame i → x: i*cellW, y: 0.
-// PetController가 (action, frameIndex)를 들고 있고, 여기서는 잘린 프레임을 캐시.
+// 두 개의 sprite 출처를 함께 쓴다:
+//   - Animated Wild Animals (CC0, ScratchIO): 동물 6종, sprite는 모두 좌향
+//   - Pixel Adventure 1 (CC0, Pixel Frog):    캐릭터 4종, sprite는 모두 우향
+// 둘 다 동작별 strip PNG (frame i → x: i*cellW, y: 0). PetController가
+// (action, frameIndex)를 들고 있고, 여기서 잘린 프레임을 캐시.
 
 enum PetKind: String, CaseIterable, Identifiable, Codable {
+    // wild-animals
     case fox
     case wolf
     case bear
     case boar
     case deer
     case rabbit
+    // pixel-adventure
+    case maskDude
+    case ninjaFrog
+    case mushroom
+    case slime
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .fox:    return "여우"
-        case .wolf:   return "늑대"
-        case .bear:   return "곰"
-        case .boar:   return "멧돼지"
-        case .deer:   return "사슴"
-        case .rabbit: return "토끼"
+        case .fox:       return "여우"
+        case .wolf:      return "늑대"
+        case .bear:      return "곰"
+        case .boar:      return "멧돼지"
+        case .deer:      return "사슴"
+        case .rabbit:    return "토끼"
+        case .maskDude:  return "마스크 영웅"
+        case .ninjaFrog: return "닌자 개구리"
+        case .mushroom:  return "버섯"
+        case .slime:     return "슬라임"
         }
     }
 
     var cellSize: (w: Int, h: Int) {
         switch self {
-        case .fox:    return (64, 36)
-        case .wolf:   return (64, 40)
-        case .bear:   return (64, 33)
-        case .boar:   return (64, 40)
-        case .deer:   return (72, 52)
-        case .rabbit: return (32, 26)
+        case .fox:       return (64, 36)
+        case .wolf:      return (64, 40)
+        case .bear:      return (64, 33)
+        case .boar:      return (64, 40)
+        case .deer:      return (72, 52)
+        case .rabbit:    return (32, 26)
+        case .maskDude:  return (32, 32)
+        case .ninjaFrog: return (32, 32)
+        case .mushroom:  return (32, 32)
+        case .slime:     return (44, 30)
         }
     }
 
-    /// 동작 → 파일 prefix. Rabbit은 Walk 대신 Hop, Wolf는 Idle 대신 Howl.
+    /// sprite가 기본적으로 좌측을 보고 있는지. 우측 이동 시 반전 여부 결정.
+    /// Wild Animals 는 모두 좌향, Pixel Adventure 는 모두 우향.
+    var defaultFacingLeft: Bool {
+        switch self {
+        case .fox, .wolf, .bear, .boar, .deer, .rabbit:
+            return true
+        case .maskDude, .ninjaFrog, .mushroom, .slime:
+            return false
+        }
+    }
+
+    /// 동작 → 파일 basename. 스프라이트 별로 가능한 strip이 달라서 alias 처리:
+    ///   - Rabbit은 Walk 대신 Hop, Wolf는 Idle 대신 Howl
+    ///   - Pixel Adventure 캐릭터들은 Walk strip 자체가 없어 Run으로 대체
+    ///   - Slime은 Idle/Run 한 strip(IdleRun)으로 합쳐져 있음
     func resourceName(for action: PetController.Action) -> String {
         let prefix: String
         switch self {
-        case .fox: prefix = "Fox"
-        case .wolf: prefix = "Wolf"
-        case .bear: prefix = "Bear"
-        case .boar: prefix = "Boar"
-        case .deer: prefix = "Deer"
-        case .rabbit: prefix = "Rabbit"
+        case .fox:       prefix = "Fox"
+        case .wolf:      prefix = "Wolf"
+        case .bear:      prefix = "Bear"
+        case .boar:      prefix = "Boar"
+        case .deer:      prefix = "Deer"
+        case .rabbit:    prefix = "Rabbit"
+        case .maskDude:  prefix = "MaskDude"
+        case .ninjaFrog: prefix = "NinjaFrog"
+        case .mushroom:  prefix = "Mushroom"
+        case .slime:     prefix = "Slime"
+        }
+        // Slime은 모든 action이 한 파일.
+        if self == .slime {
+            return "\(prefix)_IdleRun"
         }
         switch action {
         case .walk:
-            return self == .rabbit ? "\(prefix)_Hop" : "\(prefix)_Walk"
+            switch self {
+            case .rabbit:    return "\(prefix)_Hop"
+            case .maskDude, .ninjaFrog, .mushroom:
+                return "\(prefix)_Run"
+            default:         return "\(prefix)_Walk"
+            }
         case .run:
             return "\(prefix)_Run"
         case .sit, .scan, .quote:

@@ -61,8 +61,13 @@ struct WalkingCat: View {
                 .resizable()
                 .interpolation(.none)
                 .frame(width: w, height: h)
-                // Wild Animals sprite는 모두 좌향 → 우측 이동시 반전
-                .scaleEffect(x: ctrl.facingRight ? -1 : 1, y: 1, anchor: .center)
+                // sprite가 기본 향한 방향과 진행 방향이 다르면 반전.
+                // (Wild Animals=좌향, Pixel Adventure=우향)
+                .scaleEffect(
+                    x: kind.defaultFacingLeft == ctrl.facingRight ? -1 : 1,
+                    y: 1,
+                    anchor: .center
+                )
                 .rotationEffect(.degrees(rollAngle), anchor: .center)
                 .colorMultiply(mood.tint)
                 .position(

@@ -358,10 +358,11 @@ struct ClaudeSection: View {
                     if settings.petClaudeEnabled {
                         GeometryReader { geo in
                             let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
+                            // 차트 라인이 그려지는 validData와 동일한 범위를 펫에 전달.
+                            // recent 그대로 넘기면 0% 스냅샷 때문에 펫의 x-도메인이
+                            // 차트 x-도메인보다 넓어져서 plot 좌/우로 빠져나간다.
                             WalkingCat(
-                                points: recent.compactMap { s in
-                                    s.fiveHourPct.map { (s.takenAt, $0) }
-                                },
+                                points: validData,
                                 proxy: proxy,
                                 plotFrame: plotFrame,
                                 kind: settings.petClaudeKind,

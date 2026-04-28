@@ -66,6 +66,10 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .boar:          return .field
         case .deer:          return .grassland
         case .rabbit:        return .grassland
+        case .maskDude:      return .wilderness
+        case .ninjaFrog:     return .grassland
+        case .mushroom:      return .field
+        case .slime:         return .wilderness
         }
     }
 }

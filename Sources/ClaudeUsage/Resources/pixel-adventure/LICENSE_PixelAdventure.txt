@@ -1,0 +1,9 @@
+Pixel Adventure 1 sprites by Pixel Frog
+Source: https://pixelfrog-assets.itch.io/pixel-adventure-1
+License: Creative Commons Zero (CC0) — public domain, no attribution required.
+
+Included characters:
+- MaskDude   (Main Characters / Mask Dude)
+- NinjaFrog  (Main Characters / Ninja Frog)
+- Mushroom   (Enemies / Mushroom)
+- Slime      (Enemies / Slime)
