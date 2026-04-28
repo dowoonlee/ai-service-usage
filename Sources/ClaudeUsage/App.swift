@@ -187,7 +187,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// "Claude 73 · Cursor 42" 형식. 값 없으면 "—" 로 표시. 둘 다 없으면 앱 이름.
+    /// "✨ 73 · ⌖ 42" 형식. SF Symbol 두 개로 Claude/Cursor 구분.
+    /// 값 없으면 "—". 둘 다 없으면 앱 이름.
     private func refreshMenuBarTitle() {
         guard let button = statusItem?.button else { return }
         func fmt(_ pct: Double?) -> String {
@@ -197,10 +198,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let c = vm.claudeCurrent?.fiveHourPct
         let u = vm.cursorCurrentPct
         if c == nil, u == nil {
-            button.title = "AIUsage"
-        } else {
-            button.title = "Claude \(fmt(c)) · Cursor \(fmt(u))"
+            button.attributedTitle = NSAttributedString(string: "AIUsage")
+            return
         }
+        let attr = NSMutableAttributedString()
+        attr.append(symbolAttachment("sparkles"))           // Claude
+        attr.append(NSAttributedString(string: " \(fmt(c))  ·  "))
+        attr.append(symbolAttachment("cursorarrow.click.2")) // Cursor
+        attr.append(NSAttributedString(string: " \(fmt(u))"))
+        button.attributedTitle = attr
+    }
+
+    /// SF Symbol 을 status item 폰트 baseline 에 맞춘 NSTextAttachment 로 감싸 반환.
+    /// 시스템 template 이미지라 light/dark 모드 자동 대응.
+    private func symbolAttachment(_ name: String) -> NSAttributedString {
+        let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+        let img = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+        img?.isTemplate = true
+        let attachment = NSTextAttachment()
+        attachment.image = img
+        if let size = img?.size {
+            // baseline 보정: 글리프가 약간 아래로 가도록 -2 오프셋.
+            attachment.bounds = CGRect(x: 0, y: -2, width: size.width, height: size.height)
+        }
+        return NSAttributedString(attachment: attachment)
     }
 
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
