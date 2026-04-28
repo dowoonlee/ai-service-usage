@@ -175,17 +175,15 @@ enum Renderer {
             return
         }
 
-        // 5h
+        // 5h: sparkline + 값. GUI 와 동일하게 sparkline 은 5h 만 그리고
+        // 주간은 숫자만 표시.
         if let pct = snap.fiveHourPct {
             let history = vm.claudeHistory.compactMap { $0.fiveHourPct }
             drawMetricLine(label: "5h", spark: history, value: "\(Int(pct.rounded()))%", cols: cols)
         }
-        // weekly
         if let pct = snap.sevenDayPct {
-            let history = vm.claudeHistory.compactMap { $0.sevenDayPct }
-            drawMetricLine(label: "주간", spark: history, value: "\(Int(pct.rounded()))%", cols: cols)
+            Terminal.write("   주간      \(Int(pct.rounded()))%\r\n")
         }
-        // reset countdown
         if let resetAt = snap.fiveHourResetAt {
             let r = formatRemaining(from: now, to: resetAt)
             Terminal.write("   \u{1B}[2m5h reset   \(r)\u{1B}[0m\r\n")
