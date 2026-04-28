@@ -24,6 +24,22 @@ fileprivate extension View {
             }
         }
     }
+
+    /// x축: 자동 3 tick + 8pt 날짜 라벨. format 으로 시간/날짜 단위 결정.
+    func sparklineXAxis(format: Date.FormatStyle) -> some View {
+        chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 3)) { value in
+                AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
+                AxisValueLabel {
+                    if let d = value.as(Date.self) {
+                        Text(d, format: format)
+                            .font(.system(size: 8))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
 }
 
 struct MainView: View {
@@ -358,17 +374,7 @@ struct ClaudeSection: View {
                 }
                 .chartYScale(domain: 0...ymax)
                 .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
-                .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 3)) { value in
-                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
-                        AxisValueLabel {
-                            if let d = value.as(Date.self) {
-                                Text(d, format: tickFormat)
-                                    .font(.system(size: 8)).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+                .sparklineXAxis(format: tickFormat)
                 .chartOverlay { proxy in
                     if settings.petClaudeEnabled {
                         GeometryReader { geo in
@@ -649,17 +655,7 @@ struct CursorSection: View {
                 }
                 .chartYScale(domain: 0...ymax)
                 .sparklineYAxis(values: yValues, format: { "$\(Int($0))" })
-                .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 3)) { value in
-                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
-                        AxisValueLabel {
-                            if let d = value.as(Date.self) {
-                                Text(d, format: tickFormat)
-                                    .font(.system(size: 8)).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+                .sparklineXAxis(format: tickFormat)
                 .chartOverlay { proxy in
                     if settings.petCursorEnabled {
                         GeometryReader { geo in
@@ -737,17 +733,7 @@ struct CursorSection: View {
                 }
                 .chartYScale(domain: 0...ymax)
                 .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
-                .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 3)) { value in
-                        AxisTick(length: 2).foregroundStyle(.secondary.opacity(0.5))
-                        AxisValueLabel {
-                            if let d = value.as(Date.self) {
-                                Text(d, format: tickFormat)
-                                    .font(.system(size: 8)).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+                .sparklineXAxis(format: tickFormat)
                 .chartOverlay { proxy in
                     if settings.petCursorEnabled {
                         GeometryReader { geo in
