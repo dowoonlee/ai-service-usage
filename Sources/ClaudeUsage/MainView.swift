@@ -78,6 +78,46 @@ fileprivate func niceYMax(dataMax: Double) -> (ymax: Double, ticks: [Double]) {
     return (ymax, [0, ymax / 2, ymax])
 }
 
+/// Claude/Cursor 섹션이 공유하는 토글 가능 헤더.
+/// 접혔을 때는 우측에 요약 게이지(또는 needsLogin/needsSetup 같은 단순 텍스트)를 표시.
+@ViewBuilder
+fileprivate func sectionHeader(
+    title: String,
+    isCollapsed: Bool,
+    onToggle: @escaping () -> Void,
+    planBadge: String?,
+    summary: String,
+    showOnlySummary: Bool,
+    gaugePct: Double?
+) -> some View {
+    Button {
+        onToggle()
+    } label: {
+        HStack(spacing: 6) {
+            Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+            if let plan = planBadge {
+                PlanBadge(text: plan)
+            }
+            Spacer()
+            if isCollapsed {
+                if showOnlySummary {
+                    Text(summary)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                } else {
+                    CollapsedGauge(text: summary, pct: gaugePct)
+                }
+            }
+        }
+        .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+}
+
 struct MainView: View {
     @ObservedObject var vm: ViewModel
     var onLogin: () -> Void
@@ -259,32 +299,15 @@ struct ClaudeSection: View {
     }
 
     private var header: some View {
-        Button {
-            vm.claudeCollapsed.toggle()
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: vm.claudeCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text("Claude")
-                    .font(.system(size: 11, weight: .semibold))
-                if let plan = vm.claudeCurrent?.planName {
-                    PlanBadge(text: plan)
-                }
-                Spacer()
-                if vm.claudeCollapsed {
-                    if vm.claudeNeedsLogin {
-                        Text(summary)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        CollapsedGauge(text: summary, pct: collapsedPct)
-                    }
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        sectionHeader(
+            title: "Claude",
+            isCollapsed: vm.claudeCollapsed,
+            onToggle: { vm.claudeCollapsed.toggle() },
+            planBadge: vm.claudeCurrent?.planName,
+            summary: summary,
+            showOnlySummary: vm.claudeNeedsLogin,
+            gaugePct: collapsedPct
+        )
     }
 
     private var summary: String {
@@ -474,32 +497,16 @@ struct CursorSection: View {
     }
 
     private var header: some View {
-        Button {
-            vm.cursorCollapsed.toggle()
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: vm.cursorCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text("Cursor")
-                    .font(.system(size: 11, weight: .semibold))
-                if let plan = vm.cursorCurrent?.planName, !plan.isEmpty {
-                    PlanBadge(text: prettyCursorPlan(plan))
-                }
-                Spacer()
-                if vm.cursorCollapsed {
-                    if vm.cursorNeedsSetup || vm.cursorCurrent == nil {
-                        Text(summary)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        CollapsedGauge(text: summary, pct: vm.cursorCurrentPct)
-                    }
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        let plan = vm.cursorCurrent?.planName.flatMap { $0.isEmpty ? nil : prettyCursorPlan($0) }
+        return sectionHeader(
+            title: "Cursor",
+            isCollapsed: vm.cursorCollapsed,
+            onToggle: { vm.cursorCollapsed.toggle() },
+            planBadge: plan,
+            summary: summary,
+            showOnlySummary: vm.cursorNeedsSetup || vm.cursorCurrent == nil,
+            gaugePct: vm.cursorCurrentPct
+        )
     }
 
     private func prettyCursorPlan(_ s: String) -> String {
