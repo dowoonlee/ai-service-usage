@@ -290,15 +290,27 @@ enum Renderer {
         Terminal.write("\(leftPad)\(labelStr)\(tilesPart)  \(pctPart)\(row.suffix)\r\n")
     }
 
-    /// 각 timestep 의 % 를 임계치 색의 █ tile 한 칸으로 렌더.
+    /// 각 timestep 을 █ tile 한 칸으로 렌더하되, 색은 표출된 history 의
+    /// min/max 를 0..100 범위에 매핑한 **상대 위치**로 결정.
+    /// → 사용량이 60~80 사이에서만 변동하는 구간이면 60 = 초록, 80 = 빨강.
+    /// 절대값이 아니라 그 시점의 트렌드를 보여줌.
     /// 데이터가 width 보다 적으면 좌측을 공백으로 패딩 (가장 최근이 우측).
     private static func tileRow(values: [Double], width: Int) -> String {
         guard width > 0 else { return "" }
         let recent = Array(values.suffix(width))
         let pad = max(0, width - recent.count)
         var out = String(repeating: " ", count: pad)
+        let mn = recent.min() ?? 0
+        let mx = recent.max() ?? 1
+        let range = mx - mn
+        // range 가 거의 0 이면 모두 거의 같은 값 → 중간 색(노랑)으로 통일.
+        if range < 0.001 {
+            for _ in recent { out += "\(levelColor(50))█\(RST)" }
+            return out
+        }
         for v in recent {
-            out += "\(levelColor(v))█\(RST)"
+            let relative = (v - mn) / range * 100
+            out += "\(levelColor(relative))█\(RST)"
         }
         return out
     }
