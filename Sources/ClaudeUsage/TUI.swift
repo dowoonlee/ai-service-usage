@@ -181,6 +181,14 @@ enum Renderer {
         Terminal.write("\(CYAN)╰\(String(repeating: "─", count: max(0, cols - 2)))╯\(RST)\r\n")
     }
 
+    /// 한 metric row 의 입력. label/spark/pct/suffix 만 외부에서 결정.
+    private struct MetricRow {
+        let label: String
+        let spark: [Double]?
+        let pct: Double
+        let suffix: String
+    }
+
     private static func drawClaude(vm: ViewModel, cols: Int, now: Date) {
         Terminal.write(" \(CYAN)●\(RST)  \(BOLD)Claude\(RST)")
         if let plan = vm.claudeCurrent?.planName {
@@ -197,16 +205,18 @@ enum Renderer {
             return
         }
 
+        var rows: [MetricRow] = []
         if let pct = snap.fiveHourPct {
             let history = vm.claudeHistory.compactMap { $0.fiveHourPct }
             let suffix = snap.fiveHourResetAt.map {
                 "   \(DIM)reset \(formatRemaining(from: now, to: $0))\(RST)"
             } ?? ""
-            drawMetric(label: "5h", spark: history, pct: pct, suffix: suffix, cols: cols)
+            rows.append(MetricRow(label: "5h", spark: history, pct: pct, suffix: suffix))
         }
         if let pct = snap.sevenDayPct {
-            drawMetric(label: "주간", spark: nil, pct: pct, suffix: "", cols: cols)
+            rows.append(MetricRow(label: "주간", spark: nil, pct: pct, suffix: ""))
         }
+        drawSection(rows: rows, cols: cols)
     }
 
     private static func drawCursor(vm: ViewModel, cols: Int, now: Date) {
@@ -228,42 +238,50 @@ enum Renderer {
             "   \(DIM)reset \(dateFmt.string(from: $0))\(RST)"
         } ?? ""
 
+        var rows: [MetricRow] = []
         if let total = snap.totalCents, let max = snap.maxCents, max > 0 {
             let history = vm.cursorHistory.compactMap { $0.totalCents }
             let pct = total / max * 100
             let detail = "  \(DIM)$\(Int((total / 100).rounded())) / $\(Int((max / 100).rounded()))\(RST)"
-            drawMetric(label: "$", spark: history, pct: pct, suffix: detail + resetSuffix, cols: cols)
+            rows.append(MetricRow(label: "$", spark: history, pct: pct, suffix: detail + resetSuffix))
         } else if let req = snap.totalRequests, let max = snap.maxRequests, max > 0 {
             let history = vm.cursorHistory.compactMap { $0.totalRequests.map(Double.init) }
             let pct = Double(req) / Double(max) * 100
             let detail = "  \(DIM)\(req) / \(max)\(RST)"
-            drawMetric(label: "req", spark: history, pct: pct, suffix: detail + resetSuffix, cols: cols)
+            rows.append(MetricRow(label: "req", spark: history, pct: pct, suffix: detail + resetSuffix))
+        }
+        drawSection(rows: rows, cols: cols)
+    }
+
+    /// 섹션의 모든 row 를 같은 sparkline 폭으로 그려서 % 위치를 column-정렬.
+    /// sparkW 는 row 들 중 가장 긴 suffix 기준으로 산정 → 모든 row 의 % 가 같은 x.
+    private static func drawSection(rows: [MetricRow], cols: Int) {
+        guard !rows.isEmpty else { return }
+        let leftPad = "    "
+        let labelW = 6
+        let pctVisible = 4   // "100%" 까지 4자
+        let maxSuffixW = rows.map { stripAnsi($0.suffix).count }.max() ?? 0
+        let used = leftPad.count + labelW + pctVisible + maxSuffixW + 6
+        let sparkW = max(8, cols - used)
+        for row in rows {
+            drawMetric(row, leftPad: leftPad, labelW: labelW, sparkW: sparkW)
         }
     }
 
-    /// "    <label>  <sparkline>  <pct%>  <suffix>" 형태로 한 줄.
-    /// spark = nil 이면 sparkline 자리 공백.
-    private static func drawMetric(label: String, spark: [Double]?, pct: Double, suffix: String, cols: Int) {
-        let leftPad = "    "
-        let labelW = 6
+    private static func drawMetric(_ row: MetricRow, leftPad: String, labelW: Int, sparkW: Int) {
         // 한글(전각) 문자는 monospace 터미널에서 2 cols 폭이라 padding(toLength:) 가
         // UTF-16 길이로 세면 정렬이 어긋난다. display-width 기준으로 패딩.
-        let labelStr = padDisplay(label, labelW)
-        let pctText = "\(Int(pct.rounded()))%"
-        let pctVisible = pctText.count
-        // sparkline 폭 = 전체 - 좌패딩 - 라벨 - pct - suffix 가시 길이 - 여백
-        let suffixVisible = stripAnsi(suffix).count
-        let used = leftPad.count + labelW + pctVisible + suffixVisible + 6
-        let sparkW = max(8, cols - used)
+        let labelStr = padDisplay(row.label, labelW)
+        let pctText = padDisplay("\(Int(row.pct.rounded()))%", 4)  // 우측까지 균등 폭으로
 
         let sparkPart: String
-        if let sp = spark {
+        if let sp = row.spark {
             sparkPart = "\(DIM)\(CYAN)\(Sparkline.render(values: sp, width: sparkW))\(RST)"
         } else {
             sparkPart = String(repeating: " ", count: sparkW)
         }
-        let pctPart = "\(BOLD)\(levelColor(pct))\(pctText)\(RST)"
-        Terminal.write("\(leftPad)\(labelStr)\(sparkPart)  \(pctPart)\(suffix)\r\n")
+        let pctPart = "\(BOLD)\(levelColor(row.pct))\(pctText)\(RST)"
+        Terminal.write("\(leftPad)\(labelStr)\(sparkPart)  \(pctPart)\(row.suffix)\r\n")
     }
 
     private static func formatRemaining(from now: Date, to target: Date) -> String {
