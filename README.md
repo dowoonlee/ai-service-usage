@@ -119,6 +119,7 @@ git tag v0.1.2 && git push origin v0.1.2
 
 | 버전 | 날짜 | 주요 변경 |
 |---|---|---|
+| v0.1.13 | 2026-04-28 | 메뉴바 모드 옵션 (Settings 토글로 NSStatusItem 에 `Claude X · Cursor Y` 표시, 패널 close=hide 동작); TUI 모드 (`--tui` 플래그 시 터미널에서 htop 풍 시간축 heatmap + 시각 tick + 색 그라디언트로 사용량 표시) |
 | v0.1.12 | 2026-04-28 | 펫 명언 20→41개 (개발자/AI 밈 추가); 펫·차트 코드 리팩터 (PetDefinition 도입, 차트 헬퍼 통합) |
 | v0.1.11 | 2026-04-28 | Pixel Adventure 캐릭터 4종 추가 (펫 6→10); Claude 차트 펫 x-범위 어긋남 버그 수정 |
 | v0.1.10 | 2026-04-27 | 큰 상승 시 점프 + "WHEE!" 환호 말풍선 (굴러떨어짐의 거울짝); 극적 segment 1.5배 지속; quote 말풍선 plot 안쪽 클램프 |
