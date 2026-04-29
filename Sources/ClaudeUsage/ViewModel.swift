@@ -131,8 +131,10 @@ final class ViewModel: ObservableObject {
     /// 임박한 resetAt 직전(=`resetGuard`초 전)에 마지막 관측 폴링이 잡히도록 sleep을 단축.
     /// 윈도우 끝 사용분이 코인 적립에서 누락되는 걸 막기 위함 — 그 폴링의 pct가 윈도우 종료 pct로
     /// 기록되고, 다음(=normal interval) 폴링은 새 윈도우라서 자연스럽게 rebase된다.
-    private static let resetGuard: TimeInterval = 15
-    private static let minSleep: TimeInterval = 5
+    /// 30s buffer는 refresh의 네트워크 라운드트립(특히 Ultra cursor event 페이지네이션)이
+    /// resetAt을 넘겨버려 새 윈도우 baseline을 받아오는 걸 막기 위한 안전 마진.
+    static let resetGuard: TimeInterval = 30
+    static let minSleep: TimeInterval = 5
 
     func startPolling(interval: TimeInterval = 300) {
         pollTask?.cancel()
@@ -148,20 +150,35 @@ final class ViewModel: ObservableObject {
     }
 
     func nextPollDelay(maxInterval: TimeInterval) -> TimeInterval {
-        let now = Date()
+        Self.nextPollDelay(
+            now: Date(),
+            resets: [
+                claudeCurrent?.fiveHourResetAt,
+                claudeCurrent?.sevenDayResetAt,
+                cursorCurrent?.resetAt,
+            ],
+            maxInterval: maxInterval,
+            resetGuard: Self.resetGuard,
+            minSleep: Self.minSleep
+        )
+    }
+
+    // pure 함수 — instance 상태와 분리해서 시나리오 검증 가능.
+    nonisolated static func nextPollDelay(
+        now: Date,
+        resets: [Date?],
+        maxInterval: TimeInterval,
+        resetGuard: TimeInterval,
+        minSleep: TimeInterval
+    ) -> TimeInterval {
         var nextDeadline = now.addingTimeInterval(maxInterval)
-        let resets: [Date?] = [
-            claudeCurrent?.fiveHourResetAt,
-            claudeCurrent?.sevenDayResetAt,
-            cursorCurrent?.resetAt,
-        ]
         for r in resets.compactMap({ $0 }) {
-            let preReset = r.addingTimeInterval(-Self.resetGuard)
+            let preReset = r.addingTimeInterval(-resetGuard)
             if preReset > now && preReset < nextDeadline {
                 nextDeadline = preReset
             }
         }
-        return max(Self.minSleep, nextDeadline.timeIntervalSince(now))
+        return max(minSleep, nextDeadline.timeIntervalSince(now))
     }
 
     // MARK: - Claude
