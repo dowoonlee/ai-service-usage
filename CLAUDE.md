@@ -72,11 +72,27 @@ Two behaviors that depend on chart shape live in WalkingCat (not the controller)
 
 `WalkingCat` takes `plotFrame: CGRect` (not just `plotOrigin: CGPoint`) precisely so the bubble clamp logic has access to the plot's right/bottom bounds. Always pass the same `points` to `WalkingCat` that the chart line uses — if the two diverge (e.g., chart uses a filtered subset, pet gets the unfiltered array) the pet's `xNorm ∈ [0,1]` maps to dates outside the chart's x-domain and the pet drifts past the plot edges.
 
-`PetKind` covers three CC0 sprite packs side-by-side: Wild Animals (fox/wolf/bear/boar/deer/rabbit, in `Resources/wild-animals/`), Pixel Adventure 1 (maskDude/ninjaFrog/mushroom/slime, in `Resources/pixel-adventure/`), and Pixel Adventure 2 enemies (`Resources/pixel-adventure-2/`, 18 species — Mushroom/Slime omitted since byte-identical to PA1). The Wild Animals pack faces left while the Pixel Adventure packs face right, so `PetKind.defaultFacingLeft` flag drives the `scaleEffect` flip in `WalkingCat`. Adding a new kind needs only an `enum case` and a `PetDefinition` entry (cellSize, suffixes, defaultTheme, defaultFacingLeft); `PetTheme.defaultFor(_:)` reads from the def directly. SwiftPM bundles flatten resource paths, so every PNG/LICENSE basename across `Resources/` must be unique.
+`PetKind` covers seven sprite packs side-by-side (75 species total). Six are pixel art, one is the Wild Animals pixel set:
+
+| Directory | Pack | Species | License | Facing |
+|---|---|---|---|---|
+| `Resources/wild-animals/` | Animated Wild Animals (ScratchIO) | 6 | CC0 | left |
+| `Resources/pixel-adventure/` | Pixel Adventure 1 (Pixel Frog) | 4 | CC0 | right |
+| `Resources/pixel-adventure-2/` | Pixel Adventure 2 enemies (Pixel Frog) | 20 | CC0 | right |
+| `Resources/dungeon-tileset/` | 0x72 DungeonTileset II | 32 | CC0 | right |
+| `Resources/kings-and-pigs/` | Kings and Pigs (Pixel Frog) | 5 | CC-BY 4.0 | right |
+| `Resources/pirate-bomb/` | Pirate Bomb (Pixel Frog) | 6 | CC-BY 4.0 | right |
+| `Resources/treasure-hunters/` | Treasure Hunters demo (Pixel Frog) | 2 | CC-BY 4.0 | right |
+
+The CC-BY packs require attribution — kept in each pack's `LICENSE_*.txt`. The OGA mirror of the Pixel Frog packs is CC-BY 4.0 even though the itch.io distribution is CC0; treat all as CC-BY for safety.
+
+The Wild Animals pack faces left while every other pack faces right, so `PetKind.defaultFacingLeft` flag drives the `scaleEffect` flip in `WalkingCat`. Adding a new kind needs only an `enum case` and a `PetDefinition` entry (cellSize, suffixes, defaultTheme, defaultFacingLeft); `PetTheme.defaultFor(_:)` reads from the def directly. SwiftPM bundles flatten resource paths, so every PNG/LICENSE basename across `Resources/` must be unique.
+
+For the dungeon-tileset pack: 7 enemies (`necromancer`, `slug`, `iceZombie`, `muddy`, `swampy`, `tinySlug`, `zombie`) have only a single anim cycle in the source — their `Idle.png` and `Run.png` are intentionally identical strips so the `walkSuffix`/`runSuffix`/`idleSuffix` aliasing in `PetDefinition` keeps the existing renderer happy. The Pirate Bomb and Treasure Hunters source files are individual frame PNGs (no strips), stitched into horizontal strips by the asset-import script that lives outside the build.
 
 ### Gacha collection system
 
-30 pet roster, 4-tier rarity (Legendary 2% / Epic 8% / Rare 30% / Common 60%), 4 color variants per pet ("이로치" / shiny — `WalkingCat.hueDegrees(for:)`).
+75 pet roster, 4-tier rarity (Legendary 2% / Epic 8% / Rare 30% / Common 60%), 4 color variants per pet ("이로치" / shiny — `WalkingCat.hueDegrees(for:)`). Per-rarity counts live in `Gacha.pool` (`Gacha.swift`); changing them does not require code elsewhere.
 
 **Coin sources** (all usage-proportional, all routed through `CoinLedger`):
 - Cursor `chargedCents` × 1.0 (Ultra plan only — Pro/Free have no event stream).
@@ -89,7 +105,11 @@ Two behaviors that depend on chart shape live in WalkingCat (not the controller)
 
 **Roll vs commit** (`Gacha.swift`) — `roll(useTicket:)` debits balance + decides the kind/rarity but **does not mutate `ownedPets`**. `commit(_:)` is called only at `.hatched` phase entry in `GachaView`, so the inventory grid does not unlock the pet during the egg/cracking/revealing animation. Trade-off: if the app is killed during the ~3.7s animation window, the user pays the cost but gets no pet. Acceptable because (a) re-rolling is cheap and (b) persisting a pending pull adds storage/migration complexity disproportionate to the rarity of crashes mid-animation.
 
-**Migration safety** — first launch of the gacha-aware build registers `petClaudeKind`/`petCursorKind` (legacy single-pet selection) into `ownedPets` via `.initial()`. ⚠ When adding a new Legendary in the future, ensure no prior build's default value can land there — otherwise the migration grants a free Legendary. Today's NinjaFrog is safe only because it didn't exist in the prior schema.
+**Migration safety** — first launch of the gacha-aware build registers `petClaudeKind`/`petCursorKind` (legacy single-pet selection) into `ownedPets` via `.initial()`, *gated by* `Gacha.isLegendaryOrEpic(_:)` (`Settings.swift`'s migration block). The gate keeps the migration from quietly granting a Legendary/Epic if a future build's default kind, or a user's explicit settings choice, lands on a high-tier kind. The defaults today (`.fox`, `.wolf`) are both Common, so the gate is a no-op in practice — but you should leave it in place when adding new tiers.
+
+**Variant unlock paths** — there are two parallel paths that flip bits in `PetOwnership.unlockedVariants`, both calling into `PetOwnership` mutating funcs:
+- **Gacha duplicates** (`registerPull`) — count thresholds 5/15/40 → variants 1/2/3.
+- **Usage time** (`registerUsage(totalSeconds:)`) — `PetOwnership.usageThresholds` of 4d/8d/12d → variants 1/2/3, accumulated in `Settings.petUsageSeconds[kind]` by `ViewModel.accumulatePetUsage()`. Each polling tick credits the elapsed wall-clock seconds (capped at `petUsageMaxCreditPerTick = 600s` to avoid crediting laptop-sleep time) to the kinds currently selected as `petClaudeKind`/`petCursorKind`. If both charts have the same kind, it's credited twice per tick (deliberate double-count). The two paths share the same `unlockedVariants` set — once a variant is unlocked by either path, it stays. The `GachaView` preview shows a "다음 이로치까지 Xd Yh" gauge; once all 3 variants are unlocked the gauge disappears.
 
 ### Notification dedup
 

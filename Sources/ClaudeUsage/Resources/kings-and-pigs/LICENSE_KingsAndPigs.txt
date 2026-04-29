@@ -1,0 +1,19 @@
+Kings and Pigs (Pixel Frog)
+
+Source:  https://opengameart.org/content/kings-and-pigs
+         https://pixelfrog-assets.itch.io/kings-and-pigs
+Author:  Pixel Frog (https://pixelfrog-assets.itch.io)
+License: Creative Commons Attribution 4.0 (CC-BY 4.0)
+         https://creativecommons.org/licenses/by/4.0/
+
+Attribution required. The OpenGameArt mirror of this pack is
+distributed under CC-BY 4.0.
+
+Included characters (idle+run strips, file names match in-pack
+"<action> (WxH).png" — cellSize is the W×H in the original filename):
+
+- KingHuman   (78x58)
+- KingPig     (38x28)
+- Pig         (34x28)
+- PigBoxer    (26x30) — "Pig Throwing a Box"
+- PigBomber   (26x26) — "Pig Throwing a Bomb"

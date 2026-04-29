@@ -1,0 +1,20 @@
+Pirate Bomb (Pixel Frog)
+
+Source:  https://opengameart.org/content/pirate-bomb
+         https://pixelfrog-assets.itch.io/pirate-bomb
+Author:  Pixel Frog (https://pixelfrog-assets.itch.io)
+License: Creative Commons Attribution 4.0 (CC-BY 4.0)
+         https://creativecommons.org/licenses/by/4.0/
+
+Attribution required.
+
+Included characters (idle+run strips, frames stitched horizontally
+from per-frame PNGs in the source pack):
+
+- BombGuy        (58x58)  — Player, "Bomb Guy"
+- BaldPirate     (63x67)
+- Cucumber       (64x68)
+- BigGuy         (77x74)
+- PirateCaptain  (80x72)  — "Captain" (renamed to disambiguate from
+                            Treasure Hunters' ClownCaptain)
+- Whale          (68x46)

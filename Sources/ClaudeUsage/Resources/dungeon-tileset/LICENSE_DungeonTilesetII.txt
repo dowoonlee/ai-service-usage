@@ -1,0 +1,29 @@
+0x72 DungeonTileset II (frames extracted from v1.7)
+
+Source:  https://0x72.itch.io/dungeontileset-ii
+Author:  0x72
+License: Creative Commons Zero (CC0 1.0 Universal)
+         https://creativecommons.org/publicdomain/zero/1.0/
+
+Public domain — free to use in personal, educational, and commercial
+projects without attribution. Crediting the author is appreciated.
+
+Included characters (idle+run animations stitched as horizontal strips):
+
+Heroes (16x28):
+- DwarfF, DwarfM
+- ElfF, ElfM
+- KnightF, KnightM
+- LizardF, LizardM
+- WizardF, WizardM
+
+Tall enemies (16x23):
+- Chort, Doc, MaskedOrc, OrcShaman, OrcWarrior, PumpkinDude, Wogol
+- Necromancer, Slug (single animation cycle)
+
+Small enemies (16x16):
+- Angel, Goblin, Imp, Skelet, TinyZombie
+- IceZombie, Muddy, Swampy, TinySlug, Zombie (single animation cycle)
+
+Big enemies (32x36):
+- BigDemon, BigZombie, Ogre

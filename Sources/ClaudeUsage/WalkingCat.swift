@@ -84,6 +84,8 @@ struct WalkingCat: View {
     var body: some View {
         // mood는 매 render마다 컨트롤러에 동기화 (publish 아님 → 경고 없음)
         ctrl.mood = mood
+        // kind도 동일 패턴으로 매 render마다 sync — `.quote` 동작 진입 시 종 전용 대사를 뽑는 데 사용.
+        ctrl.petKind = kind
         // 큰 낙폭 segment 통과 중에는 펫 속도를 1/1.5배로 늦춰서
         // 굴러떨어짐/점프와 말풍선이 1.5배 더 오래 보이도록.
         ctrl.speedMultiplier = (bigDropDescent(at: ctrl.x) != 0) ? (1.0 / 1.5) : 1.0
@@ -516,6 +518,8 @@ final class PetController: ObservableObject {
     var mood: PetMood = .neutral
     // 1보다 작으면 그 시점 펫 속도가 비례해서 느려짐 (큰 낙폭 구간에서 사용).
     var speedMultiplier: Double = 1.0
+    // 종(kind) 전용 대사를 `.quote` 진입 시점에 뽑기 위한 참조. 첫 render 전엔 임의 기본값.
+    var petKind: PetKind = .fox
 
     private var direction: Double = 1
     private var actionUntil: Date = .distantPast
@@ -629,7 +633,7 @@ final class PetController: ObservableObject {
             actionUntil = now.addingTimeInterval(.random(in: 0.4...1.2))
         } else if r < quoteEnd {
             action = .quote
-            currentQuote = Quotes.random()
+            currentQuote = Quotes.random(for: petKind)
             actionUntil = now.addingTimeInterval(7.0)
         } else {
             // walk vs run: mood.runChance에 따라 분기. run은 짧은 burst.

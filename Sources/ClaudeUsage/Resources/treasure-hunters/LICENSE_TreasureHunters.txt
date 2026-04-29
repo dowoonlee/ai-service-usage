@@ -1,0 +1,15 @@
+Treasure Hunters - Demo (Pixel Frog)
+
+Source:  https://opengameart.org/content/treasure-hunters-demo
+         https://pixelfrog-assets.itch.io/treasure-hunters
+Author:  Pixel Frog (https://pixelfrog-assets.itch.io)
+License: Creative Commons Attribution 4.0 (CC-BY 4.0)
+         https://creativecommons.org/licenses/by/4.0/
+
+This is the free demo subset of the Treasure Hunters pack. Attribution
+required.
+
+Included characters (idle+run strips, frames stitched horizontally):
+
+- ClownCaptain (64x40) — "Captain Clown Nose"; uses the "Sword" idle/run.
+- FierceTooth  (34x30)

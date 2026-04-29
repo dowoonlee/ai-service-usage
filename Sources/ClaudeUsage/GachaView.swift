@@ -164,62 +164,19 @@ struct GachaView: View {
             case .hatched(let p):
                 hatchedView(p).transition(.opacity)
             case .preview(let k, let v):
-                previewView(kind: k, variant: v).transition(.opacity)
+                // .id로 kind/variant 바뀔 때마다 view 재마운트 → PetPreviewView 안의 enteredAt이 리셋되어
+                // 슬라이드 애니메이션이 처음부터 다시 재생된다.
+                PetPreviewView(kind: k, variant: v, settings: settings)
+                    .id("\(k.rawValue)-\(v)")
+                    .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 180)
         .animation(.easeInOut(duration: 0.22), value: phaseKey)
     }
 
-    /// 보유 펫의 walking sprite 미리보기. 좌우 swing + walk frame cycle.
-    private func previewView(kind: PetKind, variant: Int) -> some View {
-        TimelineView(.animation) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            // walk strip 우선, 없으면 idle (Bee/Plant/Skull 등)
-            let walkFrames = PetSprite.frames(for: kind, action: .walk)
-            let frames = walkFrames.isEmpty ? PetSprite.frames(for: kind, action: .sit) : walkFrames
-            // truncatingRemainder로 큰 t 값을 작은 cycle 안에 가두기 — swing과 일관된 패턴.
-            let frameCycleSec: Double = 1.0  // 8 fps × 8 frames 같은 일반 cycle 안에 가두기
-            let framePhase = t.truncatingRemainder(dividingBy: frameCycleSec) / frameCycleSec  // 0..1
-            let frameIdx = frames.isEmpty ? 0 : Int(framePhase * 8) % frames.count
-            // 좌우로 천천히 swing
-            let swingPeriod: Double = 4.0
-            let phase = (t.truncatingRemainder(dividingBy: swingPeriod)) / swingPeriod  // 0..1
-            let swingX = sin(phase * 2 * .pi) * 60
-            let movingRight = cos(phase * 2 * .pi) > 0
-            // sprite가 바라보는 기본 방향과 진행 방향이 다르면 가로 반전
-            let flip = (kind.defaultFacingLeft && movingRight) || (!kind.defaultFacingLeft && !movingRight)
-
-            ZStack {
-                if !frames.isEmpty {
-                    Image(nsImage: frames[frameIdx])
-                        .resizable()
-                        .interpolation(.none)
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 84)
-                        .scaleEffect(x: flip ? -1 : 1, y: 1)
-                        .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
-                        .saturation(variant > 0 ? 1.15 : 1.0)
-                        .offset(x: swingX, y: Self.spriteRestY)
-                }
-
-                VStack(spacing: 4) {
-                    Text(kind.displayName)
-                        .font(.title3.weight(.medium))
-                    if variant > 0 {
-                        Text(String(repeating: "✨", count: variant))
-                            .font(.caption)
-                    } else {
-                        Text("기본")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .offset(y: 50)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
+    // 기존 previewView/previewBubble/usageProgressView/formatRemaining 메소드는
+    // 슬라이드 애니메이션 도입과 함께 PetPreviewView struct로 이동 (이 파일 하단 참고).
 
     /// phase enum의 동등성 비교용 (associated value 무시한 단순 식별자).
     /// `.animation(_:value:)`가 phase 변경을 감지하도록 한다.
@@ -443,6 +400,7 @@ struct GachaView: View {
                     InventorySlot(
                         kind: kind,
                         ownership: settings.ownedPets[kind],
+                        isHighlighted: settings.pendingHighlights.contains(kind),
                         onTap: {
                             guard let o = settings.ownedPets[kind] else { return }
                             let activeVariant = settings.petClaudeKind == kind
@@ -451,6 +409,8 @@ struct GachaView: View {
                             let v = o.unlockedVariants.contains(activeVariant)
                                 ? activeVariant
                                 : (o.unlockedVariants.sorted().first ?? 0)
+                            // 직접 클릭 → 강조 해제. 영속화는 settings 안에서 처리.
+                            settings.acknowledgeHighlight(kind)
                             phase = .preview(kind, v)
                             errorMessage = nil
                         }
@@ -473,11 +433,12 @@ struct GachaView: View {
 private struct InventorySlot: View {
     let kind: PetKind
     let ownership: PetOwnership?
+    let isHighlighted: Bool
     let onTap: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 3) {
-            ZStack {
+            ZStack(alignment: .topTrailing) {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.secondary.opacity(0.1))
                 if let img = PetSprite.image(for: kind, action: .sit, frameIndex: 0) {
@@ -489,13 +450,30 @@ private struct InventorySlot: View {
                         .colorMultiply(ownership == nil ? .black : .white)
                         .opacity(ownership == nil ? 0.45 : 1.0)
                 }
+                if isHighlighted {
+                    // 새 펫 / variant 해금 알림. 직접 클릭해 확인하기 전까지 영속.
+                    Text("!")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(width: 14, height: 14)
+                        .background(Circle().fill(Color.yellow))
+                        .overlay(Circle().stroke(Color.orange, lineWidth: 1))
+                        .shadow(color: Color.yellow.opacity(0.7), radius: 3)
+                        .offset(x: 5, y: -5)
+                }
             }
             .frame(width: 60, height: 60)
+            .overlay(
+                // 슬롯 외곽 강조 — NEW 뱃지와 동일한 노란 톤. ownership != nil 조건은 isHighlighted
+                // 트리거 시점에 항상 만족하지만 방어적으로 유지.
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isHighlighted ? Color.yellow : Color.clear, lineWidth: 2)
+            )
             .contentShape(Rectangle())
             .onTapGesture {
                 if ownership != nil { onTap?() }
             }
-            .help(ownership == nil ? "잠김" : "클릭하여 미리보기")
+            .help(ownership == nil ? "잠김" : (isHighlighted ? "새로 해금 — 클릭하여 확인" : "클릭하여 미리보기"))
 
             Text(ownership == nil ? "?" : kind.displayName)
                 .font(.caption2)
@@ -586,6 +564,260 @@ struct CoinIcon: View {
                 .font(.system(size: size))
                 .foregroundStyle(.yellow)
         }
+    }
+}
+
+/// 도감에서 인벤토리 슬롯을 클릭했을 때 띄우는 펫 미리보기.
+///
+/// 진입 직후 0.55s 동안 좌우 swing 하던 sprite 그룹이 스무스하게 좌측으로 슬라이드되고,
+/// 그 동안 우측에 캐릭터 설명 카드가 페이드인된다. kind/variant가 바뀌면 부모(GachaView)의 .id()가
+/// 이 view를 재마운트 → @State `enteredAt`이 .onAppear에서 새로 잡혀 슬라이드가 다시 재생된다.
+private struct PetPreviewView: View {
+    let kind: PetKind
+    let variant: Int
+    @ObservedObject var settings: Settings
+
+    /// 마운트 시점. 슬라이드 progress(0→1) 계산의 기준.
+    @State private var enteredAt: Date = Date()
+
+    /// sprite 그룹이 슬라이드 후 멈추는 x offset (center 기준).
+    /// description 카드 폭(160) 대비 펫 sprite + ±60 swing 가동 범위가 겹치지 않도록 좌측으로 충분히 이동.
+    private static let slideEndX: CGFloat = -120
+    /// description 카드의 최종 x offset (center 기준). 슬라이드 시작 직후엔 이보다 +30 더 우측.
+    private static let descEndX: CGFloat = 100
+    /// description 카드 폭. 좁힐수록 펫 가동 범위와의 간격이 늘어남.
+    private static let descCardWidth: CGFloat = 160
+    /// 슬라이드 + 페이드인이 끝나는 시간.
+    private static let slideDuration: TimeInterval = 0.55
+    /// hatched/revealing 단계 sprite의 y offset (영역 center 기준).
+    private static let spriteRestY: CGFloat = -38
+
+    var body: some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let elapsed = ctx.date.timeIntervalSince(enteredAt)
+            // easeInOut(0..1) — sliding feel.
+            let raw = max(0, min(1, elapsed / Self.slideDuration))
+            let progress = Self.easeInOut(raw)
+
+            // walk strip 우선, 없으면 idle (Bee/Plant/Skull 등)
+            let walkFrames = PetSprite.frames(for: kind, action: .walk)
+            let frames = walkFrames.isEmpty ? PetSprite.frames(for: kind, action: .sit) : walkFrames
+            let frameCycleSec: Double = 1.0
+            let framePhase = t.truncatingRemainder(dividingBy: frameCycleSec) / frameCycleSec
+            let frameIdx = frames.isEmpty ? 0 : Int(framePhase * 8) % frames.count
+            // 좌우로 천천히 swing
+            let swingPeriod: Double = 4.0
+            let phase = (t.truncatingRemainder(dividingBy: swingPeriod)) / swingPeriod
+            let swingX = sin(phase * 2 * .pi) * 60
+            let movingRight = cos(phase * 2 * .pi) > 0
+            let flip = (kind.defaultFacingLeft && movingRight) || (!kind.defaultFacingLeft && !movingRight)
+
+            // 종 전용 대사 풀에서 5초마다 다음 라인으로 순환.
+            let quotes = Quotes.perPet[kind] ?? ["..."]
+            let quoteCycleSec: Double = 5.0
+            let quoteIdx = Int(t / quoteCycleSec) % max(1, quotes.count)
+            let currentQuote = quotes[quoteIdx]
+
+            // 슬라이드 진행 — sprite 그룹의 x offset (음수 = 좌측 이동).
+            let slideX = Self.slideEndX * progress
+            // description 카드는 우측에서 +30 → descEndX로 살짝 슬라이드인 + 페이드인.
+            // progress 0.3부터 페이드인 시작 → 1.0에 완료 (sprite 슬라이드와 살짝 겹치게).
+            let descOpacity = max(0, (progress - 0.3) / 0.7)
+            let descX = Self.descEndX + (1 - progress) * 30
+
+            ZStack {
+                // ─── 펫 그룹 (sprite + 말풍선 + 이름 + 게이지) — 좌측으로 슬라이드 ───
+                ZStack {
+                    if !frames.isEmpty {
+                        Image(nsImage: frames[frameIdx])
+                            .resizable()
+                            .interpolation(.none)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 84)
+                            .scaleEffect(x: flip ? -1 : 1, y: 1)
+                            .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
+                            .saturation(variant > 0 ? 1.15 : 1.0)
+                            .offset(x: swingX, y: Self.spriteRestY)
+                    }
+
+                    Self.bubble(currentQuote)
+                        .fixedSize()
+                        .offset(y: Self.spriteRestY - 56)
+                        .id(quoteIdx)
+                        .transition(.opacity)
+                        .animation(.easeInOut(duration: 0.35), value: quoteIdx)
+
+                    VStack(spacing: 4) {
+                        Text(kind.displayName)
+                            .font(.title3.weight(.medium))
+                        if variant > 0 {
+                            Text(String(repeating: "✨", count: variant))
+                                .font(.caption)
+                        } else {
+                            Text("기본")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        usageProgressView()
+                    }
+                    .offset(y: 50)
+                }
+                .offset(x: slideX)
+
+                // ─── 우측 캐릭터 설명 카드 — 페이드인 + slide-in ───
+                descriptionCard
+                    .opacity(descOpacity)
+                    .offset(x: descX)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear { enteredAt = Date() }
+    }
+
+    /// 우측 도감 카드 — 포켓몬 도감 톤. 컬러 헤더 (ID + 이름 + rarity 태그) + 어두운 본문 패널.
+    /// 폭(160)은 펫의 ±60 swing 가동 범위와 겹치지 않게 좁게 유지.
+    private var descriptionCard: some View {
+        let dexNum = Self.dexNumber(for: kind)
+        let r = Self.rarity(of: kind)
+        let headerColor = Self.rarityColor(r)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            // 헤더 — rarity 색상의 띠. ID + 이름 + 등급.
+            HStack(spacing: 5) {
+                Text(String(format: "#%03d", dexNum))
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+                Text(kind.displayName)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                Spacer(minLength: 2)
+                if let r {
+                    Text(Self.rarityStars(r))
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: .infinity)
+            .background(headerColor)
+
+            // 본문 — 도감 화면처럼 살짝 들어간 inset 패널 느낌.
+            Text(PetDescriptions.description(for: kind))
+                .font(.system(size: 11.5, design: .rounded))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.gray.opacity(0.10))
+        }
+        .frame(width: Self.descCardWidth, alignment: .leading)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(headerColor.opacity(0.55), lineWidth: 1.2)
+        )
+    }
+
+    /// 도감 ID — `PetKind.allCases` 순서를 그대로 dex 번호로 사용. 새 펫이 enum 끝에 추가되면
+    /// 자연스럽게 다음 번호를 받음 (포켓몬 도감처럼 #001부터 1-based).
+    private static func dexNumber(for kind: PetKind) -> Int {
+        (PetKind.allCases.firstIndex(of: kind) ?? 0) + 1
+    }
+
+    /// 펫이 속한 rarity 조회. `Gacha.pool`에서 역방향 검색.
+    private static func rarity(of kind: PetKind) -> Rarity? {
+        for tier in [Rarity.legendary, .epic, .rare, .common] {
+            if (Gacha.pool[tier] ?? []).contains(kind) { return tier }
+        }
+        return nil
+    }
+
+    /// rarity 색상 — GachaView의 private rarityColor와 동일한 매핑 (struct 분리로 재선언).
+    private static func rarityColor(_ r: Rarity?) -> Color {
+        switch r {
+        case .legendary: return .orange
+        case .epic:      return .purple
+        case .rare:      return .blue
+        case .common:    return .gray
+        case .none:      return .gray
+        }
+    }
+
+    /// rarity → 별 카운트. 헤더 우측에 컴팩트한 등급 표시로 사용 (LEGENDARY 줄바꿈 회피).
+    private static func rarityStars(_ r: Rarity) -> String {
+        switch r {
+        case .common:    return "★"
+        case .rare:      return "★★"
+        case .epic:      return "★★★"
+        case .legendary: return "★★★★"
+        }
+    }
+
+    /// 사용 시간 기반 "다음 이로치까지 N일" 게이지. 모든 variant 해금되면 표시 안 함.
+    @ViewBuilder
+    private func usageProgressView() -> some View {
+        let owned = settings.ownedPets[kind]
+        let usageSec = settings.petUsageSeconds[kind] ?? 0
+        let unlocked = owned?.unlockedVariants ?? []
+        if let next = PetOwnership.usageThresholds.first(where: { !unlocked.contains($0.1) }) {
+            let prevSec: TimeInterval = {
+                guard let idx = PetOwnership.usageThresholds.firstIndex(where: { $0.1 == next.1 }),
+                      idx > 0
+                else { return 0 }
+                return PetOwnership.usageThresholds[idx - 1].0
+            }()
+            let span = max(1, next.0 - prevSec)
+            let progress = max(0, min(1, (usageSec - prevSec) / span))
+            let remaining = max(0, next.0 - usageSec)
+            VStack(spacing: 3) {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .frame(width: 160)
+                    .tint(.purple)
+                Text("다음 이로치까지 \(Self.formatRemaining(remaining))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    /// 말풍선 외형 — WalkingCat의 quote bubble과 동일하게 매칭.
+    private static func bubble(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .foregroundStyle(Color.black)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white))
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.black.opacity(0.7), lineWidth: 0.6)
+            )
+    }
+
+    private static func formatRemaining(_ seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded(.up))
+        let d = total / 86400
+        let h = (total % 86400) / 3600
+        let m = (total % 3600) / 60
+        if d > 0 { return "\(d)d \(h)h" }
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(max(1, m))m"
+    }
+
+    /// 표준 easeInOut 곡선 — slideX 와 description fade 모두 동일 곡선을 공유해 같은 페이싱을 갖는다.
+    private static func easeInOut(_ x: Double) -> Double {
+        x < 0.5 ? 2 * x * x : 1 - pow(-2 * x + 2, 2) / 2
     }
 }
 

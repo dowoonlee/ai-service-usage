@@ -46,6 +46,14 @@ final class ViewModel: ObservableObject {
     private var pollTask: Task<Void, Never>?
     private var clockTimer: Timer?
 
+    /// 펫 사용 시간 누적용 마지막 tick 시각. 앱 첫 실행 직후 nil → 첫 tick은 무크레딧 (앱 종료 중 시간을 보정).
+    /// 인메모리만 — 재실행 시 다시 nil로 시작.
+    private var lastPetUsageTickAt: Date?
+
+    /// 한 번의 polling tick에서 펫 사용 시간으로 인정할 최대 초 (sleep/suspend 보호).
+    /// 폴링 주기 300s × 2 = 600s. 노트북 sleep 후 깨면 첫 tick은 600s 까지만 인정.
+    private static let petUsageMaxCreditPerTick: TimeInterval = 600
+
     init() {
         let d = UserDefaults.standard
         self.claudeCollapsed = d.bool(forKey: "section.claude.collapsed")
@@ -143,10 +151,47 @@ final class ViewModel: ObservableObject {
             while !Task.isCancelled {
                 await self.refreshClaude()
                 await self.refreshCursor()
+                self.accumulatePetUsage()
                 let sleepSec = self.nextPollDelay(maxInterval: interval)
                 try? await Task.sleep(nanoseconds: UInt64(sleepSec * 1_000_000_000))
             }
         }
+    }
+
+    /// 폴링 tick마다 호출 — 현재 차트에 배치된 펫(`petClaudeKind`/`petCursorKind`)에 실시간 누적.
+    /// 양쪽 차트가 같은 종이면 더블카운트 (한 tick에 2배 누적). pet enable 토글이 꺼진 차트는 누적 제외.
+    /// 임계 초과 시 `PetOwnership.registerUsage`가 variant unlock을 트리거하고 그 결과를 로그.
+    private func accumulatePetUsage() {
+        let now = Date()
+        defer { lastPetUsageTickAt = now }
+        // 첫 tick: 크레딧 없이 기준 시각만 잡음 (앱이 막 켜진 시점부터 카운트 시작)
+        guard let last = lastPetUsageTickAt else { return }
+
+        // 실제 경과 시간 — sleep/suspend 후 폭주 방지를 위해 최대치 캡.
+        let elapsed = max(0, now.timeIntervalSince(last))
+        let credited = min(elapsed, Self.petUsageMaxCreditPerTick)
+        guard credited > 0 else { return }
+
+        let s = Settings.shared
+        var usage = s.petUsageSeconds
+        var owned = s.ownedPets
+
+        @MainActor func creditOne(_ kind: PetKind) {
+            usage[kind, default: 0] += credited
+            guard var o = owned[kind] else { return }
+            if let v = o.registerUsage(totalSeconds: usage[kind] ?? 0) {
+                DebugLog.log("Pet usage unlock: \(kind.rawValue) variant \(v) @ \(Int((usage[kind] ?? 0) / 86400))d")
+                // 도감 강조 — 사용자가 직접 슬롯 클릭해 확인하기 전까지 NEW 뱃지 유지.
+                s.pendingHighlights.insert(kind)
+            }
+            owned[kind] = o
+        }
+
+        if s.petClaudeEnabled { creditOne(s.petClaudeKind) }
+        if s.petCursorEnabled { creditOne(s.petCursorKind) }
+
+        s.petUsageSeconds = usage
+        s.ownedPets = owned
     }
 
     func nextPollDelay(maxInterval: TimeInterval) -> TimeInterval {
