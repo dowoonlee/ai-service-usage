@@ -3,17 +3,35 @@ import Foundation
 /// 가챠 엔진. 등급 분배 + 가중 랜덤 + 보유 상태 반영.
 ///
 /// 분배 정책: 현실 동물 = Common, 의인화/판타지 = 상위 등급.
-/// 종 수가 등급별로 16/9/4/1이라 종당 확률이 단조감소 (3.75/3.33/2.0/2.0%).
+/// 75종 풀에서 등급별 4/10/22/39 분배 → 종당 확률 0.5/0.8/1.36/1.54%.
+/// 대형 사이즈/보스급 → Legendary, 헤드라이너/전사 → Epic, 등.
 @MainActor
 enum Gacha {
     static let pool: [Rarity: [PetKind]] = [
-        .legendary: [.ninjaFrog],
-        .epic:      [.maskDude, .ghost, .plant, .skull],
-        .rare:      [.mushroom, .slime, .trunk, .radish, .rock1, .rock2, .rock3, .chameleon, .rino],
+        .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale],
+        .epic:      [.maskDude, .ghost, .plant, .skull,
+                     .ogre, .bigDemon, .kingHuman, .clownCaptain, .wizardM, .knightF],
+        .rare:      [.mushroom, .slime, .trunk, .radish, .rock1, .rock2, .rock3, .chameleon, .rino,
+                     .bigZombie, .necromancer, .fierceTooth, .kingPig, .baldPirate, .bigGuy,
+                     .dwarfM, .elfM, .lizardM, .wizardF, .doc, .orcShaman, .orcWarrior,
+                     .maskedOrc],
         .common:    [.fox, .wolf, .bear, .boar, .deer, .rabbit,
                      .angryPig, .bunny, .chicken, .duck, .blueBird, .fatBird,
-                     .bat, .bee, .snail, .turtle],
+                     .bat, .bee, .snail, .turtle,
+                     .dwarfF, .elfF, .lizardF,
+                     .chort, .pumpkinDude, .wogol,
+                     .slug, .angel, .goblin, .imp, .skelet, .tinyZombie,
+                     .iceZombie, .muddy, .swampy, .tinySlug, .zombie,
+                     .pig, .pigBoxer, .pigBomber,
+                     .bombGuy, .cucumber],
     ]
+
+    /// 마이그레이션 시 legacy default petKind를 ownedPets로 옮길 때 등급 화이트리스트.
+    /// Legendary/Epic은 마이그레이션으로 무료 지급되면 안 된다 — 사용자가 가챠로 뽑아야 함.
+    /// (CLAUDE.md "Migration safety" 항목 참고)
+    static func isLegendaryOrEpic(_ kind: PetKind) -> Bool {
+        (pool[.legendary] ?? []).contains(kind) || (pool[.epic] ?? []).contains(kind)
+    }
 
     /// 환율 캘리브레이션 그레이스 기간 (이 기간 내엔 시드값 사용).
     static let calibrationGracePeriod: TimeInterval = 7 * 86400
@@ -82,14 +100,19 @@ enum Gacha {
         let wasEmpty = s.ownedPets.isEmpty
         var owned = s.ownedPets
         var newVariant: Int? = nil
+        var triggerHighlight = false
         if owned[pull.kind] == nil {
             owned[pull.kind] = .initial()
+            triggerHighlight = true   // 신규 펫
         } else {
             var existing = owned[pull.kind]!
             newVariant = existing.registerPull()
             owned[pull.kind] = existing
+            if newVariant != nil { triggerHighlight = true }   // 중복 누적으로 variant 해금
         }
         s.ownedPets = owned
+        // 도감에서 직접 클릭해 확인하기 전까지 노란 강조 표시 유지.
+        if triggerHighlight { s.pendingHighlights.insert(pull.kind) }
         // 첫 가챠 결과를 양쪽 차트의 활성 펫으로 자동 할당.
         // (의도된 동작) 두 번째 뽑기로 다른 펫을 얻어도 자동 갱신은 안 됨 — 사용자가
         // 명시적으로 SettingsView picker에서 변경해야 한다. 첫 뽑기 직후 두 차트가 같은

@@ -24,6 +24,27 @@ struct PetOwnership: Codable, Hashable {
         }
         return nil
     }
+
+    /// 누적 사용 시간 기반 variant unlock 체크. 가챠 중복(5/15/40)과 평행한 두 번째 진입 경로.
+    /// 4일/8일/12일 누적 → variant 1/2/3. 실제 누적 카운터는 변하지 않고 `unlockedVariants`만 갱신.
+    /// - Parameter totalSeconds: 해당 종의 `Settings.petUsageSeconds[kind]` 누적치.
+    /// - Returns: 이번 호출로 새로 unlock된 variant index (없으면 nil)
+    mutating func registerUsage(totalSeconds: TimeInterval) -> Int? {
+        let thresholds: [(TimeInterval, Int)] = PetOwnership.usageThresholds
+        for (sec, variant) in thresholds where totalSeconds >= sec && !unlockedVariants.contains(variant) {
+            unlockedVariants.insert(variant)
+            return variant
+        }
+        return nil
+    }
+
+    /// 사용 시간 → variant index 매핑. UI에서도 동일 값을 참조하도록 한 곳에 둠.
+    /// `(임계초, variant 인덱스)` 오름차순.
+    static let usageThresholds: [(TimeInterval, Int)] = [
+        (4 * 86400, 1),
+        (8 * 86400, 2),
+        (12 * 86400, 3),
+    ]
 }
 
 /// 사용자가 차트에 띄우려고 활성화한 펫 (kind + variant 페어).

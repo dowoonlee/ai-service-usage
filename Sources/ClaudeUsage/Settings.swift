@@ -64,6 +64,19 @@ final class Settings: ObservableObject {
     @Published var ownedPets: [PetKind: PetOwnership] {
         didSet { persistOwnedPets() }
     }
+    /// 펫 종별 누적 사용 시간 (초). `petClaudeKind`/`petCursorKind`로 선택된 종에 polling tick마다
+    /// 실시간 누적 — 더블카운트 (양쪽 차트가 같은 종이면 1tick에 2배). 4d/8d/12d 임계 초과 시
+    /// `PetOwnership.registerUsage(totalSeconds:)`가 가챠와 동일한 variant unlock을 트리거한다.
+    @Published var petUsageSeconds: [PetKind: TimeInterval] {
+        didSet { persistPetUsageSeconds() }
+    }
+    /// 도감에서 강조 표시(NEW! 뱃지 + 노란 테두리)가 필요한 펫 종 집합.
+    /// 추가 트리거: 신규 펫 commit / 가챠 중복으로 variant 해금 / 사용 시간으로 variant 해금.
+    /// 제거 트리거: 사용자가 그 펫 슬롯을 클릭해 미리보기 진입(아래 `acknowledgeHighlight(_:)` 사용).
+    /// 영속화 — 앱 종료 후에도 강조 표시는 사용자가 확인할 때까지 유지.
+    @Published var pendingHighlights: Set<PetKind> {
+        didSet { persistPendingHighlights() }
+    }
     /// 차트에 활성화된 펫의 variant index (0 = 기본, 1/2/3 = shiny).
     /// kind는 기존 petClaudeKind/petCursorKind를 그대로 사용.
     @Published var petClaudeVariant: Int {
@@ -136,6 +149,10 @@ final class Settings: ObservableObject {
         self.gachaTickets = (d.object(forKey: Keys.gachaTickets) as? Int) ?? 0
         let ownedData = d.data(forKey: Keys.ownedPets)
         self.ownedPets = (ownedData.flatMap { try? JSONDecoder().decode([PetKind: PetOwnership].self, from: $0) }) ?? [:]
+        let usageData = d.data(forKey: Keys.petUsageSeconds)
+        self.petUsageSeconds = (usageData.flatMap { try? JSONDecoder().decode([PetKind: TimeInterval].self, from: $0) }) ?? [:]
+        let highlightData = d.data(forKey: Keys.pendingHighlights)
+        self.pendingHighlights = (highlightData.flatMap { try? JSONDecoder().decode(Set<PetKind>.self, from: $0) }) ?? []
         self.petClaudeVariant = (d.object(forKey: Keys.petClaudeVariant) as? Int) ?? 0
         self.petCursorVariant = (d.object(forKey: Keys.petCursorVariant) as? Int) ?? 0
         self.lastClaudeFiveHourReset = d.object(forKey: Keys.lastClaudeFiveHourReset) as? Date
@@ -151,17 +168,17 @@ final class Settings: ObservableObject {
 
         // 첫 실행 시 1회만: 가챠권 1장 지급 + 기존 사용 중이던 펫이 있으면 보유 목록에 등록.
         //
-        // ⚠ 주의: 향후 새 legendary 펫을 추가할 때 그 종이 이전 빌드의 default petClaudeKind/
-        // petCursorKind에 들어가지 않도록 주의해야 한다. 만약 사용자가 그 값으로 골라뒀다면
-        // 이 마이그레이션이 등급 검사 없이 `.initial()`로 등록 → legendary 무료 지급.
-        // 현재 NinjaFrog는 이번 PR에서 처음 도입돼 사용자가 보유할 수 없으므로 안전하지만,
-        // 미래 추가 시 등급 화이트리스트(common/rare만 마이그레이션) 또는 legendary 제외가 필요.
+        // 등급 가드: legacy default petKind가 Legendary/Epic이면 마이그레이션으로 무료 등록하지
+        // 않는다 — 사용자는 가챠로 뽑아야 함. (`Gacha.isLegendaryOrEpic`가 권위 있는 검사.)
+        // 이론상 legacy default(.fox, .wolf)는 모두 Common이라 현재 가드는 no-op이지만,
+        // 향후 default 값이 바뀌거나 사용자가 settings UI에서 상위 등급을 선택해뒀다면 보호된다.
         if !d.bool(forKey: Keys.hasCompletedGachaMigration) {
             var owned = self.ownedPets
-            if hadLegacyClaudeKind, owned[self.petClaudeKind] == nil {
+            if hadLegacyClaudeKind, owned[self.petClaudeKind] == nil,
+               !Gacha.isLegendaryOrEpic(self.petClaudeKind) {
                 owned[self.petClaudeKind] = .initial()
             }
-            if hadLegacyCursorKind {
+            if hadLegacyCursorKind, !Gacha.isLegendaryOrEpic(self.petCursorKind) {
                 if owned[self.petCursorKind] == nil {
                     owned[self.petCursorKind] = .initial()
                 } else {
@@ -180,6 +197,25 @@ final class Settings: ObservableObject {
     private func persistOwnedPets() {
         if let data = try? JSONEncoder().encode(ownedPets) {
             UserDefaults.standard.set(data, forKey: Keys.ownedPets)
+        }
+    }
+
+    private func persistPetUsageSeconds() {
+        if let data = try? JSONEncoder().encode(petUsageSeconds) {
+            UserDefaults.standard.set(data, forKey: Keys.petUsageSeconds)
+        }
+    }
+
+    private func persistPendingHighlights() {
+        if let data = try? JSONEncoder().encode(pendingHighlights) {
+            UserDefaults.standard.set(data, forKey: Keys.pendingHighlights)
+        }
+    }
+
+    /// 도감 슬롯 클릭 시 호출 — 그 펫의 강조 표시 해제. 비어있으면 no-op.
+    func acknowledgeHighlight(_ kind: PetKind) {
+        if pendingHighlights.contains(kind) {
+            pendingHighlights.remove(kind)
         }
     }
 
@@ -239,5 +275,7 @@ final class Settings: ObservableObject {
         static let hasCompletedGachaMigration  = "settings.hasCompletedGachaMigration"
         static let coinsTotalEarned            = "settings.coinsTotalEarned"
         static let firstCreditedAt             = "settings.firstCreditedAt"
+        static let petUsageSeconds             = "settings.petUsageSeconds"
+        static let pendingHighlights           = "settings.pendingHighlights"
     }
 }
