@@ -123,11 +123,8 @@ final class ViewModel: ObservableObject {
         let elapsed = lastWellnessShownAt.map { Date().timeIntervalSince($0) } ?? .infinity
         guard elapsed < Self.wellnessRewardWindow else { return .noReward }
         let amount = Self.wellnessRewardCoins
-        let s = Settings.shared
-        s.coins += amount
-        s.coinsTotalEarned += amount
-        if s.firstCreditedAt == nil { s.firstCreditedAt = Date() }
-        DebugLog.log("Wellness reward: +\(amount) coin (clicked \(Int(elapsed))s after nudge)")
+        // credit 정책(totalEarned/firstCreditedAt 추적)을 한곳에서만 관리하기 위해 CoinLedger 경유.
+        CoinLedger.shared.creditWellness(amount: amount)
         return .rewarded(amount)
     }
 

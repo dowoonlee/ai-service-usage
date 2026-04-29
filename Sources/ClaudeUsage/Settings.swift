@@ -86,6 +86,17 @@ final class Settings: ObservableObject {
     @Published var lastClaudeSevenDayPctSeen: Double? {
         didSet { UserDefaults.standard.set(lastClaudeSevenDayPctSeen, forKey: Keys.lastClaudeSevenDayPctSeen) }
     }
+    /// 정수 절단으로 코인이 새지 않도록 폴링마다의 소수부를 누적해서 carry.
+    /// (예: 0.835 coin/poll × 60 polls 가 50 coin로 누적되도록)
+    @Published var claudeFiveHourCoinFraction: Double {
+        didSet { UserDefaults.standard.set(claudeFiveHourCoinFraction, forKey: Keys.claudeFiveHourCoinFraction) }
+    }
+    @Published var claudeSevenDayCoinFraction: Double {
+        didSet { UserDefaults.standard.set(claudeSevenDayCoinFraction, forKey: Keys.claudeSevenDayCoinFraction) }
+    }
+    @Published var cursorCoinFraction: Double {
+        didSet { UserDefaults.standard.set(cursorCoinFraction, forKey: Keys.cursorCoinFraction) }
+    }
     /// CoinLedger가 처리한 마지막 Cursor 이벤트 timestamp (그 이후만 적립 대상).
     @Published var lastCursorEventCredited: Date? {
         didSet { UserDefaults.standard.set(lastCursorEventCredited, forKey: Keys.lastCursorEventCredited) }
@@ -131,11 +142,20 @@ final class Settings: ObservableObject {
         self.lastClaudeSevenDayReset = d.object(forKey: Keys.lastClaudeSevenDayReset) as? Date
         self.lastClaudeFiveHourPctSeen = d.object(forKey: Keys.lastClaudeFiveHourPctSeen) as? Double
         self.lastClaudeSevenDayPctSeen = d.object(forKey: Keys.lastClaudeSevenDayPctSeen) as? Double
+        self.claudeFiveHourCoinFraction = (d.object(forKey: Keys.claudeFiveHourCoinFraction) as? Double) ?? 0
+        self.claudeSevenDayCoinFraction = (d.object(forKey: Keys.claudeSevenDayCoinFraction) as? Double) ?? 0
+        self.cursorCoinFraction = (d.object(forKey: Keys.cursorCoinFraction) as? Double) ?? 0
         self.lastCursorEventCredited = d.object(forKey: Keys.lastCursorEventCredited) as? Date
         self.coinsTotalEarned = (d.object(forKey: Keys.coinsTotalEarned) as? Int) ?? 0
         self.firstCreditedAt = d.object(forKey: Keys.firstCreditedAt) as? Date
 
         // 첫 실행 시 1회만: 가챠권 1장 지급 + 기존 사용 중이던 펫이 있으면 보유 목록에 등록.
+        //
+        // ⚠ 주의: 향후 새 legendary 펫을 추가할 때 그 종이 이전 빌드의 default petClaudeKind/
+        // petCursorKind에 들어가지 않도록 주의해야 한다. 만약 사용자가 그 값으로 골라뒀다면
+        // 이 마이그레이션이 등급 검사 없이 `.initial()`로 등록 → legendary 무료 지급.
+        // 현재 NinjaFrog는 이번 PR에서 처음 도입돼 사용자가 보유할 수 없으므로 안전하지만,
+        // 미래 추가 시 등급 화이트리스트(common/rare만 마이그레이션) 또는 legendary 제외가 필요.
         if !d.bool(forKey: Keys.hasCompletedGachaMigration) {
             var owned = self.ownedPets
             if hadLegacyClaudeKind, owned[self.petClaudeKind] == nil {
@@ -213,6 +233,9 @@ final class Settings: ObservableObject {
         static let lastCursorEventCredited     = "settings.lastCursorEventCredited"
         static let lastClaudeFiveHourPctSeen   = "settings.lastClaudeFiveHourPctSeen"
         static let lastClaudeSevenDayPctSeen   = "settings.lastClaudeSevenDayPctSeen"
+        static let claudeFiveHourCoinFraction  = "settings.claudeFiveHourCoinFraction"
+        static let claudeSevenDayCoinFraction  = "settings.claudeSevenDayCoinFraction"
+        static let cursorCoinFraction          = "settings.cursorCoinFraction"
         static let hasCompletedGachaMigration  = "settings.hasCompletedGachaMigration"
         static let coinsTotalEarned            = "settings.coinsTotalEarned"
         static let firstCreditedAt             = "settings.firstCreditedAt"

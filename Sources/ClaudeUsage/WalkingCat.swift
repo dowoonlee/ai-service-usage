@@ -87,7 +87,14 @@ struct WalkingCat: View {
         // 큰 낙폭 segment 통과 중에는 펫 속도를 1/1.5배로 늦춰서
         // 굴러떨어짐/점프와 말풍선이 1.5배 더 오래 보이도록.
         ctrl.speedMultiplier = (bigDropDescent(at: ctrl.x) != 0) ? (1.0 / 1.5) : 1.0
-        return sprite()
+        // 코인 popping/보상 말풍선은 sprite의 if-let pos 분기 안에 묶여 있으면 차트 데이터가
+        // 일시적으로 비어 sprite가 사라질 때 같이 사라진다. ZStack의 sibling으로 빼서 보상
+        // 연출이 1초 내내 보이도록 보장.
+        return ZStack {
+            sprite()
+            coinPopOverlay.allowsHitTesting(false)
+            rewardAmountOverlay.allowsHitTesting(false)
+        }
             .onPreferenceChange(QuoteBubbleSizeKey.self) { bubbleSize = $0 }
             .onPreferenceChange(WellnessBubbleSizeKey.self) { wellnessBubbleSize = $0 }
             .onAppear { ctrl.start() }
@@ -284,9 +291,6 @@ struct WalkingCat: View {
                     }
             }
 
-            // 보상 코인 popping + "+N" 말풍선. hit-testing 비활성화.
-            coinPopOverlay.allowsHitTesting(false)
-            rewardAmountOverlay.allowsHitTesting(false)
         }
     }
 

@@ -72,7 +72,24 @@ Two behaviors that depend on chart shape live in WalkingCat (not the controller)
 
 `WalkingCat` takes `plotFrame: CGRect` (not just `plotOrigin: CGPoint`) precisely so the bubble clamp logic has access to the plot's right/bottom bounds. Always pass the same `points` to `WalkingCat` that the chart line uses — if the two diverge (e.g., chart uses a filtered subset, pet gets the unfiltered array) the pet's `xNorm ∈ [0,1]` maps to dates outside the chart's x-domain and the pet drifts past the plot edges.
 
-`PetKind` covers two CC0 sprite packs side-by-side: Wild Animals (fox/wolf/bear/boar/deer/rabbit, in `Resources/wild-animals/`) and Pixel Adventure 1 (maskDude/ninjaFrog/mushroom/slime, in `Resources/pixel-adventure/`). The two packs face opposite default directions, so `PetKind.defaultFacingLeft` flag drives the `scaleEffect` flip in `WalkingCat`. Adding a new kind needs entries in `cellSize`, `defaultFacingLeft`, `resourceName(for:)`, and `PetTheme.defaultFor(_:)`. SwiftPM bundles flatten resource paths, so every PNG/LICENSE basename across `Resources/` must be unique (this is why the two LICENSE files are `LICENSE_WildAnimals.txt` / `LICENSE_PixelAdventure.txt`).
+`PetKind` covers three CC0 sprite packs side-by-side: Wild Animals (fox/wolf/bear/boar/deer/rabbit, in `Resources/wild-animals/`), Pixel Adventure 1 (maskDude/ninjaFrog/mushroom/slime, in `Resources/pixel-adventure/`), and Pixel Adventure 2 enemies (`Resources/pixel-adventure-2/`, 18 species — Mushroom/Slime omitted since byte-identical to PA1). The Wild Animals pack faces left while the Pixel Adventure packs face right, so `PetKind.defaultFacingLeft` flag drives the `scaleEffect` flip in `WalkingCat`. Adding a new kind needs only an `enum case` and a `PetDefinition` entry (cellSize, suffixes, defaultTheme, defaultFacingLeft); `PetTheme.defaultFor(_:)` reads from the def directly. SwiftPM bundles flatten resource paths, so every PNG/LICENSE basename across `Resources/` must be unique.
+
+### Gacha collection system
+
+30 pet roster, 4-tier rarity (Legendary 2% / Epic 8% / Rare 30% / Common 60%), 4 color variants per pet ("이로치" / shiny — `WalkingCat.hueDegrees(for:)`).
+
+**Coin sources** (all usage-proportional, all routed through `CoinLedger`):
+- Cursor `chargedCents` × 1.0 (Ultra plan only — Pro/Free have no event stream).
+- Claude 5h/7d window: `pct delta within same resetAt` × rate (0.5/1.0). resetAt change rebases without crediting.
+- Wellness nudge clicked within 60s × 30 coin (flat).
+
+**Fractional carry** (`Settings.claudeFiveHourCoinFraction` etc): every poll's `Int(...)` truncation would otherwise lose ~0.835 coin/poll on a 5h window with 5-min polling. `CoinLedger.creditWithCarry(amount:fraction:)` accumulates the leftover and only credits whole coins.
+
+**Pull cost** auto-calibrates to `avgDaily * 3.5` (≈ 2 pulls/week) after a 7-day grace period seeded at 300 coin (`Gacha.pullCost`). Bounds 50…2000.
+
+**Roll vs commit** (`Gacha.swift`) — `roll(useTicket:)` debits balance + decides the kind/rarity but **does not mutate `ownedPets`**. `commit(_:)` is called only at `.hatched` phase entry in `GachaView`, so the inventory grid does not unlock the pet during the egg/cracking/revealing animation. Trade-off: if the app is killed during the ~3.7s animation window, the user pays the cost but gets no pet. Acceptable because (a) re-rolling is cheap and (b) persisting a pending pull adds storage/migration complexity disproportionate to the rarity of crashes mid-animation.
+
+**Migration safety** — first launch of the gacha-aware build registers `petClaudeKind`/`petCursorKind` (legacy single-pet selection) into `ownedPets` via `.initial()`. ⚠ When adding a new Legendary in the future, ensure no prior build's default value can land there — otherwise the migration grants a free Legendary. Today's NinjaFrog is safe only because it didn't exist in the prior schema.
 
 ### Notification dedup
 

@@ -91,6 +91,9 @@ enum Gacha {
         }
         s.ownedPets = owned
         // 첫 가챠 결과를 양쪽 차트의 활성 펫으로 자동 할당.
+        // (의도된 동작) 두 번째 뽑기로 다른 펫을 얻어도 자동 갱신은 안 됨 — 사용자가
+        // 명시적으로 SettingsView picker에서 변경해야 한다. 첫 뽑기 직후 두 차트가 같은
+        // 펫인 게 살짝 어색할 수 있으나, 다른 종 보유 후 사용자가 의도해 골라야 분리.
         if wasEmpty {
             s.petClaudeKind = pull.kind
             s.petCursorKind = pull.kind

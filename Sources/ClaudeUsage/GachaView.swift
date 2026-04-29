@@ -19,6 +19,8 @@ struct GachaView: View {
     @State private var revealStartedAt: Date?
     /// `.cracking` 시작 시각. crack 라인이 trim으로 점진 그려지는 데 사용.
     @State private var crackStartedAt: Date?
+    /// 임계 도달 후 Task spawn race 방지. 부화 시퀀스가 한 번만 commit하도록 가드.
+    @State private var hatchInProgress: Bool = false
 
     /// 알을 깨는 데 필요한 탭 수.
     private static let eggTapsRequired: Int = 6
@@ -93,6 +95,7 @@ struct GachaView: View {
             phase = .egg(result)
             eggTapCount = 0
             eggShakeAngle = 0
+            hatchInProgress = false
             errorMessage = nil
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -101,8 +104,10 @@ struct GachaView: View {
     }
 
     /// 알 탭 처리. 탭마다 점점 강하게 흔들리고, 임계치에 도달하면 cracking → hatched로 자동 진전.
+    /// `hatchInProgress` 가드 — 임계 도달 후 250ms 동안 phase가 아직 `.egg`여서 추가 탭이
+    /// race로 두 번째 시퀀스를 시작시키는 것을 방지 (방치 시 commit이 두 번 호출되어 count +2).
     private func tapEgg(_ pull: GachaPull) {
-        guard case .egg = phase else { return }
+        guard case .egg = phase, !hatchInProgress else { return }
         eggTapCount += 1
 
         let intensity = min(1.0, Double(eggTapCount) / Double(Self.eggTapsRequired))
@@ -120,6 +125,7 @@ struct GachaView: View {
         }
 
         if eggTapCount >= Self.eggTapsRequired {
+            hatchInProgress = true
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 250_000_000)
                 crackStartedAt = Date()
@@ -172,7 +178,10 @@ struct GachaView: View {
             // walk strip 우선, 없으면 idle (Bee/Plant/Skull 등)
             let walkFrames = PetSprite.frames(for: kind, action: .walk)
             let frames = walkFrames.isEmpty ? PetSprite.frames(for: kind, action: .sit) : walkFrames
-            let frameIdx = frames.isEmpty ? 0 : Int(t * 8) % frames.count
+            // truncatingRemainder로 큰 t 값을 작은 cycle 안에 가두기 — swing과 일관된 패턴.
+            let frameCycleSec: Double = 1.0  // 8 fps × 8 frames 같은 일반 cycle 안에 가두기
+            let framePhase = t.truncatingRemainder(dividingBy: frameCycleSec) / frameCycleSec  // 0..1
+            let frameIdx = frames.isEmpty ? 0 : Int(framePhase * 8) % frames.count
             // 좌우로 천천히 swing
             let swingPeriod: Double = 4.0
             let phase = (t.truncatingRemainder(dividingBy: swingPeriod)) / swingPeriod  // 0..1
