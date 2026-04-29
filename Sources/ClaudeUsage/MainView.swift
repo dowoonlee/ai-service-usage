@@ -48,11 +48,12 @@ fileprivate extension View {
         enabled: Bool,
         points: [(Date, Double)],
         kind: PetKind,
+        variant: Int = 0,
         pct: Double?,
         anxietyAt: Double,
         bigDropThreshold: Double,
         wellnessNudge: String? = nil,
-        onDismissWellness: (() -> Void)? = nil
+        onDismissWellness: (() -> WellnessDismissResult)? = nil
     ) -> some View {
         chartOverlay { proxy in
             if enabled {
@@ -63,6 +64,7 @@ fileprivate extension View {
                         proxy: proxy,
                         plotFrame: plotFrame,
                         kind: kind,
+                        variant: variant,
                         mood: PetMood.from(pct: pct, anxietyAt: anxietyAt),
                         bigDropThreshold: bigDropThreshold,
                         wellnessNudge: wellnessNudge,
@@ -126,6 +128,7 @@ fileprivate func sectionHeader(
 
 struct MainView: View {
     @ObservedObject var vm: ViewModel
+    @ObservedObject var settings = Settings.shared
     var onLogin: () -> Void
     var onSettings: () -> Void
     var onQuit: () -> Void
@@ -153,6 +156,29 @@ struct MainView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
             Spacer()
+            // 코인 잔액 — 클릭하면 가챠/도감 창 열림
+            Button {
+                GachaWindowController.shared.present()
+            } label: {
+                HStack(spacing: 3) {
+                    CoinIcon(size: 12)
+                    Text("\(settings.coins)")
+                        .font(.system(size: 11, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                    if settings.gachaTickets > 0 {
+                        Image(systemName: "ticket.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.blue)
+                        Text("\(settings.gachaTickets)")
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.primary)
+                    }
+                }
+            }
+            .buttonStyle(.borderless)
+            .help("코인 잔액 — 클릭하여 가챠 열기")
             if vm.claudeLoading || vm.cursorLoading {
                 ProgressView().controlSize(.mini)
             }
@@ -444,9 +470,10 @@ struct ClaudeSection: View {
                 // 다른 데이터(예: recent 0% 포함)를 넘기면 펫의 x-도메인이 차트보다 넓어져
                 // plot 좌/우로 빠져나간다.
                 .chartPet(
-                    enabled: settings.petClaudeEnabled,
+                    enabled: settings.petClaudeEnabled && !settings.ownedPets.isEmpty,
                     points: validData,
                     kind: settings.petClaudeKind,
+                    variant: settings.petClaudeVariant,
                     pct: vm.claudeCurrent?.fiveHourPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
@@ -694,9 +721,10 @@ struct CursorSection: View {
                 .sparklineYAxis(values: yValues, format: { "$\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
                 .chartPet(
-                    enabled: settings.petCursorEnabled,
+                    enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty,
                     points: points,
                     kind: settings.petCursorKind,
+                    variant: settings.petCursorVariant,
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
@@ -760,9 +788,10 @@ struct CursorSection: View {
                 .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
                 .chartPet(
-                    enabled: settings.petCursorEnabled,
+                    enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty,
                     points: validData,
                     kind: settings.petCursorKind,
+                    variant: settings.petCursorVariant,
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,

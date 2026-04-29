@@ -1,0 +1,5 @@
+Egg.png
+Author: GoopyBus
+Source: https://opengameart.org/content/egg-item-sprite
+License: Creative Commons Zero (CC0) — public domain, no attribution required.
+Size: 32x32, single frame.

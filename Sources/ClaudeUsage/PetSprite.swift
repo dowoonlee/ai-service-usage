@@ -55,6 +55,27 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
     case ninjaFrog
     case mushroom
     case slime
+    // pixel-adventure-2 (PA2 enemies)
+    case angryPig
+    case bat
+    case bee
+    case blueBird
+    case bunny
+    case chameleon
+    case chicken
+    case duck
+    case fatBird
+    case ghost
+    case plant
+    case radish
+    case rino
+    case rock1
+    case rock2
+    case rock3
+    case skull
+    case snail
+    case trunk
+    case turtle
 
     var id: String { rawValue }
 
@@ -110,6 +131,106 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  cellSize: (44, 30), defaultFacingLeft: false,
                                  walkSuffix: "IdleRun", runSuffix: "IdleRun", idleSuffix: "IdleRun",
                                  defaultTheme: .wilderness)
+        case .angryPig:
+            return PetDefinition(prefix: "AngryPig", displayName: "성난 돼지",
+                                 cellSize: (36, 30), defaultFacingLeft: false,
+                                 walkSuffix: "Walk", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .bat:
+            return PetDefinition(prefix: "Bat", displayName: "박쥐",
+                                 cellSize: (46, 30), defaultFacingLeft: false,
+                                 walkSuffix: "Flying", runSuffix: "Flying", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .bee:
+            return PetDefinition(prefix: "Bee", displayName: "벌",
+                                 cellSize: (36, 34), defaultFacingLeft: false,
+                                 walkSuffix: "Idle", runSuffix: "Idle", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .blueBird:
+            return PetDefinition(prefix: "BlueBird", displayName: "파랑새",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Flying", runSuffix: "Flying", idleSuffix: "Flying",
+                                 defaultTheme: .grassland)
+        case .bunny:
+            return PetDefinition(prefix: "Bunny", displayName: "버니",
+                                 cellSize: (34, 44), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .chameleon:
+            return PetDefinition(prefix: "Chameleon", displayName: "카멜레온",
+                                 cellSize: (84, 38), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .chicken:
+            return PetDefinition(prefix: "Chicken", displayName: "닭",
+                                 cellSize: (32, 34), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .duck:
+            return PetDefinition(prefix: "Duck", displayName: "오리",
+                                 cellSize: (36, 36), defaultFacingLeft: false,
+                                 walkSuffix: "Idle", runSuffix: "Idle", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .fatBird:
+            return PetDefinition(prefix: "FatBird", displayName: "뚱뚱한 새",
+                                 cellSize: (40, 48), defaultFacingLeft: false,
+                                 walkSuffix: "Idle", runSuffix: "Idle", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .ghost:
+            return PetDefinition(prefix: "Ghost", displayName: "유령",
+                                 cellSize: (44, 30), defaultFacingLeft: false,
+                                 walkSuffix: "Idle", runSuffix: "Idle", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .plant:
+            return PetDefinition(prefix: "Plant", displayName: "식인 식물",
+                                 cellSize: (44, 42), defaultFacingLeft: false,
+                                 walkSuffix: "Idle", runSuffix: "Idle", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .radish:
+            return PetDefinition(prefix: "Radish", displayName: "무",
+                                 cellSize: (30, 38), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .rino:
+            return PetDefinition(prefix: "Rino", displayName: "코뿔소",
+                                 cellSize: (52, 34), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .rock1:
+            return PetDefinition(prefix: "Rock1", displayName: "큰 돌",
+                                 cellSize: (38, 34), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .rock2:
+            return PetDefinition(prefix: "Rock2", displayName: "돌",
+                                 cellSize: (32, 28), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .rock3:
+            return PetDefinition(prefix: "Rock3", displayName: "작은 돌",
+                                 cellSize: (22, 18), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .skull:
+            return PetDefinition(prefix: "Skull", displayName: "해골",
+                                 cellSize: (52, 54), defaultFacingLeft: false,
+                                 walkSuffix: "Idle", runSuffix: "Idle", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .snail:
+            return PetDefinition(prefix: "Snail", displayName: "달팽이",
+                                 cellSize: (38, 24), defaultFacingLeft: false,
+                                 walkSuffix: "Walk", runSuffix: "Walk", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .trunk:
+            return PetDefinition(prefix: "Trunk", displayName: "통나무",
+                                 cellSize: (64, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .turtle:
+            return PetDefinition(prefix: "Turtle", displayName: "거북",
+                                 cellSize: (44, 26), defaultFacingLeft: false,
+                                 walkSuffix: "Idle", runSuffix: "Idle", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
         }
     }
 
@@ -125,6 +246,7 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
 @MainActor
 enum PetSprite {
     private static var cache: [String: [NSImage]] = [:]
+    private static var imageCache: [String: NSImage] = [:]
 
     /// SwiftPM 의 자동 생성 Bundle.module 은 .app/<name>.bundle 만 체크하지만
     /// 표준 .app 은 Contents/Resources/ 아래에 리소스가 들어감 → 둘 다 fallback.
@@ -175,5 +297,45 @@ enum PetSprite {
         let f = frames(for: kind, action: action)
         guard !f.isEmpty else { return nil }
         return f[frameIndex % f.count]
+    }
+
+    /// 단일 PNG 로딩 (sprite strip이 아닌 일반 이미지 — 예: 가챠 알). 캐시됨.
+    static func image(named name: String) -> NSImage? {
+        if let cached = imageCache[name] { return cached }
+        guard let url = resourceBundle.url(forResource: name, withExtension: "png"),
+              let img = NSImage(contentsOf: url)
+        else {
+            DebugLog.log("PetSprite: \(name).png 로드 실패")
+            return nil
+        }
+        imageCache[name] = img
+        return img
+    }
+
+    /// PetKind와 무관한 strip PNG (예: 가챠 코인 회전)을 frame 배열로. 캐시됨.
+    static func frames(named name: String, cellSize: (w: Int, h: Int)) -> [NSImage] {
+        let key = "\(name)/\(cellSize.w)x\(cellSize.h)"
+        if let cached = cache[key] { return cached }
+        guard let url = resourceBundle.url(forResource: name, withExtension: "png"),
+              let nsImage = NSImage(contentsOf: url),
+              let tiff = nsImage.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let sheet = bitmap.cgImage
+        else {
+            DebugLog.log("PetSprite: \(name).png strip 로드 실패")
+            cache[key] = []
+            return []
+        }
+        let frameCount = max(1, sheet.width / cellSize.w)
+        var frames: [NSImage] = []
+        frames.reserveCapacity(frameCount)
+        for i in 0..<frameCount {
+            let rect = CGRect(x: i * cellSize.w, y: 0, width: cellSize.w, height: cellSize.h)
+            if let cropped = sheet.cropping(to: rect) {
+                frames.append(NSImage(cgImage: cropped, size: NSSize(width: cellSize.w, height: cellSize.h)))
+            }
+        }
+        cache[key] = frames
+        return frames
     }
 }

@@ -1,0 +1,5 @@
+Coin.png
+Author: truezipp
+Source: https://opengameart.org/content/pixel-coins-asset
+License: Creative Commons Zero (CC0) — public domain, no attribution required.
+Format: 6-frame spin animation strip, 18x20 per cell, 108x20 total.

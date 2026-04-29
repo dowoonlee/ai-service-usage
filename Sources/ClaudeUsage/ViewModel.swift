@@ -1,6 +1,13 @@
 import Foundation
 import Combine
 
+/// `dismissWellnessNudge`의 결과. 호출 측 (WalkingCat)에서 코인 popping
+/// 애니메이션을 띄울지 결정하는 데 사용.
+enum WellnessDismissResult {
+    case rewarded(Int)   // 보상 받은 코인 수
+    case noReward
+}
+
 @MainActor
 final class ViewModel: ObservableObject {
     // Claude
@@ -76,10 +83,15 @@ final class ViewModel: ObservableObject {
     // 1시간 동안 거의 쉬지 않고 사용 중이면 휴식 권유 말풍선을 띄운다.
     // 5분 폴링 간격이라 1시간 = 12 스냅샷, 그 중 flat(델타 < 0.1%)이 2개 이하일 때 "계속 일하는 중"으로 본다.
     // 한 번 띄우면 1시간 쿨다운.
+    static let wellnessIntervalSec: TimeInterval = 60 * 60
+    /// nudge 표시 후 이 시간 내에 클릭하면 보상.
+    static let wellnessRewardWindow: TimeInterval = 60
+    /// 보상 코인 수.
+    static let wellnessRewardCoins: Int = 30
+
     private func evaluateWellnessNudge() {
         guard wellnessNudge == nil else { return }
-        guard Settings.shared.wellnessEnabled else { return }
-        let intervalSec = TimeInterval(Settings.shared.wellnessIntervalMinutes * 60)
+        let intervalSec = Self.wellnessIntervalSec
         if let last = lastWellnessShownAt, now.timeIntervalSince(last) < intervalSec { return }
 
         // 인터벌 동안 사용자가 활동(델타 > 0.1%)했어야 트리거. 안 쓰던 사람한테 휴식하라고 권할 필요 없음.
@@ -103,8 +115,17 @@ final class ViewModel: ObservableObject {
         lastWellnessShownAt = now
     }
 
-    func dismissWellnessNudge() {
-        wellnessNudge = nil
+    /// nudge 클릭 처리. 표시 후 `wellnessRewardWindow`(60s) 이내면 코인 보상.
+    /// - Returns: 보상 여부와 금액. 호출 측이 popping 애니메이션 트리거에 사용.
+    @discardableResult
+    func dismissWellnessNudge() -> WellnessDismissResult {
+        defer { wellnessNudge = nil }
+        let elapsed = lastWellnessShownAt.map { Date().timeIntervalSince($0) } ?? .infinity
+        guard elapsed < Self.wellnessRewardWindow else { return .noReward }
+        let amount = Self.wellnessRewardCoins
+        // credit 정책(totalEarned/firstCreditedAt 추적)을 한곳에서만 관리하기 위해 CoinLedger 경유.
+        CoinLedger.shared.creditWellness(amount: amount)
+        return .rewarded(amount)
     }
 
     func startPolling(interval: TimeInterval = 300) {
@@ -134,6 +155,7 @@ final class ViewModel: ObservableObject {
             claudeLastSuccess = snap.takenAt
             claudeNeedsLogin = false
             evaluateClaudeAlerts(snap)
+            CoinLedger.shared.evaluateClaude(snapshot: snap)
         } catch UsageError.notLoggedIn {
             claudeNeedsLogin = true
             claudeError = "로그인 필요"
@@ -330,6 +352,7 @@ final class ViewModel: ObservableObject {
                 for ev in new { SnapshotStore.cursorEvents.append(ev) }
                 cursorEvents.append(contentsOf: new)
                 cursorEvents.sort { $0.timestamp < $1.timestamp }
+                CoinLedger.shared.evaluateCursor(newEvents: new)
             }
         } catch {
             DebugLog.log(" fetchEvents failed: \(error.localizedDescription)")
