@@ -44,14 +44,6 @@ final class Settings: ObservableObject {
     }
     @Published private(set) var launchAtLogin: Bool
 
-    /// 펫이 차트 위에서 휴식 권유 말풍선을 띄울지 여부.
-    @Published var wellnessEnabled: Bool {
-        didSet { UserDefaults.standard.set(wellnessEnabled, forKey: Keys.wellnessEnabled) }
-    }
-    /// 휴식 권유 말풍선 사이의 최소 간격(분). 이 시간 동안 사용자가 활동했어야 트리거.
-    @Published var wellnessIntervalMinutes: Int {
-        didSet { UserDefaults.standard.set(wellnessIntervalMinutes, forKey: Keys.wellnessIntervalMinutes) }
-    }
     /// 차트 한 구간의 |dy|가 전체 y-range 대비 이 비율 이상이면 펫이 AAAH/WHEE 말풍선을 띄움.
     /// 낮을수록 자주 발생, 높을수록 드물게 발생. 기본 0.40.
     @Published var bigDropThreshold: Double {
@@ -80,12 +72,19 @@ final class Settings: ObservableObject {
     @Published var petCursorVariant: Int {
         didSet { UserDefaults.standard.set(petCursorVariant, forKey: Keys.petCursorVariant) }
     }
-    /// CoinLedger가 5h/7d 윈도우 리셋 적립 중복 방지용으로 마지막 적립 시각 기록.
+    /// 마지막으로 본 Claude 5h/7d 윈도우의 resetAt. 같은 resetAt 안에서 pct delta로 적립.
     @Published var lastClaudeFiveHourReset: Date? {
         didSet { UserDefaults.standard.set(lastClaudeFiveHourReset, forKey: Keys.lastClaudeFiveHourReset) }
     }
     @Published var lastClaudeSevenDayReset: Date? {
         didSet { UserDefaults.standard.set(lastClaudeSevenDayReset, forKey: Keys.lastClaudeSevenDayReset) }
+    }
+    /// 같은 윈도우 안에서 마지막으로 본 사용률 — 다음 폴링과의 delta 적립용.
+    @Published var lastClaudeFiveHourPctSeen: Double? {
+        didSet { UserDefaults.standard.set(lastClaudeFiveHourPctSeen, forKey: Keys.lastClaudeFiveHourPctSeen) }
+    }
+    @Published var lastClaudeSevenDayPctSeen: Double? {
+        didSet { UserDefaults.standard.set(lastClaudeSevenDayPctSeen, forKey: Keys.lastClaudeSevenDayPctSeen) }
     }
     /// CoinLedger가 처리한 마지막 Cursor 이벤트 timestamp (그 이후만 적립 대상).
     @Published var lastCursorEventCredited: Date? {
@@ -115,9 +114,6 @@ final class Settings: ObservableObject {
         self.themeClaudeOverride = d.string(forKey: Keys.themeClaudeOverride).flatMap { PetTheme(rawValue: $0) }
         self.themeCursorOverride = d.string(forKey: Keys.themeCursorOverride).flatMap { PetTheme(rawValue: $0) }
         self.launchAtLogin = (SMAppService.mainApp.status == .enabled)
-        self.wellnessEnabled = (d.object(forKey: Keys.wellnessEnabled) as? Bool) ?? true
-        let storedWellness = (d.object(forKey: Keys.wellnessIntervalMinutes) as? Int) ?? 60
-        self.wellnessIntervalMinutes = max(10, min(240, storedWellness))
         let storedBigDrop = (d.object(forKey: Keys.bigDropThreshold) as? Double) ?? 0.40
         self.bigDropThreshold = max(0.10, min(0.80, storedBigDrop))
 
@@ -133,6 +129,8 @@ final class Settings: ObservableObject {
         self.petCursorVariant = (d.object(forKey: Keys.petCursorVariant) as? Int) ?? 0
         self.lastClaudeFiveHourReset = d.object(forKey: Keys.lastClaudeFiveHourReset) as? Date
         self.lastClaudeSevenDayReset = d.object(forKey: Keys.lastClaudeSevenDayReset) as? Date
+        self.lastClaudeFiveHourPctSeen = d.object(forKey: Keys.lastClaudeFiveHourPctSeen) as? Double
+        self.lastClaudeSevenDayPctSeen = d.object(forKey: Keys.lastClaudeSevenDayPctSeen) as? Double
         self.lastCursorEventCredited = d.object(forKey: Keys.lastCursorEventCredited) as? Date
         self.coinsTotalEarned = (d.object(forKey: Keys.coinsTotalEarned) as? Int) ?? 0
         self.firstCreditedAt = d.object(forKey: Keys.firstCreditedAt) as? Date
@@ -203,8 +201,6 @@ final class Settings: ObservableObject {
         static let petCursorKind    = "settings.petCursorKind"
         static let themeClaudeOverride = "settings.themeClaudeOverride"
         static let themeCursorOverride = "settings.themeCursorOverride"
-        static let wellnessEnabled = "settings.wellnessEnabled"
-        static let wellnessIntervalMinutes = "settings.wellnessIntervalMinutes"
         static let bigDropThreshold = "settings.bigDropThreshold"
         // Gacha (M2)
         static let coins                       = "settings.coins"
@@ -215,6 +211,8 @@ final class Settings: ObservableObject {
         static let lastClaudeFiveHourReset     = "settings.lastClaudeFiveHourReset"
         static let lastClaudeSevenDayReset     = "settings.lastClaudeSevenDayReset"
         static let lastCursorEventCredited     = "settings.lastCursorEventCredited"
+        static let lastClaudeFiveHourPctSeen   = "settings.lastClaudeFiveHourPctSeen"
+        static let lastClaudeSevenDayPctSeen   = "settings.lastClaudeSevenDayPctSeen"
         static let hasCompletedGachaMigration  = "settings.hasCompletedGachaMigration"
         static let coinsTotalEarned            = "settings.coinsTotalEarned"
         static let firstCreditedAt             = "settings.firstCreditedAt"

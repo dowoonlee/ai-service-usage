@@ -1,25 +1,25 @@
 import Foundation
 
-/// 사용량 기반으로 가챠 코인을 적립하는 ledger.
+/// 사용량 기반으로 가챠 코인을 적립하는 ledger. 모든 적립은 **사용량 비례**.
 ///
-/// 두 source:
-///   - **Claude**: 5h/7d 윈도우가 새로 리셋될 때마다 정액 지급
-///     (재지급 방지: `Settings.lastClaudeFiveHourReset`/`lastClaudeSevenDayReset` 비교)
-///   - **Cursor**: 신규 `CursorEvent`의 `chargedCents` × 환율 (Ultra만; Pro는 이벤트 fetch 안 함)
-///
-/// 환율은 M3.3에서 사용자별 평균 적립 페이스 기준으로 자동 캘리브레이션 예정.
-/// 현재 값은 시드(static).
+/// Source:
+///   - **Claude 5h / 7d**: 같은 윈도우 안에서의 사용률(`fiveHourPct`/`sevenDayPct`)
+///     변화량(delta) × 환율. resetAt이 변경되면 baseline만 갱신하고 적립은 0.
+///   - **Cursor**: 신규 `CursorEvent`의 `chargedCents` × 환율 (Ultra만 — Pro는 이벤트 미발생).
+///   - **Wellness**: 펫 nudge 1분 이내 클릭 시 정액 (`ViewModel.dismissWellnessNudge`).
 @MainActor
 final class CoinLedger {
     static let shared = CoinLedger()
     private init() {}
 
-    static let cursorCentToCoin: Double      = 1.0   // 1 cent = 1 coin
-    static let claudeFiveHourResetCoin: Int  = 30    // 5h 윈도우 리셋 1회 = 30 coin
-    static let claudeSevenDayResetCoin: Int  = 200   // 7d 윈도우 리셋 1회 = 200 coin
+    /// 1 cent = 1 coin.
+    static let cursorCentToCoin: Double         = 1.0
+    /// Claude 5h 윈도우 사용률 1% = N coin (한 윈도우 100% 채울 시 50 coin).
+    static let claudeFiveHourPctToCoin: Double  = 0.5
+    /// Claude 7d 윈도우 사용률 1% = N coin (한 주 100% 채울 시 100 coin).
+    static let claudeSevenDayPctToCoin: Double  = 1.0
 
-    /// 적립 시 호출해서 coins 증가 + totalEarned/firstCreditedAt 추적.
-    /// 이 두 값은 Gacha.pullCost(동적 환율)의 분자/분모로 쓰인다.
+    /// 적립 시 호출해서 coins + totalEarned + firstCreditedAt 갱신.
     private func credit(_ amount: Int) {
         guard amount > 0 else { return }
         let s = Settings.shared
@@ -28,32 +28,41 @@ final class CoinLedger {
         if s.firstCreditedAt == nil { s.firstCreditedAt = Date() }
     }
 
-    /// Claude snapshot 기반 적립.
-    /// `fiveHourResetAt`이 마지막 적립 시각보다 새 값이면 정액 지급.
-    /// 첫 폴링은 baseline만 기록하고 적립 안 함 (앱 설치 직전 발생한 리셋을 소급 지급하지 않기 위해).
+    /// Claude snapshot에서 사용량 delta로 적립.
+    /// - 같은 `resetAt` 안에서는 직전 본 pct 대비 delta(>0) × 환율.
+    /// - `resetAt`이 변경되면 새 윈도우 시작 → baseline만 갱신.
+    /// - 첫 폴링은 baseline만 기록 (소급 적립 방지).
     func evaluateClaude(snapshot: UsageSnapshot) {
         let s = Settings.shared
-        if let resetAt = snapshot.fiveHourResetAt {
-            if let last = s.lastClaudeFiveHourReset {
-                if resetAt > last {
-                    credit(Self.claudeFiveHourResetCoin)
-                    s.lastClaudeFiveHourReset = resetAt
-                    DebugLog.log("CoinLedger: Claude 5h reset → +\(Self.claudeFiveHourResetCoin) coin (total=\(s.coins))")
+        // 5-hour 윈도우
+        if let resetAt = snapshot.fiveHourResetAt, let pct = snapshot.fiveHourPct {
+            if let lastReset = s.lastClaudeFiveHourReset,
+               let lastPct = s.lastClaudeFiveHourPctSeen,
+               resetAt == lastReset {
+                let delta = pct - lastPct
+                let earned = Int(delta * Self.claudeFiveHourPctToCoin)
+                if earned > 0 {
+                    credit(earned)
+                    DebugLog.log("CoinLedger: Claude 5h Δ\(String(format: "%.1f", delta))% → +\(earned) coin (total=\(s.coins))")
                 }
-            } else {
-                s.lastClaudeFiveHourReset = resetAt
             }
+            s.lastClaudeFiveHourReset = resetAt
+            s.lastClaudeFiveHourPctSeen = pct
         }
-        if let resetAt = snapshot.sevenDayResetAt {
-            if let last = s.lastClaudeSevenDayReset {
-                if resetAt > last {
-                    credit(Self.claudeSevenDayResetCoin)
-                    s.lastClaudeSevenDayReset = resetAt
-                    DebugLog.log("CoinLedger: Claude 7d reset → +\(Self.claudeSevenDayResetCoin) coin (total=\(s.coins))")
+        // 7-day 윈도우
+        if let resetAt = snapshot.sevenDayResetAt, let pct = snapshot.sevenDayPct {
+            if let lastReset = s.lastClaudeSevenDayReset,
+               let lastPct = s.lastClaudeSevenDayPctSeen,
+               resetAt == lastReset {
+                let delta = pct - lastPct
+                let earned = Int(delta * Self.claudeSevenDayPctToCoin)
+                if earned > 0 {
+                    credit(earned)
+                    DebugLog.log("CoinLedger: Claude 7d Δ\(String(format: "%.1f", delta))% → +\(earned) coin (total=\(s.coins))")
                 }
-            } else {
-                s.lastClaudeSevenDayReset = resetAt
             }
+            s.lastClaudeSevenDayReset = resetAt
+            s.lastClaudeSevenDayPctSeen = pct
         }
     }
 

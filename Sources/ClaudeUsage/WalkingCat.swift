@@ -67,7 +67,8 @@ struct WalkingCat: View {
     // ViewModel이 1시간 연속 사용 감지 시 채워주는 휴식 권유 멘트.
     // nil이면 표시 안 함. tap 시 onDismissWellness 호출.
     var wellnessNudge: String? = nil
-    var onDismissWellness: (() -> Void)? = nil
+    /// 클릭 결과를 받아 보상 여부에 따라 코인 popping을 띄움.
+    var onDismissWellness: (() -> WellnessDismissResult)? = nil
 
     @StateObject private var ctrl = PetController()
     @State private var bubbleSize: CGSize = .zero
@@ -75,6 +76,10 @@ struct WalkingCat: View {
     // wellness 말풍선 등장 직후 3초간 blink 시키는 opacity 상태.
     @State private var wellnessOpacity: Double = 1.0
     @State private var wellnessBlinkTask: Task<Void, Never>?
+    /// wellness nudge 보상 클릭 시 튀어오르는 코인 파티클.
+    @State private var coinPops: [CoinPopParticle] = []
+    /// 보상 받은 코인 액수("+50") 말풍선. 한 번에 하나만, 위로 떠오르며 페이드아웃.
+    @State private var rewardAmountPop: (origin: CGPoint, amount: Int, createdAt: Date)?
 
     var body: some View {
         // mood는 매 render마다 컨트롤러에 동기화 (publish 아님 → 경고 없음)
@@ -154,7 +159,8 @@ struct WalkingCat: View {
                 .frame(width: max(w, 32), height: max(h, 32))
                 .contentShape(Rectangle())
                 .onContinuousHover { phase in
-                    if case .active = phase {
+                    // 보상 popping 진행 중엔 reaction 말풍선이 코인 위에 겹쳐 보이지 않도록 차단.
+                    if case .active = phase, coinPops.isEmpty {
                         ctrl.startFleeFromMouse()
                     }
                 }
@@ -271,8 +277,96 @@ struct WalkingCat: View {
                     .opacity(wellnessOpacity)
                     .position(x: bx, y: by)
                     .onTapGesture {
-                        onDismissWellness?()
+                        let result = onDismissWellness?() ?? .noReward
+                        if case .rewarded(let amount) = result {
+                            startCoinPop(at: CGPoint(x: bx, y: by), amount: amount)
+                        }
                     }
+            }
+
+            // 보상 코인 popping + "+N" 말풍선. hit-testing 비활성화.
+            coinPopOverlay.allowsHitTesting(false)
+            rewardAmountOverlay.allowsHitTesting(false)
+        }
+    }
+
+    /// 보상 코인 파티클 렌더링. TimelineView로 매 프레임 위치 갱신 +
+    /// 코인 sprite의 회전 frame을 시간 기반으로 cycle.
+    @ViewBuilder
+    private var coinPopOverlay: some View {
+        if !coinPops.isEmpty {
+            let coinFrames = PetSprite.frames(named: "Coin", cellSize: (18, 20))
+            TimelineView(.animation) { ctx in
+                ZStack {
+                    ForEach(coinPops) { p in
+                        let t = ctx.date.timeIntervalSince(p.createdAt)
+                        if t < Self.coinPopDuration, !coinFrames.isEmpty {
+                            let gravity: Double = 320
+                            let x = p.origin.x + p.velocityX * t
+                            let y = p.origin.y + p.velocityY * t + 0.5 * gravity * t * t
+                            let opacity = max(0, 1 - t / Self.coinPopDuration)
+                            // 코인마다 frame phase를 다르게 → spin이 일제히 똑같이 안 돌게
+                            let frameIdx = (Int(t * 14) + p.framePhase) % coinFrames.count
+                            Image(nsImage: coinFrames[frameIdx])
+                                .resizable()
+                                .interpolation(.none)
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 16 * p.scale, height: 18 * p.scale)
+                                .opacity(opacity)
+                                .position(x: x, y: y)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static let coinPopCount: Int = 8
+    private static let coinPopDuration: TimeInterval = 0.9
+    private static let rewardAmountDuration: TimeInterval = 1.1
+
+    /// 보상 위치(말풍선 center)에서 코인 파티클 + "+N" 말풍선 함께 시작.
+    private func startCoinPop(at origin: CGPoint, amount: Int) {
+        let now = Date()
+        let particles = (0..<Self.coinPopCount).map { _ in
+            CoinPopParticle(
+                origin: origin,
+                velocityX: Double.random(in: -90...90),
+                velocityY: Double.random(in: -200 ... -110),
+                scale: Double.random(in: 0.7...1.05),
+                framePhase: Int.random(in: 0..<6),
+                createdAt: now
+            )
+        }
+        coinPops.append(contentsOf: particles)
+        rewardAmountPop = (origin, amount, now)
+
+        let batchIds = Set(particles.map(\.id))
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(Self.coinPopDuration * 1_100_000_000))
+            coinPops.removeAll { batchIds.contains($0.id) }
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(Self.rewardAmountDuration * 1_100_000_000))
+            if let r = rewardAmountPop, r.createdAt == now {
+                rewardAmountPop = nil
+            }
+        }
+    }
+
+    /// "+50" 보상 액수 말풍선. 위로 떠오르며 페이드아웃.
+    @ViewBuilder
+    private var rewardAmountOverlay: some View {
+        if let r = rewardAmountPop {
+            TimelineView(.animation) { ctx in
+                let t = ctx.date.timeIntervalSince(r.createdAt)
+                if t < Self.rewardAmountDuration {
+                    let yOffset = -t * 38
+                    let opacity = max(0, 1 - t / Self.rewardAmountDuration)
+                    bubble("+\(r.amount)", fontSize: 11, weight: .medium, cornerRadius: 6, padH: 6, padV: 2.5)
+                        .opacity(opacity)
+                        .position(x: r.origin.x, y: r.origin.y + yOffset - 10)
+                }
             }
         }
     }
@@ -280,7 +374,7 @@ struct WalkingCat: View {
     /// 노란 spiky 말풍선. 텍스트는 검정 굵은 글씨, 외곽은 starburst 모양.
     private func spikyBubble(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .heavy, design: .rounded))
+            .font(.system(size: 10, weight: .medium, design: .rounded))
             .foregroundStyle(Color.black)
             .lineLimit(1)
             .padding(.horizontal, 12)
@@ -387,6 +481,18 @@ struct WalkingCat: View {
         default: return 0
         }
     }
+}
+
+/// wellness 보상 클릭 시 튀는 코인 한 개의 운동 상태.
+struct CoinPopParticle: Identifiable {
+    let id = UUID()
+    let origin: CGPoint
+    let velocityX: Double      // px/s
+    let velocityY: Double      // px/s (음수=위로 솟구침)
+    let scale: Double
+    /// sprite의 spin frame cycle을 코인마다 다른 위상에서 시작하기 위한 offset.
+    let framePhase: Int
+    let createdAt: Date
 }
 
 @MainActor

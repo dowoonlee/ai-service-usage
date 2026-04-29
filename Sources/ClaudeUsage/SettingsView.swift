@@ -68,8 +68,7 @@ struct SettingsView: View {
             }
             Section("수집") {
                 HStack(spacing: 10) {
-                    Image(systemName: "circle.hexagongrid.fill")
-                        .foregroundStyle(.yellow)
+                    CoinIcon(size: 16)
                     Text("\(settings.coins)").monospacedDigit()
                     Image(systemName: "ticket.fill")
                         .foregroundStyle(.blue)
@@ -80,22 +79,6 @@ struct SettingsView: View {
                     }
                 }
                 Text("뽑기를 돌려 펫을 모으세요. 사용량이 코인으로 적립됩니다.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            Section("휴식 권유") {
-                Toggle("일정 시간 사용 시 휴식 권유 말풍선", isOn: $settings.wellnessEnabled)
-                Stepper(value: $settings.wellnessIntervalMinutes, in: 10...240, step: 5) {
-                    HStack {
-                        Text("간격")
-                        Spacer()
-                        Text("\(settings.wellnessIntervalMinutes)분")
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .disabled(!settings.wellnessEnabled)
-                Text("이 간격 동안 사용자가 활동했으면 펫이 노란 말풍선으로 휴식을 권유합니다. 클릭하면 사라집니다.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }

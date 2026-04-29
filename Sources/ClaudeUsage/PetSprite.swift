@@ -311,4 +311,31 @@ enum PetSprite {
         imageCache[name] = img
         return img
     }
+
+    /// PetKind와 무관한 strip PNG (예: 가챠 코인 회전)을 frame 배열로. 캐시됨.
+    static func frames(named name: String, cellSize: (w: Int, h: Int)) -> [NSImage] {
+        let key = "\(name)/\(cellSize.w)x\(cellSize.h)"
+        if let cached = cache[key] { return cached }
+        guard let url = resourceBundle.url(forResource: name, withExtension: "png"),
+              let nsImage = NSImage(contentsOf: url),
+              let tiff = nsImage.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let sheet = bitmap.cgImage
+        else {
+            DebugLog.log("PetSprite: \(name).png strip 로드 실패")
+            cache[key] = []
+            return []
+        }
+        let frameCount = max(1, sheet.width / cellSize.w)
+        var frames: [NSImage] = []
+        frames.reserveCapacity(frameCount)
+        for i in 0..<frameCount {
+            let rect = CGRect(x: i * cellSize.w, y: 0, width: cellSize.w, height: cellSize.h)
+            if let cropped = sheet.cropping(to: rect) {
+                frames.append(NSImage(cgImage: cropped, size: NSSize(width: cellSize.w, height: cellSize.h)))
+            }
+        }
+        cache[key] = frames
+        return frames
+    }
 }

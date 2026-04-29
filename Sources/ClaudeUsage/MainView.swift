@@ -53,7 +53,7 @@ fileprivate extension View {
         anxietyAt: Double,
         bigDropThreshold: Double,
         wellnessNudge: String? = nil,
-        onDismissWellness: (() -> Void)? = nil
+        onDismissWellness: (() -> WellnessDismissResult)? = nil
     ) -> some View {
         chartOverlay { proxy in
             if enabled {
@@ -128,6 +128,7 @@ fileprivate func sectionHeader(
 
 struct MainView: View {
     @ObservedObject var vm: ViewModel
+    @ObservedObject var settings = Settings.shared
     var onLogin: () -> Void
     var onSettings: () -> Void
     var onQuit: () -> Void
@@ -155,6 +156,29 @@ struct MainView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
             Spacer()
+            // 코인 잔액 — 클릭하면 가챠/도감 창 열림
+            Button {
+                GachaWindowController.shared.present()
+            } label: {
+                HStack(spacing: 3) {
+                    CoinIcon(size: 12)
+                    Text("\(settings.coins)")
+                        .font(.system(size: 11, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.primary)
+                    if settings.gachaTickets > 0 {
+                        Image(systemName: "ticket.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.blue)
+                        Text("\(settings.gachaTickets)")
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.primary)
+                    }
+                }
+            }
+            .buttonStyle(.borderless)
+            .help("코인 잔액 — 클릭하여 가챠 열기")
             if vm.claudeLoading || vm.cursorLoading {
                 ProgressView().controlSize(.mini)
             }

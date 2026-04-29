@@ -36,6 +36,7 @@ struct GachaView: View {
         case cracking(GachaPull)
         case revealing(GachaPull)  // 암전 + flash + 실루엣 + fade in
         case hatched(GachaPull)
+        case preview(PetKind, Int) // 인벤토리에서 클릭한 보유 펫 미리보기
     }
 
     var body: some View {
@@ -55,8 +56,7 @@ struct GachaView: View {
     private var header: some View {
         HStack(spacing: 14) {
             HStack(spacing: 4) {
-                Image(systemName: "circle.hexagongrid.fill")
-                    .foregroundStyle(.yellow)
+                CoinIcon(size: 18)
                 Text("\(settings.coins)")
                     .font(.title3.weight(.bold))
                     .monospacedDigit()
@@ -88,7 +88,8 @@ struct GachaView: View {
     private func pull() {
         let useTicket = settings.gachaTickets > 0
         do {
-            let result = try Gacha.performPull(useTicket: useTicket)
+            // 잔액 차감 + 결과 결정만. 보유 상태는 hatched 진입 시점에 commit().
+            let result = try Gacha.roll(useTicket: useTicket)
             phase = .egg(result)
             eggTapCount = 0
             eggShakeAngle = 0
@@ -127,7 +128,9 @@ struct GachaView: View {
                 revealStartedAt = Date()
                 phase = .revealing(pull)
                 try? await Task.sleep(nanoseconds: UInt64(Self.revealDuration * 1_000_000_000))
-                phase = .hatched(pull)
+                // 애니메이션 완료 시점에 비로소 보유 상태 반영 (인벤토리 해금).
+                let resolved = Gacha.commit(pull)
+                phase = .hatched(resolved)
             }
         }
     }
@@ -154,10 +157,59 @@ struct GachaView: View {
                 revealingView(p).transition(.opacity)
             case .hatched(let p):
                 hatchedView(p).transition(.opacity)
+            case .preview(let k, let v):
+                previewView(kind: k, variant: v).transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 180)
         .animation(.easeInOut(duration: 0.22), value: phaseKey)
+    }
+
+    /// 보유 펫의 walking sprite 미리보기. 좌우 swing + walk frame cycle.
+    private func previewView(kind: PetKind, variant: Int) -> some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            // walk strip 우선, 없으면 idle (Bee/Plant/Skull 등)
+            let walkFrames = PetSprite.frames(for: kind, action: .walk)
+            let frames = walkFrames.isEmpty ? PetSprite.frames(for: kind, action: .sit) : walkFrames
+            let frameIdx = frames.isEmpty ? 0 : Int(t * 8) % frames.count
+            // 좌우로 천천히 swing
+            let swingPeriod: Double = 4.0
+            let phase = (t.truncatingRemainder(dividingBy: swingPeriod)) / swingPeriod  // 0..1
+            let swingX = sin(phase * 2 * .pi) * 60
+            let movingRight = cos(phase * 2 * .pi) > 0
+            // sprite가 바라보는 기본 방향과 진행 방향이 다르면 가로 반전
+            let flip = (kind.defaultFacingLeft && movingRight) || (!kind.defaultFacingLeft && !movingRight)
+
+            ZStack {
+                if !frames.isEmpty {
+                    Image(nsImage: frames[frameIdx])
+                        .resizable()
+                        .interpolation(.none)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 84)
+                        .scaleEffect(x: flip ? -1 : 1, y: 1)
+                        .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
+                        .saturation(variant > 0 ? 1.15 : 1.0)
+                        .offset(x: swingX, y: Self.spriteRestY)
+                }
+
+                VStack(spacing: 4) {
+                    Text(kind.displayName)
+                        .font(.title3.weight(.medium))
+                    if variant > 0 {
+                        Text(String(repeating: "✨", count: variant))
+                            .font(.caption)
+                    } else {
+                        Text("기본")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .offset(y: 50)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// phase enum의 동등성 비교용 (associated value 무시한 단순 식별자).
@@ -169,6 +221,7 @@ struct GachaView: View {
         case .cracking:  return 2
         case .revealing: return 3
         case .hatched:   return 4
+        case .preview:   return 5
         }
     }
 
@@ -349,10 +402,50 @@ struct GachaView: View {
                     .monospacedDigit()
             }
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 10)], spacing: 12) {
-                    ForEach(PetKind.allCases) { kind in
-                        InventorySlot(kind: kind, ownership: settings.ownedPets[kind])
+                VStack(alignment: .leading, spacing: 14) {
+                    // 희귀한 등급 먼저 (위 → 아래).
+                    ForEach([Rarity.legendary, .epic, .rare, .common], id: \.self) { r in
+                        raritySection(r)
                     }
+                }
+            }
+        }
+    }
+
+    private func raritySection(_ rarity: Rarity) -> some View {
+        let kinds = Gacha.pool[rarity] ?? []
+        let ownedCount = kinds.filter { settings.ownedPets[$0] != nil }.count
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(rarityColor(rarity))
+                    .frame(width: 8, height: 8)
+                Text(rarity.displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(rarityColor(rarity))
+                Spacer()
+                Text("\(ownedCount)/\(kinds.count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 10)], spacing: 12) {
+                ForEach(kinds) { kind in
+                    InventorySlot(
+                        kind: kind,
+                        ownership: settings.ownedPets[kind],
+                        onTap: {
+                            guard let o = settings.ownedPets[kind] else { return }
+                            let activeVariant = settings.petClaudeKind == kind
+                                ? settings.petClaudeVariant
+                                : (settings.petCursorKind == kind ? settings.petCursorVariant : 0)
+                            let v = o.unlockedVariants.contains(activeVariant)
+                                ? activeVariant
+                                : (o.unlockedVariants.sorted().first ?? 0)
+                            phase = .preview(kind, v)
+                            errorMessage = nil
+                        }
+                    )
                 }
             }
         }
@@ -371,6 +464,7 @@ struct GachaView: View {
 private struct InventorySlot: View {
     let kind: PetKind
     let ownership: PetOwnership?
+    let onTap: (() -> Void)?
 
     var body: some View {
         VStack(spacing: 3) {
@@ -388,6 +482,11 @@ private struct InventorySlot: View {
                 }
             }
             .frame(width: 60, height: 60)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if ownership != nil { onTap?() }
+            }
+            .help(ownership == nil ? "잠김" : "클릭하여 미리보기")
 
             Text(ownership == nil ? "?" : kind.displayName)
                 .font(.caption2)
@@ -459,6 +558,25 @@ struct CrackShape: Shape {
         p.addLine(to: CGPoint(x: rect.midX + rect.width * 0.20, y: rect.minY + rect.height * 0.80))
         p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
         return p
+    }
+}
+
+/// 헤더/설정 화면에서 사용하는 정적 코인 아이콘 (sprite 첫 프레임).
+/// 자산 누락 시 SF Symbol fallback.
+struct CoinIcon: View {
+    var size: CGFloat = 16
+    var body: some View {
+        if let img = PetSprite.frames(named: "Coin", cellSize: (18, 20)).first {
+            Image(nsImage: img)
+                .resizable()
+                .interpolation(.none)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        } else {
+            Image(systemName: "circle.hexagongrid.fill")
+                .font(.system(size: size))
+                .foregroundStyle(.yellow)
+        }
     }
 }
 
