@@ -128,6 +128,12 @@ final class ViewModel: ObservableObject {
         return .rewarded(amount)
     }
 
+    /// 임박한 resetAt 직전(=`resetGuard`초 전)에 마지막 관측 폴링이 잡히도록 sleep을 단축.
+    /// 윈도우 끝 사용분이 코인 적립에서 누락되는 걸 막기 위함 — 그 폴링의 pct가 윈도우 종료 pct로
+    /// 기록되고, 다음(=normal interval) 폴링은 새 윈도우라서 자연스럽게 rebase된다.
+    private static let resetGuard: TimeInterval = 15
+    private static let minSleep: TimeInterval = 5
+
     func startPolling(interval: TimeInterval = 300) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
@@ -135,9 +141,27 @@ final class ViewModel: ObservableObject {
             while !Task.isCancelled {
                 await self.refreshClaude()
                 await self.refreshCursor()
-                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                let sleepSec = self.nextPollDelay(maxInterval: interval)
+                try? await Task.sleep(nanoseconds: UInt64(sleepSec * 1_000_000_000))
             }
         }
+    }
+
+    func nextPollDelay(maxInterval: TimeInterval) -> TimeInterval {
+        let now = Date()
+        var nextDeadline = now.addingTimeInterval(maxInterval)
+        let resets: [Date?] = [
+            claudeCurrent?.fiveHourResetAt,
+            claudeCurrent?.sevenDayResetAt,
+            cursorCurrent?.resetAt,
+        ]
+        for r in resets.compactMap({ $0 }) {
+            let preReset = r.addingTimeInterval(-Self.resetGuard)
+            if preReset > now && preReset < nextDeadline {
+                nextDeadline = preReset
+            }
+        }
+        return max(Self.minSleep, nextDeadline.timeIntervalSince(now))
     }
 
     // MARK: - Claude
