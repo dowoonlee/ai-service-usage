@@ -48,6 +48,7 @@ fileprivate extension View {
         enabled: Bool,
         points: [(Date, Double)],
         kind: PetKind,
+        variant: Int = 0,
         pct: Double?,
         anxietyAt: Double,
         bigDropThreshold: Double,
@@ -63,6 +64,7 @@ fileprivate extension View {
                         proxy: proxy,
                         plotFrame: plotFrame,
                         kind: kind,
+                        variant: variant,
                         mood: PetMood.from(pct: pct, anxietyAt: anxietyAt),
                         bigDropThreshold: bigDropThreshold,
                         wellnessNudge: wellnessNudge,
@@ -444,9 +446,10 @@ struct ClaudeSection: View {
                 // 다른 데이터(예: recent 0% 포함)를 넘기면 펫의 x-도메인이 차트보다 넓어져
                 // plot 좌/우로 빠져나간다.
                 .chartPet(
-                    enabled: settings.petClaudeEnabled,
+                    enabled: settings.petClaudeEnabled && !settings.ownedPets.isEmpty,
                     points: validData,
                     kind: settings.petClaudeKind,
+                    variant: settings.petClaudeVariant,
                     pct: vm.claudeCurrent?.fiveHourPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
@@ -694,9 +697,10 @@ struct CursorSection: View {
                 .sparklineYAxis(values: yValues, format: { "$\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
                 .chartPet(
-                    enabled: settings.petCursorEnabled,
+                    enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty,
                     points: points,
                     kind: settings.petCursorKind,
+                    variant: settings.petCursorVariant,
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
@@ -760,9 +764,10 @@ struct CursorSection: View {
                 .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
                 .chartPet(
-                    enabled: settings.petCursorEnabled,
+                    enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty,
                     points: validData,
                     kind: settings.petCursorKind,
+                    variant: settings.petCursorVariant,
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,

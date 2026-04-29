@@ -134,6 +134,7 @@ final class ViewModel: ObservableObject {
             claudeLastSuccess = snap.takenAt
             claudeNeedsLogin = false
             evaluateClaudeAlerts(snap)
+            CoinLedger.shared.evaluateClaude(snapshot: snap)
         } catch UsageError.notLoggedIn {
             claudeNeedsLogin = true
             claudeError = "로그인 필요"
@@ -330,6 +331,7 @@ final class ViewModel: ObservableObject {
                 for ev in new { SnapshotStore.cursorEvents.append(ev) }
                 cursorEvents.append(contentsOf: new)
                 cursorEvents.sort { $0.timestamp < $1.timestamp }
+                CoinLedger.shared.evaluateCursor(newEvents: new)
             }
         } catch {
             DebugLog.log(" fetchEvents failed: \(error.localizedDescription)")

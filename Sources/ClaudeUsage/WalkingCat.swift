@@ -58,6 +58,8 @@ struct WalkingCat: View {
     let proxy: ChartProxy
     let plotFrame: CGRect          // 차트 plot rect (좌표 변환 + 말풍선 클램프 용)
     var kind: PetKind = .fox
+    /// 색상 변종 (이로치). 0 = 기본, 1/2/3 = shiny tier. hueRotation 각도로 매핑.
+    var variant: Int = 0
     var mood: PetMood = .neutral
     var displayHeight: CGFloat = 18
     // 차트 한 구간이 전체 y-range 대비 이 비율 이상일 때 AAAH/WHEE 말풍선 발동. 낮을수록 자주.
@@ -145,6 +147,8 @@ struct WalkingCat: View {
                     anchor: .center
                 )
                 .rotationEffect(.degrees(rollAngle), anchor: .center)
+                .hueRotation(.degrees(Self.hueDegrees(for: variant)))
+                .saturation(variant == 0 ? 1.0 : 1.15)
                 .colorMultiply(mood.tint)
                 // 작은 sprite(18pt) 위 hover 감지를 쉽게 하려고 32x32 hit area로 확장.
                 .frame(width: max(w, 32), height: max(h, 32))
@@ -371,6 +375,17 @@ struct WalkingCat: View {
             }
         }
         return points.last!.1
+    }
+
+    /// variant index → hueRotation 각도 (도).
+    /// 0 = 기본(미변경), 1/2/3 = shiny tier (서로 충분히 떨어진 색).
+    static func hueDegrees(for variant: Int) -> Double {
+        switch variant {
+        case 1: return 60   // yellow-green shift
+        case 2: return 180  // 정반대 색
+        case 3: return 300  // purple-red shift
+        default: return 0
+        }
     }
 }
 

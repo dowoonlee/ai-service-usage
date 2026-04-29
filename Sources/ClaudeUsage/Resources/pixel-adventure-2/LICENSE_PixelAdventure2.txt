@@ -1,0 +1,29 @@
+Pixel Adventure 2 sprites by Pixel Frog
+Source: https://pixelfrog-assets.itch.io/pixel-adventure-2
+License: Creative Commons Zero (CC0) — public domain, no attribution required.
+
+Included characters (Enemies):
+- AngryPig
+- Bat
+- Bee
+- BlueBird
+- Bunny
+- Chameleon
+- Chicken
+- Duck
+- FatBird
+- Ghost
+- Plant
+- Radish
+- Rino
+- Rock1
+- Rock2
+- Rock3
+- Skull
+- Snail
+- Trunk
+- Turtle
+
+Note: Mushroom and Slime from Pixel Adventure 2 are byte-identical to the
+PA1 versions already included under ../pixel-adventure/, so they are not
+duplicated here.
