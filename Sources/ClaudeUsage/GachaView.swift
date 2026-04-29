@@ -15,16 +15,26 @@ struct GachaView: View {
     @State private var errorMessage: String?
     @State private var eggTapCount: Int = 0
     @State private var eggShakeAngle: Double = 0
+    /// `.revealing` 시작 시각. TimelineView가 elapsed 기반 시각 효과 계산에 사용.
+    @State private var revealStartedAt: Date?
+    /// `.cracking` 시작 시각. crack 라인이 trim으로 점진 그려지는 데 사용.
+    @State private var crackStartedAt: Date?
 
     /// 알을 깨는 데 필요한 탭 수.
     private static let eggTapsRequired: Int = 6
-    /// cracking → hatched 사이 머무는 시간.
+    /// cracking → revealing 사이 머무는 시간.
     private static let crackingDuration: TimeInterval = 1.0
+    /// revealing 단계 전체 시간 (flash + silhouette + fadeIn 합).
+    private static let revealDuration: TimeInterval = 2.2
+    /// hatched/revealing 단계 sprite의 y offset (영역 center 기준).
+    /// 두 view가 sprite를 같은 위치에 그려야 cross-fade 시 점프가 없다.
+    private static let spriteRestY: CGFloat = -38
 
     enum ResultPhase {
         case idle
         case egg(GachaPull)
         case cracking(GachaPull)
+        case revealing(GachaPull)  // 암전 + flash + 실루엣 + fade in
         case hatched(GachaPull)
     }
 
@@ -111,13 +121,13 @@ struct GachaView: View {
         if eggTapCount >= Self.eggTapsRequired {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 250_000_000)
-                withAnimation(.easeInOut(duration: 0.3)) {
-                    phase = .cracking(pull)
-                }
+                crackStartedAt = Date()
+                phase = .cracking(pull)
                 try? await Task.sleep(nanoseconds: UInt64(Self.crackingDuration * 1_000_000_000))
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.6)) {
-                    phase = .hatched(pull)
-                }
+                revealStartedAt = Date()
+                phase = .revealing(pull)
+                try? await Task.sleep(nanoseconds: UInt64(Self.revealDuration * 1_000_000_000))
+                phase = .hatched(pull)
             }
         }
     }
@@ -130,31 +140,42 @@ struct GachaView: View {
             switch phase {
             case .idle:
                 if let msg = errorMessage {
-                    Text(msg).foregroundStyle(.red)
+                    Text(msg).foregroundStyle(.red).transition(.opacity)
                 } else {
                     Text("뽑기를 돌려 펫을 만나보세요")
                         .foregroundStyle(.secondary)
+                        .transition(.opacity)
                 }
             case .egg(let p):
-                eggView(p)
+                eggView(p).transition(.opacity)
             case .cracking(let p):
-                crackingView(p)
+                crackingView(p).transition(.opacity)
+            case .revealing(let p):
+                revealingView(p).transition(.opacity)
             case .hatched(let p):
-                hatchedView(p)
-                    .transition(.scale(scale: 0.3).combined(with: .opacity))
+                hatchedView(p).transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 180)
+        .animation(.easeInOut(duration: 0.22), value: phaseKey)
+    }
+
+    /// phase enum의 동등성 비교용 (associated value 무시한 단순 식별자).
+    /// `.animation(_:value:)`가 phase 변경을 감지하도록 한다.
+    private var phaseKey: Int {
+        switch phase {
+        case .idle:      return 0
+        case .egg:       return 1
+        case .cracking:  return 2
+        case .revealing: return 3
+        case .hatched:   return 4
+        }
     }
 
     private func eggView(_ pull: GachaPull) -> some View {
         VStack(spacing: 8) {
-            EggShape()
-                .fill(LinearGradient(colors: [Color(white: 0.97), Color(white: 0.78)],
-                                     startPoint: .top, endPoint: .bottom))
-                .overlay(EggShape().stroke(Color.black.opacity(0.55), lineWidth: 1.2))
-                .overlay(eggSpots)
-                .frame(width: 80, height: 100)
+            eggSprite
+                .frame(width: 96, height: 96)
                 .rotationEffect(.degrees(eggShakeAngle), anchor: .bottom)
                 .onTapGesture { tapEgg(pull) }
                 .contentShape(Rectangle())
@@ -166,70 +187,152 @@ struct GachaView: View {
         }
     }
 
-    /// 알 표면의 점박이 무늬.
-    private var eggSpots: some View {
-        ZStack {
-            Circle().fill(Color.brown.opacity(0.55)).frame(width: 9, height: 9).offset(x: -12, y: -4)
-            Circle().fill(Color.brown.opacity(0.55)).frame(width: 6, height: 6).offset(x: 8, y: -14)
-            Circle().fill(Color.brown.opacity(0.55)).frame(width: 5, height: 5).offset(x: 14, y: 12)
-            Circle().fill(Color.brown.opacity(0.55)).frame(width: 7, height: 7).offset(x: -6, y: 18)
+    /// 가챠 알 sprite. 자산 누락 시 EggShape으로 fallback.
+    @ViewBuilder
+    private var eggSprite: some View {
+        if let img = PetSprite.image(named: "Egg") {
+            Image(nsImage: img)
+                .resizable()
+                .interpolation(.none)
+                .aspectRatio(contentMode: .fit)
+        } else {
+            EggShape()
+                .fill(Color(white: 0.95))
+                .overlay(EggShape().stroke(Color.black.opacity(0.5), lineWidth: 1))
         }
     }
 
+    /// `.cracking` 단계 시각화.
+    /// - 0.0 ~ 0.6s: 균열 라인이 위에서 아래로 점진 그려짐 (trim).
+    /// - 그 후: 알이 살짝 더 빠르게 진동 (부화 임박).
     private func crackingView(_ pull: GachaPull) -> some View {
-        TimelineView(.animation) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            let pulse = 1.0 + sin(t * 16) * 0.06
-            EggShape()
-                .fill(LinearGradient(colors: [Color(white: 0.97), Color(white: 0.78)],
-                                     startPoint: .top, endPoint: .bottom))
-                .overlay(EggShape().stroke(Color.black.opacity(0.55), lineWidth: 1.2))
-                .overlay(eggSpots)
+        let startedAt = crackStartedAt ?? Date()
+        return TimelineView(.animation) { ctx in
+            let elapsed = ctx.date.timeIntervalSince(startedAt)
+            let crackProgress = min(1.0, elapsed / 0.6)
+            let pulseFreq = elapsed < 0.6 ? 12.0 : 22.0
+            let pulseAmp = elapsed < 0.6 ? 0.04 : 0.07
+            let pulse = 1.0 + sin(elapsed * pulseFreq) * pulseAmp
+            eggSprite
                 .overlay(
                     CrackShape()
+                        .trim(from: 0, to: crackProgress)
                         .stroke(Color.black, lineWidth: 1.5)
-                        .padding(.horizontal, 18)
+                        .padding(.horizontal, 24)
                         .padding(.vertical, 12)
                 )
-                .frame(width: 80, height: 100)
+                .frame(width: 96, height: 96)
                 .scaleEffect(pulse)
         }
     }
 
+    /// 부화 직후 연출. 시간 구간 (revealStartedAt 기준):
+    ///   - 0.0 ~ 0.25s: 검은 배경 fade in + 알 burst-out (scale up + opacity down)
+    ///   - 0.0 ~ 0.5s : 흰 flash 페이드아웃 (깜빡임)
+    ///   - 0.5 ~ 1.5s : 어두운 실루엣
+    ///   - 1.5 ~ 2.2s : 색상 fade in (실루엣 → 풀컬러)
+    ///   - 마지막 0.4s: 검은 배경 fade out (hatched로 자연스럽게 연결)
+    private func revealingView(_ pull: GachaPull) -> some View {
+        let startedAt = revealStartedAt ?? Date()
+        return TimelineView(.animation) { ctx in
+            let elapsed = ctx.date.timeIntervalSince(startedAt)
+            ZStack {
+                // 검은 배경 — 들어올 땐 0.25s fade in. 나갈 때는 부모 cross-fade(0.22s)에
+                // 맡기고 자체 fade out은 짧게(0.15s)만 — 두 효과가 겹쳐 굼뜨지 않게.
+                let bgFadeIn = min(1.0, elapsed / 0.25)
+                let fadeOutStart = Self.revealDuration - 0.15
+                let bgFadeOut = elapsed > fadeOutStart
+                    ? max(0, 1 - (elapsed - fadeOutStart) / 0.15)
+                    : 1.0
+                Color.black.opacity(bgFadeIn * bgFadeOut)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                // 알이 폭발하듯 사라짐 — cracking에서 살짝 진동 중이던 알이 그대로 fade out
+                if elapsed < 0.35 {
+                    let burst = elapsed / 0.35
+                    eggSprite
+                        .frame(width: 96, height: 96)
+                        .scaleEffect(1 + burst * 0.5)
+                        .opacity(1 - burst)
+                }
+
+                // 흰 flash 깜빡임
+                if elapsed < 0.5 {
+                    let envelope = max(0, 1 - elapsed / 0.5)
+                    let blink = abs(sin(elapsed * 24))
+                    Color.white.opacity(envelope * blink * 0.85)
+                }
+
+                // 펫 등장 (silhouette → fade in)
+                if let img = PetSprite.image(for: pull.kind, action: .sit, frameIndex: 0) {
+                    let appearAt: TimeInterval = 0.5
+                    let silhouetteUntil: TimeInterval = 1.5
+                    let revealDoneAt: TimeInterval = 2.2
+                    let progress: Double = {
+                        if elapsed < silhouetteUntil { return 0 }
+                        return min(1, (elapsed - silhouetteUntil) / (revealDoneAt - silhouetteUntil))
+                    }()
+                    let multiplier = max(0.15, progress)
+
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.none)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 84)
+                        .hueRotation(.degrees(WalkingCat.hueDegrees(for: pull.variantUnlocked ?? 0)))
+                        .colorMultiply(Color(white: multiplier))
+                        .saturation(progress)
+                        .opacity(elapsed < appearAt ? 0 : 1)
+                        .offset(y: Self.spriteRestY)  // hatched의 sprite와 동일 위치
+                }
+            }
+            .clipped()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     private func hatchedView(_ pull: GachaPull) -> some View {
-        VStack(spacing: 6) {
+        // ZStack으로 revealing과 동일한 sprite 위치(spriteRestY)를 유지.
+        // 메타데이터는 sprite 아래에 별도 묶음으로 배치.
+        ZStack {
             if let img = PetSprite.image(for: pull.kind, action: .sit, frameIndex: 0) {
                 Image(nsImage: img)
                     .resizable()
                     .interpolation(.none)
                     .aspectRatio(contentMode: .fit)
-                    .frame(height: 64)
+                    .frame(height: 84)
                     .hueRotation(.degrees(WalkingCat.hueDegrees(for: pull.variantUnlocked ?? 0)))
                     .saturation((pull.variantUnlocked ?? 0) > 0 ? 1.15 : 1.0)
+                    .offset(y: Self.spriteRestY)
             }
-            Text(pull.kind.displayName)
-                .font(.title3.weight(.bold))
-            Text(pull.rarity.displayName)
-                .font(.caption.weight(.bold))
-                .padding(.horizontal, 10).padding(.vertical, 3)
-                .background(rarityColor(pull.rarity).opacity(0.2))
-                .foregroundStyle(rarityColor(pull.rarity))
-                .clipShape(Capsule())
 
-            if let v = pull.variantUnlocked, v > 0 {
-                Label("색상 변종 \(v) 해금!", systemImage: "sparkles")
+            VStack(spacing: 5) {
+                Text(pull.kind.displayName)
+                    .font(.title3.weight(.bold))
+                Text(pull.rarity.displayName)
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.yellow)
-            } else if (settings.ownedPets[pull.kind]?.count ?? 0) == 1 {
-                Label("새 펫!", systemImage: "star.fill")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.green)
-            } else {
-                Text("중복 (\(settings.ownedPets[pull.kind]?.count ?? 0)마리째)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 10).padding(.vertical, 3)
+                    .background(rarityColor(pull.rarity).opacity(0.2))
+                    .foregroundStyle(rarityColor(pull.rarity))
+                    .clipShape(Capsule())
+
+                if let v = pull.variantUnlocked, v > 0 {
+                    Label("색상 변종 \(v) 해금!", systemImage: "sparkles")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.yellow)
+                } else if (settings.ownedPets[pull.kind]?.count ?? 0) == 1 {
+                    Label("새 펫!", systemImage: "star.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.green)
+                } else {
+                    Text("중복 (\(settings.ownedPets[pull.kind]?.count ?? 0)마리째)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .offset(y: 50)  // sprite 아래에 배치 (sprite center=−38, 메타 center=+50 → ~88px 떨어짐)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Inventory
