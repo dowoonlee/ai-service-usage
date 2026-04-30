@@ -2,6 +2,14 @@
 
 Claude.ai(Max/Pro)와 Cursor(Ultra/Pro) 구독 사용량을 **항상 떠있는 작은 플로팅 윈도우**로 보여주는 macOS 앱.
 
+<p align="center">
+  <img src="example_image.png" alt="AIUsage" width="320" />
+</p>
+
+남은 한도, 다음 리셋까지의 카운트다운, 현재 페이스 예측을 한눈에. 사용한 만큼 펫 가챠 코인이 적립되고 차트 위를 75종 펫이 걷습니다.
+
+## 기능
+
 - Claude: 5시간창 %, 주간 %, 리셋 카운트다운, 자체 스파크라인
 - Cursor: 월 누적 $ (Ultra) / 요청수 (Pro), 리셋 카운트다운, 이번 달 이벤트 기반 누적 그래프
 - 플랜 자동 감지(예: `Max 20x`, `Ultra`)하여 헤더 배지 표시
