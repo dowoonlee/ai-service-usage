@@ -6,6 +6,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
     case grassland   // 잔디밭 (밝은 풀색)
     case field       // 들판 (말린 풀, 황록)
     case wilderness  // 황야 (마른 흙, 황갈)
+    case sea         // 바다 (파랑)
 
     var id: String { rawValue }
 
@@ -14,6 +15,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .grassland:  return "잔디밭"
         case .field:      return "들판"
         case .wilderness: return "황야"
+        case .sea:        return "바다"
         }
     }
 
@@ -23,6 +25,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .grassland:  return Color(hue: 0.30, saturation: 0.40, brightness: 0.55)
         case .field:      return Color(hue: 0.20, saturation: 0.35, brightness: 0.55)
         case .wilderness: return Color(hue: 0.10, saturation: 0.30, brightness: 0.50)
+        case .sea:        return Color(hue: 0.58, saturation: 0.40, brightness: 0.60)
         }
     }
     // 아래쪽(x축 쪽) 색
@@ -31,6 +34,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .grassland:  return Color(hue: 0.30, saturation: 0.50, brightness: 0.40)
         case .field:      return Color(hue: 0.13, saturation: 0.45, brightness: 0.45)
         case .wilderness: return Color(hue: 0.07, saturation: 0.45, brightness: 0.40)
+        case .sea:        return Color(hue: 0.60, saturation: 0.55, brightness: 0.40)
         }
     }
     // 라인 색: bottomColor 보다 진하고 채도 높여서 가독성 확보
@@ -39,6 +43,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .grassland:  return Color(hue: 0.30, saturation: 0.70, brightness: 0.45)
         case .field:      return Color(hue: 0.13, saturation: 0.65, brightness: 0.50)
         case .wilderness: return Color(hue: 0.07, saturation: 0.65, brightness: 0.45)
+        case .sea:        return Color(hue: 0.58, saturation: 0.75, brightness: 0.55)
         }
     }
 
