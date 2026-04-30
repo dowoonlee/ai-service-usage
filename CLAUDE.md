@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`AIUsage` (SwiftPM target name: `ClaudeUsage`, bundle id `com.dwlee.AIUsage`) — a macOS 14+ accessory app that renders a floating panel showing Claude (claude.ai) and Cursor subscription usage. Both data sources use **unofficial endpoints** that can break without notice; treat any change there as fragile.
+`AIUsage` (SwiftPM target name: `ClaudeUsage`, bundle id `com.dwlee.AIUsage`) — a macOS 13+ accessory app that renders a floating panel showing Claude (claude.ai) and Cursor subscription usage. Both data sources use **unofficial endpoints** that can break without notice; treat any change there as fragile.
 
 ## Common commands
 
