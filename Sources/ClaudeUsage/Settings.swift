@@ -286,6 +286,7 @@ final class Settings: ObservableObject {
     /// (재연결 시 같은 PR로 중복 지급 방지).
     func disconnectGitHub() {
         Keychain.clearGitHubToken()
+        ContributorBonus.shared.updateToken(nil)
         githubLogin = nil
         githubUserID = nil
     }

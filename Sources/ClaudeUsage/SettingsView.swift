@@ -311,6 +311,7 @@ private struct GitHubLinkView: View {
                 state = .authenticating
                 let user = try await GitHubAuth.shared.fetchUser(token: token)
                 Keychain.saveGitHubToken(token)
+                ContributorBonus.shared.updateToken(token)
                 settings.githubLogin = user.login
                 settings.githubUserID = user.id
                 state = .idle

@@ -18,11 +18,29 @@ final class ContributorBonus {
     /// 동시 sync 폭주 방지용 게이트.
     private var syncing = false
 
+    /// GitHub 토큰 메모리 캐시. 폴링마다 keychain을 다시 치면 ad-hoc 서명 환경에서
+    /// 업데이트 후 ACL이 깨졌을 때 사용자에게 keychain 접근 다이얼로그가 반복적으로
+    /// 노출됨 — 캐시로 프로세스 수명 동안 1회 접근으로 줄임.
+    private var cachedToken: String?
+
+    /// 외부에서 토큰을 저장/삭제할 때 호출 — `SettingsView`의 연결 성공 직후,
+    /// `Settings.disconnectGitHub()`의 토큰 폐기 직후.
+    func updateToken(_ token: String?) {
+        cachedToken = token
+    }
+
+    private func currentToken() -> String? {
+        if let t = cachedToken { return t }
+        let t = Keychain.loadGitHubToken()
+        cachedToken = t
+        return t
+    }
+
     /// 토큰 + login이 있을 때만 동작. 호출은 폴링 루프 / 연결 직후 / 앱 시작 시.
     /// 내부에서 모든 예외를 흡수 — 네트워크/토큰 만료 시 조용히 실패.
     func sync() async {
         guard GitHubAuth.isConfigured,
-              let token = Keychain.loadGitHubToken(),
+              let token = currentToken(),
               let login = Settings.shared.githubLogin else { return }
         guard !syncing else { return }
         syncing = true
