@@ -96,12 +96,15 @@ struct SettingsView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
+            Section("GitHub 연동") {
+                GitHubLinkView(settings: settings)
+            }
             Section("정보") {
                 CreditsView()
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 520)
+        .frame(width: 380, height: 600)
     }
 
     // MARK: - 펫 picker helpers (보유 펫 + variant 페어 단위 선택)
@@ -186,6 +189,138 @@ private struct ThresholdEditor: View {
                 .disabled((Int(newValue) ?? 0) <= 0)
             }
             .padding(.top, 4)
+        }
+    }
+}
+
+// GitHub Device Flow UI — 빌드 시 GITHUB_CLIENT_ID 미설정이면 자동으로 비활성 안내만 표시.
+private struct GitHubLinkView: View {
+    @ObservedObject var settings: Settings
+
+    enum FlowState {
+        case idle
+        case requesting
+        case waiting(userCode: String, verificationURL: String)
+        case authenticating
+        case error(String)
+    }
+    @State private var state: FlowState = .idle
+    @State private var pollTask: Task<Void, Never>?
+
+    var body: some View {
+        if !GitHubAuth.isConfigured {
+            Text("GitHub 연동이 이 빌드에 포함되지 않았습니다. (GITHUB_CLIENT_ID 미설정)")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        } else if let login = settings.githubLogin {
+            connectedView(login: login)
+        } else {
+            disconnectedView
+        }
+    }
+
+    private func connectedView(login: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text("연결됨: @\(login)").font(.system(size: 12))
+                Spacer()
+                Button("연결 해제") {
+                    settings.disconnectGitHub()
+                    state = .idle
+                }
+            }
+            Text("머지된 기여 PR마다 \(CoinLedger.coinPerContributorPR) 코인 자동 적립.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Button("지금 동기화") {
+                Task { await ContributorBonus.shared.sync() }
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 11))
+        }
+    }
+
+    private var disconnectedView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch state {
+            case .idle:
+                Button("GitHub 연결하기") { startFlow() }
+                Text("기여한 PR이 머지되면 \(CoinLedger.coinPerContributorPR) 코인이 자동 적립됩니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            case .requesting:
+                HStack { ProgressView().controlSize(.small); Text("코드 요청 중...").font(.system(size: 11)) }
+            case .waiting(let userCode, let verificationURL):
+                waitingView(userCode: userCode, verificationURL: verificationURL)
+            case .authenticating:
+                HStack { ProgressView().controlSize(.small); Text("인증 처리 중...").font(.system(size: 11)) }
+            case .error(let msg):
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("실패: \(msg)").font(.system(size: 11)).foregroundStyle(.red)
+                    Button("다시 시도") { startFlow() }
+                }
+            }
+        }
+    }
+
+    private func waitingView(userCode: String, verificationURL: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("아래 코드를 GitHub에서 입력하세요")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Text(userCode)
+                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                    .textSelection(.enabled)
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(userCode, forType: .string)
+                } label: { Image(systemName: "doc.on.doc") }
+                    .buttonStyle(.borderless)
+                    .help("코드 복사")
+            }
+            HStack(spacing: 8) {
+                Button("GitHub 열기") {
+                    if let url = URL(string: verificationURL) { NSWorkspace.shared.open(url) }
+                }
+                Button("취소") {
+                    pollTask?.cancel()
+                    state = .idle
+                }
+            }
+            Text("브라우저에서 인증을 마치면 자동으로 연결됩니다.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+        }
+    }
+
+    private func startFlow() {
+        state = .requesting
+        pollTask?.cancel()
+        pollTask = Task { @MainActor in
+            do {
+                let code = try await GitHubAuth.shared.requestDeviceCode()
+                // user_code를 자동으로 클립보드에 복사 (GitHub에선 수동 입력 필요).
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(code.user_code, forType: .string)
+                state = .waiting(userCode: code.user_code, verificationURL: code.verification_uri)
+                let token = try await GitHubAuth.shared.pollForToken(
+                    deviceCode: code.device_code,
+                    interval: code.interval,
+                    expiresIn: code.expires_in
+                )
+                state = .authenticating
+                let user = try await GitHubAuth.shared.fetchUser(token: token)
+                Keychain.saveGitHubToken(token)
+                settings.githubLogin = user.login
+                settings.githubUserID = user.id
+                state = .idle
+                // 연결 직후 첫 sync — 과거 PR 일괄 보너스 트리거.
+                await ContributorBonus.shared.sync()
+            } catch is CancellationError {
+                state = .idle
+            } catch {
+                state = .error(error.localizedDescription)
+            }
         }
     }
 }

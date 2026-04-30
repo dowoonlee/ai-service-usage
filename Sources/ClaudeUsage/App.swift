@@ -44,6 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.registerSleepWakeObservers()
         // 기본 폴링 600s (10분). 자동화 트래픽 신호를 줄이기 위해 5분에서 늘림.
         vm.startPolling()
+        // GitHub 기여자 보너스 동기화 — 시작 시 1회 즉시 (다음 폴링 cycle 안 기다리게).
+        Task { await ContributorBonus.shared.sync() }
     }
 
     private func bindSettings() {

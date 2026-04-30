@@ -14,6 +14,10 @@ MIN_OS="14.0"
 SU_FEED_URL="${SU_FEED_URL:-https://raw.githubusercontent.com/dowoonlee/ai-service-usage/main/appcast.xml}"
 SU_PUBLIC_KEY="${SU_PUBLIC_KEY:-}"   # EdDSA public key (bin/generate_keys로 생성). 비어 있으면 Sparkle 키 검증 실패.
 
+# GitHub OAuth Device Flow client ID. 비어 있으면 앱의 GitHub 연동 UI는 자동 비활성.
+# Client ID는 공개 정보 — 빌드 산출물에 박혀도 보안상 무방. Client Secret은 device flow에서 안 씀.
+GITHUB_CLIENT_ID="${GITHUB_CLIENT_ID:-}"
+
 echo "==> swift build -c release"
 swift build -c release
 
@@ -86,6 +90,7 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
     <key>SUPublicEDKey</key><string>${SU_PUBLIC_KEY}</string>
     <key>SUEnableAutomaticChecks</key><true/>
     <key>SUScheduledCheckInterval</key><integer>86400</integer>
+    <key>GitHubClientID</key><string>${GITHUB_CLIENT_ID}</string>
 </dict>
 </plist>
 PLIST

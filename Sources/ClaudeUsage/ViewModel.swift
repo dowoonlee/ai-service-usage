@@ -192,6 +192,7 @@ final class ViewModel: ObservableObject {
                     await self.refreshClaude()
                     await self.refreshCursor()
                     self.accumulatePetUsage()
+                    await ContributorBonus.shared.sync()
                     self.updateBackoffAfterCycle()
                 }
 

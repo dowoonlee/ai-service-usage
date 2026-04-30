@@ -37,6 +37,7 @@ jobs:
         env:
           VERSION: ${{ steps.ver.outputs.version }}
           SU_PUBLIC_KEY: ${{ secrets.SU_PUBLIC_KEY }}
+          GITHUB_CLIENT_ID: ${{ secrets.GH_CONTRIBUTOR_CLIENT_ID }}
         run: bash scripts/package.sh
 
       - name: Compute SHA256

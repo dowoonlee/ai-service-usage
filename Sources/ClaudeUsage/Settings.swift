@@ -123,6 +123,21 @@ final class Settings: ObservableObject {
         didSet { UserDefaults.standard.set(firstCreditedAt, forKey: Keys.firstCreditedAt) }
     }
 
+    // MARK: - GitHub 기여자 보너스
+
+    /// 연결된 GitHub login (예: "youznn"). nil이면 미연결. 토큰은 Keychain에 별도 저장.
+    @Published var githubLogin: String? {
+        didSet { UserDefaults.standard.set(githubLogin, forKey: Keys.githubLogin) }
+    }
+    /// 연결된 GitHub user id — login 변경에 안전한 식별자.
+    @Published var githubUserID: Int? {
+        didSet { UserDefaults.standard.set(githubUserID, forKey: Keys.githubUserID) }
+    }
+    /// 이미 보너스가 적립된 PR 번호 집합 (dedupe). 한번 들어가면 영구 보존 — 계정 갈아끼워도 재지급 안 됨.
+    @Published var creditedPRNumbers: Set<Int> {
+        didSet { persistCreditedPRNumbers() }
+    }
+
     private init() {
         let d = UserDefaults.standard
         self.panelOpacity  = (d.object(forKey: Keys.panelOpacity) as? Double) ?? 1.0
@@ -165,6 +180,11 @@ final class Settings: ObservableObject {
         self.lastCursorEventCredited = d.object(forKey: Keys.lastCursorEventCredited) as? Date
         self.coinsTotalEarned = (d.object(forKey: Keys.coinsTotalEarned) as? Int) ?? 0
         self.firstCreditedAt = d.object(forKey: Keys.firstCreditedAt) as? Date
+
+        self.githubLogin = d.string(forKey: Keys.githubLogin)
+        self.githubUserID = (d.object(forKey: Keys.githubUserID) as? Int)
+        let creditedData = d.data(forKey: Keys.creditedPRNumbers)
+        self.creditedPRNumbers = (creditedData.flatMap { try? JSONDecoder().decode(Set<Int>.self, from: $0) }) ?? []
 
         // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
         //   1) 신규 사용자 (hasCompletedGachaMigration 아직 false): 첫 실행 시 3장 지급
@@ -256,6 +276,20 @@ final class Settings: ObservableObject {
         }
     }
 
+    private func persistCreditedPRNumbers() {
+        if let data = try? JSONEncoder().encode(creditedPRNumbers) {
+            UserDefaults.standard.set(data, forKey: Keys.creditedPRNumbers)
+        }
+    }
+
+    /// GitHub 연결 해제 — 토큰 폐기 + identity 클리어. creditedPRNumbers는 의도적으로 유지
+    /// (재연결 시 같은 PR로 중복 지급 방지).
+    func disconnectGitHub() {
+        Keychain.clearGitHubToken()
+        githubLogin = nil
+        githubUserID = nil
+    }
+
     /// 도감 슬롯 클릭 시 호출 — 그 펫의 강조 표시 해제. 비어있으면 no-op.
     func acknowledgeHighlight(_ kind: PetKind) {
         if pendingHighlights.contains(kind) {
@@ -322,5 +356,9 @@ final class Settings: ObservableObject {
         static let petUsageSeconds             = "settings.petUsageSeconds"
         static let pendingHighlights           = "settings.pendingHighlights"
         static let hasReceivedV032TicketBonus  = "settings.hasReceivedV032TicketBonus"
+        // GitHub 기여자 보너스
+        static let githubLogin                 = "settings.githubLogin"
+        static let githubUserID                = "settings.githubUserID"
+        static let creditedPRNumbers           = "settings.creditedPRNumbers"
     }
 }

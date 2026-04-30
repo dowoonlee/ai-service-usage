@@ -49,6 +49,16 @@ final class CoinLedger {
         DebugLog.log("CoinLedger: Wellness +\(amount) coin (total=\(Settings.shared.coins))")
     }
 
+    /// 외부 기여자 PR 머지 보너스. PR 1개 = 50 coin (정액).
+    /// dedupe는 호출 측(`ContributorBonus`)에서 `Settings.creditedPRNumbers`로 처리.
+    static let coinPerContributorPR: Int = 50
+    func creditContributorBonus(prCount: Int) {
+        guard prCount > 0 else { return }
+        let amount = prCount * Self.coinPerContributorPR
+        credit(amount)
+        DebugLog.log("CoinLedger: Contributor +\(amount) coin (\(prCount) PR) (total=\(Settings.shared.coins))")
+    }
+
     /// Claude snapshot에서 사용량 delta로 적립.
     /// - 같은 `resetAt` 안에서는 직전 본 pct 대비 delta(>0) × 환율 (소수부 carry).
     /// - `resetAt`이 변경되면 새 윈도우 시작 → baseline만 갱신.
