@@ -96,9 +96,12 @@ struct SettingsView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
+            Section("정보") {
+                CreditsView()
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 460)
+        .frame(width: 380, height: 520)
     }
 
     // MARK: - 펫 picker helpers (보유 펫 + variant 페어 단위 선택)
@@ -183,6 +186,76 @@ private struct ThresholdEditor: View {
                 .disabled((Int(newValue) ?? 0) <= 0)
             }
             .padding(.top, 4)
+        }
+    }
+}
+
+// CC-BY 4.0 attribution은 라이선스 의무 — UI에 노출 필수.
+private struct CreditsView: View {
+    private struct Pack: Identifiable {
+        let id = UUID()
+        let name: String
+        let author: String
+        let license: String
+        let url: String
+    }
+
+    private let packs: [Pack] = [
+        .init(name: "Animated Wild Animals", author: "ScratchIO",
+              license: "CC0",
+              url: "https://opengameart.org/content/animated-wild-animals"),
+        .init(name: "Pixel Adventure 1", author: "Pixel Frog",
+              license: "CC-BY 4.0",
+              url: "https://pixelfrog-assets.itch.io/pixel-adventure-1"),
+        .init(name: "Pixel Adventure 2", author: "Pixel Frog",
+              license: "CC-BY 4.0",
+              url: "https://pixelfrog-assets.itch.io/pixel-adventure-2"),
+        .init(name: "Kings and Pigs", author: "Pixel Frog",
+              license: "CC-BY 4.0",
+              url: "https://pixelfrog-assets.itch.io/kings-and-pigs"),
+        .init(name: "Pirate Bomb", author: "Pixel Frog",
+              license: "CC-BY 4.0",
+              url: "https://pixelfrog-assets.itch.io/pirate-bomb"),
+        .init(name: "Treasure Hunters", author: "Pixel Frog",
+              license: "CC-BY 4.0",
+              url: "https://pixelfrog-assets.itch.io/treasure-hunters"),
+        .init(name: "0x72 DungeonTileset II", author: "0x72",
+              license: "CC0",
+              url: "https://0x72.itch.io/dungeontileset-ii"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("에셋 크레딧")
+                .font(.system(size: 11, weight: .semibold))
+            ForEach(packs) { p in
+                HStack(spacing: 6) {
+                    Text(p.name)
+                        .font(.system(size: 11))
+                    Text("· \(p.author)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(p.license)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    Button {
+                        if let u = URL(string: p.url) { NSWorkspace.shared.open(u) }
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.borderless)
+                    .help(p.url)
+                }
+            }
+            Divider().padding(.vertical, 2)
+            Text("자동 업데이트는 Sparkle (MIT 라이선스)을 사용합니다.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Text("Pixel Frog 팩은 CC-BY 4.0 — 출처/저작자 표기 의무를 지킵니다.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
         }
     }
 }
