@@ -15,10 +15,17 @@ struct SettingsView: View {
                         .frame(width: 40, alignment: .trailing)
                 }
                 Toggle("사용 페이스 예측 표시", isOn: $settings.showPace)
-                Toggle("메뉴바에 % 표시", isOn: $settings.showMenuBar)
-                Text("메뉴바 모드에서는 패널 close 시 종료 대신 숨김으로 동작.")
+                Toggle("메뉴바 모드 활성화", isOn: $settings.showMenuBar)
+                Text("메뉴바 모드를 설정하면 패널 close 시 메뉴바에 펫이 표시됩니다.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+                if settings.showMenuBar {
+                    Picker("메뉴바에 표시할 펫", selection: $settings.menuBarPetSource) {
+                        ForEach(MenuBarPetSource.allCases) { src in
+                            Text(src.displayName).tag(src)
+                        }
+                    }
+                }
             }
             Section("펫") {
                 Toggle("Claude 차트에 펫 표시", isOn: $settings.petClaudeEnabled)
