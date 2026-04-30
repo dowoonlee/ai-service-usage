@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 
 /// `dismissWellnessNudge`의 결과. 호출 측 (WalkingCat)에서 코인 popping
 /// 애니메이션을 띄울지 결정하는 데 사용.
@@ -51,8 +52,41 @@ final class ViewModel: ObservableObject {
     private var lastPetUsageTickAt: Date?
 
     /// 한 번의 polling tick에서 펫 사용 시간으로 인정할 최대 초 (sleep/suspend 보호).
-    /// 폴링 주기 300s × 2 = 600s. 노트북 sleep 후 깨면 첫 tick은 600s 까지만 인정.
-    private static let petUsageMaxCreditPerTick: TimeInterval = 600
+    /// 폴링 주기 600s × 2 = 1200s. 노트북 sleep 후 깨면 첫 tick은 1200s 까지만 인정.
+    private static let petUsageMaxCreditPerTick: TimeInterval = 1200
+
+    // MARK: - Bot-detection mitigations
+    //
+    // 비공식 endpoint 의존도가 높아 자동화 흔적을 최대한 흐리는 것이 사용자 계정 안전과 직결.
+    // (1) jitter: 정확한 300/600s 간격은 robotic 패턴 → ±15% 무작위.
+    // (2) backoff: 429/5xx 등 transient 실패 시 지수적 sleep 늘림.
+    // (3) sleep gate: macOS sleep/wake 동안 폴링 중단 (깨자마자 폭주 방지).
+    // (4) visibility gate: panel/menu bar 모두 안 보이면 폴링 skip.
+    /// 폴링 cycle 직전 visibility 검사용 — App.swift가 panel show/orderOut 시 갱신.
+    /// 기본값 true (panel 가시 가정), 메뉴바 모드는 `Settings.showMenuBar`로 별도 판단.
+    var panelIsVisible: Bool = true
+    /// macOS sleep 진입 동안 true. didWake 시 false → polling 재개.
+    private var isSystemSleeping: Bool = false
+    /// 연속된 transient 실패 (429/5xx/network) 카운터. 성공 시 0으로 reset.
+    /// sleep 시간을 2^min(n,4) 배 (최대 16x) 늘려서 endpoint에 부담 안 주게 backoff.
+    private var consecutiveBackoffSteps: Int = 0
+    /// refresh 메서드가 결과를 적어두는 per-source 플래그 — 한 cycle 완료 후 backoff 갱신에 사용.
+    /// 인증 오류는 backoff 대상 아님 (재로그인이 필요한 사용자 액션).
+    private var claudePollOutcome: PollOutcome = .success
+    private var cursorPollOutcome: PollOutcome = .success
+
+    /// jitter 적용 — robotic 일정한 간격을 깸. 짧은 sleep (< 60s, reset 직전) 은 그대로 둠.
+    static func applyJitter(_ baseSleep: TimeInterval) -> TimeInterval {
+        guard baseSleep > 60 else { return baseSleep }
+        let factor = Double.random(in: 0.85...1.15)
+        return baseSleep * factor
+    }
+
+    /// 연속 실패 횟수 → sleep 배수. 0 → 1×, 1 → 2×, 2 → 4×, 3 → 8×, 4+ → 16×.
+    static func backoffMultiplier(steps: Int) -> Double {
+        let capped = max(0, min(4, steps))
+        return pow(2.0, Double(capped))
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -144,18 +178,82 @@ final class ViewModel: ObservableObject {
     static let resetGuard: TimeInterval = 30
     static let minSleep: TimeInterval = 5
 
-    func startPolling(interval: TimeInterval = 300) {
+    /// 기본 폴링 간격 600s (10분). 5분에서 늘려 트래픽 절반으로 — 비공식 endpoint 부담 + bot 검출 신호 ↓.
+    /// 차트 분해능은 살짝 떨어지지만 5h/7d 윈도우 추적엔 충분.
+    func startPolling(interval: TimeInterval = 600) {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                await self.refreshClaude()
-                await self.refreshCursor()
-                self.accumulatePetUsage()
-                let sleepSec = self.nextPollDelay(maxInterval: interval)
+                // (visibility gate) panel/menu bar 모두 안 보이면 refresh 스킵.
+                // (sleep gate) macOS sleep 동안에도 스킵 — 깨자마자 폭주 방지.
+                let active = self.shouldPollNow()
+                if active {
+                    await self.refreshClaude()
+                    await self.refreshCursor()
+                    self.accumulatePetUsage()
+                    self.updateBackoffAfterCycle()
+                }
+
+                // sleep 시간 = base × jitter × backoff multiplier.
+                // 비활성 상태(sleep/invisible)일 땐 jitter/backoff 없이 짧게 폴링 — 깨면 즉시 재개되도록.
+                let baseSleep = self.nextPollDelay(maxInterval: interval)
+                let sleepSec: TimeInterval
+                if active {
+                    let jittered = Self.applyJitter(baseSleep)
+                    let multiplier = Self.backoffMultiplier(steps: self.consecutiveBackoffSteps)
+                    sleepSec = min(60 * 60, jittered * multiplier)  // 한 시간 cap
+                } else {
+                    // sleep/invisible 동안엔 30s 간격으로 가벼운 polling — visibility/wake 빠르게 감지.
+                    sleepSec = min(baseSleep, 30)
+                }
+                DebugLog.log("Poll cycle done: active=\(active) base=\(Int(baseSleep))s → sleep=\(Int(sleepSec))s (backoff×\(Int(Self.backoffMultiplier(steps: self.consecutiveBackoffSteps))))")
                 try? await Task.sleep(nanoseconds: UInt64(sleepSec * 1_000_000_000))
             }
         }
+    }
+
+    /// 현재 polling을 진행할지 결정. macOS sleep 또는 가시 surface(패널/메뉴바) 둘 다 없으면 false.
+    private func shouldPollNow() -> Bool {
+        if isSystemSleeping { return false }
+        let visibleSurface = panelIsVisible || Settings.shared.showMenuBar
+        return visibleSurface
+    }
+
+    /// 한 cycle의 결과로 backoff counter 갱신.
+    /// 둘 중 하나라도 transient 실패면 step++; 둘 다 transient 아닌 (success/auth) 결과면 reset.
+    private func updateBackoffAfterCycle() {
+        let transient = (claudePollOutcome == .transientError) || (cursorPollOutcome == .transientError)
+        if transient {
+            consecutiveBackoffSteps = min(4, consecutiveBackoffSteps + 1)
+            DebugLog.log("Polling backoff step \(consecutiveBackoffSteps) → next sleep ×\(Self.backoffMultiplier(steps: consecutiveBackoffSteps))")
+        } else {
+            consecutiveBackoffSteps = 0
+        }
+    }
+
+    /// macOS sleep/wake 알림 등록. App.swift 또는 init에서 1회 호출.
+    /// sleep 동안 polling task가 내부적으로 멈춘다 (Task.sleep가 wall-clock 기반이라 자동 보정됨).
+    func registerSleepWakeObservers() {
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.isSystemSleeping = true
+                DebugLog.log("System will sleep — polling paused")
+            }
+        }
+        nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.isSystemSleeping = false
+                DebugLog.log("System did wake — polling resumed")
+            }
+        }
+    }
+
+    enum PollOutcome {
+        case success         // 정상 응답 (snapshot 적재됨)
+        case authError       // 401/403 등 — backoff 안 함, 사용자 재로그인 필요
+        case transientError  // 429/5xx/network — backoff 대상
     }
 
     /// 폴링 tick마다 호출 — 현재 차트에 배치된 펫(`petClaudeKind`/`petCursorKind`)에 실시간 누적.
@@ -242,15 +340,19 @@ final class ViewModel: ObservableObject {
             claudeNeedsLogin = false
             evaluateClaudeAlerts(snap)
             CoinLedger.shared.evaluateClaude(snapshot: snap)
+            claudePollOutcome = .success
         } catch UsageError.notLoggedIn {
             claudeNeedsLogin = true
             claudeError = "로그인 필요"
+            claudePollOutcome = .authError
         } catch UsageError.unauthorized {
             claudeNeedsLogin = true
             claudeError = "세션 만료"
             Keychain.clear()
+            claudePollOutcome = .authError
         } catch {
             claudeError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            claudePollOutcome = .transientError  // 429/5xx/network/decoding — 일단 backoff 대상으로 분류
         }
     }
 
@@ -290,14 +392,18 @@ final class ViewModel: ObservableObject {
                     Calendar(identifier: .gregorian).date(byAdding: .month, value: -1, to: resetAt) ?? resetAt.addingTimeInterval(-30 * 86400)
                 })
             }
+            cursorPollOutcome = .success
         } catch CursorError.cursorNotInstalled, CursorError.notLoggedIn {
             cursorNeedsSetup = true
             cursorError = "Cursor 앱 로그인 필요"
+            cursorPollOutcome = .authError
         } catch CursorError.unauthorized {
             cursorNeedsSetup = true
             cursorError = "Cursor 세션 만료 (앱에서 재로그인)"
+            cursorPollOutcome = .authError
         } catch {
             cursorError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            cursorPollOutcome = .transientError
         }
     }
 

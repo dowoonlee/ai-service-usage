@@ -20,7 +20,10 @@ enum TUIApp {
         atexit { Terminal.cleanup() }
 
         let vm = ViewModel()
-        vm.startPolling(interval: 300)
+        // GUI 모드와 동일하게 sleep/wake 보호 + 600s 기본 폴링 + jitter/backoff 사용.
+        // TUI는 always-visible 환경이라 panelIsVisible은 init 기본값 true 그대로 유지.
+        vm.registerSleepWakeObservers()
+        vm.startPolling()
 
         // 1초마다 다시 그림 (countdown 등 라이브 표시 위해).
         let renderTimer = Timer(timeInterval: 1.0, repeats: true) { _ in

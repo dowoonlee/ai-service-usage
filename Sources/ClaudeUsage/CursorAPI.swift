@@ -62,7 +62,9 @@ actor CursorAPI {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         return "\(home)/Library/Application Support/Cursor/User/globalStorage/state.vscdb"
     }()
-    private let ua = "ClaudeUsage/1.0"
+    // 'ClaudeUsage/1.0' 같은 자체 UA는 비-브라우저 자동화 신호로 분류돼 ban-risk 가
+    // 높음. 사용자가 cursor.com 대시보드를 열 때 보내는 것과 비슷한 Safari UA로 통일.
+    private let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
     func refresh() async throws -> CursorSnapshot {
         guard FileManager.default.fileExists(atPath: dbPath) else {

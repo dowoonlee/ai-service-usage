@@ -40,7 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         bindSettings()
         NotificationManager.shared.requestAuthorizationIfNeeded()
         _ = Updater.shared        // Sparkle 시작 (백그라운드 자동 체크)
-        vm.startPolling(interval: 300)
+        // 비공식 endpoint 보호 — sleep/wake 동안 폴링 중단해서 깨자마자 폭주 방지.
+        vm.registerSleepWakeObservers()
+        // 기본 폴링 600s (10분). 자동화 트래픽 신호를 줄이기 위해 5분에서 늘림.
+        vm.startPolling()
     }
 
     private func bindSettings() {
@@ -147,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 메뉴바 모드에서 close 버튼이 종료가 아닌 hide 로 동작하도록 delegate 설정.
         panel.delegate = self
         panel.orderFrontRegardless()
+        vm.panelIsVisible = true
         self.panel = panel
     }
 
@@ -189,6 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 메뉴바 모드를 끄는 순간 패널이 숨겨진 상태였으면 진입점을 잃으므로 다시 보여줌.
         if let panel = panel, !panel.isVisible {
             panel.orderFrontRegardless()
+            vm.panelIsVisible = true
         }
     }
 
@@ -221,8 +226,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard let panel = panel else { return }
         if panel.isVisible {
             panel.orderOut(nil)
+            vm.panelIsVisible = false
         } else {
             panel.orderFrontRegardless()
+            vm.panelIsVisible = true
         }
     }
 
@@ -256,6 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         MainActor.assumeIsolated {
             if Settings.shared.showMenuBar {
                 sender.orderOut(nil)
+                vm.panelIsVisible = false
                 return false
             }
             return true
