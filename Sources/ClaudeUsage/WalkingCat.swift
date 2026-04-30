@@ -104,7 +104,7 @@ struct WalkingCat: View {
                 ctrl.stop()
                 wellnessBlinkTask?.cancel()
             }
-            .onChange(of: wellnessNudge) { _, newValue in
+            .onChange(of: wellnessNudge) { newValue in
                 wellnessBlinkTask?.cancel()
                 guard newValue != nil else {
                     wellnessOpacity = 1.0

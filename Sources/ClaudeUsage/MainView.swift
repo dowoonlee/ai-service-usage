@@ -58,7 +58,7 @@ fileprivate extension View {
         chartOverlay { proxy in
             if enabled {
                 GeometryReader { geo in
-                    let plotFrame = proxy.plotFrame.map { geo[$0] } ?? .zero
+                    let plotFrame = geo[proxy.plotAreaFrame]
                     WalkingCat(
                         points: points,
                         proxy: proxy,
