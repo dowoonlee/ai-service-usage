@@ -166,7 +166,14 @@ final class Settings: ObservableObject {
         self.coinsTotalEarned = (d.object(forKey: Keys.coinsTotalEarned) as? Int) ?? 0
         self.firstCreditedAt = d.object(forKey: Keys.firstCreditedAt) as? Date
 
-        // 첫 실행 시 1회만: 가챠권 1장 지급 + 기존 사용 중이던 펫이 있으면 보유 목록에 등록.
+        // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
+        //   1) 신규 사용자 (hasCompletedGachaMigration 아직 false): 첫 실행 시 3장 지급
+        //   2) 기존 사용자 (이미 1장 받고 마이그레이션 완료): v0.3.2 보너스 블록에서 +2장
+        // wasExistingUser는 1번 블록이 hasCompletedGachaMigration을 true로 토글하기 전의 값으로,
+        // 신규 유저가 1번에서 3장 받은 다음 2번 블록에서 또 +2장 받는 이중 지급을 방지.
+        let wasExistingUser = d.bool(forKey: Keys.hasCompletedGachaMigration)
+
+        // (1) 첫 실행 시 1회만: 가챠권 3장 지급 + 기존 사용 중이던 펫이 있으면 보유 목록에 등록.
         //
         // 등급 가드: legacy default petKind가 Legendary/Epic이면 마이그레이션으로 무료 등록하지
         // 않는다 — 사용자는 가챠로 뽑아야 함. (`Gacha.isLegendaryOrEpic`가 권위 있는 검사.)
@@ -186,12 +193,49 @@ final class Settings: ObservableObject {
                 }
             }
             self.ownedPets = owned
-            self.gachaTickets = 1
+            self.gachaTickets = 3
             // didSet은 init 중엔 트리거되지 않으므로 직접 persist.
             persistOwnedPets()
-            d.set(1, forKey: Keys.gachaTickets)
+            d.set(3, forKey: Keys.gachaTickets)
             d.set(true, forKey: Keys.hasCompletedGachaMigration)
         }
+
+        // (2) 1회성 보너스 마이그레이션 — 신규 보너스를 추가하려면 아래 패턴으로 한 줄씩 늘리면 됨.
+        //
+        //   applyOnceMigration(key: <UserDefaults flag>, onlyExisting: <Bool>,
+        //                      wasExistingUser: wasExistingUser) {
+        //       <gachaTickets/coins 등 갱신>
+        //       <UserDefaults persist>
+        //   }
+        //
+        // - `key`        — UserDefaults Bool flag. 첫 발동 후 true 로 마킹되어 재실행 안 됨.
+        // - `onlyExisting=true` → 신규 사용자(첫 실행)는 스킵. (1)에서 이미 새 기본값을 받았으므로
+        //   이중 지급 방지. v0.3.2처럼 "기존 사용자 평준화" 의도일 때 사용.
+        // - `onlyExisting=false` → 모든 사용자에게 일괄 적용 (예: 일회성 무료 코인 지급 캠페인 등).
+        applyOnceMigration(key: Keys.hasReceivedV032TicketBonus,
+                           onlyExisting: true,
+                           wasExistingUser: wasExistingUser) {
+            self.gachaTickets += 2
+            d.set(self.gachaTickets, forKey: Keys.gachaTickets)
+        }
+    }
+
+    /// UserDefaults `key` 가 false 인 동안만 1회 `apply` 실행 후 true 로 마킹.
+    /// `onlyExisting=true` 면 `wasExistingUser` 가 false 인 신규 사용자에 대해서는 스킵하지만
+    /// flag 는 true 로 마킹해 재실행 안 함 (= "이 사용자는 이 보너스 처리됨" 으로 본다).
+    /// 한 번만 발동해야 하는 보너스/조정/마이그레이션 추가 시 재사용.
+    private func applyOnceMigration(
+        key: String,
+        onlyExisting: Bool,
+        wasExistingUser: Bool,
+        _ apply: () -> Void
+    ) {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: key) else { return }
+        if !onlyExisting || wasExistingUser {
+            apply()
+        }
+        d.set(true, forKey: key)
     }
 
     private func persistOwnedPets() {
@@ -277,5 +321,6 @@ final class Settings: ObservableObject {
         static let firstCreditedAt             = "settings.firstCreditedAt"
         static let petUsageSeconds             = "settings.petUsageSeconds"
         static let pendingHighlights           = "settings.pendingHighlights"
+        static let hasReceivedV032TicketBonus  = "settings.hasReceivedV032TicketBonus"
     }
 }
