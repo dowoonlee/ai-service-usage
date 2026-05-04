@@ -18,10 +18,14 @@ final class Settings: ObservableObject {
     @Published var showPace: Bool {
         didSet { UserDefaults.standard.set(showPace, forKey: Keys.showPace) }
     }
-    /// 메뉴바 status item 표시 여부. true면 메뉴바에 "Claude 73 · Cursor 42" 형태로 노출,
-    /// 패널 close 시 종료 대신 숨김으로 동작 (메뉴바 클릭으로 다시 표시).
+    /// 메뉴바 모드 — true 면 패널 close 시 종료 대신 숨김 + 메뉴바에 미니 sparkline + 펫 표시.
+    /// 기본 ON. 패널 가시성과 무관하게 메뉴바 item 은 항상 표시 (정주 인디케이터 모델).
     @Published var showMenuBar: Bool {
         didSet { UserDefaults.standard.set(showMenuBar, forKey: Keys.showMenuBar) }
+    }
+    /// 메뉴바에 표시할 펫의 데이터 출처 (claude or cursor). 기본 .claude.
+    @Published var menuBarPetSource: MenuBarPetSource {
+        didSet { UserDefaults.standard.set(menuBarPetSource.rawValue, forKey: Keys.menuBarPetSource) }
     }
     @Published var petClaudeEnabled: Bool {
         didSet { UserDefaults.standard.set(petClaudeEnabled, forKey: Keys.petClaudeEnabled) }
@@ -145,7 +149,8 @@ final class Settings: ObservableObject {
         let storedThresholds = (d.array(forKey: Keys.notifyThresholds) as? [Int]) ?? []
         self.notifyThresholds = storedThresholds.isEmpty ? [80, 95] : storedThresholds.sorted()
         self.showPace      = (d.object(forKey: Keys.showPace) as? Bool) ?? true
-        self.showMenuBar   = (d.object(forKey: Keys.showMenuBar) as? Bool) ?? false
+        self.showMenuBar   = (d.object(forKey: Keys.showMenuBar) as? Bool) ?? true
+        self.menuBarPetSource = (d.string(forKey: Keys.menuBarPetSource).flatMap { MenuBarPetSource(rawValue: $0) }) ?? .claude
         self.petClaudeEnabled = (d.object(forKey: Keys.petClaudeEnabled) as? Bool) ?? true
         self.petCursorEnabled = (d.object(forKey: Keys.petCursorEnabled) as? Bool) ?? true
         self.petClaudeKind = (d.string(forKey: Keys.petClaudeKind).flatMap { PetKind(rawValue: $0) }) ?? .fox
@@ -330,6 +335,7 @@ final class Settings: ObservableObject {
         static let notifyThresholds = "settings.notifyThresholds"
         static let showPace         = "settings.showPace"
         static let showMenuBar      = "settings.showMenuBar"
+        static let menuBarPetSource = "settings.menuBarPetSource"
         static let petClaudeEnabled = "settings.petClaudeEnabled"
         static let petCursorEnabled = "settings.petCursorEnabled"
         static let petClaudeKind    = "settings.petClaudeKind"
@@ -361,5 +367,19 @@ final class Settings: ObservableObject {
         static let githubLogin                 = "settings.githubLogin"
         static let githubUserID                = "settings.githubUserID"
         static let creditedPRNumbers           = "settings.creditedPRNumbers"
+    }
+}
+
+/// 메뉴바 위젯이 어느 데이터 출처(Claude / Cursor)의 펫과 사용률을 표시할지.
+enum MenuBarPetSource: String, Codable, CaseIterable, Identifiable, Hashable {
+    case claude
+    case cursor
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .cursor: return "Cursor"
+        }
     }
 }
