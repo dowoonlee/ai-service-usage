@@ -4,6 +4,7 @@ import SwiftUI
 // 기여자 페이지 — 메인 메뉴 ("기여자 보기...")에서 별도 NSWindow로 호출.
 // 데이터는 `Contributors`가 24h 캐시로 관리, 앱 시작 시 1회 refresh.
 
+@MainActor
 struct ContributorsPageView: View {
     @ObservedObject var contributors: Contributors
 
@@ -88,6 +89,7 @@ struct ContributorsPageView: View {
     }
 }
 
+@MainActor
 private struct ContributorCardView: View {
     let contributor: Contributor
     let rank: Int
@@ -219,6 +221,7 @@ private struct ContributorCardView: View {
     }
 }
 
+@MainActor
 private struct AvatarView: View {
     let url: String?
     let size: CGFloat
