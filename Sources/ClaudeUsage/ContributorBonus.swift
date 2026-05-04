@@ -21,18 +21,20 @@ final class ContributorBonus {
     /// GitHub 토큰 메모리 캐시. 폴링마다 keychain을 다시 치면 ad-hoc 서명 환경에서
     /// 업데이트 후 ACL이 깨졌을 때 사용자에게 keychain 접근 다이얼로그가 반복적으로
     /// 노출됨 — 캐시로 프로세스 수명 동안 1회 접근으로 줄임.
-    private var cachedToken: String?
+    /// `String??` 사용: nil = 미초기화(아직 keychain 미접근), .some(nil) = 토큰 없음 캐시됨.
+    /// 단순 `String?`이면 토큰 없는 사용자는 if-let에 매번 빠져서 keychain을 반복 호출함.
+    private var cachedToken: String??
 
     /// 외부에서 토큰을 저장/삭제할 때 호출 — `SettingsView`의 연결 성공 직후,
     /// `Settings.disconnectGitHub()`의 토큰 폐기 직후.
     func updateToken(_ token: String?) {
-        cachedToken = token
+        cachedToken = .some(token)
     }
 
     private func currentToken() -> String? {
-        if let t = cachedToken { return t }
+        if let cached = cachedToken { return cached }
         let t = Keychain.loadGitHubToken()
-        cachedToken = t
+        cachedToken = .some(t)
         return t
     }
 
