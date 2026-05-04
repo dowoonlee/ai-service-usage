@@ -132,6 +132,7 @@ struct MainView: View {
     var onLogin: () -> Void
     var onSettings: () -> Void
     var onContributors: () -> Void
+    var onBugReport: () -> Void
     var onQuit: () -> Void
 
     var body: some View {
@@ -190,6 +191,7 @@ struct MainView: View {
                 Button("업데이트 확인...") { Updater.shared.checkForUpdates() }
                 Button("설정...") { onSettings() }
                 Button("기여자 보기...") { onContributors() }
+                Button("버그 리포트...") { onBugReport() }
                 Divider()
                 Button("Claude 재로그인") { onLogin() }
                 Button("Claude 로그아웃") { vm.claudeLogout() }

@@ -146,6 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             onLogin: { [weak self] in self?.presentLogin() },
             onSettings: { [weak self] in self?.presentSettings() },
             onContributors: { ContributorsWindowController.shared.present() },
+            onBugReport: { BugReportWindowController.shared.present() },
             onQuit: { NSApp.terminate(nil) }
         )
         let host = NSHostingView(rootView: root)
