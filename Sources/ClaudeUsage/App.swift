@@ -64,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         vm.startPolling()
         // GitHub 기여자 보너스 동기화 — 시작 시 1회 즉시 (다음 폴링 cycle 안 기다리게).
         Task { await ContributorBonus.shared.sync() }
+        // PR 기여자 목록 — 24h 캐시라 호출은 사실상 사용자당 1회/일.
+        Task { await Contributors.shared.refreshIfNeeded() }
     }
 
     private func bindSettings() {
@@ -143,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             vm: vm,
             onLogin: { [weak self] in self?.presentLogin() },
             onSettings: { [weak self] in self?.presentSettings() },
+            onContributors: { ContributorsWindowController.shared.present() },
             onQuit: { NSApp.terminate(nil) }
         )
         let host = NSHostingView(rootView: root)
