@@ -92,11 +92,12 @@ struct GachaView: View {
     }
 
     /// 가챠 hatch 시퀀스(cracking/revealing)는 펫 commit 전이라 picker 잠금.
-    /// 단순 idle/egg 단계는 사용자가 다른 탭 보고 와도 되니 OK.
+    /// idle/egg/hatched/preview 단계는 다른 탭 봐도 OK.
+    /// (`hatchInProgress`는 .hatched 진입 후 reset 안 되어 picker 영구 잠금 버그가 있어 — phase만 검사)
     private var isHatchingMidAction: Bool {
         switch phase {
         case .cracking, .revealing: return true
-        default: return hatchInProgress
+        default: return false
         }
     }
 
