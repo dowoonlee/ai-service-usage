@@ -89,8 +89,11 @@ final class ClipboardWatcher: ObservableObject {
     func start() {
         check()
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.check() }
+        // shared singleton 직접 참조 — `[weak self]` 캡처를 Task가 사용하면 CI strict
+        // concurrency가 "reference to captured var 'self' in concurrently-executing code"
+        // 로 거부함. 인스턴스가 항상 살아있으므로 안전.
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            Task { @MainActor in ClipboardWatcher.shared.check() }
         }
     }
 
