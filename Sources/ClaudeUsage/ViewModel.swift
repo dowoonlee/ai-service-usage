@@ -74,18 +74,49 @@ final class ViewModel: ObservableObject {
     /// 인증 오류는 backoff 대상 아님 (재로그인이 필요한 사용자 액션).
     private var claudePollOutcome: PollOutcome = .success
     private var cursorPollOutcome: PollOutcome = .success
+    /// 연속 schema-suspect 카운터. 임계 도달 시 NotificationManager로 1회 알림.
+    /// success 시 0으로 reset, auth 에러는 카운터 유지(별개 사용자 액션).
+    private var claudeSchemaSuspectCount: Int = 0
+    private var cursorSchemaSuspectCount: Int = 0
+    /// 알림 발사 임계 — N회 연속 schema-suspect 시 1회 발송.
+    /// 폴링 600s × 3 = 30분 — 일시적 네트워크 jitter는 통과하고 진짜 변경만 잡힘.
+    static let schemaSuspectThreshold: Int = 3
 
     /// jitter 적용 — robotic 일정한 간격을 깸. 짧은 sleep (< 60s, reset 직전) 은 그대로 둠.
-    static func applyJitter(_ baseSleep: TimeInterval) -> TimeInterval {
+    nonisolated static func applyJitter(_ baseSleep: TimeInterval) -> TimeInterval {
         guard baseSleep > 60 else { return baseSleep }
         let factor = Double.random(in: 0.85...1.15)
         return baseSleep * factor
     }
 
     /// 연속 실패 횟수 → sleep 배수. 0 → 1×, 1 → 2×, 2 → 4×, 3 → 8×, 4+ → 16×.
-    static func backoffMultiplier(steps: Int) -> Double {
+    nonisolated static func backoffMultiplier(steps: Int) -> Double {
         let capped = max(0, min(4, steps))
         return pow(2.0, Double(capped))
+    }
+
+    /// API endpoint가 깨졌을 가능성이 있다고 판단할 만한 에러인지 분류.
+    /// - true: 응답 디코딩 실패 / 4xx (auth/429 제외) — 스키마·경로 변경 의심
+    /// - false: 401/403(auth), 429/5xx/network(transient)
+    /// 비공식 endpoint를 쓰는 만큼 변경 사실을 사용자에게 빨리 알리기 위한 신호 분류.
+    nonisolated static func isSchemaSuspect(_ error: Error) -> Bool {
+        if let e = error as? UsageError {
+            switch e {
+            case .decoding: return true
+            case .http(let code):
+                return (400..<500).contains(code) && code != 401 && code != 403 && code != 429
+            default: return false
+            }
+        }
+        if let e = error as? CursorError {
+            switch e {
+            case .decoding: return true
+            case .http(let code):
+                return (400..<500).contains(code) && code != 401 && code != 403 && code != 429
+            default: return false
+            }
+        }
+        return false
     }
 
     init() {
@@ -221,15 +252,38 @@ final class ViewModel: ObservableObject {
         return visibleSurface
     }
 
-    /// 한 cycle의 결과로 backoff counter 갱신.
-    /// 둘 중 하나라도 transient 실패면 step++; 둘 다 transient 아닌 (success/auth) 결과면 reset.
+    /// 한 cycle의 결과로 backoff counter + schema-suspect counter 갱신.
+    /// transient/schema-suspect 모두 backoff 대상 (endpoint 부담 줄이기).
+    /// schema-suspect는 추가로 per-source 카운터를 누적 — 임계 도달 시 1회 사용자 알림.
     private func updateBackoffAfterCycle() {
-        let transient = (claudePollOutcome == .transientError) || (cursorPollOutcome == .transientError)
+        func isBackoffWorthy(_ o: PollOutcome) -> Bool {
+            return o == .transientError || o == .apiSchemaSuspect
+        }
+        let transient = isBackoffWorthy(claudePollOutcome) || isBackoffWorthy(cursorPollOutcome)
         if transient {
             consecutiveBackoffSteps = min(4, consecutiveBackoffSteps + 1)
             DebugLog.log("Polling backoff step \(consecutiveBackoffSteps) → next sleep ×\(Self.backoffMultiplier(steps: consecutiveBackoffSteps))")
         } else {
             consecutiveBackoffSteps = 0
+        }
+
+        // Per-source schema-suspect: success가 들어오면 reset, auth 에러는 유지(중립).
+        // 임계 도달 정확히 그 cycle에 알림 1회 — NotificationManager가 24h 쿨다운으로 dedup.
+        if claudePollOutcome == .apiSchemaSuspect {
+            claudeSchemaSuspectCount += 1
+            if claudeSchemaSuspectCount == Self.schemaSuspectThreshold {
+                NotificationManager.shared.endpointSuspect(source: "Claude")
+            }
+        } else if claudePollOutcome == .success {
+            claudeSchemaSuspectCount = 0
+        }
+        if cursorPollOutcome == .apiSchemaSuspect {
+            cursorSchemaSuspectCount += 1
+            if cursorSchemaSuspectCount == Self.schemaSuspectThreshold {
+                NotificationManager.shared.endpointSuspect(source: "Cursor")
+            }
+        } else if cursorPollOutcome == .success {
+            cursorSchemaSuspectCount = 0
         }
     }
 
@@ -252,9 +306,10 @@ final class ViewModel: ObservableObject {
     }
 
     enum PollOutcome {
-        case success         // 정상 응답 (snapshot 적재됨)
-        case authError       // 401/403 등 — backoff 안 함, 사용자 재로그인 필요
-        case transientError  // 429/5xx/network — backoff 대상
+        case success            // 정상 응답 (snapshot 적재됨)
+        case authError          // 401/403 등 — backoff 안 함, 사용자 재로그인 필요
+        case transientError     // 429/5xx/network — backoff 대상
+        case apiSchemaSuspect   // 디코딩 실패 / 4xx (auth/429 제외) — endpoint 변경 의심
     }
 
     /// 폴링 tick마다 호출 — 현재 차트에 배치된 펫(`petClaudeKind`/`petCursorKind`)에 실시간 누적.
@@ -353,7 +408,8 @@ final class ViewModel: ObservableObject {
             claudePollOutcome = .authError
         } catch {
             claudeError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            claudePollOutcome = .transientError  // 429/5xx/network/decoding — 일단 backoff 대상으로 분류
+            // 디코딩/4xx(non-auth) → endpoint 변경 의심, 그 외 → transient. 둘 다 backoff 대상.
+            claudePollOutcome = Self.isSchemaSuspect(error) ? .apiSchemaSuspect : .transientError
         }
     }
 
@@ -404,7 +460,7 @@ final class ViewModel: ObservableObject {
             cursorPollOutcome = .authError
         } catch {
             cursorError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            cursorPollOutcome = .transientError
+            cursorPollOutcome = Self.isSchemaSuspect(error) ? .apiSchemaSuspect : .transientError
         }
     }
 
@@ -413,7 +469,7 @@ final class ViewModel: ObservableObject {
     // 현재 페이스로 주기 끝까지 갔을 때 예상 사용률(%).
     // current: 현재 % (0~100), resetAt: 주기 끝, periodLength: 주기 전체 길이(초).
     // 경과시간이 너무 짧으면 노이즈 → nil.
-    static func projectedPct(current: Double?, resetAt: Date?, periodLength: TimeInterval, now: Date) -> Double? {
+    nonisolated static func projectedPct(current: Double?, resetAt: Date?, periodLength: TimeInterval, now: Date) -> Double? {
         guard let current, let resetAt else { return nil }
         let remaining = resetAt.timeIntervalSince(now)
         let elapsed = periodLength - remaining
@@ -424,7 +480,7 @@ final class ViewModel: ObservableObject {
     }
 
     // 페이스가 100%를 초과할 때, 한도 도달 예상 시각.
-    static func projectedExhaustionDate(current: Double?, resetAt: Date?, periodLength: TimeInterval, now: Date) -> Date? {
+    nonisolated static func projectedExhaustionDate(current: Double?, resetAt: Date?, periodLength: TimeInterval, now: Date) -> Date? {
         guard let current, current > 0.1, let resetAt else { return nil }
         let elapsed = periodLength - resetAt.timeIntervalSince(now)
         let minElapsed = max(15 * 60, periodLength * 0.05)

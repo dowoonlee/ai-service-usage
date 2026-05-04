@@ -49,6 +49,21 @@ final class NotificationManager {
         d.set(t, forKey: thrKey)
     }
 
+    /// 비공식 endpoint(claude.ai/cursor.com) 응답이 연속으로 schema-suspect 판정될 때
+    /// 1회만 사용자에게 알림 — 같은 source 24시간 쿨다운.
+    /// 호출은 ViewModel.updateBackoffAfterCycle에서 임계 도달 cycle에 1회.
+    func endpointSuspect(source: String) {
+        let d = UserDefaults.standard
+        let key = "notify.endpoint.\(source).firedAt"
+        if let last = d.object(forKey: key) as? Date,
+           Date().timeIntervalSince(last) < 24 * 3600 { return }
+        let title = "\(source) API 응답 이상"
+        let body  = "\(source) 비공식 endpoint 스키마가 변경됐을 가능성이 있습니다. 앱 업데이트를 확인해주세요."
+        send(title: title, body: body)
+        d.set(Date(), forKey: key)
+        DebugLog.log("Endpoint suspect alerted: source=\(source)")
+    }
+
     /// 기여자 보너스 적립 알림 — `ContributorBonus.sync()`에서 새 PR 발견 시 1회 호출.
     func contributorBonus(prCount: Int, totalCoins: Int, prList: String) {
         let title = "기여자 보너스 +\(totalCoins) 코인"
