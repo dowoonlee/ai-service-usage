@@ -16,12 +16,13 @@ final class CoinLedger {
     static let shared = CoinLedger()
     private init() {}
 
-    /// 1 cent = 1 coin.
-    static let cursorCentToCoin: Double         = 1.0
+    /// 1 cent = 0.1 coin. v0.6.x balance patch — 1:1이면 Ultra 한 달 한도($400)가 40,000 coin이라
+    /// 폭주. 1/10로 낮춰 Ultra 한 달 max ~4,000 coin (가챠 ~20회/월). Claude 페이스와 균형.
+    static let cursorCentToCoin: Double         = 0.1
     /// Claude 5h 윈도우를 한 번 100% 채웠을 때 받는 코인 (Pro 기준, plan multiplier 적용 전).
-    static let claudeFiveHourMaxCoin: Double    = 50
+    static let claudeFiveHourMaxCoin: Double    = 30
     /// Claude 7d 윈도우 100% 채웠을 때 받는 코인 (Pro 기준).
-    static let claudeSevenDayMaxCoin: Double    = 100
+    static let claudeSevenDayMaxCoin: Double    = 60
 
     /// 누적 % 위치 → 누적 코인 비율. 양 끝(0%, 100%)은 고정, 중간 구간은 concave.
     /// shape(0)=0, shape(1)=1, 0<x<1에서 shape(x) > x → 초반 적립률↑/후반 적립률↓.
@@ -31,13 +32,12 @@ final class CoinLedger {
         return clamped.squareRoot()
     }
 
-    /// Claude plan별 코인 multiplier. plan 라벨의 5x/20x를 그대로 곱하면 Pro 사용자와 격차가
-    /// 너무 커서 의욕 저하 — 보수적으로 절반(또는 1/5) 정도 가중. Free=0.5 / Pro=1 / Max 5x=2 /
-    /// Max 20x=4 / Enterprise=1.5. planName이 nil이거나 매칭 실패 시 1.0 (안전한 기본).
+    /// Claude plan별 코인 multiplier. v0.6.x balance patch — Max 20x 4.0 → 2.5, Max 5x 2.0 → 1.5
+    /// 로 격차 완화. Pro/Free 그대로. Free=0.5 / Pro·Team=1 / Max 5x=1.5 / Max 20x=2.5 / Enterprise=1.5.
     nonisolated static func planMultiplier(_ planName: String?) -> Double {
         guard let name = planName?.lowercased() else { return 1.0 }
-        if name.contains("max 20")   { return 4.0 }
-        if name.contains("max 5") || name.contains("max") { return 2.0 }
+        if name.contains("max 20")   { return 2.5 }
+        if name.contains("max 5") || name.contains("max") { return 1.5 }
         if name.contains("enterprise") { return 1.5 }
         if name.contains("pro") || name.contains("team") { return 1.0 }
         if name.contains("free") { return 0.5 }
