@@ -66,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Task { await ContributorBonus.shared.sync() }
         // PR 기여자 목록 — 24h 캐시라 호출은 사실상 사용자당 1회/일.
         Task { await Contributors.shared.refreshIfNeeded() }
+        // 도장 마이그레이션 — Stash/Dependency 소급. Settings.init 안에서 호출하면
+        // `BadgeRegistry.evaluate`가 `Settings.shared`를 재진입해 crash.
+        Settings.shared.applyGymMigrationIfNeeded()
     }
 
     private func bindSettings() {

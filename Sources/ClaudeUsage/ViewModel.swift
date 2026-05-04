@@ -157,8 +157,8 @@ final class ViewModel: ObservableObject {
     // 5분 폴링 간격이라 1시간 = 12 스냅샷, 그 중 flat(델타 < 0.1%)이 2개 이하일 때 "계속 일하는 중"으로 본다.
     // 한 번 띄우면 1시간 쿨다운.
     static let wellnessIntervalSec: TimeInterval = 60 * 60
-    /// nudge 표시 후 이 시간 내에 클릭하면 보상.
-    static let wellnessRewardWindow: TimeInterval = 60
+    /// nudge 표시 후 이 시간 내에 클릭하면 보상 (5분 버퍼).
+    static let wellnessRewardWindow: TimeInterval = 5 * 60
     /// 보상 코인 수.
     static let wellnessRewardCoins: Int = 30
 
@@ -188,7 +188,7 @@ final class ViewModel: ObservableObject {
         lastWellnessShownAt = now
     }
 
-    /// nudge 클릭 처리. 표시 후 `wellnessRewardWindow`(60s) 이내면 코인 보상.
+    /// nudge 클릭 처리. 표시 후 `wellnessRewardWindow`(5분) 이내면 코인 보상.
     /// - Returns: 보상 여부와 금액. 호출 측이 popping 애니메이션 트리거에 사용.
     @discardableResult
     func dismissWellnessNudge() -> WellnessDismissResult {
@@ -198,6 +198,9 @@ final class ViewModel: ObservableObject {
         let amount = Self.wellnessRewardCoins
         // credit 정책(totalEarned/firstCreditedAt 추적)을 한곳에서만 관리하기 위해 CoinLedger 경유.
         CoinLedger.shared.creditWellness(amount: amount)
+        // Standup 도장 — `.rewarded`(60s 안 응답)만 카운트.
+        Settings.shared.wellnessRespondedCount += 1
+        BadgeRegistry.evaluate()
         return .rewarded(amount)
     }
 
@@ -220,11 +223,13 @@ final class ViewModel: ObservableObject {
                 // (sleep gate) macOS sleep 동안에도 스킵 — 깨자마자 폭주 방지.
                 let active = self.shouldPollNow()
                 if active {
+                    self.updateGymCountersOnCycleStart(sleepSec: interval)
                     await self.refreshClaude()
                     await self.refreshCursor()
                     self.accumulatePetUsage()
                     await ContributorBonus.shared.sync()
                     self.updateBackoffAfterCycle()
+                    BadgeRegistry.evaluate()
                 }
 
                 // sleep 시간 = base × jitter × backoff multiplier.
@@ -348,6 +353,33 @@ final class ViewModel: ObservableObject {
         s.ownedPets = owned
     }
 
+    /// 도장 카운터 — Heartbeat (36h grace streak), Night Owl (0~6시 폴링 누적).
+    /// Rate Limit은 7d resetAt 변경 시점에 평가하므로 `refreshClaude`에서 따로 처리.
+    /// `sleepSec`은 직전 cycle의 sleep 길이 — Night Owl 누적 단위.
+    private func updateGymCountersOnCycleStart(sleepSec: TimeInterval) {
+        let s = Settings.shared
+        let now = Date()
+
+        // Heartbeat — 36h grace + 자정 기준 day 변경 시 streak++.
+        if let last = s.heartbeatLastActiveAt {
+            let elapsed = now.timeIntervalSince(last)
+            if elapsed > 36 * 3600 {
+                s.heartbeatStreak = 1
+            } else if !Calendar.current.isDate(last, inSameDayAs: now) {
+                s.heartbeatStreak += 1
+            }
+        } else {
+            s.heartbeatStreak = 1
+        }
+        s.heartbeatLastActiveAt = now
+
+        // Night Owl — 자정~6시면 직전 sleep 길이만큼 누적. 첫 cycle은 sleep 없으니 0.
+        let hour = Calendar.current.component(.hour, from: now)
+        if hour < 6 {
+            s.nightOwlSecondsAccumulated += Int(sleepSec)
+        }
+    }
+
     func nextPollDelay(maxInterval: TimeInterval) -> TimeInterval {
         Self.nextPollDelay(
             now: Date(),
@@ -395,6 +427,7 @@ final class ViewModel: ObservableObject {
             claudeLastSuccess = snap.takenAt
             claudeNeedsLogin = false
             evaluateClaudeAlerts(snap)
+            evaluateRateLimitGym(snap)
             CoinLedger.shared.evaluateClaude(snapshot: snap)
             claudePollOutcome = .success
         } catch UsageError.notLoggedIn {
@@ -553,6 +586,22 @@ final class ViewModel: ObservableObject {
             resetAt: cursorCurrent?.resetAt,
             periodLength: cursorPeriodLength, now: now
         )
+    }
+
+    // MARK: - Gym (Rate Limit)
+
+    /// Rate Limit 도장 — 7d resetAt이 변경된 cycle에서 *직전* pct가 < 80%면 +1.
+    /// `lastClaudeSevenDayReset`/`lastClaudeSevenDayPctSeen`은 CoinLedger.evaluateClaude가
+    /// 같은 cycle 안 뒷쪽에서 갱신하므로 *그 전*에 비교해야 직전 값 유지된 상태로 detect.
+    private func evaluateRateLimitGym(_ snap: UsageSnapshot) {
+        let s = Settings.shared
+        guard let newReset = snap.sevenDayResetAt,
+              let lastReset = s.lastClaudeSevenDayReset,
+              newReset != lastReset,                   // 윈도우 변경
+              let lastPct = s.lastClaudeSevenDayPctSeen,
+              lastPct < 80 else { return }
+        s.rateLimitWeeksPassed += 1
+        DebugLog.log("Gym RateLimit: weeks=\(s.rateLimitWeeksPassed) (last 7d=\(String(format: "%.1f", lastPct))%)")
     }
 
     // MARK: - Alert evaluation

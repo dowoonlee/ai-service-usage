@@ -1,0 +1,22 @@
+Intersect Engine Free Asset Pack — Terrain Tile sprites
+Source:  https://github.com/AscensionGameDev/Intersect-Assets (branch: main_full)
+Folder:  resources/tilesets/Autotiles_Ground.png + Autotiles_Water.png
+
+Each tile is a 32x32 cell extracted from the autotile sheet:
+
+  tile_grass.png     ← Autotiles_Ground.png   (col 1, row 1)
+  tile_sand.png      ← Autotiles_Ground.png   (col 7, row 0)
+  tile_mountain.png  ← Autotiles_Ground.png   (col 10, row 7)
+  tile_water.png     ← Autotiles_Water.png    (col 1, row 4)
+  tile_lake.png      ← Autotiles_Ground.png   (col 1, row 12)
+
+License (per upstream README — same as items pack):
+  Various authors at AGD; without per-file attribution the most restrictive
+  applicable license applies — CC BY-SA 3.0:
+  https://creativecommons.org/licenses/by-sa/3.0/
+
+Authors (collective): George Bailey, PixelFox, Zetasis, Murdoc, Aesthetic
+(see https://www.ascensiongamedev.com/topic/742-16x16-custom-assets/ et al.)
+
+Used in: WorldMapView (도장 페이지) base map. Rendered via Canvas with
+nearest-neighbor scaling at ~16px/cell. No modifications.

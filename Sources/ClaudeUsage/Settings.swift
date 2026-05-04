@@ -127,6 +127,53 @@ final class Settings: ObservableObject {
         didSet { UserDefaults.standard.set(firstCreditedAt, forKey: Keys.firstCreditedAt) }
     }
 
+    // MARK: - 도장 (Gym Badges)
+    //
+    // 8 카테고리 × 4 tier = 32 뱃지 + 챔피언 1 = 33. 각 카테고리는 별도 카운터/metric을 갖고,
+    // `BadgeRegistry.evaluate()`가 polling cycle 끝/사용자 액션 직후 호출되어 새로 임계 통과한
+    // 뱃지를 `clearedBadges`에 삽입하고 보너스 코인을 적립한다.
+
+    /// Standup — `dismissWellnessNudge`의 `.rewarded` 결과 시 +1.
+    @Published var wellnessRespondedCount: Int {
+        didSet { UserDefaults.standard.set(wellnessRespondedCount, forKey: Keys.wellnessRespondedCount) }
+    }
+    /// Rate Limit — 7d resetAt 변경 직전 pct가 <80%면 +1.
+    @Published var rateLimitWeeksPassed: Int {
+        didSet { UserDefaults.standard.set(rateLimitWeeksPassed, forKey: Keys.rateLimitWeeksPassed) }
+    }
+    /// Vibe·Claude — `CoinLedger.evaluateClaude`가 credit한 코인 누적 (5h+7d 합산, plan multiplier 포함).
+    @Published var claudeCoinsEarned: Int {
+        didSet { UserDefaults.standard.set(claudeCoinsEarned, forKey: Keys.claudeCoinsEarned) }
+    }
+    /// Vibe·Cursor — `CoinLedger.evaluateCursor`가 credit한 코인 누적.
+    @Published var cursorCoinsEarned: Int {
+        didSet { UserDefaults.standard.set(cursorCoinsEarned, forKey: Keys.cursorCoinsEarned) }
+    }
+    /// Heartbeat — 36h grace streak. polling 진입 시 갱신.
+    @Published var heartbeatStreak: Int {
+        didSet { UserDefaults.standard.set(heartbeatStreak, forKey: Keys.heartbeatStreak) }
+    }
+    @Published var heartbeatLastActiveAt: Date? {
+        didSet { UserDefaults.standard.set(heartbeatLastActiveAt, forKey: Keys.heartbeatLastActiveAt) }
+    }
+    /// Night Owl — 자정~6시 polling cycle의 sleep length 누적 (초).
+    @Published var nightOwlSecondsAccumulated: Int {
+        didSet { UserDefaults.standard.set(nightOwlSecondsAccumulated, forKey: Keys.nightOwlSecondsAccumulated) }
+    }
+    /// 클리어된 뱃지 ID 집합. 형식: `"<category>.<tier>"` (예: `"standup.production"`).
+    @Published var clearedBadges: Set<String> {
+        didSet { persistClearedBadges() }
+    }
+    /// 챔피언 뱃지(33번째) 획득 시각. nil = 미획득.
+    @Published var championBadgeEarnedAt: Date? {
+        didSet { UserDefaults.standard.set(championBadgeEarnedAt, forKey: Keys.championBadgeEarnedAt) }
+    }
+    /// 도장 페이지에서 reveal 강조용 — 앱 launch 후 아직 사용자가 도장 페이지를 안 열어
+    /// migration으로 자동 클리어된 뱃지를 처음 보는 상태인지.
+    @Published var hasViewedGymPage: Bool {
+        didSet { UserDefaults.standard.set(hasViewedGymPage, forKey: Keys.hasViewedGymPage) }
+    }
+
     // MARK: - GitHub 기여자 보너스
 
     /// 연결된 GitHub login (예: "youznn"). nil이면 미연결. 토큰은 Keychain에 별도 저장.
@@ -191,6 +238,19 @@ final class Settings: ObservableObject {
         let creditedData = d.data(forKey: Keys.creditedPRNumbers)
         self.creditedPRNumbers = (creditedData.flatMap { try? JSONDecoder().decode(Set<Int>.self, from: $0) }) ?? []
 
+        // 도장 카운터 로드
+        self.wellnessRespondedCount = (d.object(forKey: Keys.wellnessRespondedCount) as? Int) ?? 0
+        self.rateLimitWeeksPassed   = (d.object(forKey: Keys.rateLimitWeeksPassed) as? Int) ?? 0
+        self.claudeCoinsEarned      = (d.object(forKey: Keys.claudeCoinsEarned) as? Int) ?? 0
+        self.cursorCoinsEarned      = (d.object(forKey: Keys.cursorCoinsEarned) as? Int) ?? 0
+        self.heartbeatStreak        = (d.object(forKey: Keys.heartbeatStreak) as? Int) ?? 0
+        self.heartbeatLastActiveAt  = d.object(forKey: Keys.heartbeatLastActiveAt) as? Date
+        self.nightOwlSecondsAccumulated = (d.object(forKey: Keys.nightOwlSecondsAccumulated) as? Int) ?? 0
+        let clearedData = d.data(forKey: Keys.clearedBadges)
+        self.clearedBadges = (clearedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        self.championBadgeEarnedAt = d.object(forKey: Keys.championBadgeEarnedAt) as? Date
+        self.hasViewedGymPage      = (d.object(forKey: Keys.hasViewedGymPage) as? Bool) ?? false
+
         // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
         //   1) 신규 사용자 (hasCompletedGachaMigration 아직 false): 첫 실행 시 3장 지급
         //   2) 기존 사용자 (이미 1장 받고 마이그레이션 완료): v0.3.2 보너스 블록에서 +2장
@@ -243,6 +303,18 @@ final class Settings: ObservableObject {
             self.gachaTickets += 2
             d.set(self.gachaTickets, forKey: Keys.gachaTickets)
         }
+
+        // 도장 마이그레이션은 init 안에서 호출 금지 — `BadgeRegistry.evaluate`가 `Settings.shared`를
+        // 재진입해서 lazy init이 깨짐. App 시작 후 `applyGymMigrationIfNeeded()`에서 처리.
+    }
+
+    /// 도장 (Gym Badges) 마이그레이션 — Stash·Dependency만 소급, 나머지 6 카테고리는 0부터.
+    /// `Settings.shared` 초기화가 끝난 뒤 App 시작 훅(`applicationDidFinishLaunching`)에서 1회 호출.
+    func applyGymMigrationIfNeeded() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: Keys.hasMigratedGymBadges) else { return }
+        BadgeRegistry.evaluate(silent: true)
+        d.set(true, forKey: Keys.hasMigratedGymBadges)
     }
 
     /// UserDefaults `key` 가 false 인 동안만 1회 `apply` 실행 후 true 로 마킹.
@@ -284,6 +356,12 @@ final class Settings: ObservableObject {
     private func persistCreditedPRNumbers() {
         if let data = try? JSONEncoder().encode(creditedPRNumbers) {
             UserDefaults.standard.set(data, forKey: Keys.creditedPRNumbers)
+        }
+    }
+
+    private func persistClearedBadges() {
+        if let data = try? JSONEncoder().encode(clearedBadges) {
+            UserDefaults.standard.set(data, forKey: Keys.clearedBadges)
         }
     }
 
@@ -367,6 +445,18 @@ final class Settings: ObservableObject {
         static let githubLogin                 = "settings.githubLogin"
         static let githubUserID                = "settings.githubUserID"
         static let creditedPRNumbers           = "settings.creditedPRNumbers"
+        // 도장 (Gym Badges)
+        static let wellnessRespondedCount      = "settings.wellnessRespondedCount"
+        static let rateLimitWeeksPassed        = "settings.rateLimitWeeksPassed"
+        static let claudeCoinsEarned           = "settings.claudeCoinsEarned"
+        static let cursorCoinsEarned           = "settings.cursorCoinsEarned"
+        static let heartbeatStreak             = "settings.heartbeatStreak"
+        static let heartbeatLastActiveAt       = "settings.heartbeatLastActiveAt"
+        static let nightOwlSecondsAccumulated  = "settings.nightOwlSecondsAccumulated"
+        static let clearedBadges               = "settings.clearedBadges"
+        static let championBadgeEarnedAt       = "settings.championBadgeEarnedAt"
+        static let hasViewedGymPage            = "settings.hasViewedGymPage"
+        static let hasMigratedGymBadges        = "settings.hasMigratedGymBadges"
     }
 }
 

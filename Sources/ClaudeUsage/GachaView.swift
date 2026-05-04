@@ -21,6 +21,19 @@ struct GachaView: View {
     @State private var crackStartedAt: Date?
     /// 임계 도달 후 Task spawn race 방지. 부화 시퀀스가 한 번만 commit하도록 가드.
     @State private var hatchInProgress: Bool = false
+    /// 상점/도장 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
+    @State private var selectedTab: Tab = .shop
+
+    enum Tab: String, CaseIterable, Identifiable {
+        case shop, gym
+        var id: String { rawValue }
+        var displayName: String {
+            switch self {
+            case .shop: return "상점"
+            case .gym:  return "도장"
+            }
+        }
+    }
 
     /// 알을 깨는 데 필요한 탭 수.
     private static let eggTapsRequired: Int = 6
@@ -42,6 +55,32 @@ struct GachaView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $selectedTab) {
+                ForEach(Tab.allCases) { t in
+                    Text(t.displayName).tag(t)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(isHatchingMidAction)
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
+
+            ZStack {
+                if selectedTab == .shop {
+                    shopTab.transition(.opacity)
+                } else {
+                    GymView().transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: selectedTab)
+        }
+        .frame(width: 480, height: 640)
+    }
+
+    private var shopTab: some View {
         VStack(spacing: 16) {
             header
             Divider()
@@ -50,7 +89,15 @@ struct GachaView: View {
             inventorySection
         }
         .padding(20)
-        .frame(width: 480, height: 640)
+    }
+
+    /// 가챠 hatch 시퀀스(cracking/revealing)는 펫 commit 전이라 picker 잠금.
+    /// 단순 idle/egg 단계는 사용자가 다른 탭 보고 와도 되니 OK.
+    private var isHatchingMidAction: Bool {
+        switch phase {
+        case .cracking, .revealing: return true
+        default: return hatchInProgress
+        }
     }
 
     // MARK: - Header (잔액 + 뽑기 버튼)

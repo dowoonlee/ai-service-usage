@@ -64,6 +64,28 @@ final class NotificationManager {
         DebugLog.log("Endpoint suspect alerted: source=\(source)")
     }
 
+    /// 도장 클리어 알림 — 한 cycle에 N개 동시에 클리어돼도 단일 알림으로 묶어 발송.
+    /// migration 자동 클리어는 `evaluate(silent: true)`로 호출되어 이쪽으로 안 옴.
+    func badgesCleared(ids: [BadgeID]) {
+        guard !ids.isEmpty else { return }
+        let bonus = ids.reduce(0) { $0 + $1.tier.coinReward }
+        if ids.count == 1 {
+            let id = ids[0]
+            send(title: "도장 클리어: \(id.category.displayName) · \(id.tier.displayName)",
+                 body: "+\(bonus) 코인 적립")
+        } else {
+            let summary = ids.map { "\($0.category.displayName) \($0.tier.displayName)" }.joined(separator: ", ")
+            send(title: "도장 \(ids.count)개 클리어",
+                 body: "+\(bonus) 코인 — \(summary)")
+        }
+    }
+
+    /// 챔피언 뱃지 획득 알림.
+    func championEarned() {
+        send(title: "🏆 챔피언 등극!",
+             body: "모든 도장을 정복했습니다 +\(BadgeRegistry.championCoinReward) 코인")
+    }
+
     /// 기여자 보너스 적립 알림 — `ContributorBonus.sync()`에서 새 PR 발견 시 1회 호출.
     func contributorBonus(prCount: Int, totalCoins: Int, prList: String) {
         let title = "기여자 보너스 +\(totalCoins) 코인"

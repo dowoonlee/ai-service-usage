@@ -1,0 +1,32 @@
+Intersect Engine Free Asset Pack — Jewel & Coin sprites
+Source:  https://github.com/AscensionGameDev/Intersect-Assets (branch: main_full)
+Folder:  resources/items/Jewel_*.png, Coins_01.png
+
+The Intersect Asset Pack is a community collection. Each individual asset's
+specific authorship is not separately documented in the upstream repo's
+`credits.json`; possible authors of the item icons include:
+
+  - George Bailey (CC BY 4.0)
+    https://www.ascensiongamedev.com/profile/20-george/
+  - Joe Williamson / @JoeCreates (CC BY-SA 3.0)
+    https://opengameart.org/content/roguelikerpg-items
+  - 7Soul (custom license — commercial use permitted)
+    https://7soul.itch.io/
+
+Without explicit per-file attribution we treat these sprites under the most
+restrictive applicable license — CC BY-SA 3.0:
+
+  https://creativecommons.org/licenses/by-sa/3.0/
+
+Used files in this project (renamed for semantic clarity, content unchanged):
+
+  Jewel_Ruby.png      ← Jewel_01.png  → BadgeCategory.heartbeat
+  Jewel_Sapphire.png  ← Jewel_02.png  → BadgeCategory.rateLimit
+  Jewel_Emerald.png   ← Jewel_03.png  → BadgeCategory.cursor
+  Jewel_Amethyst.png  ← Jewel_05.png  → BadgeCategory.claude
+  Jewel_Pearl.png     ← Jewel_06.png  → BadgeCategory.standup
+  Jewel_Opal.png      ← Jewel_11.png  → BadgeCategory.nightOwl
+  Jewel_Diamond.png   ← Jewel_12.png  → BadgeCategory.dependency
+  Coins_Gold.png      ← Coins_01.png  → BadgeCategory.stash
+
+Used in: GymView (도장 페이지) tier cells. Displayed at 24-32px.
