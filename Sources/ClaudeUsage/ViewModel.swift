@@ -648,7 +648,15 @@ final class ViewModel: ObservableObject {
         ) { t in "이번 달 사용량이 \(t)%를 넘었습니다." }
     }
 
+    /// `await fetchEvents` 사이 다른 호출이 들어와 같은 events를 두 번 credit하는 race 방지.
+    /// @MainActor라 단순 Bool 가드면 atomic. 두 번째 호출은 즉시 return.
+    private var cursorEventsFetching: Bool = false
+
     private func fetchCursorEventsIncrement(periodStart: Date?) async {
+        guard !cursorEventsFetching else { return }
+        cursorEventsFetching = true
+        defer { cursorEventsFetching = false }
+
         // 캐시된 이벤트가 periodStart 밖에 있으면 정리
         if let start = periodStart {
             cursorEvents.removeAll { $0.timestamp < start }
