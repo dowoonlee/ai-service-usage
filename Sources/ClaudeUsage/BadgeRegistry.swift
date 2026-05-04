@@ -227,8 +227,8 @@ struct BadgeID: Hashable, Codable {
 
 @MainActor
 enum BadgeRegistry {
-    /// 모든 32 뱃지.
-    static var allBadges: [BadgeID] {
+    /// 모든 32 뱃지. 순수 enum 조합이라 `nonisolated` — MainActor 의존 없음.
+    nonisolated static var allBadges: [BadgeID] {
         BadgeCategory.allCases.flatMap { cat in
             BadgeTier.allCases.map { BadgeID(category: cat, tier: $0) }
         }
