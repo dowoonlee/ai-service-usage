@@ -2,20 +2,12 @@ import XCTest
 @testable import ClaudeUsage
 
 final class EndpointSuspectTests: XCTestCase {
-    // 디코딩 에러는 endpoint 변경 의심.
+    // 디코딩 에러는 endpoint 변경 의심. isSchemaSuspect는 .decoding 케이스만 매칭하고
+    // inner error 타입은 검사하지 않으므로 임의 NSError로 충분.
     func testDecodingErrorIsSuspect() {
-        struct Dummy: Decodable {}
-        let badJSON = Data("{\"unrelated\":1}".utf8)
-        let decodeErr: Error
-        do {
-            _ = try JSONDecoder().decode(Dummy.self, from: badJSON)
-            XCTFail("decode should have thrown")
-            return
-        } catch {
-            decodeErr = error
-        }
-        XCTAssertTrue(ViewModel.isSchemaSuspect(UsageError.decoding(decodeErr)))
-        XCTAssertTrue(ViewModel.isSchemaSuspect(CursorError.decoding(decodeErr)))
+        let inner = NSError(domain: "test.decoding", code: 1)
+        XCTAssertTrue(ViewModel.isSchemaSuspect(UsageError.decoding(inner)))
+        XCTAssertTrue(ViewModel.isSchemaSuspect(CursorError.decoding(inner)))
     }
 
     // 4xx (auth/429 제외)는 endpoint 변경 의심.
