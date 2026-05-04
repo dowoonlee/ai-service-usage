@@ -147,8 +147,18 @@ final class ViewModel: ObservableObject {
             Task { @MainActor in
                 self.now = Date()
                 self.evaluateWellnessNudge()
+                self.expireWellnessNudgeIfNeeded()
             }
         }
+    }
+
+    /// reward window(5분)가 지나면 nudge 자동 사라짐. 클릭 안 해도 시간 지나면 reset —
+    /// 이슈 #9: "30초 지나면 메세지 사라지게" 후속으로 reward window와 동기화해 5분 후 자동 dismiss.
+    private func expireWellnessNudgeIfNeeded() {
+        guard wellnessNudge != nil,
+              let shownAt = lastWellnessShownAt,
+              Date().timeIntervalSince(shownAt) >= Self.wellnessRewardWindow else { return }
+        wellnessNudge = nil
     }
 
     // MARK: - Wellness nudge

@@ -49,13 +49,13 @@ final class CoinCurveTests: XCTestCase {
         XCTAssertEqual(curr - prev, CoinLedger.claudeSevenDayMaxCoin, accuracy: 1e-9)
     }
 
-    // Plan multiplier 매핑 — 명시 케이스 + 기본값.
+    // Plan multiplier 매핑 — 명시 케이스 + 기본값. v0.6.x balance patch 후 값.
     func testPlanMultiplierMapping() {
         XCTAssertEqual(CoinLedger.planMultiplier("Free"),       0.5)
         XCTAssertEqual(CoinLedger.planMultiplier("Pro"),        1.0)
-        XCTAssertEqual(CoinLedger.planMultiplier("Max"),        2.0)
-        XCTAssertEqual(CoinLedger.planMultiplier("Max 5x"),     2.0)
-        XCTAssertEqual(CoinLedger.planMultiplier("Max 20x"),    4.0)
+        XCTAssertEqual(CoinLedger.planMultiplier("Max"),        1.5)
+        XCTAssertEqual(CoinLedger.planMultiplier("Max 5x"),     1.5)
+        XCTAssertEqual(CoinLedger.planMultiplier("Max 20x"),    2.5)
         XCTAssertEqual(CoinLedger.planMultiplier("Team"),       1.0)
         XCTAssertEqual(CoinLedger.planMultiplier("Enterprise"), 1.5)
         XCTAssertEqual(CoinLedger.planMultiplier(nil),          1.0)
@@ -64,18 +64,18 @@ final class CoinCurveTests: XCTestCase {
 
     // 대소문자/공백 변형도 정상 매칭.
     func testPlanMultiplierCaseInsensitive() {
-        XCTAssertEqual(CoinLedger.planMultiplier("MAX 20x"), 4.0)
-        XCTAssertEqual(CoinLedger.planMultiplier("max 5x"),  2.0)
+        XCTAssertEqual(CoinLedger.planMultiplier("MAX 20x"), 2.5)
+        XCTAssertEqual(CoinLedger.planMultiplier("max 5x"),  1.5)
         XCTAssertEqual(CoinLedger.planMultiplier("PRO"),     1.0)
     }
 
-    // Plan multiplier가 양 끝 invariant를 깨지 않는지 — Max 20x가 100% 채울 때 200 coin.
+    // Plan multiplier가 양 끝 invariant를 깨지 않는지 — 5h max 30, plan별 100% 채울 때 코인.
     func testFiveHourTotalWithPlanMultiplier() {
         let multipliers: [(String, Double)] = [
-            ("Pro",     50),
-            ("Max",     100),
-            ("Max 20x", 200),
-            ("Free",    25),
+            ("Pro",     30),    // 30 × 1.0
+            ("Max",     45),    // 30 × 1.5
+            ("Max 20x", 75),    // 30 × 2.5
+            ("Free",    15),    // 30 × 0.5
         ]
         for (plan, expected) in multipliers {
             let m = CoinLedger.planMultiplier(plan)
