@@ -69,8 +69,8 @@ final class Settings: ObservableObject {
         didSet { persistOwnedPets() }
     }
     /// 펫 종별 누적 사용 시간 (초). `petClaudeKind`/`petCursorKind`로 선택된 종에 polling tick마다
-    /// 실시간 누적 — 더블카운트 (양쪽 차트가 같은 종이면 1tick에 2배). 4d/8d/12d 임계 초과 시
-    /// `PetOwnership.registerUsage(totalSeconds:)`가 가챠와 동일한 variant unlock을 트리거한다.
+    /// 실시간 누적 — 더블카운트 (양쪽 차트가 같은 종이면 1tick에 2배).
+    /// 가챠 중복 카운트와 합산되어 `PetOwnership.progressUnits`로 환산, variant 해금 평가에 쓰인다.
     @Published var petUsageSeconds: [PetKind: TimeInterval] {
         didSet { persistPetUsageSeconds() }
     }
@@ -164,6 +164,12 @@ final class Settings: ObservableObject {
     @Published var clearedBadges: Set<String> {
         didSet { persistClearedBadges() }
     }
+    /// 코인 보상이 이미 지급된 뱃지 키 집합. `clearedBadges`와 별개의 second-line dedup —
+    /// UserDefaults 손상/멀티 인스턴스 race로 `clearedBadges`가 리셋돼도 코인 재지급은 막는다.
+    /// 한 번 들어가면 영구. 도입 시 마이그레이션으로 기존 `clearedBadges` 전체를 포함시켜 소급 보호.
+    @Published var creditedBadgeRewards: Set<String> {
+        didSet { persistCreditedBadgeRewards() }
+    }
     /// 챔피언 뱃지(33번째) 획득 시각. nil = 미획득.
     @Published var championBadgeEarnedAt: Date? {
         didSet { UserDefaults.standard.set(championBadgeEarnedAt, forKey: Keys.championBadgeEarnedAt) }
@@ -247,7 +253,18 @@ final class Settings: ObservableObject {
         self.heartbeatLastActiveAt  = d.object(forKey: Keys.heartbeatLastActiveAt) as? Date
         self.nightOwlSecondsAccumulated = (d.object(forKey: Keys.nightOwlSecondsAccumulated) as? Int) ?? 0
         let clearedData = d.data(forKey: Keys.clearedBadges)
-        self.clearedBadges = (clearedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let loadedClearedBadges: Set<String> = (clearedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        self.clearedBadges = loadedClearedBadges
+        // creditedBadgeRewards 로드 — 키가 없으면 기존 clearedBadges로 백필 (이미 보상 받았다고 간주).
+        let creditedRewardsData = d.data(forKey: Keys.creditedBadgeRewards)
+        if let decoded = creditedRewardsData.flatMap({ try? JSONDecoder().decode(Set<String>.self, from: $0) }) {
+            self.creditedBadgeRewards = decoded
+        } else {
+            self.creditedBadgeRewards = loadedClearedBadges
+            if let data = try? JSONEncoder().encode(loadedClearedBadges) {
+                d.set(data, forKey: Keys.creditedBadgeRewards)
+            }
+        }
         self.championBadgeEarnedAt = d.object(forKey: Keys.championBadgeEarnedAt) as? Date
         self.hasViewedGymPage      = (d.object(forKey: Keys.hasViewedGymPage) as? Bool) ?? false
 
@@ -365,6 +382,12 @@ final class Settings: ObservableObject {
         }
     }
 
+    private func persistCreditedBadgeRewards() {
+        if let data = try? JSONEncoder().encode(creditedBadgeRewards) {
+            UserDefaults.standard.set(data, forKey: Keys.creditedBadgeRewards)
+        }
+    }
+
     /// GitHub 연결 해제 — 토큰 폐기 + identity 클리어. creditedPRNumbers는 의도적으로 유지
     /// (재연결 시 같은 PR로 중복 지급 방지).
     func disconnectGitHub() {
@@ -454,6 +477,7 @@ final class Settings: ObservableObject {
         static let heartbeatLastActiveAt       = "settings.heartbeatLastActiveAt"
         static let nightOwlSecondsAccumulated  = "settings.nightOwlSecondsAccumulated"
         static let clearedBadges               = "settings.clearedBadges"
+        static let creditedBadgeRewards        = "settings.creditedBadgeRewards"
         static let championBadgeEarnedAt       = "settings.championBadgeEarnedAt"
         static let hasViewedGymPage            = "settings.hasViewedGymPage"
         static let hasMigratedGymBadges        = "settings.hasMigratedGymBadges"

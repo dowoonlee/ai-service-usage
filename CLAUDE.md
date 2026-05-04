@@ -97,7 +97,7 @@ For the dungeon-tileset pack: 7 enemies (`necromancer`, `slug`, `iceZombie`, `mu
 **Coin sources** (all usage-proportional, all routed through `CoinLedger`):
 - Cursor `chargedCents` × 1.0 (Ultra plan only — Pro/Free have no event stream).
 - Claude 5h/7d window: `pct delta within same resetAt` × rate (0.5/1.0). resetAt change rebases without crediting.
-- Wellness nudge clicked within 60s × 30 coin (flat).
+- Wellness nudge clicked within 5 min × 30 coin (flat).
 
 **Fractional carry** (`Settings.claudeFiveHourCoinFraction` etc): every poll's `Int(...)` truncation would otherwise lose ~0.835 coin/poll on a 5h window with 5-min polling. `CoinLedger.creditWithCarry(amount:fraction:)` accumulates the leftover and only credits whole coins.
 
@@ -141,3 +141,4 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) on tag push: build
 - `@MainActor` is applied liberally (App, ViewModel, NotificationManager, Settings); cross-actor boundaries to `UsageAPI`/`CursorAPI` actors are deliberate. Don't move HTTP work onto `MainActor`.
 - `DebugLog.log` is the project's only logging primitive. Use it; don't add `print` calls.
 - The Sparkle EdDSA private key is *not* in the repo (`sparkle_private.key` is a placeholder; the real one lives in the `SU_PRIVATE_KEY` GitHub secret). Don't commit anything that looks like a key.
+- Keep diffs surgical — change only what the task asks for. The combination of unofficial endpoints, ad-hoc signing (every release rotates the keychain ACL), and Sparkle auto-update means small unrelated edits ship to every user within a release cycle. Bundle drive-by refactors/style cleanups into a separate PR.

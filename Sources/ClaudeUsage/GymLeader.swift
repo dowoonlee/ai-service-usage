@@ -11,6 +11,7 @@ import Foundation
 struct GymLeader {
     let region: BadgeRegion
     let kind: PetKind
+    let name: String          // 표시용 이름. 도메인/캐릭터 펀.
     let dialogues: [String]   // 4개, stage 0~3 순서
 
     func dialogue(stage: Int) -> String {
@@ -31,43 +32,51 @@ struct GymLeader {
     static func leader(for region: BadgeRegion) -> GymLeader {
         switch region {
         case .coffee:
+            // Mr. Bean — UK 코미디 + 커피콩. 새벽 카페의 과묵한 영혼. Python 스택.
             return GymLeader(
                 region: .coffee, kind: .ghost,
+                name: "Mr. Bean",
                 dialogues: [
-                    "Claude한테 시켜놓고 모니터에 박혀있지 마라.",
-                    "Pomodoro 한 사이클 돌리는군.",
-                    "자리 비울 줄도 아는구나. 좋은 prompt는 산책 중에 떠오른다.",
-                    "쉬는 법을 아는 자가 좋은 질문을 한다."
+                    "...빈 잔으로 모니터 노려보지 마라.",
+                    "한 모금에 한 줄. 페이스가 잡혀가는군.",
+                    "산책 다녀올 줄 아는군. 좋은 prompt는 거기서 온다.",
+                    "...잘 우려낸 prompt는 잘 내린 커피 같다. 인정."
                 ]
             )
         case .vibe:
+            // Agent V — LangChain agent + 스파이. 임무 브리핑 톤.
             return GymLeader(
                 region: .vibe, kind: .bigDemon,
+                name: "Agent V",
                 dialogues: [
-                    "프롬프트 한 줄 던지고 magic을 기대하나?",
-                    "Cursor Tab 쓸 줄은 아는군.",
-                    "context를 풍부하게 채우는구나. Claude도 Cursor도.",
-                    "프롬프트의 마스터 — 토큰이 헛되지 않다."
+                    "임무 실패. context 부족, tool 없음.",
+                    "tool 호출 시작했군. 보고서 들어온다.",
+                    "agent loop 안정. context window를 제대로 쓰는군.",
+                    "...훌륭한 agent였다. 다음 임무도 부탁한다."
                 ]
             )
         case .cron:
+            // Jobs — cron job + 인명. 죽은 job 깨우는 네크로맨서, 시간 강박.
             return GymLeader(
                 region: .cron, kind: .necromancer,
+                name: "Jobs",
                 dialogues: [
-                    "주말에만 LLM 켜지 마라. 매일 익숙해져야 한다.",
-                    "며칠 연속 쓰는군. prompt가 손에 익기 시작했나.",
-                    "새벽에도 Claude를 부리는 자...",
-                    "AI와 함께 사는 법을 깨우쳤다."
+                    "주말에만 켜는 job? 그건 죽은 job이다.",
+                    "* * * * *. 매분 너를 보고 있다.",
+                    "재시도 정책이 있군. 잘 살아남는다.",
+                    "cron이 흐르는 한, 너는 살아있다. 인정."
                 ]
             )
         case .repo:
+            // J.SON — JSON parser + Jason(왕). schema/validate 격식체.
             return GymLeader(
                 region: .repo, kind: .kingHuman,
+                name: "J.SON",
                 dialogues: [
-                    "Free tier로 뭘 하려고. 한도 차면 끝이다.",
-                    "코인이 좀 모였군. 그러나 진정한 컬렉터는...",
-                    "도감을 거의 채웠다. Legendary는 아직 부족하지?",
-                    "풀세트 컬렉터 — 진정한 수집가다."
+                    "schema 미충족. 도감, 아직 unmarshal 실패다.",
+                    "필드가 좀 채워졌군. 허나 nullable이 많다.",
+                    "거의 valid한 도감이다. Legendary 필드만 비어있을 뿐.",
+                    "정렬된 컬렉션이군. 짐의 schema에 통과되었다."
                 ]
             )
         }

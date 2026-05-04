@@ -809,28 +809,33 @@ private struct PetPreviewView: View {
         }
     }
 
-    /// 사용 시간 기반 "다음 이로치까지 N일" 게이지. 모든 variant 해금되면 표시 안 함.
+    /// 합산 진행도(가챠 중복 + 사용 시간) 기반 "다음 이로치까지" 게이지. 모든 variant 해금되면 표시 안 함.
+    /// 잔여 표기는 "사용 시간 단독"으로 채울 경우 남는 일수 — 가챠로 더 빨리 해금 가능.
     @ViewBuilder
     private func usageProgressView() -> some View {
         let owned = settings.ownedPets[kind]
         let usageSec = settings.petUsageSeconds[kind] ?? 0
+        let count = owned?.count ?? 0
         let unlocked = owned?.unlockedVariants ?? []
-        if let next = PetOwnership.usageThresholds.first(where: { !unlocked.contains($0.1) }) {
-            let prevSec: TimeInterval = {
-                guard let idx = PetOwnership.usageThresholds.firstIndex(where: { $0.1 == next.1 }),
+        if let next = PetOwnership.variantUnitThresholds.first(where: { !unlocked.contains($0.1) }) {
+            let prevUnits: Double = {
+                guard let idx = PetOwnership.variantUnitThresholds.firstIndex(where: { $0.1 == next.1 }),
                       idx > 0
                 else { return 0 }
-                return PetOwnership.usageThresholds[idx - 1].0
+                return PetOwnership.variantUnitThresholds[idx - 1].0
             }()
-            let span = max(1, next.0 - prevSec)
-            let progress = max(0, min(1, (usageSec - prevSec) / span))
-            let remaining = max(0, next.0 - usageSec)
+            let units = PetOwnership.progressUnits(count: count, usageSeconds: usageSec)
+            let span = max(0.001, next.0 - prevUnits)
+            let progress = max(0, min(1, (units - prevUnits) / span))
+            // 잔여 unit을 사용 시간(초)으로 환산 — 가챠 안 돌리고 시간만 쌓을 때 기준 잔여시간.
+            let remainingUnits = max(0, next.0 - units)
+            let remainingSeconds = remainingUnits / PetOwnership.secondUnit
             VStack(spacing: 3) {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
                     .frame(width: 160)
                     .tint(.purple)
-                Text("다음 이로치까지 \(Self.formatRemaining(remaining))")
+                Text("다음 이로치까지 \(Self.formatRemaining(remainingSeconds))")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

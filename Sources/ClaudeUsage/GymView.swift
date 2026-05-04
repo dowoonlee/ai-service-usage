@@ -66,9 +66,9 @@ struct GymView: View {
             // 대사 bubble — 흰 배경 + 검정 텍스트로 가독성↑.
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text("\(selectedRegion.displayName) 도장")
+                    Text(leader.name)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                     Text("\(progress.cleared)/\(progress.total)")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(.secondary)

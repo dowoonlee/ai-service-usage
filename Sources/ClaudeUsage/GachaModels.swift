@@ -12,39 +12,45 @@ struct PetOwnership: Codable, Hashable {
         PetOwnership(count: 1, unlockedVariants: [0])
     }
 
-    /// 한 번 더 뽑힌 결과를 반영. count++, 임계 도달 시 새 variant unlock.
+    /// 한 번 더 뽑힌 결과를 반영. count++, 합산 진행도(가챠 중복 + 사용 시간) 임계 도달 시 variant unlock.
+    /// - Parameter usageSeconds: 해당 종의 `Settings.petUsageSeconds[kind]` 현재 누적치 (합산 평가용).
     /// - Returns: 이번 호출로 새로 unlock된 variant index (없으면 nil)
-    mutating func registerPull() -> Int? {
+    mutating func registerPull(usageSeconds: TimeInterval) -> Int? {
         count += 1
-        // 5중복 → variant 1, 15 → 2, 40 → 3
-        let thresholds: [(Int, Int)] = [(5, 1), (15, 2), (40, 3)]
-        for (cnt, variant) in thresholds where count >= cnt && !unlockedVariants.contains(variant) {
-            unlockedVariants.insert(variant)
-            return variant
-        }
-        return nil
+        return updateUnlocks(usageSeconds: usageSeconds)
     }
 
-    /// 누적 사용 시간 기반 variant unlock 체크. 가챠 중복(5/15/40)과 평행한 두 번째 진입 경로.
-    /// 4일/8일/12일 누적 → variant 1/2/3. 실제 누적 카운터는 변하지 않고 `unlockedVariants`만 갱신.
+    /// 누적 사용 시간 변경을 반영. 합산 진행도 재평가만 — 카운터 자체는 변하지 않음.
     /// - Parameter totalSeconds: 해당 종의 `Settings.petUsageSeconds[kind]` 누적치.
     /// - Returns: 이번 호출로 새로 unlock된 variant index (없으면 nil)
     mutating func registerUsage(totalSeconds: TimeInterval) -> Int? {
-        let thresholds: [(TimeInterval, Int)] = PetOwnership.usageThresholds
-        for (sec, variant) in thresholds where totalSeconds >= sec && !unlockedVariants.contains(variant) {
+        return updateUnlocks(usageSeconds: totalSeconds)
+    }
+
+    /// 가챠 중복 + 사용 시간을 합산 unit으로 환산해서 variant 해금 평가.
+    private mutating func updateUnlocks(usageSeconds: TimeInterval) -> Int? {
+        let units = Self.progressUnits(count: count, usageSeconds: usageSeconds)
+        for (threshold, variant) in Self.variantUnitThresholds
+        where units >= threshold && !unlockedVariants.contains(variant) {
             unlockedVariants.insert(variant)
             return variant
         }
         return nil
     }
 
-    /// 사용 시간 → variant index 매핑. UI에서도 동일 값을 참조하도록 한 곳에 둠.
-    /// `(임계초, variant 인덱스)` 오름차순.
-    static let usageThresholds: [(TimeInterval, Int)] = [
-        (4 * 86400, 1),
-        (8 * 86400, 2),
-        (12 * 86400, 3),
-    ]
+    /// 합산 진행 단위 환산. 5 중복 = 1 unit, 4일 사용 = 1 unit (variant 1 단독 임계 등가).
+    /// 1 pull = 0.2u, 1초 = 1/(4·86400)u → 가챠와 사용 시간을 더해서 variant 해금 평가에 사용.
+    static let pullUnit: Double = 1.0 / 5.0
+    static let secondUnit: Double = 1.0 / (4.0 * 86400)
+
+    /// variant 1/2/3 = 1/3/8 unit. 가챠 단독 = 5/15/40 중복, 사용 단독 = 4일/12일/32일과 등가.
+    /// 두 경로가 합산되므로 mixed 사용자는 더 빨리 해금. e.g., 가챠 4중복(0.8u) + 1d(0.25u) = 1.05u → variant 1.
+    static let variantUnitThresholds: [(Double, Int)] = [(1.0, 1), (3.0, 2), (8.0, 3)]
+
+    /// 합산 progress unit 계산. UI 게이지·해금 평가가 같은 식을 쓰도록 한 곳에 둠.
+    static func progressUnits(count: Int, usageSeconds: TimeInterval) -> Double {
+        Double(count) * pullUnit + usageSeconds * secondUnit
+    }
 }
 
 /// 사용자가 차트에 띄우려고 활성화한 펫 (kind + variant 페어).

@@ -106,9 +106,10 @@ enum Gacha {
             triggerHighlight = true   // 신규 펫
         } else {
             var existing = owned[pull.kind]!
-            newVariant = existing.registerPull()
+            let usageSec = s.petUsageSeconds[pull.kind] ?? 0
+            newVariant = existing.registerPull(usageSeconds: usageSec)
             owned[pull.kind] = existing
-            if newVariant != nil { triggerHighlight = true }   // 중복 누적으로 variant 해금
+            if newVariant != nil { triggerHighlight = true }   // 합산 진행도 임계 도달로 variant 해금
         }
         s.ownedPets = owned
         // 도감에서 직접 클릭해 확인하기 전까지 노란 강조 표시 유지.

@@ -252,10 +252,16 @@ enum BadgeRegistry {
                 guard let threshold = cat.thresholds[tier] else { continue }
                 if value >= threshold {
                     s.clearedBadges.insert(id.key)
-                    s.coins += tier.coinReward
-                    s.coinsTotalEarned += tier.coinReward
-                    newlyCleared.append(id)
-                    DebugLog.log("Badge cleared: \(id.key) → +\(tier.coinReward) coin")
+                    // 보상 dedup — 한 번 코인 받은 뱃지는 clearedBadges가 어떤 이유로 리셋돼도 재지급 X.
+                    if !s.creditedBadgeRewards.contains(id.key) {
+                        s.coins += tier.coinReward
+                        s.coinsTotalEarned += tier.coinReward
+                        s.creditedBadgeRewards.insert(id.key)
+                        newlyCleared.append(id)
+                        DebugLog.log("Badge cleared: \(id.key) → +\(tier.coinReward) coin")
+                    } else {
+                        DebugLog.log("Badge re-cleared: \(id.key) (이미 보상 지급됨, skip)")
+                    }
                 }
             }
         }
