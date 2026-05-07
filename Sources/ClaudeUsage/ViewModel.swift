@@ -34,7 +34,11 @@ final class ViewModel: ObservableObject {
     // 펫이 외치는 휴식 권유 말풍선. nil이면 표시 안 함.
     // 최근 1시간 동안 거의 쉬지 않고 사용 중이고, 마지막 표시로부터 1시간 이상 지났을 때 설정됨.
     @Published var wellnessNudge: String?
-    private var lastWellnessShownAt: Date?
+    /// Wellness 너지 표시 시각은 `Settings.lastWellnessShownAt`에 영구 저장 — 앱 재실행 시 1시간 쿨다운이 유지되어야 함 (#11).
+    private var lastWellnessShownAt: Date? {
+        get { Settings.shared.lastWellnessShownAt }
+        set { Settings.shared.lastWellnessShownAt = newValue }
+    }
 
     // Section collapse
     @Published var claudeCollapsed: Bool {

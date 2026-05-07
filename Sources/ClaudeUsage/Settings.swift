@@ -126,6 +126,10 @@ final class Settings: ObservableObject {
     @Published var firstCreditedAt: Date? {
         didSet { UserDefaults.standard.set(firstCreditedAt, forKey: Keys.firstCreditedAt) }
     }
+    /// Wellness nudge 마지막 표시 시각. 1시간 쿨다운이 앱 재실행 가로질러 유지되도록 영구화 (#11).
+    @Published var lastWellnessShownAt: Date? {
+        didSet { UserDefaults.standard.set(lastWellnessShownAt, forKey: Keys.lastWellnessShownAt) }
+    }
 
     // MARK: - 도장 (Gym Badges)
     //
@@ -238,6 +242,7 @@ final class Settings: ObservableObject {
         self.lastCursorEventCredited = d.object(forKey: Keys.lastCursorEventCredited) as? Date
         self.coinsTotalEarned = (d.object(forKey: Keys.coinsTotalEarned) as? Int) ?? 0
         self.firstCreditedAt = d.object(forKey: Keys.firstCreditedAt) as? Date
+        self.lastWellnessShownAt = d.object(forKey: Keys.lastWellnessShownAt) as? Date
 
         self.githubLogin = d.string(forKey: Keys.githubLogin)
         self.githubUserID = (d.object(forKey: Keys.githubUserID) as? Int)
@@ -461,6 +466,7 @@ final class Settings: ObservableObject {
         static let hasCompletedGachaMigration  = "settings.hasCompletedGachaMigration"
         static let coinsTotalEarned            = "settings.coinsTotalEarned"
         static let firstCreditedAt             = "settings.firstCreditedAt"
+        static let lastWellnessShownAt         = "settings.lastWellnessShownAt"
         static let petUsageSeconds             = "settings.petUsageSeconds"
         static let pendingHighlights           = "settings.pendingHighlights"
         static let hasReceivedV032TicketBonus  = "settings.hasReceivedV032TicketBonus"
