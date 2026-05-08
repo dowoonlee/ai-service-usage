@@ -17,7 +17,16 @@ struct TrainerCard: Codable, Hashable {
     var title: CardTitle
     /// nil이면 액세서리 미착용.
     var accessory: CardAccessory?
+    /// 액세서리 위치·크기 transform. drag/slider로 사용자가 직접 조정. nil이면 `.default`.
+    /// Codable 호환성을 위해 Optional — 기존(v0.7.0/v0.7.1) 영속화 카드에 이 필드가
+    /// 없어도 누락(nil)로 decode 가능. 호출 측은 `?? .default`로 fallback.
+    var accessoryTransform: AccessoryTransform?
     var layout: CardLayout
+
+    /// 사용자 의도에 따른 effective transform — nil이면 default.
+    var effectiveAccessoryTransform: AccessoryTransform {
+        accessoryTransform ?? .default
+    }
 
     static let `default` = TrainerCard(
         avatar: PetSelection(kind: .fox, variant: 0),
@@ -25,8 +34,25 @@ struct TrainerCard: Codable, Hashable {
         frame: .none,
         title: .newcomer,
         accessory: nil,
+        accessoryTransform: nil,
         layout: CardLayout()
     )
+}
+
+/// 액세서리 transform — 펫 sprite 기준 상대 offset + scale.
+/// 기본값(0, -32, 1.0)은 펫 머리 위 중앙 + 50px 사이즈에 해당 (이전 hardcoded와 동일).
+/// `Codable` decoding 시 누락 필드는 default로 fallback (Swift 기본 동작 X — 모든 필드
+/// 명시적 default value로 처리).
+struct AccessoryTransform: Codable, Hashable {
+    var offsetX: CGFloat = 0
+    var offsetY: CGFloat = -32
+    var scale: CGFloat = 1.0
+
+    static let `default` = AccessoryTransform()
+
+    /// drag/scale 한계 — 펫(110px) 영역을 너무 벗어나지 않도록 clamp용.
+    static let offsetLimit: CGFloat = 80
+    static let scaleRange: ClosedRange<CGFloat> = 0.4...2.5
 }
 
 /// 카드 배경 — PetTheme 4개 + 컴플리트한 컬렉션 11색까지 unlock 가능.
@@ -379,14 +405,17 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
 /// `resourceName`이 가리키는 PNG가 `Resources/trainer-accessories/`에 있으면 그 sprite 사용,
 /// 없으면 SF Symbol fallback (`fallbackSymbol`)으로 즉시 가시화. 추후 픽셀 sprite 자원이
 /// 추가되면 자동 swap — 시스템 자체는 자원 유무와 무관하게 동작.
+/// case 이름은 displayName/fallback symbol과 일관되도록 변경(`tshirt`, `gift`)했지만
+/// rawValue는 v0.7.0/v0.7.1 사용자의 `ownedAccessories` 영속 데이터 호환을 위해 옛값
+/// (`"scarf"`, `"ribbon"`) 그대로 유지. 결과: 코드 가독성 + 인벤토리 보존 둘 다 만족.
 enum CardAccessory: String, CaseIterable, Codable, Hashable {
     case strawHat
     case glasses
     case crown
-    case scarf
+    case tshirt = "scarf"      // rawValue는 v0.7.0 호환
     case halo
     case mask
-    case ribbon
+    case gift = "ribbon"        // rawValue는 v0.7.0 호환
     case headphones
 
     var displayName: String {
@@ -394,10 +423,10 @@ enum CardAccessory: String, CaseIterable, Codable, Hashable {
         case .strawHat:   return "밀짚 모자"
         case .glasses:    return "안경"
         case .crown:      return "왕관"
-        case .scarf:      return "목도리"
+        case .tshirt:     return "티셔츠"
         case .halo:       return "후광"
         case .mask:       return "마스크"
-        case .ribbon:     return "리본"
+        case .gift:       return "선물"
         case .headphones: return "헤드폰"
         }
     }
@@ -412,10 +441,10 @@ enum CardAccessory: String, CaseIterable, Codable, Hashable {
         case .strawHat:   return "graduationcap.fill"
         case .glasses:    return "eyeglasses"
         case .crown:      return "crown.fill"
-        case .scarf:      return "scarf"
+        case .tshirt:     return "tshirt.fill"
         case .halo:       return "circle.dashed"
         case .mask:       return "theatermasks.fill"
-        case .ribbon:     return "ribbon"
+        case .gift:       return "gift.fill"
         case .headphones: return "headphones"
         }
     }
@@ -423,8 +452,8 @@ enum CardAccessory: String, CaseIterable, Codable, Hashable {
     /// 코인 직접 구매 가격. 가챠 풀과 별도 — 사용자가 원하는 것만 살 수 있게.
     var price: Int {
         switch self {
-        case .strawHat, .glasses, .scarf:  return 800
-        case .ribbon, .mask, .headphones:  return 1500
+        case .strawHat, .glasses, .tshirt: return 800
+        case .gift, .mask, .headphones:    return 1500
         case .crown, .halo:                return 3000
         }
     }

@@ -16,6 +16,9 @@ struct ReportView: View {
     /// 호버된 칭호/프레임 — popover 트리거 single-track. 한 번에 하나만 popover 노출.
     @State private var hoveringTitle: CardTitle?
     @State private var hoveringFrame: CardFrame?
+    /// 액세서리 구매 확인 alert 트리거. 사용자가 미보유 액세서리를 클릭하면 즉시 차감
+    /// 대신 이 state를 set → alert으로 yes/no 받음.
+    @State private var pendingAccessoryPurchase: CardAccessory?
 
     /// 미리보기에서 카드 폭. 컨테이너(480) 안에 패딩 포함.
     private static let previewWidth: CGFloat = 440
@@ -28,6 +31,24 @@ struct ReportView: View {
                 shareSection
             }
             .padding(16)
+        }
+        .alert(
+            pendingAccessoryPurchase.map { "\($0.displayName) 구매" } ?? "",
+            isPresented: Binding(
+                get: { pendingAccessoryPurchase != nil },
+                set: { if !$0 { pendingAccessoryPurchase = nil } }
+            ),
+            presenting: pendingAccessoryPurchase
+        ) { acc in
+            Button("\(acc.price) coin 으로 구매") {
+                guard settings.coins >= acc.price else { return }
+                settings.coins -= acc.price
+                settings.ownedAccessories.insert(acc.rawValue)
+                settings.trainerCard.accessory = acc
+            }
+            Button("취소", role: .cancel) {}
+        } message: { acc in
+            Text("이 액세서리를 구매하시겠습니까?\n현재 잔액: \(settings.coins.formatted()) coin → 구매 후 \((settings.coins - acc.price).formatted()) coin")
         }
     }
 
@@ -44,11 +65,21 @@ struct ReportView: View {
                 badges: badgeRows,
                 collections: collectionRows,
                 showWatermark: true,
-                width: Self.previewWidth
+                width: Self.previewWidth,
+                accessoryEditing: accessoryTransformBinding
             )
-            .id(settings.trainerCard) // customization 변경 시 view 재생성으로 즉시 반영
             Spacer()
         }
+    }
+
+    /// 액세서리 transform 편집 binding — 카드 sprite drag로 위치 변경 + sidebar slider로 scale.
+    /// nil-coalescing은 effective default로 fallback해 첫 launch에서 자연스러운 시작 위치
+    /// (펫 머리 위, 50px)부터 조작 가능.
+    private var accessoryTransformBinding: Binding<AccessoryTransform> {
+        Binding(
+            get: { settings.trainerCard.effectiveAccessoryTransform },
+            set: { settings.trainerCard.accessoryTransform = $0 }
+        )
     }
 
     // MARK: - Customization
@@ -65,6 +96,9 @@ struct ReportView: View {
             titleRow
             sectionHeader("액세서리")
             accessoryRow
+            if settings.trainerCard.accessory != nil {
+                accessoryAdjustRow
+            }
             sectionHeader("공유 설정")
             shareSettingsRow
         }
@@ -330,9 +364,8 @@ struct ReportView: View {
             if owned {
                 settings.trainerCard.accessory = acc
             } else if canPurchase, let a = acc, settings.coins >= a.price {
-                settings.coins -= a.price
-                settings.ownedAccessories.insert(a.rawValue)
-                settings.trainerCard.accessory = a
+                // 즉시 차감 대신 confirmation alert — 실수 클릭 방지.
+                pendingAccessoryPurchase = a
             }
         } label: {
             VStack(spacing: 2) {
@@ -378,6 +411,44 @@ struct ReportView: View {
         }
         .buttonStyle(.plain)
         .disabled(!owned && !canPurchase)
+    }
+
+    // MARK: - Accessory adjust (위치는 카드 위 drag, 크기는 slider)
+
+    private var accessoryAdjustRow: some View {
+        let binding = accessoryTransformBinding
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text("카드의 액세서리를 마우스로 끌어 위치 조정")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Text("크기")
+                    .font(.caption)
+                    .frame(width: 30, alignment: .leading)
+                Slider(
+                    value: Binding(
+                        get: { binding.wrappedValue.scale },
+                        set: { var t = binding.wrappedValue; t.scale = $0; binding.wrappedValue = t }
+                    ),
+                    in: AccessoryTransform.scaleRange
+                )
+                .frame(width: 200)
+                Text(String(format: "%.2f×", binding.wrappedValue.scale))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 40)
+                Button("초기화") {
+                    settings.trainerCard.accessoryTransform = .default
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+            }
+        }
     }
 
     // MARK: - Share settings

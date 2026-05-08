@@ -35,6 +35,9 @@ struct TrainerCardView: View {
 
     /// 카드 폭. preview에선 컨테이너 폭, export 시 `standardWidth`. 비율(4:3)에 맞춰 height 자동.
     var width: CGFloat = standardWidth
+    /// 액세서리 transform 편집 가능한 binding. nil이면 정적 표시 (export 캡처용).
+    /// Set이면 액세서리 sprite에 DragGesture가 붙어 마우스로 위치 조정 가능.
+    var accessoryEditing: Binding<AccessoryTransform>? = nil
 
     var body: some View {
         ZStack {
@@ -161,22 +164,29 @@ struct TrainerCardView: View {
 
     @ViewBuilder
     private func accessoryLayer(_ acc: CardAccessory) -> some View {
-        if let img = PetSprite.image(named: acc.resourceName) {
-            // PNG 자원 있음 — 펫 위쪽 중앙(머리 위치 근사) overlay.
-            Image(nsImage: img)
-                .resizable()
-                .interpolation(.none)
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 50, height: 50)
-                .offset(y: -32)
-        } else {
-            // Fallback: SF Symbol. 자원 추가되면 자동 swap.
-            Image(systemName: acc.fallbackSymbol)
-                .font(.system(size: 26, weight: .bold))
-                .foregroundStyle(.yellow)
-                .shadow(color: .black.opacity(0.6), radius: 1)
-                .offset(y: -32)
+        let t = card.effectiveAccessoryTransform
+        let baseSize: CGFloat = 50
+        let size = baseSize * t.scale
+        let symbolSize: CGFloat = 26 * t.scale
+        Group {
+            if let img = PetSprite.image(named: acc.resourceName) {
+                // PNG 자원 있음 — 펫 위쪽 중앙(머리 위치 근사) overlay.
+                Image(nsImage: img)
+                    .resizable()
+                    .interpolation(.none)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: size, height: size)
+            } else {
+                // Fallback: SF Symbol. 자원 추가되면 자동 swap.
+                Image(systemName: acc.fallbackSymbol)
+                    .font(.system(size: symbolSize, weight: .bold))
+                    .foregroundStyle(.yellow)
+                    .shadow(color: .black.opacity(0.6), radius: 1)
+                    .frame(width: size, height: size)
+            }
         }
+        .offset(x: t.offsetX, y: t.offsetY)
+        .modifier(AccessoryDragModifier(editing: accessoryEditing))
     }
 
     private var statsView: some View {
@@ -277,6 +287,41 @@ struct TrainerCardView: View {
                 .foregroundStyle(.white.opacity(0.55))
             Spacer()
         }
+    }
+}
+
+/// 액세서리 sprite에 DragGesture를 조건부로 적용하는 modifier.
+/// `editing` binding이 nil이면 gesture 미부착(export 캡처용 정적 view).
+/// drag 시작 시 transform snapshot을 잡고, 누적 translation을 더해 offset 변경 — clamp로
+/// 펫(110px) 영역 너무 벗어나지 않게 제한.
+private struct AccessoryDragModifier: ViewModifier {
+    let editing: Binding<AccessoryTransform>?
+    @State private var dragStart: AccessoryTransform?
+
+    func body(content: Content) -> some View {
+        if let editing = editing {
+            content.gesture(
+                DragGesture()
+                    .onChanged { value in
+                        if dragStart == nil { dragStart = editing.wrappedValue }
+                        var t = dragStart ?? editing.wrappedValue
+                        t.offsetX = (t.offsetX + value.translation.width)
+                            .clamped(to: -AccessoryTransform.offsetLimit...AccessoryTransform.offsetLimit)
+                        t.offsetY = (t.offsetY + value.translation.height)
+                            .clamped(to: -AccessoryTransform.offsetLimit...AccessoryTransform.offsetLimit)
+                        editing.wrappedValue = t
+                    }
+                    .onEnded { _ in dragStart = nil }
+            )
+        } else {
+            content
+        }
+    }
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }
 
