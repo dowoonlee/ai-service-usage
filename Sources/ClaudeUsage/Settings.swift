@@ -184,6 +184,28 @@ final class Settings: ObservableObject {
         didSet { UserDefaults.standard.set(hasViewedGymPage, forKey: Keys.hasViewedGymPage) }
     }
 
+    // MARK: - 펫 컬렉션 (셋 보너스)
+    //
+    // 한 컬렉션의 base 펫(variant 0)을 모두 모으면 1회성 코인 보너스 + 도감 업적 섹션에
+    // 영구 등재. 평가는 `Gacha.commit(_:)` 직후 `PetCollectionRegistry.evaluate()`가 수행.
+    //
+    // dedup은 `completedCollections`(rawValue Set) — `BadgeRegistry`의 `clearedBadges`와
+    // 동일 패턴. 한 번 들어가면 ownedPets가 어떤 이유로 비워져도 재지급 안 됨.
+
+    /// 컴플리트된 컬렉션의 `PetCollection.rawValue` Set. 보너스 재지급 방지 dedup.
+    @Published var completedCollections: Set<String> {
+        didSet { persistCompletedCollections() }
+    }
+    /// 각 컬렉션의 컴플리트 시각 — 도감 업적 섹션의 "획득 일자" 표시용.
+    @Published var collectionCompletedAt: [String: Date] {
+        didSet { persistCollectionCompletedAt() }
+    }
+    /// 가장 최근에 컴플리트된 컬렉션의 rawValue — 가챠 hatched 화면이 컴플리트 배너를
+    /// 띄우고 nil로 소비. UI가 한 번만 읽고 비우는 단발성 플래그.
+    @Published var pendingCollectionCelebration: String? {
+        didSet { UserDefaults.standard.set(pendingCollectionCelebration, forKey: Keys.pendingCollectionCelebration) }
+    }
+
     // MARK: - GitHub 기여자 보너스
 
     /// 연결된 GitHub login (예: "youznn"). nil이면 미연결. 토큰은 Keychain에 별도 저장.
@@ -272,6 +294,16 @@ final class Settings: ObservableObject {
         }
         self.championBadgeEarnedAt = d.object(forKey: Keys.championBadgeEarnedAt) as? Date
         self.hasViewedGymPage      = (d.object(forKey: Keys.hasViewedGymPage) as? Bool) ?? false
+
+        // 펫 컬렉션 (셋 보너스) 로드
+        let completedColData = d.data(forKey: Keys.completedCollections)
+        self.completedCollections = (completedColData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let completedAtData = d.data(forKey: Keys.collectionCompletedAt)
+        self.collectionCompletedAt = (completedAtData.flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) }) ?? [:]
+        // pendingCollectionCelebration은 단발성이지만 앱 종료 시점에 미소비 상태일 수 있으므로
+        // 영속 — 다음 실행 시 가챠 화면 진입 첫 hatched에서 처리하거나, 사용자가 도감을 직접
+        // 열면 거기서 한 번 띄우고 nil. 영영 묵히지 않음.
+        self.pendingCollectionCelebration = d.string(forKey: Keys.pendingCollectionCelebration)
 
         // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
         //   1) 신규 사용자 (hasCompletedGachaMigration 아직 false): 첫 실행 시 3장 지급
@@ -393,6 +425,18 @@ final class Settings: ObservableObject {
         }
     }
 
+    private func persistCompletedCollections() {
+        if let data = try? JSONEncoder().encode(completedCollections) {
+            UserDefaults.standard.set(data, forKey: Keys.completedCollections)
+        }
+    }
+
+    private func persistCollectionCompletedAt() {
+        if let data = try? JSONEncoder().encode(collectionCompletedAt) {
+            UserDefaults.standard.set(data, forKey: Keys.collectionCompletedAt)
+        }
+    }
+
     /// GitHub 연결 해제 — 토큰 폐기 + identity 클리어. creditedPRNumbers는 의도적으로 유지
     /// (재연결 시 같은 PR로 중복 지급 방지).
     func disconnectGitHub() {
@@ -487,6 +531,10 @@ final class Settings: ObservableObject {
         static let championBadgeEarnedAt       = "settings.championBadgeEarnedAt"
         static let hasViewedGymPage            = "settings.hasViewedGymPage"
         static let hasMigratedGymBadges        = "settings.hasMigratedGymBadges"
+        // 펫 컬렉션 (셋 보너스)
+        static let completedCollections        = "settings.completedCollections"
+        static let collectionCompletedAt       = "settings.collectionCompletedAt"
+        static let pendingCollectionCelebration = "settings.pendingCollectionCelebration"
     }
 }
 

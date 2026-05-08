@@ -81,6 +81,20 @@ enum Rarity: String, Codable, CaseIterable, Hashable {
         case .legendary: return 0.02
         }
     }
+
+    /// 셋 보너스(`PetCollection.bonusCoins`) 산정에 쓰는 등급별 코인 가치.
+    /// 가챠 weight와 inversely 가까운 곡선 — Common 100 → Legendary 2500 (25배).
+    /// weight 비(0.60/0.02 = 30배)보다 살짝 완만 — 셋 한 개에 Legendary가 들어있다고
+    /// 보너스가 폭주하지 않도록 의도적으로 압축. e.g., Vibe Coders(L×2 + E×2 + R×2 + C×2)
+    /// = 7400 → ×1.5 = 11,100 coin (≈ 37 pulls 가치).
+    var coinValue: Int {
+        switch self {
+        case .common:    return 100
+        case .rare:      return 300
+        case .epic:      return 800
+        case .legendary: return 2500
+        }
+    }
 }
 
 /// 가챠 1회 이력 — `JSONLStore<GachaPull>`로 영속 가능 (M4 인벤토리 표시용).

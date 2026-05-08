@@ -7,7 +7,9 @@ import Foundation
 /// 대형 사이즈/보스급 → Legendary, 헤드라이너/전사 → Epic, 등.
 @MainActor
 enum Gacha {
-    static let pool: [Rarity: [PetKind]] = [
+    /// 풀은 read-only static 데이터 — actor 격리 불필요. nonisolated로 두면 비-MainActor
+    /// 컨텍스트(`PetCollection.bonusCoins` 같은 nonisolated computed)에서도 직접 읽을 수 있음.
+    nonisolated static let pool: [Rarity: [PetKind]] = [
         .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale],
         .epic:      [.maskDude, .ghost, .plant, .skull,
                      .ogre, .bigDemon, .kingHuman, .clownCaptain, .wizardM, .knightF],
@@ -119,6 +121,8 @@ enum Gacha {
         }
         DebugLog.log("Gacha commit: \(pull.kind.rawValue) [\(pull.rarity.rawValue)] count=\(owned[pull.kind]!.count)" +
                      (newVariant != nil ? " newVariant=\(newVariant!)" : ""))
+        // 새 펫 보유 → 펫 컬렉션 컴플리트 평가. dedup은 Registry 내부.
+        PetCollectionRegistry.evaluate()
         return GachaPull(pulledAt: pull.pulledAt, kind: pull.kind, rarity: pull.rarity,
                          variantUnlocked: newVariant)
     }

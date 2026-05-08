@@ -90,6 +90,15 @@ final class CoinLedger {
         DebugLog.log("CoinLedger: Contributor +\(amount) coin (\(prCount) PR) (total=\(Settings.shared.coins))")
     }
 
+    /// 펫 컬렉션 컴플리트 보너스. `PetCollection.bonusCoins`(rarity 합 × 1.5)를 적립.
+    /// dedupe는 호출 측(`PetCollectionRegistry.evaluate`)에서 `Settings.completedCollections`로
+    /// 처리 — 같은 컬렉션이 이중 호출돼도 여기까지 도달하지 않음.
+    func creditCollectionBonus(_ c: PetCollection) {
+        let amount = c.bonusCoins
+        credit(amount)
+        DebugLog.log("CoinLedger: Collection [\(c.displayName)] +\(amount) coin (total=\(Settings.shared.coins))")
+    }
+
     /// Claude snapshot에서 사용량 delta로 적립.
     /// - 같은 `resetAt` 안에서는 누적 % 위치에 대한 곡선값 delta × max coin × planMultiplier.
     ///   linear가 아닌 concave(sqrt) 곡선 — 초반 적립률↑/후반 적립률↓, 양 끝(0%, 100%)은 고정.

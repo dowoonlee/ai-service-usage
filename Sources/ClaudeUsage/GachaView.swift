@@ -361,6 +361,8 @@ struct GachaView: View {
     private func hatchedView(_ pull: GachaPull) -> some View {
         // ZStack으로 revealing과 동일한 sprite 위치(spriteRestY)를 유지.
         // 메타데이터는 sprite 아래에 별도 묶음으로 배치.
+        // 펜딩 컬렉션 컴플리트가 있으면 상단에 배너 오버레이 — `.hatched` 진입 시
+        // `Settings.pendingCollectionCelebration`이 set돼있으면 노출하고 onAppear에서 nil로 소비.
         ZStack {
             if let img = PetSprite.image(for: pull.kind, action: .sit, frameIndex: 0) {
                 Image(nsImage: img)
@@ -400,6 +402,17 @@ struct GachaView: View {
             .offset(y: 50)  // sprite 아래에 배치 (sprite center=−38, 메타 center=+50 → ~88px 떨어짐)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .top) {
+            if let raw = settings.pendingCollectionCelebration,
+               let c = PetCollection(rawValue: raw) {
+                CollectionCompleteBanner(collection: c) {
+                    settings.pendingCollectionCelebration = nil
+                }
+                .padding(.top, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: settings.pendingCollectionCelebration)
     }
 
     // MARK: - Inventory
@@ -421,6 +434,37 @@ struct GachaView: View {
                     ForEach([Rarity.legendary, .epic, .rare, .common], id: \.self) { r in
                         raritySection(r)
                     }
+                    // 컬렉션 업적 섹션 — rarity 레이아웃 그대로 유지하고 그 아래에 묶음.
+                    Divider().padding(.vertical, 4)
+                    collectionsAchievementSection()
+                }
+            }
+        }
+    }
+
+    // MARK: - Collections (셋 보너스 업적)
+
+    /// 펫 컬렉션(셋 보너스) 진행 카드 11개. 완성된 그룹은 accentColor + ✓ +완성일,
+    /// 미완성은 회색 + 진행도(`5/8`). 모든 11개 그룹을 항상 노출 — 미완성도 농담 부분
+    /// (subtitle)이 보여야 컬렉션 자체가 동기 부여 역할.
+    private func collectionsAchievementSection() -> some View {
+        let totalCompleted = settings.completedCollections.count
+        let totalCollections = PetCollection.allCases.count
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "trophy.fill")
+                    .foregroundStyle(.yellow)
+                Text("업적")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(totalCompleted)/\(totalCollections)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], spacing: 8) {
+                ForEach(PetCollection.allCases, id: \.self) { c in
+                    CollectionCard(collection: c, settings: settings)
                 }
             }
         }
@@ -548,6 +592,121 @@ private struct InventorySlot: View {
         case 3: return .pink
         default: return .gray
         }
+    }
+}
+
+/// 컬렉션 컴플리트 배너 — `.hatched` 진입 시 그 가챠로 셋이 완성됐으면 상단에 노출.
+/// 2.5s 후 자동 dismiss + 클릭 시 즉시 dismiss. 둘 다 `pendingCollectionCelebration = nil`로
+/// 소비해서 같은 컴플리트가 다음 가챠에서 또 뜨지 않도록 한다.
+private struct CollectionCompleteBanner: View {
+    let collection: PetCollection
+    let onDismiss: () -> Void
+
+    @State private var pulse: Bool = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "trophy.fill")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(.yellow)
+                .scaleEffect(pulse ? 1.15 : 1.0)
+                .shadow(color: .yellow.opacity(0.6), radius: pulse ? 8 : 2)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(collection.displayName.uppercased()) COMPLETE!")
+                    .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(.white)
+                Text("+\(collection.bonusCoins) coin · \(collection.subtitle)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(collection.accentColor)
+                .shadow(color: collection.accentColor.opacity(0.6), radius: pulse ? 12 : 4)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(.white.opacity(0.3), lineWidth: 1)
+        )
+        .onTapGesture { onDismiss() }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+            // 2.5s 후 자동 소비.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                onDismiss()
+            }
+        }
+    }
+}
+
+/// 컬렉션 업적 카드. 완성: accentColor 배경 + ✓ + 완성일자. 미완성: 회색 + 진행도.
+/// `subtitle`은 항상 노출 — 컬렉션의 정체성(농담)이 진행 상태와 무관히 보여야 동기 유발.
+private struct CollectionCard: View {
+    let collection: PetCollection
+    @ObservedObject var settings: Settings
+
+    private static let completedAtFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy.MM.dd"
+        return f
+    }()
+
+    var body: some View {
+        let isComplete = settings.completedCollections.contains(collection.rawValue)
+        let progress = collection.progress(settings)
+        let bg = isComplete ? collection.accentColor : Color.gray
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                if isComplete {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                Text(collection.displayName)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+                Text("\(progress.collected)/\(progress.total)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .monospacedDigit()
+            }
+            Text(collection.subtitle)
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(2)
+                .truncationMode(.tail)
+            if isComplete, let date = settings.collectionCompletedAt[collection.rawValue] {
+                Text("\(Self.completedAtFormatter.string(from: date)) · +\(collection.bonusCoins)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.75))
+            } else {
+                // 미완성도 동일 높이 유지 — 카드 크기 jitter 방지.
+                Text("+\(collection.bonusCoins) coin")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.65))
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(bg.opacity(isComplete ? 0.95 : 0.55)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isComplete ? bg : Color.gray.opacity(0.3), lineWidth: 1)
+        )
+        .help(isComplete
+              ? "\(collection.displayName) 컴플리트 — \(collection.bonusCoins) 코인 적립"
+              : "\(progress.collected)/\(progress.total) 보유 · 완성 시 +\(collection.bonusCoins) 코인")
     }
 }
 
