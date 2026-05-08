@@ -3,7 +3,7 @@ import Foundation
 // 연결된 GitHub 사용자가 머지한 PR을 찾아 코인 보너스를 적립.
 //
 // 정책:
-//   - PR 1개 = 50 coin (CoinLedger.coinPerContributorPR)
+//   - PR 1개 = 1,000 coin (CoinLedger.coinPerContributorPR) — v0.6.10에 50 → 1,000으로 상향
 //   - dedupe: Settings.creditedPRNumbers (Set<Int>)에 PR 번호 저장 → 한 번 적립된 PR은 영구 제외
 //   - 소급: 처음 연결 시 과거 머지된 모든 PR이 한꺼번에 적립됨
 //   - 자기 자신(repo owner)도 포함 — 외부 기여자만 분리하지 않음 (사용자 결정 v0.4.0)

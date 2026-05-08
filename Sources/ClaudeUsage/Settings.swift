@@ -213,6 +213,34 @@ final class Settings: ObservableObject {
         didSet { persist(pendingCollectionHighlights, forKey: Keys.pendingCollectionHighlights) }
     }
 
+    // MARK: - 트레이너 카드 (Report 탭)
+    //
+    // 사용자 progress + customization을 한 카드에 응축, 스크린샷으로 공유하는 기능.
+    // 4 layer: avatar(펫) / background / frame / title. + accessory 인벤토리.
+    // unlock 평가는 `CardFrame.unlocked(in:)` / `CardTitle.unlocked(in:)` 등 enum-static.
+
+    /// 트레이너 5자리 ID — 첫 launch 시 랜덤 생성, 영속. 사용자 변경 불가 (포켓몬 트레이너 ID 톤).
+    @Published var trainerID: String {
+        didSet { UserDefaults.standard.set(trainerID, forKey: Keys.trainerID) }
+    }
+    /// 트레이너 카드 customization 상태 (avatar/background/frame/title/accessory/layout).
+    @Published var trainerCard: TrainerCard {
+        didSet { persist(trainerCard, forKey: Keys.trainerCard) }
+    }
+    /// 코인 구매로 unlock한 액세서리 인벤토리. CardAccessory.rawValue 보관.
+    @Published var ownedAccessories: Set<String> {
+        didSet { persist(ownedAccessories, forKey: Keys.ownedAccessories) }
+    }
+    /// 코인 구매로 unlock한 칭호 인벤토리. CardTitle.rawValue 보관 (자동 unlock 칭호는 미포함).
+    @Published var ownedTitles: Set<String> {
+        didSet { persist(ownedTitles, forKey: Keys.ownedTitles) }
+    }
+    /// 카드를 공유 이미지로 export할 때 GitHub login을 노출할지. 기본 false (privacy first) —
+    /// GitHub 연결한 사용자가 명시적 opt-in해야 카드에 username 박힘.
+    @Published var showGitHubLoginInCard: Bool {
+        didSet { UserDefaults.standard.set(showGitHubLoginInCard, forKey: Keys.showGitHubLoginInCard) }
+    }
+
     // MARK: - GitHub 기여자 보너스
 
     /// 연결된 GitHub login (예: "youznn"). nil이면 미연결. 토큰은 Keychain에 별도 저장.
@@ -314,6 +342,22 @@ final class Settings: ObservableObject {
         let collectionHighlightsData = d.data(forKey: Keys.pendingCollectionHighlights)
         self.pendingCollectionHighlights = (collectionHighlightsData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
 
+        // 트레이너 카드 로드. 첫 launch면 랜덤 5자리 ID 생성 + 기본 카드 사용.
+        if let id = d.string(forKey: Keys.trainerID), !id.isEmpty {
+            self.trainerID = id
+        } else {
+            let newID = TrainerCard.generateTrainerID()
+            self.trainerID = newID
+            d.set(newID, forKey: Keys.trainerID)
+        }
+        let cardData = d.data(forKey: Keys.trainerCard)
+        self.trainerCard = (cardData.flatMap { try? JSONDecoder().decode(TrainerCard.self, from: $0) }) ?? .default
+        let accessoriesData = d.data(forKey: Keys.ownedAccessories)
+        self.ownedAccessories = (accessoriesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let titlesData = d.data(forKey: Keys.ownedTitles)
+        self.ownedTitles = (titlesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        self.showGitHubLoginInCard = (d.object(forKey: Keys.showGitHubLoginInCard) as? Bool) ?? false
+
         // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
         //   1) 신규 사용자 (hasCompletedGachaMigration 아직 false): 첫 실행 시 3장 지급
         //   2) 기존 사용자 (이미 1장 받고 마이그레이션 완료): v0.3.2 보너스 블록에서 +2장
@@ -378,6 +422,20 @@ final class Settings: ObservableObject {
         guard !d.bool(forKey: Keys.hasMigratedGymBadges) else { return }
         BadgeRegistry.evaluate(silent: true)
         d.set(true, forKey: Keys.hasMigratedGymBadges)
+    }
+
+    /// Contributor PR 보너스 단가 50 → 1,000 상향(v0.6.10) 소급 적용. 이미 적립된
+    /// `creditedPRNumbers`의 카운트 × 950(차액)을 1회만 추가 credit. dedup은
+    /// `hasMigratedContributorBonusUpgrade` flag — 두 번 실행 안 됨.
+    /// `Settings.shared` 재진입 위험 없음(`creditContributorBonusUpgrade`는 단순 credit).
+    func applyContributorBonusUpgradeIfNeeded() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: Keys.hasMigratedContributorBonusUpgrade) else { return }
+        let prCount = creditedPRNumbers.count
+        if prCount > 0 {
+            CoinLedger.shared.creditContributorBonusUpgrade(prCount: prCount)
+        }
+        d.set(true, forKey: Keys.hasMigratedContributorBonusUpgrade)
     }
 
     /// 펫 컬렉션 셋 보너스 마이그레이션 — v0.6.x에 컬렉션 시스템이 추가되기 전부터 펫을
@@ -533,6 +591,13 @@ final class Settings: ObservableObject {
         static let pendingCollectionCelebration = "settings.pendingCollectionCelebration"
         static let pendingCollectionHighlights = "settings.pendingCollectionHighlights"
         static let hasMigratedCollectionBonuses = "settings.hasMigratedCollectionBonuses"
+        // 트레이너 카드 (Report 탭)
+        static let trainerID                   = "settings.trainerID"
+        static let trainerCard                 = "settings.trainerCard"
+        static let ownedAccessories            = "settings.ownedAccessories"
+        static let ownedTitles                 = "settings.ownedTitles"
+        static let showGitHubLoginInCard       = "settings.showGitHubLoginInCard"
+        static let hasMigratedContributorBonusUpgrade = "settings.hasMigratedContributorBonusUpgrade"
     }
 }
 

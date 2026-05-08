@@ -80,14 +80,26 @@ final class CoinLedger {
         DebugLog.log("CoinLedger: Wellness +\(amount) coin (total=\(Settings.shared.coins))")
     }
 
-    /// 외부 기여자 PR 머지 보너스. PR 1개 = 50 coin (정액).
+    /// 외부 기여자 PR 머지 보너스. PR 1개 = 1,000 coin (정액).
     /// dedupe는 호출 측(`ContributorBonus`)에서 `Settings.creditedPRNumbers`로 처리.
-    static let coinPerContributorPR: Int = 50
+    static let coinPerContributorPR: Int = 1000
     func creditContributorBonus(prCount: Int) {
         guard prCount > 0 else { return }
         let amount = prCount * Self.coinPerContributorPR
         credit(amount)
         DebugLog.log("CoinLedger: Contributor +\(amount) coin (\(prCount) PR) (total=\(Settings.shared.coins))")
+    }
+
+    /// v0.6.10에서 PR 1개당 보너스를 50 → 1,000으로 상향했을 때, 이미 적립된 과거 PR에
+    /// 차액(950 × N) 만큼 1회 소급 적립. `Settings.applyContributorBonusUpgradeIfNeeded`
+    /// 가 첫 launch에서 한 번만 호출, dedup은 `Keys.hasMigratedContributorBonusUpgrade` flag.
+    func creditContributorBonusUpgrade(prCount: Int) {
+        guard prCount > 0 else { return }
+        let perPRDelta = Self.coinPerContributorPR - 50  // 950
+        let amount = perPRDelta * prCount
+        guard amount > 0 else { return }
+        credit(amount)
+        DebugLog.log("CoinLedger: Contributor upgrade +\(amount) coin (\(prCount) PR × +\(perPRDelta) 차액) (total=\(Settings.shared.coins))")
     }
 
     /// 펫 컬렉션 컴플리트 보너스. `PetCollection.bonusCoins`(rarity 합 × 1.5)를 적립.

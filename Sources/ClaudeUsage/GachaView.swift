@@ -21,16 +21,17 @@ struct GachaView: View {
     @State private var crackStartedAt: Date?
     /// 임계 도달 후 Task spawn race 방지. 부화 시퀀스가 한 번만 commit하도록 가드.
     @State private var hatchInProgress: Bool = false
-    /// 상점/도장 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
+    /// 상점/도장/리포트 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
     @State private var selectedTab: Tab = .shop
 
     enum Tab: String, CaseIterable, Identifiable {
-        case shop, gym
+        case shop, gym, report
         var id: String { rawValue }
         var displayName: String {
             switch self {
-            case .shop: return "상점"
-            case .gym:  return "도장"
+            case .shop:   return "상점"
+            case .gym:    return "도장"
+            case .report: return "레포트"
             }
         }
     }
@@ -69,10 +70,10 @@ struct GachaView: View {
             .padding(.bottom, 8)
 
             ZStack {
-                if selectedTab == .shop {
-                    shopTab.transition(.opacity)
-                } else {
-                    GymView().transition(.opacity)
+                switch selectedTab {
+                case .shop:   shopTab.transition(.opacity)
+                case .gym:    GymView().transition(.opacity)
+                case .report: ReportView().transition(.opacity)
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: selectedTab)

@@ -413,7 +413,7 @@ private struct BadgeTierTooltip: View {
 
 // MARK: - Color hex helper
 
-private extension Color {
+extension Color {
     init(hex: String) {
         var s = hex.uppercased()
         if s.hasPrefix("#") { s.removeFirst() }

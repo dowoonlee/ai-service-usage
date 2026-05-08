@@ -75,6 +75,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 펫 컬렉션 셋 보너스 마이그레이션 — 기존 사용자가 이미 모은 컬렉션에 회고적 보너스.
         // 같은 재진입 위험으로 init 밖에서 호출.
         Settings.shared.applyCollectionMigrationIfNeeded()
+        // PR 보너스 50 → 1,000 상향(v0.6.10) 소급 — 기존 적립 PR에 차액 950 × N 추가.
+        Settings.shared.applyContributorBonusUpgradeIfNeeded()
     }
 
     private func bindSettings() {
