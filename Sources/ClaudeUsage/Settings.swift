@@ -66,20 +66,20 @@ final class Settings: ObservableObject {
     }
     /// 펫 종별 보유 상태 (count + unlockedVariants).
     @Published var ownedPets: [PetKind: PetOwnership] {
-        didSet { persistOwnedPets() }
+        didSet { persist(ownedPets, forKey: Keys.ownedPets) }
     }
     /// 펫 종별 누적 사용 시간 (초). `petClaudeKind`/`petCursorKind`로 선택된 종에 polling tick마다
     /// 실시간 누적 — 더블카운트 (양쪽 차트가 같은 종이면 1tick에 2배).
     /// 가챠 중복 카운트와 합산되어 `PetOwnership.progressUnits`로 환산, variant 해금 평가에 쓰인다.
     @Published var petUsageSeconds: [PetKind: TimeInterval] {
-        didSet { persistPetUsageSeconds() }
+        didSet { persist(petUsageSeconds, forKey: Keys.petUsageSeconds) }
     }
     /// 도감에서 강조 표시(NEW! 뱃지 + 노란 테두리)가 필요한 펫 종 집합.
     /// 추가 트리거: 신규 펫 commit / 가챠 중복으로 variant 해금 / 사용 시간으로 variant 해금.
     /// 제거 트리거: 사용자가 그 펫 슬롯을 클릭해 미리보기 진입(아래 `acknowledgeHighlight(_:)` 사용).
     /// 영속화 — 앱 종료 후에도 강조 표시는 사용자가 확인할 때까지 유지.
     @Published var pendingHighlights: Set<PetKind> {
-        didSet { persistPendingHighlights() }
+        didSet { persist(pendingHighlights, forKey: Keys.pendingHighlights) }
     }
     /// 차트에 활성화된 펫의 variant index (0 = 기본, 1/2/3 = shiny).
     /// kind는 기존 petClaudeKind/petCursorKind를 그대로 사용.
@@ -166,13 +166,13 @@ final class Settings: ObservableObject {
     }
     /// 클리어된 뱃지 ID 집합. 형식: `"<category>.<tier>"` (예: `"standup.production"`).
     @Published var clearedBadges: Set<String> {
-        didSet { persistClearedBadges() }
+        didSet { persist(clearedBadges, forKey: Keys.clearedBadges) }
     }
     /// 코인 보상이 이미 지급된 뱃지 키 집합. `clearedBadges`와 별개의 second-line dedup —
     /// UserDefaults 손상/멀티 인스턴스 race로 `clearedBadges`가 리셋돼도 코인 재지급은 막는다.
     /// 한 번 들어가면 영구. 도입 시 마이그레이션으로 기존 `clearedBadges` 전체를 포함시켜 소급 보호.
     @Published var creditedBadgeRewards: Set<String> {
-        didSet { persistCreditedBadgeRewards() }
+        didSet { persist(creditedBadgeRewards, forKey: Keys.creditedBadgeRewards) }
     }
     /// 챔피언 뱃지(33번째) 획득 시각. nil = 미획득.
     @Published var championBadgeEarnedAt: Date? {
@@ -194,16 +194,23 @@ final class Settings: ObservableObject {
 
     /// 컴플리트된 컬렉션의 `PetCollection.rawValue` Set. 보너스 재지급 방지 dedup.
     @Published var completedCollections: Set<String> {
-        didSet { persistCompletedCollections() }
+        didSet { persist(completedCollections, forKey: Keys.completedCollections) }
     }
     /// 각 컬렉션의 컴플리트 시각 — 도감 업적 섹션의 "획득 일자" 표시용.
     @Published var collectionCompletedAt: [String: Date] {
-        didSet { persistCollectionCompletedAt() }
+        didSet { persist(collectionCompletedAt, forKey: Keys.collectionCompletedAt) }
     }
     /// 가장 최근에 컴플리트된 컬렉션의 rawValue — 가챠 hatched 화면이 컴플리트 배너를
     /// 띄우고 nil로 소비. UI가 한 번만 읽고 비우는 단발성 플래그.
     @Published var pendingCollectionCelebration: String? {
         didSet { UserDefaults.standard.set(pendingCollectionCelebration, forKey: Keys.pendingCollectionCelebration) }
+    }
+    /// 새로 컴플리트된 컬렉션 강조 — `pendingHighlights`(펫 슬롯)와 동일 패턴.
+    /// 사용자가 뱃지를 직접 클릭해 확인하기 전까지 노란 ! 마크 + 외곽 강조 유지. 영속.
+    /// 마이그레이션 시 다중 컴플리트가 한꺼번에 발생해도 사용자가 모두 인지할 수 있게
+    /// (단발성 `pendingCollectionCelebration` 배너만으론 마지막 1개만 노출되는 한계 보완).
+    @Published var pendingCollectionHighlights: Set<String> {
+        didSet { persist(pendingCollectionHighlights, forKey: Keys.pendingCollectionHighlights) }
     }
 
     // MARK: - GitHub 기여자 보너스
@@ -218,7 +225,7 @@ final class Settings: ObservableObject {
     }
     /// 이미 보너스가 적립된 PR 번호 집합 (dedupe). 한번 들어가면 영구 보존 — 계정 갈아끼워도 재지급 안 됨.
     @Published var creditedPRNumbers: Set<Int> {
-        didSet { persistCreditedPRNumbers() }
+        didSet { persist(creditedPRNumbers, forKey: Keys.creditedPRNumbers) }
     }
 
     private init() {
@@ -304,6 +311,8 @@ final class Settings: ObservableObject {
         // 영속 — 다음 실행 시 가챠 화면 진입 첫 hatched에서 처리하거나, 사용자가 도감을 직접
         // 열면 거기서 한 번 띄우고 nil. 영영 묵히지 않음.
         self.pendingCollectionCelebration = d.string(forKey: Keys.pendingCollectionCelebration)
+        let collectionHighlightsData = d.data(forKey: Keys.pendingCollectionHighlights)
+        self.pendingCollectionHighlights = (collectionHighlightsData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
 
         // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
         //   1) 신규 사용자 (hasCompletedGachaMigration 아직 false): 첫 실행 시 3장 지급
@@ -334,7 +343,7 @@ final class Settings: ObservableObject {
             self.ownedPets = owned
             self.gachaTickets = 3
             // didSet은 init 중엔 트리거되지 않으므로 직접 persist.
-            persistOwnedPets()
+            persist(self.ownedPets, forKey: Keys.ownedPets)
             d.set(3, forKey: Keys.gachaTickets)
             d.set(true, forKey: Keys.hasCompletedGachaMigration)
         }
@@ -371,6 +380,32 @@ final class Settings: ObservableObject {
         d.set(true, forKey: Keys.hasMigratedGymBadges)
     }
 
+    /// 펫 컬렉션 셋 보너스 마이그레이션 — v0.6.x에 컬렉션 시스템이 추가되기 전부터 펫을
+    /// 모은 기존 사용자에게 회고적 보상. 이미 한 그룹의 base 펫(variant 0)을 모두 보유한
+    /// 상태면 컴플리트로 등록 + 코인 보너스 + `pendingCollectionHighlights`에 추가
+    /// (사용자가 가챠 화면에서 강조 마크로 인지할 수 있도록).
+    ///
+    /// `silent: true`로 호출 — `pendingCollectionCelebration`(단발성 배너)은 set 안 함.
+    /// 다중 컴플리트가 한꺼번에 발생할 수 있어 배너로는 마지막 1개만 노출되는 한계가 있고,
+    /// 어차피 첫 launch 시점엔 사용자가 가챠 화면을 안 봤을 가능성이 높음.
+    /// 인지는 모두 `pendingCollectionHighlights` 강조에 위임.
+    ///
+    /// `BadgeRegistry`처럼 `Settings.shared`를 재진입하므로 init 안에서 호출 금지 — App 시작 후 호출.
+    func applyCollectionMigrationIfNeeded() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: Keys.hasMigratedCollectionBonuses) else { return }
+        PetCollectionRegistry.evaluate(silent: true)
+        d.set(true, forKey: Keys.hasMigratedCollectionBonuses)
+    }
+
+    /// 컬렉션 뱃지 클릭 시 호출 — 그 컬렉션의 강조 표시 해제. 비어있으면 no-op.
+    /// `acknowledgeHighlight(_ kind: PetKind)`(펫 슬롯)와 동일 패턴.
+    func acknowledgeCollectionHighlight(_ rawValue: String) {
+        if pendingCollectionHighlights.contains(rawValue) {
+            pendingCollectionHighlights.remove(rawValue)
+        }
+    }
+
     /// UserDefaults `key` 가 false 인 동안만 1회 `apply` 실행 후 true 로 마킹.
     /// `onlyExisting=true` 면 `wasExistingUser` 가 false 인 신규 사용자에 대해서는 스킵하지만
     /// flag 는 true 로 마킹해 재실행 안 함 (= "이 사용자는 이 보너스 처리됨" 으로 본다).
@@ -389,51 +424,12 @@ final class Settings: ObservableObject {
         d.set(true, forKey: key)
     }
 
-    private func persistOwnedPets() {
-        if let data = try? JSONEncoder().encode(ownedPets) {
-            UserDefaults.standard.set(data, forKey: Keys.ownedPets)
-        }
-    }
-
-    private func persistPetUsageSeconds() {
-        if let data = try? JSONEncoder().encode(petUsageSeconds) {
-            UserDefaults.standard.set(data, forKey: Keys.petUsageSeconds)
-        }
-    }
-
-    private func persistPendingHighlights() {
-        if let data = try? JSONEncoder().encode(pendingHighlights) {
-            UserDefaults.standard.set(data, forKey: Keys.pendingHighlights)
-        }
-    }
-
-    private func persistCreditedPRNumbers() {
-        if let data = try? JSONEncoder().encode(creditedPRNumbers) {
-            UserDefaults.standard.set(data, forKey: Keys.creditedPRNumbers)
-        }
-    }
-
-    private func persistClearedBadges() {
-        if let data = try? JSONEncoder().encode(clearedBadges) {
-            UserDefaults.standard.set(data, forKey: Keys.clearedBadges)
-        }
-    }
-
-    private func persistCreditedBadgeRewards() {
-        if let data = try? JSONEncoder().encode(creditedBadgeRewards) {
-            UserDefaults.standard.set(data, forKey: Keys.creditedBadgeRewards)
-        }
-    }
-
-    private func persistCompletedCollections() {
-        if let data = try? JSONEncoder().encode(completedCollections) {
-            UserDefaults.standard.set(data, forKey: Keys.completedCollections)
-        }
-    }
-
-    private func persistCollectionCompletedAt() {
-        if let data = try? JSONEncoder().encode(collectionCompletedAt) {
-            UserDefaults.standard.set(data, forKey: Keys.collectionCompletedAt)
+    /// `Codable` 값을 JSON으로 인코딩해 `UserDefaults`에 저장. 인코딩 실패는 무시 — 일시적
+    /// 메모리 압박 등 transient 실패에 대해 기존 저장값을 보존하는 게 더 안전 (다음 didSet에서
+    /// 재시도). Set/Dict didSet에서 매번 호출되는 hot path이지만 사이즈가 작아 부담 없음.
+    private func persist<T: Encodable>(_ value: T, forKey key: String) {
+        if let data = try? JSONEncoder().encode(value) {
+            UserDefaults.standard.set(data, forKey: key)
         }
     }
 
@@ -535,6 +531,8 @@ final class Settings: ObservableObject {
         static let completedCollections        = "settings.completedCollections"
         static let collectionCompletedAt       = "settings.collectionCompletedAt"
         static let pendingCollectionCelebration = "settings.pendingCollectionCelebration"
+        static let pendingCollectionHighlights = "settings.pendingCollectionHighlights"
+        static let hasMigratedCollectionBonuses = "settings.hasMigratedCollectionBonuses"
     }
 }
 

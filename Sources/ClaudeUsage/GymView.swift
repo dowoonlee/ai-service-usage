@@ -226,18 +226,22 @@ struct GymView: View {
         // cell intrinsic size 고정 — hover 상태와 무관하게 column 폭 일정.
         .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56)
         .contentShape(Rectangle())
-        // tooltip은 .overlay로 빼서 cell intrinsic size 영향 0.
-        .overlay(alignment: .top) {
-            if isHovered {
-                tooltipBubble(category: category, tier: tier, current: currentValue,
-                              threshold: threshold, cleared: cleared, available: available)
-                    .offset(y: -50)
-                    .allowsHitTesting(false)
-                    .zIndex(10)
-            }
-        }
         .onHover { hovering in
             hoveredKey = hovering ? id.key : (hoveredKey == id.key ? nil : hoveredKey)
+        }
+        // 가챠 컬렉션 뱃지와 동일한 호버 패턴 — 시스템 popover로 풍부한 카드 노출.
+        // (이전엔 검은 박스 .overlay tooltip이었음. ScrollView clip / hit-test 이슈 회피
+        // 효과 + 페이드 애니메이션 자동 + 화면 가장자리 자동 배치 + 디자인 통일.)
+        .popover(isPresented: Binding(
+            get: { isHovered },
+            set: { isPresented in
+                if !isPresented, hoveredKey == id.key { hoveredKey = nil }
+            }
+        ), arrowEdge: .top) {
+            BadgeTierTooltip(category: category, tier: tier,
+                             currentValue: currentValue, threshold: threshold,
+                             cleared: cleared, available: available,
+                             strokeColor: strokeColor)
         }
     }
 
@@ -314,32 +318,6 @@ struct GymView: View {
                 radius: 4)
     }
 
-    /// 호버 tooltip 본문 — 카테고리 / tier 이름 / 현재 진행 / 보상.
-    private func tooltipBubble(category: BadgeCategory, tier: BadgeTier,
-                               current: Int, threshold: Int,
-                               cleared: Bool, available: Bool) -> some View {
-        let title = "\(category.displayName) · \(tier.displayName)"
-        let body: String = {
-            if !available { return "Cursor Ultra 사용자 전용" }
-            if cleared    { return "클리어 — +\(tier.coinReward) 코인" }
-            return "\(current)/\(threshold) \(category.unit) · 보상 +\(tier.coinReward) 코인"
-        }()
-        return VStack(alignment: .leading, spacing: 2) {
-            Text(title)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white)
-            Text(body)
-                .font(.system(size: 9))
-                .foregroundStyle(.white.opacity(0.85))
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(Color.black.opacity(0.85))
-        )
-        .fixedSize(horizontal: true, vertical: false)
-    }
 
     // MARK: - Tier 색 / 굵기
 
@@ -360,6 +338,76 @@ struct GymView: View {
         case .staging:    return 3.0
         case .production: return 3.5
         }
+    }
+}
+
+/// 도장 셀 호버 popover. 가챠 컬렉션 뱃지의 `CollectionBadgeTooltip`과 동일 톤 —
+/// 헤더(카테고리·tier) + 본문(상태별 분기: cleared/locked/in-progress) + 보상.
+/// macOS 시스템 popover라 ScrollView clip 영향 없고 페이드/스케일 애니메이션 자동.
+private struct BadgeTierTooltip: View {
+    let category: BadgeCategory
+    let tier: BadgeTier
+    let currentValue: Int
+    let threshold: Int
+    let cleared: Bool
+    let available: Bool
+    let strokeColor: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 헤더: 카테고리 · tier + tier 색 도트.
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(strokeColor)
+                    .frame(width: 8, height: 8)
+                Text("\(category.displayName) · \(tier.displayName)")
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                Spacer(minLength: 4)
+            }
+            Divider()
+            // 상태별 본문.
+            if !available {
+                Label {
+                    Text("Cursor Ultra 사용자 전용")
+                        .font(.caption)
+                } icon: {
+                    Image(systemName: "lock.fill")
+                        .foregroundStyle(.secondary)
+                }
+            } else if cleared {
+                Label {
+                    Text("클리어")
+                        .font(.caption.weight(.semibold))
+                } icon: {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                }
+                Text("\(threshold) \(category.unit) 달성")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text("+\(tier.coinReward) coin 적립됨")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            } else {
+                // 진행도 + 진행 바 + 보상.
+                let pct = threshold > 0 ? min(1.0, Double(currentValue) / Double(threshold)) : 0
+                Text("\(currentValue)/\(threshold) \(category.unit)")
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.secondary.opacity(0.2))
+                        Capsule().fill(strokeColor.opacity(0.85))
+                            .frame(width: geo.size.width * pct)
+                    }
+                }
+                .frame(height: 4)
+                Text("달성 시 +\(tier.coinReward) coin")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(strokeColor)
+            }
+        }
+        .padding(12)
+        .frame(width: 230, alignment: .leading)
     }
 }
 

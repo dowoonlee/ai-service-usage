@@ -132,10 +132,24 @@ struct GachaView: View {
     }
 
     private var canPull: Bool {
-        settings.gachaTickets > 0 || settings.coins >= Gacha.pullCost
+        !isPullInProgress && (settings.gachaTickets > 0 || settings.coins >= Gacha.pullCost)
+    }
+
+    /// 가챠 부화 시퀀스가 시작된 후 commit 직전까지의 phase 집합. 이 동안엔 새 가챠 진입을
+    /// 막아야 한다 — 안 막으면 빠른 더블 클릭이 `pull()`을 두 번 호출해서 잔액만 두 번
+    /// 차감되고 첫 결과는 `phase = .egg(pull2)`로 덮어쓰여 commit 안 되고 사라짐.
+    private var isPullInProgress: Bool {
+        switch phase {
+        case .egg, .cracking, .revealing: return true
+        case .idle, .hatched, .preview:   return false
+        }
     }
 
     private func pull() {
+        // Button.disabled가 1차 가드. 진입 가드는 키보드 단축키·접근성 등 우회 경로
+        // 대비한 2차 방어선.
+        guard !isPullInProgress else { return }
+
         let useTicket = settings.gachaTickets > 0
         do {
             // 잔액 차감 + 결과 결정만. 보유 상태는 hatched 진입 시점에 commit().
@@ -381,8 +395,8 @@ struct GachaView: View {
                 Text(pull.rarity.displayName)
                     .font(.caption.weight(.bold))
                     .padding(.horizontal, 10).padding(.vertical, 3)
-                    .background(rarityColor(pull.rarity).opacity(0.2))
-                    .foregroundStyle(rarityColor(pull.rarity))
+                    .background(pull.rarity.color.opacity(0.2))
+                    .foregroundStyle(pull.rarity.color)
                     .clipShape(Capsule())
 
                 if let v = pull.variantUnlocked, v > 0 {
@@ -476,11 +490,11 @@ struct GachaView: View {
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(rarityColor(rarity))
+                    .fill(rarity.color)
                     .frame(width: 8, height: 8)
                 Text(rarity.displayName)
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(rarityColor(rarity))
+                    .foregroundStyle(rarity.color)
                 Spacer()
                 Text("\(ownedCount)/\(kinds.count)")
                     .font(.caption)
@@ -512,14 +526,6 @@ struct GachaView: View {
         }
     }
 
-    private func rarityColor(_ r: Rarity) -> Color {
-        switch r {
-        case .common:    return .gray
-        case .rare:      return .blue
-        case .epic:      return .purple
-        case .legendary: return .orange
-        }
-    }
 }
 
 private struct InventorySlot: View {
@@ -657,14 +663,9 @@ private struct CollectionBadge: View {
 
     @State private var hovering: Bool = false
 
-    private static let completedAtFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy.MM.dd"
-        return f
-    }()
-
     var body: some View {
         let isComplete = settings.completedCollections.contains(collection.rawValue)
+        let isHighlighted = settings.pendingCollectionHighlights.contains(collection.rawValue)
         let progress = collection.progress(settings)
         let color: Color = isComplete ? collection.accentColor : Color.gray
 
@@ -701,17 +702,36 @@ private struct CollectionBadge: View {
                             .allowsHitTesting(false)
                     )
                     .overlay(
+                        // 외곽 stroke — highlighted면 노란색·두꺼움(클릭 확인하기 전까지 강조).
                         Circle()
-                            .stroke(color.opacity(isComplete ? 0.95 : 0.45), lineWidth: 1.0)
+                            .stroke(
+                                isHighlighted ? Color.yellow : color.opacity(isComplete ? 0.95 : 0.45),
+                                lineWidth: isHighlighted ? 2.0 : 1.0
+                            )
                     )
-                    .shadow(color: color.opacity(isComplete ? 0.55 : 0.18), radius: 4, x: 0, y: 2)
+                    .shadow(
+                        color: isHighlighted ? Color.yellow.opacity(0.65) : color.opacity(isComplete ? 0.55 : 0.18),
+                        radius: isHighlighted ? 6 : 4, x: 0, y: 2
+                    )
                 Image(systemName: collection.iconSystemImage)
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white.opacity(isComplete ? 1.0 : 0.70))
                     .shadow(color: .black.opacity(0.30), radius: 1, x: 0, y: 0.5)
                     .frame(width: 48, height: 48)
                     .allowsHitTesting(false)
-                if isComplete {
+                if isHighlighted {
+                    // 신규 컴플리트 — 클릭으로 확인하기 전까지 ! 마크 유지.
+                    // (✓ 마크와 같은 위치에 표시 — 사용자가 클릭하면 ! → ✓로 자연 전환.)
+                    Text("!")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(width: 14, height: 14)
+                        .background(Circle().fill(Color.yellow))
+                        .overlay(Circle().stroke(Color.orange, lineWidth: 1))
+                        .shadow(color: Color.yellow.opacity(0.7), radius: 3)
+                        .offset(x: 4, y: -4)
+                        .allowsHitTesting(false)
+                } else if isComplete {
                     // 완성 표식 — 우상단 노란 체크. 뱃지 가장자리 살짝 넘게 배치.
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14, weight: .bold))
@@ -731,6 +751,11 @@ private struct CollectionBadge: View {
         // 자식 view 영역으로만 한정되므로 명시.
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
+        .onTapGesture {
+            // 클릭으로 강조 확인 — 호버 popover로 정보를 봤다고 자동 dismiss하지 않음.
+            // (`pendingHighlights`(펫 슬롯)와 동일 패턴 — 명시적 클릭만 acknowledge.)
+            settings.acknowledgeCollectionHighlight(collection.rawValue)
+        }
         .popover(isPresented: $hovering, arrowEdge: .top) {
             CollectionBadgeTooltip(
                 collection: collection,
@@ -1023,7 +1048,7 @@ private struct PetPreviewView: View {
     private var descriptionCard: some View {
         let dexNum = Self.dexNumber(for: kind)
         let r = Self.rarity(of: kind)
-        let headerColor = Self.rarityColor(r)
+        let headerColor = r?.color ?? .gray
 
         return VStack(alignment: .leading, spacing: 0) {
             // 헤더 — rarity 색상의 띠. ID + 이름 + 등급.
@@ -1081,17 +1106,6 @@ private struct PetPreviewView: View {
             if (Gacha.pool[tier] ?? []).contains(kind) { return tier }
         }
         return nil
-    }
-
-    /// rarity 색상 — GachaView의 private rarityColor와 동일한 매핑 (struct 분리로 재선언).
-    private static func rarityColor(_ r: Rarity?) -> Color {
-        switch r {
-        case .legendary: return .orange
-        case .epic:      return .purple
-        case .rare:      return .blue
-        case .common:    return .gray
-        case .none:      return .gray
-        }
     }
 
     /// rarity → 별 카운트. 헤더 우측에 컴팩트한 등급 표시로 사용 (LEGENDARY 줄바꿈 회피).

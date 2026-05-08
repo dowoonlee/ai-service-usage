@@ -75,16 +75,10 @@ final class Contributors: ObservableObject {
         prs: [(number: Int, title: String, mergedAt: String?, login: String?, avatar: String?)],
         ownerLogin: String
     ) -> [Contributor] {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoNoFrac = ISO8601DateFormatter()
-        isoNoFrac.formatOptions = [.withInternetDateTime]
-
         var bucket: [String: (avatarURL: String?, prs: [PullRequest])] = [:]
         for pr in prs {
             guard let login = pr.login, login != ownerLogin,
-                  let mergedAtStr = pr.mergedAt,
-                  let mergedAt = iso.date(from: mergedAtStr) ?? isoNoFrac.date(from: mergedAtStr)
+                  let mergedAt = Date.parseISO8601(pr.mergedAt)
             else { continue }
             var entry = bucket[login] ?? (avatarURL: pr.avatar, prs: [])
             entry.prs.append(PullRequest(number: pr.number, title: pr.title, mergedAt: mergedAt))

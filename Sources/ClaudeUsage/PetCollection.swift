@@ -158,13 +158,20 @@ extension PetCollection {
 /// 와 동일 패턴. 한 번 컴플리트된 컬렉션은 ownedPets가 어떤 이유로 비워져도 재지급 안 됨.
 @MainActor
 enum PetCollectionRegistry {
-    static func evaluate() {
+    /// - Parameter silent: 단발성 컴플리트 배너(`pendingCollectionCelebration`)는 set 안 함.
+    ///   기본 `false`(가챠 commit 경로) — 한 번에 하나의 컬렉션만 컴플리트되므로 배너 1개로 충분.
+    ///   `true`(마이그레이션 경로) — 다중 컴플리트가 동시 발생할 수 있는데 단일 String? 배너로는
+    ///   마지막 1개만 노출되는 한계가 있으니 강조 표시(`pendingCollectionHighlights`)에 인지를 위임.
+    static func evaluate(silent: Bool = false) {
         let s = Settings.shared
         for c in PetCollection.allCases where !s.completedCollections.contains(c.rawValue) {
             guard c.isComplete(s) else { continue }
             s.completedCollections.insert(c.rawValue)
             s.collectionCompletedAt[c.rawValue] = Date()
-            s.pendingCollectionCelebration = c.rawValue
+            s.pendingCollectionHighlights.insert(c.rawValue)
+            if !silent {
+                s.pendingCollectionCelebration = c.rawValue
+            }
             CoinLedger.shared.creditCollectionBonus(c)
         }
     }

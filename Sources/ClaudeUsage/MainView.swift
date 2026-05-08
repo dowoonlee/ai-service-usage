@@ -232,6 +232,21 @@ enum SectionFormat {
         return f.localizedString(for: d, relativeTo: now)
     }
 
+    /// 차트 데이터 부족 시 표시 — 첫 폴링 직후(~5s), 윈도우 reset 직후 첫 폴링 전,
+    /// fiveHourPct=0 같이 라인 그래프가 비어 보이는 케이스에 사용. 빈 영역만 두면
+    /// 사용자가 "앱이 멈췄나" 혼란 가능 — 명시적 안내로 진행 상태 알림.
+    @ViewBuilder
+    static func chartEmptyState(_ message: String = "데이터 수집 중...") -> some View {
+        HStack {
+            Spacer()
+            Text(message)
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+            Spacer()
+        }
+        .frame(height: 44)
+    }
+
     static func barColor(_ v: Double?) -> Color {
         guard let v else { return .blue }
         if v >= 80 { return .red }
@@ -486,7 +501,7 @@ struct ClaudeSection: View {
                 )
                 .frame(height: 44)
             } else {
-                Color.clear.frame(height: 44)
+                SectionFormat.chartEmptyState()
             }
         }
     }
@@ -737,7 +752,7 @@ struct CursorSection: View {
                 )
                 .frame(height: 44)
             } else {
-                Color.clear.frame(height: 44)
+                SectionFormat.chartEmptyState()
             }
         }
     }
@@ -804,7 +819,7 @@ struct CursorSection: View {
                 )
                 .frame(height: 44)
             } else {
-                Color.clear.frame(height: 44)
+                SectionFormat.chartEmptyState()
             }
         }
     }

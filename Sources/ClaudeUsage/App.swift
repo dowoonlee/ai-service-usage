@@ -54,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let menuBarTraversalSec: Double = 18.0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 디버그 로그 회전 — 5MB 초과 시 .bak으로 rename. 다른 컴포넌트의 첫 log 호출
+        // 이전에 회전해야 새 사이클의 로그가 깨끗한 파일에서 시작.
+        DebugLog.rotateIfNeeded()
         setupPanel()
         bindSettings()
         NotificationManager.shared.requestAuthorizationIfNeeded()
@@ -69,6 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 도장 마이그레이션 — Stash/Dependency 소급. Settings.init 안에서 호출하면
         // `BadgeRegistry.evaluate`가 `Settings.shared`를 재진입해 crash.
         Settings.shared.applyGymMigrationIfNeeded()
+        // 펫 컬렉션 셋 보너스 마이그레이션 — 기존 사용자가 이미 모은 컬렉션에 회고적 보너스.
+        // 같은 재진입 위험으로 init 밖에서 호출.
+        Settings.shared.applyCollectionMigrationIfNeeded()
     }
 
     private func bindSettings() {

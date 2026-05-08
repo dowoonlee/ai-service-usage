@@ -130,20 +130,12 @@ actor UsageAPI {
     func clearOrgCache() { cachedOrgID = nil }
 
     private func toSnapshot(_ r: APIUsageResponse) -> UsageSnapshot {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoNoFrac = ISO8601DateFormatter()
-        isoNoFrac.formatOptions = [.withInternetDateTime]
-        func parse(_ s: String?) -> Date? {
-            guard let s else { return nil }
-            return iso.date(from: s) ?? isoNoFrac.date(from: s)
-        }
         return UsageSnapshot(
             takenAt: Date(),
             fiveHourPct: r.five_hour?.utilization,
-            fiveHourResetAt: parse(r.five_hour?.resets_at),
+            fiveHourResetAt: Date.parseISO8601(r.five_hour?.resets_at),
             sevenDayPct: r.seven_day?.utilization,
-            sevenDayResetAt: parse(r.seven_day?.resets_at),
+            sevenDayResetAt: Date.parseISO8601(r.seven_day?.resets_at),
             extraUsageEnabled: r.extra_usage?.is_enabled,
             extraUsageUtilPct: r.extra_usage?.utilization,
             extraUsageMonthlyLimit: r.extra_usage?.monthly_limit,

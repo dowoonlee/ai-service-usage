@@ -220,16 +220,11 @@ actor CursorAPI {
         }
 
         var resetAt: Date?
-        if let som = obj["startOfMonth"] as? String {
-            let iso = ISO8601DateFormatter()
-            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let iso2 = ISO8601DateFormatter()
-            iso2.formatOptions = [.withInternetDateTime]
-            if let start = iso.date(from: som) ?? iso2.date(from: som) {
-                var cal = Calendar(identifier: .gregorian)
-                cal.timeZone = TimeZone(identifier: "UTC")!
-                resetAt = cal.date(byAdding: .month, value: 1, to: start)
-            }
+        if let som = obj["startOfMonth"] as? String,
+           let start = Date.parseISO8601(som) {
+            var cal = Calendar(identifier: .gregorian)
+            cal.timeZone = TimeZone(identifier: "UTC")!
+            resetAt = cal.date(byAdding: .month, value: 1, to: start)
         }
 
         return CursorSnapshot(

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// 한 펫 종에 대한 보유 상태.
 /// - count: 가챠로 누적 뽑힌 횟수 (중복 포함)
@@ -93,6 +94,18 @@ enum Rarity: String, Codable, CaseIterable, Hashable {
         case .rare:      return 300
         case .epic:      return 800
         case .legendary: return 2500
+        }
+    }
+
+    /// 도감 헤더, 결과 카드, 인벤토리 띠 등 등급 시각화에 공통으로 쓰는 색상.
+    /// (이전엔 `GachaView.rarityColor`와 `GachaPetCard.rarityColor` 두 곳에 동일 매핑이
+    /// 중복되어 있었음 — enum prop으로 단일화.)
+    var color: Color {
+        switch self {
+        case .common:    return .gray
+        case .rare:      return .blue
+        case .epic:      return .purple
+        case .legendary: return .orange
         }
     }
 }
