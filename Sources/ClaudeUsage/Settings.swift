@@ -411,6 +411,22 @@ final class Settings: ObservableObject {
             d.set(self.gachaTickets, forKey: Keys.gachaTickets)
         }
 
+        // 5월의 달 기념 — 신규+기존 모든 사용자에게 1회 5,000 coin 지급. v0.7.0 캠페인.
+        // onlyExisting=false라 첫 launch 신규 사용자도 환영 보너스로 받음.
+        applyOnceMigration(key: Keys.hasReceivedMay2026Bonus,
+                           onlyExisting: false,
+                           wasExistingUser: wasExistingUser) {
+            self.coins += 5000
+            self.coinsTotalEarned += 5000
+            // 첫 적립이라면 firstCreditedAt도 채워야 평균 일일 적립 계산이 의미 있음.
+            if self.firstCreditedAt == nil {
+                self.firstCreditedAt = Date()
+                d.set(self.firstCreditedAt, forKey: Keys.firstCreditedAt)
+            }
+            d.set(self.coins, forKey: Keys.coins)
+            d.set(self.coinsTotalEarned, forKey: Keys.coinsTotalEarned)
+        }
+
         // 도장 마이그레이션은 init 안에서 호출 금지 — `BadgeRegistry.evaluate`가 `Settings.shared`를
         // 재진입해서 lazy init이 깨짐. App 시작 후 `applyGymMigrationIfNeeded()`에서 처리.
     }
@@ -568,6 +584,7 @@ final class Settings: ObservableObject {
         static let petUsageSeconds             = "settings.petUsageSeconds"
         static let pendingHighlights           = "settings.pendingHighlights"
         static let hasReceivedV032TicketBonus  = "settings.hasReceivedV032TicketBonus"
+        static let hasReceivedMay2026Bonus     = "settings.hasReceivedMay2026Bonus"
         // GitHub 기여자 보너스
         static let githubLogin                 = "settings.githubLogin"
         static let githubUserID                = "settings.githubUserID"
