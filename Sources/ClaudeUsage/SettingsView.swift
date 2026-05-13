@@ -106,12 +106,15 @@ struct SettingsView: View {
             Section("GitHub 연동") {
                 GitHubLinkView(settings: settings)
             }
+            Section("랭킹") {
+                RankingSectionView(settings: settings)
+            }
             Section("정보") {
                 CreditsView()
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 600)
+        .frame(width: 380, height: 700)
     }
 
     // MARK: - 펫 picker helpers (보유 펫 + variant 페어 단위 선택)
@@ -329,6 +332,325 @@ private struct GitHubLinkView: View {
             } catch {
                 state = .error(error.localizedDescription)
             }
+        }
+    }
+}
+
+// 랭킹 옵트인/관리 UI. 옵트인 시점에 처리방침 동의 + 닉네임 확정 + 서버 register.
+// 등록 후엔 닉네임 변경/계정 삭제/복구 코드 재표시/보드 열기 액션을 노출.
+private struct RankingSectionView: View {
+    @ObservedObject var settings: Settings
+
+    enum FlowState: Equatable {
+        case idle
+        case registering
+        case error(String)
+    }
+    @State private var state: FlowState = .idle
+    @State private var nicknameInput: String = ""
+    @State private var editingNickname: Bool = false
+    @State private var showRecoveryCode: Bool = false
+    @State private var recoveryInput: String = ""
+    @State private var showRecoveryEntry: Bool = false
+    @State private var confirmDelete: Bool = false
+
+    var body: some View {
+        if !RankingAPI.isConfigured {
+            Text("랭킹 기능이 이 빌드에 포함되지 않았습니다. (SupabaseURL 미설정)")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        } else if settings.rankingRegistered {
+            registeredView
+        } else {
+            optInView
+        }
+    }
+
+    // MARK: - Opt-in (등록 전)
+
+    private var optInView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            switch state {
+            case .idle:
+                idleOptInView
+            case .registering:
+                HStack { ProgressView().controlSize(.small); Text("등록 중...").font(.system(size: 11)) }
+            case .error(let msg):
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("실패: \(msg)").font(.system(size: 11)).foregroundStyle(.red)
+                    Button("다시 시도") { state = .idle }
+                }
+            }
+        }
+    }
+
+    private var idleOptInView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("코인 누적량을 글로벌 보드에 공개합니다. 닉네임은 사용자 식별에만 사용.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 4) {
+                Toggle(isOn: $settings.rankingPrivacyAccepted) {
+                    Text("처리방침에 동의합니다").font(.system(size: 11))
+                }
+                .toggleStyle(.checkbox)
+                if let url = RankingAPI.privacyPolicyURL {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: { Image(systemName: "arrow.up.right.square").font(.system(size: 11)) }
+                    .buttonStyle(.borderless)
+                    .help("처리방침 보기")
+                }
+            }
+
+            HStack {
+                Text("닉네임").font(.system(size: 11)).frame(width: 56, alignment: .leading)
+                TextField("자동 생성", text: $nicknameInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 11))
+            }
+            HStack(spacing: 6) {
+                Button("자동 생성") { nicknameInput = NicknameGenerator.generate() }
+                    .buttonStyle(.borderless).font(.system(size: 11))
+                if let login = settings.githubLogin {
+                    Button("GitHub(@\(login)) 사용") { nicknameInput = login }
+                        .buttonStyle(.borderless).font(.system(size: 11))
+                }
+                Spacer()
+            }
+
+            HStack {
+                Button("참여 시작") { startRegistration() }
+                    .disabled(!settings.rankingPrivacyAccepted || !NicknameGenerator.isValid(nicknameInput))
+                Spacer()
+                Button("복구 코드로 이전 계정 불러오기") { showRecoveryEntry = true }
+                    .buttonStyle(.borderless).font(.system(size: 11))
+            }
+        }
+        .onAppear {
+            if nicknameInput.isEmpty {
+                nicknameInput = settings.githubLogin ?? NicknameGenerator.generate()
+            }
+        }
+        .sheet(isPresented: $showRecoveryEntry) {
+            recoveryEntrySheet
+        }
+    }
+
+    // MARK: - Registered (등록 후)
+
+    private var registeredView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: settings.rankingEnabled ? "checkmark.circle.fill" : "pause.circle.fill")
+                    .foregroundStyle(settings.rankingEnabled ? .green : .secondary)
+                Text(settings.rankingEnabled ? "참여 중" : "일시 중지")
+                    .font(.system(size: 12))
+                Spacer()
+                Toggle("", isOn: pauseBinding).labelsHidden().toggleStyle(.switch)
+            }
+
+            HStack {
+                Text("닉네임").font(.system(size: 11)).frame(width: 56, alignment: .leading)
+                if editingNickname {
+                    TextField("", text: $nicknameInput)
+                        .textFieldStyle(.roundedBorder).font(.system(size: 11))
+                    Button("저장") {
+                        let trimmed = nicknameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if NicknameGenerator.isValid(trimmed) {
+                            settings.rankingNickname = trimmed
+                        }
+                        editingNickname = false
+                    }
+                    .font(.system(size: 11))
+                    Button("취소") { editingNickname = false; nicknameInput = settings.rankingNickname }
+                        .buttonStyle(.borderless).font(.system(size: 11))
+                } else {
+                    Text(settings.rankingNickname).font(.system(size: 12, weight: .medium))
+                    Button {
+                        nicknameInput = settings.rankingNickname
+                        editingNickname = true
+                    } label: { Image(systemName: "pencil").font(.system(size: 11)) }
+                        .buttonStyle(.borderless)
+                    Spacer()
+                }
+            }
+
+            if let lastAt = settings.rankingLastSubmittedAt {
+                Text("마지막 동기화 \(lastAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                Button("보드 열기") { GachaWindowController.shared.present(tab: .ranking) }
+                Button("복구 코드") { showRecoveryCode = true }
+                    .buttonStyle(.borderless).font(.system(size: 11))
+                Spacer()
+                Button {
+                    confirmDelete = true
+                } label: {
+                    Text("계정 삭제").foregroundStyle(.red)
+                }
+                .buttonStyle(.borderless).font(.system(size: 11))
+            }
+        }
+        .alert("복구 코드", isPresented: $showRecoveryCode) {
+            Button("복사") {
+                if let code = settings.rankingRecoveryCode {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(code, forType: .string)
+                }
+            }
+            Button("닫기", role: .cancel) { }
+        } message: {
+            Text(settings.rankingRecoveryCode ?? "없음")
+        }
+        .alert("계정을 삭제하시겠습니까?", isPresented: $confirmDelete) {
+            Button("삭제", role: .destructive) { deleteAccount() }
+            Button("취소", role: .cancel) { }
+        } message: {
+            Text("서버의 모든 데이터가 영구 삭제됩니다. 누적 코인은 복구되지 않습니다.")
+        }
+    }
+
+    private var pauseBinding: Binding<Bool> {
+        Binding(
+            get: { settings.rankingEnabled },
+            set: { newValue in
+                if newValue {
+                    // OFF→ON: 일시 중지 동안 누적된 delta를 rebase. 한 번에 큰 값 제출 회피.
+                    settings.rankingLastSubmittedTotal = settings.rankingScoreEarnedVP
+                }
+                settings.rankingEnabled = newValue
+            }
+        )
+    }
+
+    // MARK: - Recovery entry sheet
+
+    private var recoveryEntrySheet: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("이전 계정 불러오기").font(.system(size: 13, weight: .semibold))
+            Text("등록 시 발급된 복구 코드를 입력하거나 같은 GitHub 계정으로 인증하세요.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            TextField("XXXX-XXXX-XXXX", text: $recoveryInput)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12, design: .monospaced))
+            HStack {
+                Button("코드로 복구") { recoverWithCode() }
+                    .disabled(recoveryInput.count < 8)
+                if settings.githubLogin != nil {
+                    Button("GitHub으로 복구") { recoverWithGitHub() }
+                }
+                Spacer()
+                Button("닫기") { showRecoveryEntry = false }
+            }
+        }
+        .padding(16)
+        .frame(width: 360)
+    }
+
+    // MARK: - Actions
+
+    private func startRegistration() {
+        let nickname = nicknameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard NicknameGenerator.isValid(nickname) else {
+            state = .error("닉네임 형식이 올바르지 않습니다.")
+            return
+        }
+        let deviceId = settings.rankingDeviceID.isEmpty ? UUID().uuidString : settings.rankingDeviceID
+        state = .registering
+        Task { @MainActor in
+            do {
+                // 누적값 인정 — register 시 현재 rankingScoreEarnedVP를 initialCoins로 전달
+                // (서버는 점수 의미 무관 opaque 정수). baseline 동일값으로 잡아 다음 delta=0부터 시작.
+                let currentTotal = settings.rankingScoreEarnedVP
+                let profile = ProfileState.current(from: settings)
+                let resp = try await RankingAPI.shared.register(
+                    deviceId: deviceId,
+                    nickname: nickname,
+                    githubLogin: settings.githubLogin,
+                    githubUserId: settings.githubUserID,
+                    initialCoins: currentTotal,
+                    profileJson: profile
+                )
+                Keychain.saveRankingHmacKey(resp.hmacKey)
+                settings.rankingDeviceID = deviceId
+                settings.rankingNickname = resp.nickname
+                settings.rankingRecoveryCode = resp.recoveryCode
+                settings.rankingBaselineCoins = currentTotal
+                settings.rankingLastSubmittedTotal = currentTotal
+                settings.rankingRegistered = true
+                settings.rankingEnabled = true
+                state = .idle
+                showRecoveryCode = true
+            } catch {
+                state = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    private func recoverWithCode() {
+        let newDeviceId = settings.rankingDeviceID.isEmpty ? UUID().uuidString : settings.rankingDeviceID
+        Task { @MainActor in
+            do {
+                let resp = try await RankingAPI.shared.recoverWithRecoveryCode(recoveryInput, newDeviceId: newDeviceId)
+                Keychain.saveRankingHmacKey(resp.hmacKey)
+                settings.rankingDeviceID = resp.deviceId
+                settings.rankingNickname = resp.nickname
+                settings.rankingRecoveryCode = recoveryInput
+                settings.rankingLastSubmittedTotal = resp.totalCoins
+                settings.rankingBaselineCoins = settings.rankingScoreEarnedVP
+                settings.rankingRegistered = true
+                settings.rankingEnabled = true
+                settings.rankingPrivacyAccepted = true
+                showRecoveryEntry = false
+            } catch {
+                state = .error(error.localizedDescription)
+                showRecoveryEntry = false
+            }
+        }
+    }
+
+    private func recoverWithGitHub() {
+        guard let token = Keychain.loadGitHubToken() else {
+            state = .error("GitHub 토큰이 없습니다. 먼저 GitHub 연동을 마치세요.")
+            return
+        }
+        let newDeviceId = settings.rankingDeviceID.isEmpty ? UUID().uuidString : settings.rankingDeviceID
+        Task { @MainActor in
+            do {
+                let resp = try await RankingAPI.shared.recoverWithGitHub(token: token, newDeviceId: newDeviceId)
+                Keychain.saveRankingHmacKey(resp.hmacKey)
+                settings.rankingDeviceID = resp.deviceId
+                settings.rankingNickname = resp.nickname
+                settings.rankingLastSubmittedTotal = resp.totalCoins
+                settings.rankingBaselineCoins = settings.rankingScoreEarnedVP
+                settings.rankingRegistered = true
+                settings.rankingEnabled = true
+                settings.rankingPrivacyAccepted = true
+                showRecoveryEntry = false
+            } catch {
+                state = .error(error.localizedDescription)
+                showRecoveryEntry = false
+            }
+        }
+    }
+
+    private func deleteAccount() {
+        guard let hmacKey = Keychain.loadRankingHmacKey() else {
+            settings.clearRankingLocalState()
+            return
+        }
+        let deviceId = settings.rankingDeviceID
+        Task { @MainActor in
+            do {
+                try await RankingAPI.shared.deleteAccount(deviceId: deviceId, hmacKeyBase64: hmacKey)
+            } catch {
+                DebugLog.log("Ranking delete failed (clearing local anyway): \(error.localizedDescription)")
+            }
+            settings.clearRankingLocalState()
         }
     }
 }

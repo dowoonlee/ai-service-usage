@@ -124,6 +124,11 @@ final class ViewModel: ObservableObject {
     }
 
     init() {
+        // 사용량 이벤트 ledger 등록 — GUI/TUI 모두 ViewModel 경유하므로 여기에 두면 두 모드 모두
+        // 안전. UsageEventBus.register는 dedup이 있어 중복 호출 무해.
+        UsageEventBus.shared.register(CoinLedger.shared)
+        UsageEventBus.shared.register(VPLedger.shared)
+
         let d = UserDefaults.standard
         self.claudeCollapsed = d.bool(forKey: "section.claude.collapsed")
         self.cursorCollapsed = d.bool(forKey: "section.cursor.collapsed")
@@ -244,6 +249,7 @@ final class ViewModel: ObservableObject {
                     await ContributorBonus.shared.sync()
                     self.updateBackoffAfterCycle()
                     BadgeRegistry.evaluate()
+                    await self.submitRankingIfNeeded()
                 }
 
                 // sleep 시간 = base × jitter × backoff multiplier.
@@ -367,6 +373,46 @@ final class ViewModel: ObservableObject {
         s.ownedPets = owned
     }
 
+    /// 랭킹 서버에 누적 VP delta 제출 + 프로필 동기화. fire-and-forget — 실패해도 본 폴링
+    /// 루프에 영향 없음. 옵트인 + 등록 + HMAC 키 + Supabase 설정 모두 갖춰진 경우에만 실제 호출.
+    /// delta = `rankingScoreEarnedVP` - `rankingLastSubmittedTotal`. 0 이하면 skip (profile은
+    /// 다음 VP 적립 cycle에 piggy-back되어 동기화).
+    private func submitRankingIfNeeded() async {
+        let s = Settings.shared
+        guard s.rankingEnabled, s.rankingRegistered,
+              !s.rankingDeviceID.isEmpty,
+              RankingAPI.isConfigured,
+              let hmacKey = Keychain.loadRankingHmacKey() else { return }
+        let total = s.rankingScoreEarnedVP
+        let delta = total - s.rankingLastSubmittedTotal
+        guard delta > 0 else { return }
+        let profile = ProfileState.current(from: s)
+        do {
+            let resp = try await RankingAPI.shared.submitDelta(
+                deviceId: s.rankingDeviceID,
+                delta: delta,
+                prevTotal: s.rankingLastSubmittedTotal,
+                hmacKeyBase64: hmacKey,
+                profileJson: profile
+            )
+            if resp.accepted {
+                s.rankingLastSubmittedTotal = total
+                s.rankingLastSubmittedAt = Date()
+                DebugLog.log("Ranking: submitted +\(delta) coin (server total=\(resp.totalCoins))")
+            } else if resp.rejectReason == "prev_total_mismatch" {
+                // 클라이언트가 추적하는 prevTotal과 서버 total이 어긋남 (보통 옛 register 코드로
+                // 등록된 경우 서버 0인 채로 시작). 서버 값을 truth로 sync — 다음 cycle에 정상
+                // delta 계산. 캡으로 한 번에 다 못 보내는 경우 여러 cycle 걸쳐 따라잡음.
+                DebugLog.log("Ranking: prev_total drift — syncing to server total=\(resp.totalCoins)")
+                s.rankingLastSubmittedTotal = resp.totalCoins
+            } else {
+                DebugLog.log("Ranking: submit rejected — \(resp.rejectReason ?? "unknown")")
+            }
+        } catch {
+            DebugLog.log("Ranking submit failed: \(error.localizedDescription)")
+        }
+    }
+
     /// 도장 카운터 — Heartbeat (36h grace streak), Night Owl (0~6시 폴링 누적).
     /// Rate Limit은 7d resetAt 변경 시점에 평가하므로 `refreshClaude`에서 따로 처리.
     /// `sleepSec`은 직전 cycle의 sleep 길이 — Night Owl 누적 단위.
@@ -442,7 +488,8 @@ final class ViewModel: ObservableObject {
             claudeNeedsLogin = false
             evaluateClaudeAlerts(snap)
             evaluateRateLimitGym(snap)
-            CoinLedger.shared.evaluateClaude(snapshot: snap)
+            UsageEventProducer.ingestClaude(snap)
+            BadgeRegistry.evaluate()
             claudePollOutcome = .success
         } catch UsageError.notLoggedIn {
             claudeNeedsLogin = true
@@ -495,6 +542,9 @@ final class ViewModel: ObservableObject {
                     // resetAt은 startOfMonth + 1개월이므로 - 1개월로 periodStart 복원
                     Calendar(identifier: .gregorian).date(byAdding: .month, value: -1, to: resetAt) ?? resetAt.addingTimeInterval(-30 * 86400)
                 })
+            } else {
+                // Pro/Free/Business — snapshot의 request delta 기반 (Ultra는 events 경로).
+                UsageEventProducer.ingestCursorSnapshot(snap)
             }
             cursorPollOutcome = .success
         } catch CursorError.cursorNotInstalled, CursorError.notLoggedIn {
@@ -672,7 +722,8 @@ final class ViewModel: ObservableObject {
                 for ev in new { SnapshotStore.cursorEvents.append(ev) }
                 cursorEvents.append(contentsOf: new)
                 cursorEvents.sort { $0.timestamp < $1.timestamp }
-                CoinLedger.shared.evaluateCursor(newEvents: new)
+                UsageEventProducer.ingestCursorEvents(new)
+                BadgeRegistry.evaluate()
             }
         } catch {
             DebugLog.log(" fetchEvents failed: \(error.localizedDescription)")

@@ -8,6 +8,8 @@ enum Keychain {
     static let claudeAccount = "sessionKey"
     // GitHub OAuth access token (device flow).
     static let githubAccount = "githubToken"
+    // 랭킹 서버가 register 시 발급한 per-install HMAC 키 (base64). payload 서명에 사용.
+    static let rankingHmacAccount = "rankingHmacKey"
 
     // MARK: - Claude session (legacy API, 인자 없음)
 
@@ -20,6 +22,12 @@ enum Keychain {
     static func saveGitHubToken(_ value: String) { saveItem(value, account: githubAccount) }
     static func loadGitHubToken() -> String? { loadItem(account: githubAccount) }
     static func clearGitHubToken() { clearItem(account: githubAccount) }
+
+    // MARK: - Ranking HMAC key
+
+    static func saveRankingHmacKey(_ value: String) { saveItem(value, account: rankingHmacAccount) }
+    static func loadRankingHmacKey() -> String? { loadItem(account: rankingHmacAccount) }
+    static func clearRankingHmacKey() { clearItem(account: rankingHmacAccount) }
 
     // MARK: - 내부 공통
 

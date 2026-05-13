@@ -254,11 +254,9 @@ enum BadgeRegistry {
                     s.clearedBadges.insert(id.key)
                     // 보상 dedup — 한 번 코인 받은 뱃지는 clearedBadges가 어떤 이유로 리셋돼도 재지급 X.
                     if !s.creditedBadgeRewards.contains(id.key) {
-                        s.coins += tier.coinReward
-                        s.coinsTotalEarned += tier.coinReward
+                        CoinLedger.shared.creditBonus(tier.coinReward, reason: "badge.\(id.key)")
                         s.creditedBadgeRewards.insert(id.key)
                         newlyCleared.append(id)
-                        DebugLog.log("Badge cleared: \(id.key) → +\(tier.coinReward) coin")
                     } else {
                         DebugLog.log("Badge re-cleared: \(id.key) (이미 보상 지급됨, skip)")
                     }
@@ -273,9 +271,7 @@ enum BadgeRegistry {
         // 챔피언 평가 — 사용자 plan에서 가능한 모든 카테고리×tier 풀세트면 획득.
         if s.championBadgeEarnedAt == nil && isChampionEarned(s) {
             s.championBadgeEarnedAt = Date()
-            s.coins += championCoinReward
-            s.coinsTotalEarned += championCoinReward
-            DebugLog.log("Champion badge earned → +\(championCoinReward) coin")
+            CoinLedger.shared.creditBonus(championCoinReward, reason: "badge.champion")
             if !silent {
                 NotificationManager.shared.championEarned()
             }

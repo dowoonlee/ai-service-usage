@@ -326,7 +326,8 @@ private extension Comparable {
 }
 
 /// 트레이너 카드의 통계 입력. `ReportView`가 `Settings`로부터 계산해 주입.
-struct TrainerStats {
+/// Codable — 랭킹 보드 ProfileState 직렬화 대상.
+struct TrainerStats: Codable {
     let totalSeconds: Int
     let coinsTotalEarned: Int
     let totalPulls: Int

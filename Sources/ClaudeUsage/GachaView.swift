@@ -21,17 +21,18 @@ struct GachaView: View {
     @State private var crackStartedAt: Date?
     /// 임계 도달 후 Task spawn race 방지. 부화 시퀀스가 한 번만 commit하도록 가드.
     @State private var hatchInProgress: Bool = false
-    /// 상점/도장/리포트 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
+    /// 상점/도장/레포트/랭킹 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
     @State private var selectedTab: Tab = .shop
 
     enum Tab: String, CaseIterable, Identifiable {
-        case shop, gym, report
+        case shop, gym, report, ranking
         var id: String { rawValue }
         var displayName: String {
             switch self {
-            case .shop:   return "상점"
-            case .gym:    return "도장"
-            case .report: return "레포트"
+            case .shop:    return "상점"
+            case .gym:     return "도장"
+            case .report:  return "레포트"
+            case .ranking: return "랭킹"
             }
         }
     }
@@ -71,14 +72,18 @@ struct GachaView: View {
 
             ZStack {
                 switch selectedTab {
-                case .shop:   shopTab.transition(.opacity)
-                case .gym:    GymView().transition(.opacity)
-                case .report: ReportView().transition(.opacity)
+                case .shop:    shopTab.transition(.opacity)
+                case .gym:     GymView().transition(.opacity)
+                case .report:  ReportView().transition(.opacity)
+                case .ranking: RankingView().transition(.opacity)
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: selectedTab)
         }
         .frame(width: 480, height: 640)
+        .onReceive(NotificationCenter.default.publisher(for: .gachaSwitchTab)) { notif in
+            if let tab = notif.object as? Tab { selectedTab = tab }
+        }
     }
 
     private var shopTab: some View {
@@ -1198,9 +1203,19 @@ final class GachaWindowController: NSWindowController {
         self.init(window: window)
     }
 
-    func present() {
+    /// 윈도우를 띄우면서 특정 탭으로 전환. `tab=nil`이면 마지막 선택 상태 유지.
+    /// 외부(SettingsView 등)가 "보드 열기" 같은 라우팅에 사용.
+    func present(tab: GachaView.Tab? = nil) {
         NSApp.activate(ignoringOtherApps: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        if let tab {
+            NotificationCenter.default.post(name: .gachaSwitchTab, object: tab)
+        }
     }
+}
+
+extension Notification.Name {
+    /// GachaView가 외부 요청으로 탭 전환할 때 사용. object = GachaView.Tab.
+    static let gachaSwitchTab = Notification.Name("gachaSwitchTab")
 }

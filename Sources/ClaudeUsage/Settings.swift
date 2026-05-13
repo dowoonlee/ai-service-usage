@@ -256,6 +256,79 @@ final class Settings: ObservableObject {
         didSet { persist(creditedPRNumbers, forKey: Keys.creditedPRNumbers) }
     }
 
+    // MARK: - 랭킹 (글로벌 보드)
+    //
+    // opt-in 후 활성. opt-in 시점에 baseline = 현재 `coinsTotalEarned` 캡처 → 서버에는 그
+    // 시점부터의 delta(현재 total - lastSubmittedTotal)만 보고. 옵트인 이전 누적분이 한
+    // 번에 큰 delta로 넘어가지 않게 막아 서버 sanity check(시간 비례 캡)를 회피하지 않음.
+    //
+    // 디바이스 UUID + per-install HMAC 키 + recovery code는 서버 register 시 발급. 재설치
+    // 시 device UUID는 잃으므로 recovery code 또는 GitHub OAuth로 같은 user 레코드에 새
+    // device UUID를 매핑.
+    //
+    // `rankingEnabled` (사용자 의사) 와 `rankingRegistered` (서버 등록 완료) 는 별개 —
+    // 등록 후 사용자가 잠시 OFF 해도 서버 데이터는 유지 (계정 삭제는 별도 액션).
+
+    /// 사용자가 랭킹 참여를 켰는지. 기본 false (현재 앱 철학: 로컬 우선, opt-in).
+    @Published var rankingEnabled: Bool {
+        didSet { UserDefaults.standard.set(rankingEnabled, forKey: Keys.rankingEnabled) }
+    }
+    /// 디바이스 식별자. 첫 옵트인 시 클라이언트에서 UUID 생성, 서버 register 시 등록.
+    /// 재설치하면 잃음 → recovery code/GitHub OAuth로 새 UUID를 같은 user에 매핑.
+    @Published var rankingDeviceID: String {
+        didSet { UserDefaults.standard.set(rankingDeviceID, forKey: Keys.rankingDeviceID) }
+    }
+    /// 보드에 표시될 닉네임. 기본값은 `NicknameGenerator.generate()` 또는 `githubLogin`.
+    /// 사용자가 자유 변경 가능. 서버측 unique 제약(case-insensitive) — 충돌 시 register 실패.
+    @Published var rankingNickname: String {
+        didSet { UserDefaults.standard.set(rankingNickname, forKey: Keys.rankingNickname) }
+    }
+    /// 서버가 register 응답으로 발급한 복구 코드 (XXXX-XXXX-XXXX). 사용자가 1회 보고 별도
+    /// 보관. 분실 시 GitHub 연동이 두 번째 복구 수단.
+    @Published var rankingRecoveryCode: String? {
+        didSet { UserDefaults.standard.set(rankingRecoveryCode, forKey: Keys.rankingRecoveryCode) }
+    }
+    /// 옵트인 시점의 `coinsTotalEarned` 스냅샷. 서버에 baseline 이전 데이터는 보내지 않음.
+    @Published var rankingBaselineCoins: Int {
+        didSet { UserDefaults.standard.set(rankingBaselineCoins, forKey: Keys.rankingBaselineCoins) }
+    }
+    /// 마지막 성공 제출 시점의 `coinsTotalEarned`. 다음 제출 delta = 현재 total - 이 값.
+    /// 첫 제출 전엔 baseline과 동일.
+    @Published var rankingLastSubmittedTotal: Int {
+        didSet { UserDefaults.standard.set(rankingLastSubmittedTotal, forKey: Keys.rankingLastSubmittedTotal) }
+    }
+    /// 마지막 성공 제출 시각. 시간 비례 캡 계산(서버측) + UI 표시용.
+    @Published var rankingLastSubmittedAt: Date? {
+        didSet { UserDefaults.standard.set(rankingLastSubmittedAt, forKey: Keys.rankingLastSubmittedAt) }
+    }
+    /// 서버 등록 완료 여부. 등록 전엔 enabled=true 여도 제출 안 함.
+    /// enabled OFF/ON 토글로는 변하지 않음 — 계정 삭제 시에만 false.
+    @Published var rankingRegistered: Bool {
+        didSet { UserDefaults.standard.set(rankingRegistered, forKey: Keys.rankingRegistered) }
+    }
+    /// 처리방침 동의 여부. 옵트인 UI에서 체크박스로 받음. 미동의면 register 시도 차단.
+    @Published var rankingPrivacyAccepted: Bool {
+        didSet { UserDefaults.standard.set(rankingPrivacyAccepted, forKey: Keys.rankingPrivacyAccepted) }
+    }
+    /// 랭킹 점수 (Vibe Points) — Claude/Cursor 사용량을 "USD 가치"로 환산한 누적값.
+    /// 1 VP = 1 cent (= $0.01) 등가. VPLedger가 UsageEvent 받을 때마다 plan price 기반 환산해
+    /// 누적. coinsTotalEarned (가챠 코인 누적)과 별도. 보드 제출의 source-of-truth.
+    @Published var rankingScoreEarnedVP: Int {
+        didSet { UserDefaults.standard.set(rankingScoreEarnedVP, forKey: Keys.rankingScoreEarnedVP) }
+    }
+    /// VP 절단 손실 carry — `pureValue × vpFactor`가 소수일 때 누적 보존용.
+    @Published var rankingScoreFractionVP: Double {
+        didSet { UserDefaults.standard.set(rankingScoreFractionVP, forKey: Keys.rankingScoreFractionVP) }
+    }
+    /// Cursor Pro/Free 사용자의 request delta 추적용. Ultra는 events 기반이라 불필요.
+    /// startOfMonth가 바뀌면 reset.
+    @Published var cursorLastRequestsSeen: Int? {
+        didSet { UserDefaults.standard.set(cursorLastRequestsSeen, forKey: Keys.cursorLastRequestsSeen) }
+    }
+    @Published var cursorLastStartOfMonth: Date? {
+        didSet { UserDefaults.standard.set(cursorLastStartOfMonth, forKey: Keys.cursorLastStartOfMonth) }
+    }
+
     private init() {
         let d = UserDefaults.standard
         self.panelOpacity  = (d.object(forKey: Keys.panelOpacity) as? Double) ?? 1.0
@@ -305,6 +378,21 @@ final class Settings: ObservableObject {
         self.githubUserID = (d.object(forKey: Keys.githubUserID) as? Int)
         let creditedData = d.data(forKey: Keys.creditedPRNumbers)
         self.creditedPRNumbers = (creditedData.flatMap { try? JSONDecoder().decode(Set<Int>.self, from: $0) }) ?? []
+
+        // 랭킹 (글로벌 보드)
+        self.rankingEnabled            = (d.object(forKey: Keys.rankingEnabled) as? Bool) ?? false
+        self.rankingDeviceID           = d.string(forKey: Keys.rankingDeviceID) ?? ""
+        self.rankingNickname           = d.string(forKey: Keys.rankingNickname) ?? ""
+        self.rankingRecoveryCode       = d.string(forKey: Keys.rankingRecoveryCode)
+        self.rankingBaselineCoins      = (d.object(forKey: Keys.rankingBaselineCoins) as? Int) ?? 0
+        self.rankingLastSubmittedTotal = (d.object(forKey: Keys.rankingLastSubmittedTotal) as? Int) ?? 0
+        self.rankingLastSubmittedAt    = d.object(forKey: Keys.rankingLastSubmittedAt) as? Date
+        self.rankingRegistered         = (d.object(forKey: Keys.rankingRegistered) as? Bool) ?? false
+        self.rankingPrivacyAccepted    = (d.object(forKey: Keys.rankingPrivacyAccepted) as? Bool) ?? false
+        self.rankingScoreEarnedVP      = (d.object(forKey: Keys.rankingScoreEarnedVP) as? Int) ?? 0
+        self.rankingScoreFractionVP    = (d.object(forKey: Keys.rankingScoreFractionVP) as? Double) ?? 0
+        self.cursorLastRequestsSeen    = d.object(forKey: Keys.cursorLastRequestsSeen) as? Int
+        self.cursorLastStartOfMonth    = d.object(forKey: Keys.cursorLastStartOfMonth) as? Date
 
         // 도장 카운터 로드
         self.wellnessRespondedCount = (d.object(forKey: Keys.wellnessRespondedCount) as? Int) ?? 0
@@ -413,12 +501,13 @@ final class Settings: ObservableObject {
 
         // 5월의 달 기념 — 신규+기존 모든 사용자에게 1회 5,000 coin 지급. v0.7.0 캠페인.
         // onlyExisting=false라 첫 launch 신규 사용자도 환영 보너스로 받음.
+        // 주의: init 중엔 CoinLedger.shared 호출 시 Settings.shared 재진입으로 deadlock 위험.
+        // 따라서 여기서만 예외적으로 직접 mutate. 그 외 위치에선 CoinLedger.creditBonus() 사용.
         applyOnceMigration(key: Keys.hasReceivedMay2026Bonus,
                            onlyExisting: false,
                            wasExistingUser: wasExistingUser) {
             self.coins += 5000
             self.coinsTotalEarned += 5000
-            // 첫 적립이라면 firstCreditedAt도 채워야 평균 일일 적립 계산이 의미 있음.
             if self.firstCreditedAt == nil {
                 self.firstCreditedAt = Date()
                 d.set(self.firstCreditedAt, forKey: Keys.firstCreditedAt)
@@ -516,6 +605,23 @@ final class Settings: ObservableObject {
         githubUserID = nil
     }
 
+    /// 랭킹 계정 로컬 상태 클리어. 서버측 데이터 삭제는 별도 `RankingAPI.deleteAccount()` 호출
+    /// 후 본 메서드 호출. HMAC 키도 Keychain에서 제거.
+    /// `rankingScoreEarnedVP`는 의도적으로 유지 — 누적 VP는 보드 참여와 무관한 사용량 기록.
+    /// 재옵트인 시 다시 보드에 보낼 baseline으로 활용 가능.
+    func clearRankingLocalState() {
+        Keychain.clearRankingHmacKey()
+        rankingEnabled = false
+        rankingDeviceID = ""
+        rankingNickname = ""
+        rankingRecoveryCode = nil
+        rankingBaselineCoins = 0
+        rankingLastSubmittedTotal = 0
+        rankingLastSubmittedAt = nil
+        rankingRegistered = false
+        rankingPrivacyAccepted = false
+    }
+
     /// 도감 슬롯 클릭 시 호출 — 그 펫의 강조 표시 해제. 비어있으면 no-op.
     func acknowledgeHighlight(_ kind: PetKind) {
         if pendingHighlights.contains(kind) {
@@ -589,6 +695,20 @@ final class Settings: ObservableObject {
         static let githubLogin                 = "settings.githubLogin"
         static let githubUserID                = "settings.githubUserID"
         static let creditedPRNumbers           = "settings.creditedPRNumbers"
+        // 랭킹 (글로벌 보드)
+        static let rankingEnabled              = "settings.rankingEnabled"
+        static let rankingDeviceID             = "settings.rankingDeviceID"
+        static let rankingNickname             = "settings.rankingNickname"
+        static let rankingRecoveryCode         = "settings.rankingRecoveryCode"
+        static let rankingBaselineCoins        = "settings.rankingBaselineCoins"
+        static let rankingLastSubmittedTotal   = "settings.rankingLastSubmittedTotal"
+        static let rankingLastSubmittedAt      = "settings.rankingLastSubmittedAt"
+        static let rankingRegistered           = "settings.rankingRegistered"
+        static let rankingPrivacyAccepted      = "settings.rankingPrivacyAccepted"
+        static let rankingScoreEarnedVP        = "settings.rankingScoreEarnedVP"
+        static let rankingScoreFractionVP      = "settings.rankingScoreFractionVP"
+        static let cursorLastRequestsSeen      = "settings.cursorLastRequestsSeen"
+        static let cursorLastStartOfMonth      = "settings.cursorLastStartOfMonth"
         // 도장 (Gym Badges)
         static let wellnessRespondedCount      = "settings.wellnessRespondedCount"
         static let rateLimitWeeksPassed        = "settings.rateLimitWeeksPassed"
