@@ -38,6 +38,10 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
           SU_PUBLIC_KEY: ${{ secrets.SU_PUBLIC_KEY }}
           GITHUB_CLIENT_ID: ${{ secrets.GH_CONTRIBUTOR_CLIENT_ID }}
+          # 랭킹 시스템 — 미설정 시 빌드는 성공하지만 클라이언트에서 "기능 미포함" 안내만 노출됨.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          PRIVACY_POLICY_URL: ${{ secrets.PRIVACY_POLICY_URL }}
         run: bash scripts/package.sh
 
       - name: Compute SHA256
