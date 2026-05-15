@@ -14,6 +14,7 @@ import { isValidUUID } from "../_shared/validation.ts";
 
 const POST_LIMIT = 100;
 const POST_COOLDOWN_SEC = 600;     // /post와 동일
+const POST_DISPLAY_WINDOW_HOURS = 24;  // 최근 1일치만 노출 (DB는 영구 보관, UI 노출만 제한)
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -28,10 +29,12 @@ Deno.serve(async (req: Request) => {
 
   const db = getDb();
 
-  // 1) 최근 N개 글
+  // 1) 최근 1일 + 최대 100개 글. 두 조건 모두 적용 — 1일 안에 100개 넘게 와도 LIMIT으로 컷.
+  const windowStart = new Date(Date.now() - POST_DISPLAY_WINDOW_HOURS * 3600 * 1000).toISOString();
   const { data: posts, error: postsErr } = await db
     .from("board_posts")
     .select("id, device_id, nickname_snapshot, content, created_at")
+    .gte("created_at", windowStart)
     .order("created_at", { ascending: false })
     .limit(POST_LIMIT);
   if (postsErr) {

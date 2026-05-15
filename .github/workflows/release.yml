@@ -13,6 +13,14 @@ on:
 permissions:
   contents: write
 
+# 2026/6/2부터 GitHub Actions 런타임이 Node 20 → Node 24로 강제 전환됨.
+# 현재 사용 중인 actions(checkout@v4 / upload-artifact@v4 / action-gh-release@v2)는
+# 모두 Node 20 의존이라 deprecation warning이 뜸. 환경변수로 Node 24 런타임을 즉시 활성화 —
+# action 자체 코드 변경 없이 deprecation 해소. 향후 actions major bump (v6/v7/v3)는
+# breaking changes 검증 후 별도로 진행.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: macos-14

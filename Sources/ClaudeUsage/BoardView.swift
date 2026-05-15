@@ -27,8 +27,16 @@ struct BoardView: View {
 
     /// 좋아요 in-flight + 1초 추가 cooldown 중인 postId 모음. 서버 트래픽 슈팅 방지.
     @State private var likingPostIds: Set<Int> = []
+    /// 삭제 in-flight 중인 postId 모음.
+    @State private var deletingPostIds: Set<Int> = []
+
+    /// 1초 tick — "본인 글 + 1분 이내" 판정의 now. 게시판 윈도우 active 동안만 도는 가벼운 timer.
+    /// 60초 지나면 자연스럽게 삭제 버튼이 BoardRow에서 사라짐.
+    @State private var nowTick: Date = Date()
+    @State private var clockTask: Task<Void, Never>?
 
     private static let maxContentLength = 100
+    private static let deleteWindowSec: TimeInterval = 60
 
     /// 게시판 사용 가능 여부 — 등록 + 활성 둘 다 필요. 일시중지면 false.
     private var rankingActive: Bool {
@@ -58,12 +66,14 @@ struct BoardView: View {
                 NotificationCenter.default.post(name: .boardSeen, object: nil)
                 refresh()
                 startPolling()
+                startClockTick()
             }
         }
         .onDisappear {
             refreshTask?.cancel()
             pollTask?.cancel()
             cooldownTickTask?.cancel()
+            clockTask?.cancel()
         }
     }
 
@@ -211,7 +221,13 @@ struct BoardView: View {
                             post: post,
                             isLikeBusy: likingPostIds.contains(post.id),
                             isMyOwnPost: post.isMine,
-                            onLikeTap: { toggleLike(postId: post.id) }
+                            isDeleteBusy: deletingPostIds.contains(post.id),
+                            isDeletable: post.isMine
+                                && !deletingPostIds.contains(post.id)
+                                && nowTick.timeIntervalSince(post.createdAt) < Self.deleteWindowSec,
+                            deleteRemainingSec: Int(Self.deleteWindowSec - nowTick.timeIntervalSince(post.createdAt)),
+                            onLikeTap: { toggleLike(postId: post.id) },
+                            onDeleteTap: { deletePost(postId: post.id) }
                         )
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -229,7 +245,7 @@ struct BoardView: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
             Spacer()
-            Text("총 \(posts.count)개 (최대 100)")
+            Text("최근 1일 · \(posts.count)개")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
@@ -287,6 +303,17 @@ struct BoardView: View {
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled { return }
                 clientCooldownSec = max(0, clientCooldownSec - 1)
+            }
+        }
+    }
+
+    private func startClockTick() {
+        clockTask?.cancel()
+        clockTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+                nowTick = Date()
             }
         }
     }
@@ -400,6 +427,34 @@ struct BoardView: View {
         }
     }
 
+    /// 본인 글 1분 이내 삭제. 서버가 권위 (윈도우 만료/타인 글 → 403).
+    private func deletePost(postId: Int) {
+        guard !deletingPostIds.contains(postId) else { return }
+        let key = Keychain.loadRankingHmacKey() ?? ""
+        guard !key.isEmpty, !settings.rankingDeviceID.isEmpty else { return }
+        deletingPostIds.insert(postId)
+
+        // Optimistic remove — 즉시 UI에서 사라짐. 실패하면 refresh로 복구.
+        let snapshot = posts
+        posts.removeAll { $0.id == postId }
+
+        Task { @MainActor in
+            defer { deletingPostIds.remove(postId) }
+            do {
+                _ = try await RankingAPI.shared.deleteBoardPost(
+                    deviceId: settings.rankingDeviceID,
+                    postId: postId,
+                    hmacKeyBase64: key
+                )
+                // 서버 OK — optimistic remove 그대로 유지.
+            } catch {
+                // 실패 — UI 복구.
+                posts = snapshot
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
     /// 환경설정 → 랭킹 섹션을 띄우는 진입점. 윈도우 닫지 않음 — 작성 끝나면 돌아오기 편하게.
     private func openRankingSettings() {
         NotificationCenter.default.post(name: .openRankingSettings, object: nil)
@@ -412,7 +467,11 @@ private struct BoardRow: View {
     let post: RankingAPI.BoardPost
     let isLikeBusy: Bool
     let isMyOwnPost: Bool
+    let isDeleteBusy: Bool
+    let isDeletable: Bool
+    let deleteRemainingSec: Int
     let onLikeTap: () -> Void
+    let onDeleteTap: () -> Void
     @State private var hoveringHeart: Bool = false
 
     var body: some View {
@@ -432,6 +491,20 @@ private struct BoardRow: View {
                             .background(Color.accentColor.opacity(0.15))
                             .foregroundStyle(Color.accentColor)
                             .cornerRadius(3)
+                    }
+                    if isDeletable {
+                        Button(action: onDeleteTap) {
+                            HStack(spacing: 2) {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 9))
+                                Text("\(deleteRemainingSec)s")
+                                    .font(.system(size: 9, design: .monospaced))
+                            }
+                            .foregroundStyle(.red.opacity(0.85))
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(isDeleteBusy)
+                        .help("작성 1분 이내에 한해 삭제 가능")
                     }
                 }
                 Text(post.content)

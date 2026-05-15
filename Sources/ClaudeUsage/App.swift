@@ -635,7 +635,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let toggleTitle = (panel?.isVisible == true) ? "패널 숨기기" : "패널 보기"
         menu.addItem(withTitle: toggleTitle, action: #selector(togglePanelMenuAction), keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "💬 게시판", action: #selector(presentBoardMenuAction), keyEquivalent: "")
         menu.addItem(withTitle: "설정…", action: #selector(presentSettingsMenuAction), keyEquivalent: ",")
         menu.addItem(.separator())
         menu.addItem(withTitle: "종료", action: #selector(quitMenuAction), keyEquivalent: "q")
@@ -652,7 +651,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func togglePanelMenuAction() { togglePanel() }
     @objc private func presentSettingsMenuAction() { presentSettings() }
-    @objc private func presentBoardMenuAction() { BoardWindowController.shared.present() }
     @objc private func openRankingSettingsAction() { presentSettings() }
     @objc private func quitMenuAction() { NSApp.terminate(nil) }
 

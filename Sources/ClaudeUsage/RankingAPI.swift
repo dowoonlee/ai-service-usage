@@ -191,6 +191,19 @@ actor RankingAPI {
         let count: Int
     }
 
+    struct DeletePostPayload: Encodable {
+        let deviceId: String
+        let postId: Int
+        let ts: Int64
+    }
+    struct DeletePostRequest: Encodable {
+        let payload: DeletePostPayload
+        let signature: String
+    }
+    struct DeletePostResponse: Decodable {
+        let deleted: Bool
+    }
+
     struct RecoverByCodeRequest: Encodable {
         let recoveryCode: String
         let newDeviceId: String
@@ -333,6 +346,17 @@ actor RankingAPI {
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let req = LikeRequest(payload: payload, signature: sig)
         return try await post(path: "like", body: req, signed: true)
+    }
+
+    /// 본인 글 1분 이내 삭제. 윈도우 만료/타인 글이면 서버가 403 → `.http(403, _)` throw.
+    /// 좋아요는 FK CASCADE로 자동 정리.
+    func deleteBoardPost(deviceId: String, postId: Int,
+                         hmacKeyBase64: String) async throws -> DeletePostResponse {
+        let payload = DeletePostPayload(deviceId: deviceId, postId: postId,
+                                        ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let req = DeletePostRequest(payload: payload, signature: sig)
+        return try await post(path: "delete-post", body: req, signed: true)
     }
 
     /// 계정 영구 삭제. 서버측 row + submissions 로그 모두 제거.

@@ -72,6 +72,23 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
   if (!postRow) return errorResponse(404, "post_not_found");
 
+  // shadow_banned는 DB 변경 없이 silent 응답 — 본인에겐 toggle된 것처럼 보이지만
+  // 다른 사용자에겐 좋아요 안 보임. post의 shadow_banned 처리와 일관.
+  if (user.status === "shadow_banned") {
+    const { data: existing } = await db
+      .from("board_post_likes")
+      .select("post_id")
+      .eq("post_id", p.postId)
+      .eq("device_id", p.deviceId)
+      .maybeSingle();
+    const { count } = await db
+      .from("board_post_likes")
+      .select("post_id", { count: "exact", head: true })
+      .eq("post_id", p.postId);
+    // 실제 DB 상태 그대로 반환 — 매 호출마다 같은 응답 (사용자 입장 always "안 눌린 상태").
+    return jsonResponse({ liked: !!existing, count: count ?? 0 });
+  }
+
   // 현재 좋아요 상태 조회 → toggle 결정.
   const { data: existing } = await db
     .from("board_post_likes")

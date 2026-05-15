@@ -56,7 +56,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, nickname, status")
+    .select("device_id, hmac_key_b64, nickname, status, last_post_at")
     .eq("device_id", p.deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -69,22 +69,17 @@ Deno.serve(async (req: Request) => {
   );
   if (!ok) return errorResponse(401, "bad_signature");
 
-  // 서버측 rate limit — 본인 가장 최근 글 시각 기준.
-  const cooldownThreshold = new Date(Date.now() - POST_COOLDOWN_SEC * 1000).toISOString();
-  const { data: recent } = await db
-    .from("board_posts")
-    .select("created_at")
-    .eq("device_id", p.deviceId)
-    .gte("created_at", cooldownThreshold)
-    .order("created_at", { ascending: false })
-    .limit(1);
-  if (recent && recent.length > 0) {
-    const lastAt = new Date(recent[0].created_at).getTime();
+  // 서버측 rate limit — users.last_post_at 기준. board_posts row 삭제로는 영향 없음 →
+  // 글 작성 후 1분 이내 삭제하고 즉시 재작성하는 cooldown 우회 어뷰징 차단.
+  if (user.last_post_at) {
+    const lastAt = new Date(user.last_post_at).getTime();
     const remainingSec = Math.ceil((lastAt + POST_COOLDOWN_SEC * 1000 - Date.now()) / 1000);
-    return jsonResponse(
-      { error: "rate_limited", retryAfterSec: Math.max(1, remainingSec) },
-      { status: 429 },
-    );
+    if (remainingSec > 0) {
+      return jsonResponse(
+        { error: "rate_limited", retryAfterSec: Math.max(1, remainingSec) },
+        { status: 429 },
+      );
+    }
   }
 
   // shadow_banned는 insert 자체를 스킵 — 본인에겐 200 응답으로 잠잠.
@@ -105,6 +100,12 @@ Deno.serve(async (req: Request) => {
     console.error("board post insert failed", insertErr);
     return errorResponse(500, "insert_failed");
   }
+
+  // last_post_at 갱신 — 다음 cooldown 체크의 권위 source. 실패해도 글은 들어갔으니 200.
+  await db
+    .from("users")
+    .update({ last_post_at: inserted.created_at })
+    .eq("device_id", p.deviceId);
 
   return jsonResponse({
     accepted: true,

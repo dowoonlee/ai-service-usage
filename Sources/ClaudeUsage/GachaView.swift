@@ -948,11 +948,21 @@ struct CoinIcon: View {
 /// 이 view를 재마운트 → @State `enteredAt`이 .onAppear에서 새로 잡혀 슬라이드가 다시 재생된다.
 private struct PetPreviewView: View {
     let kind: PetKind
-    let variant: Int
     @ObservedObject var settings: Settings
 
     /// 마운트 시점. 슬라이드 progress(0→1) 계산의 기준.
     @State private var enteredAt: Date = Date()
+
+    /// 사용자가 dot selector로 토글하는 현재 variant. init 시점의 variant로 시드.
+    /// 외부에서 variant 변경은 .id() 재마운트로 처리 (다른 펫 → 새 PetPreviewView 인스턴스).
+    /// 같은 펫 안에서 이로치 토글은 internal state라 슬라이드 애니메이션 재생 X — 즉시 hue 변경.
+    @State private var selectedVariant: Int
+
+    init(kind: PetKind, variant: Int, settings: Settings) {
+        self.kind = kind
+        self._selectedVariant = State(initialValue: variant)
+        self.settings = settings
+    }
 
     /// sprite 그룹이 슬라이드 후 멈추는 x offset (center 기준).
     /// description 카드 폭(160) 대비 펫 sprite + ±60 swing 가동 범위가 겹치지 않도록 좌측으로 충분히 이동.
@@ -1010,8 +1020,8 @@ private struct PetPreviewView: View {
                             .aspectRatio(contentMode: .fit)
                             .frame(height: 84)
                             .scaleEffect(x: flip ? -1 : 1, y: 1)
-                            .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
-                            .saturation(variant > 0 ? 1.15 : 1.0)
+                            .hueRotation(.degrees(WalkingCat.hueDegrees(for: selectedVariant)))
+                            .saturation(selectedVariant > 0 ? 1.15 : 1.0)
                             .offset(x: swingX, y: Self.spriteRestY)
                     }
 
@@ -1025,14 +1035,15 @@ private struct PetPreviewView: View {
                     VStack(spacing: 4) {
                         Text(kind.displayName)
                             .font(.title3.weight(.medium))
-                        if variant > 0 {
-                            Text(String(repeating: "✨", count: variant))
+                        if selectedVariant > 0 {
+                            Text(String(repeating: "✨", count: selectedVariant))
                                 .font(.caption)
                         } else {
                             Text("기본")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        variantSelector
                         usageProgressView()
                     }
                     .offset(y: 50)
@@ -1121,6 +1132,47 @@ private struct PetPreviewView: View {
         case .rare:      return "★★"
         case .epic:      return "★★★"
         case .legendary: return "★★★★"
+        }
+    }
+
+    /// 해금된 variant들 사이 토글 selector — dot 4개. 잠긴 dot은 회색 + 클릭 X.
+    /// 현재 선택된 dot은 외곽 stroke로 강조.
+    @ViewBuilder
+    private var variantSelector: some View {
+        let unlocked = settings.ownedPets[kind]?.unlockedVariants ?? []
+        HStack(spacing: 8) {
+            ForEach(0..<4, id: \.self) { i in
+                let isUnlocked = unlocked.contains(i)
+                let isSelected = selectedVariant == i
+                Circle()
+                    .fill(isUnlocked ? Self.variantDotColor(i) : Color.secondary.opacity(0.2))
+                    .frame(width: 12, height: 12)
+                    .overlay(
+                        Circle().strokeBorder(
+                            isSelected ? Color.primary : Color.clear,
+                            lineWidth: 1.5
+                        )
+                    )
+                    .contentShape(Circle())
+                    .onTapGesture {
+                        if isUnlocked { selectedVariant = i }
+                    }
+                    .help(isUnlocked
+                          ? (i == 0 ? "기본" : "이로치 \(i)")
+                          : "잠김 — 가챠 중복 또는 사용 시간으로 해금")
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    /// variant dot 색 — InventorySlot의 variantDot과 동일 매핑 (시각적 일관성).
+    private static func variantDotColor(_ i: Int) -> Color {
+        switch i {
+        case 0: return .gray
+        case 1: return .yellow
+        case 2: return .cyan
+        case 3: return .pink
+        default: return .gray
         }
     }
 
