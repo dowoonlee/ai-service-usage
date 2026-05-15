@@ -50,6 +50,11 @@ enum UsageSource: String, Codable, Sendable {
 
     /// CoinLedger의 fractional carry용 Settings keyPath.
     /// 새 소스 추가 시 새 fraction 필드도 추가하거나 기존을 재사용.
+    ///
+    /// `Settings`가 `@MainActor`라 keypath 형성도 MainActor 컨텍스트에서 일어나야 함 —
+    /// nonisolated 호출 시 Swift 6에서 컴파일 에러. 호출 측(CoinLedger.consume)은 모두
+    /// MainActor라 격리 추가가 호출 그래프에 영향 없음.
+    @MainActor
     var coinFractionKeyPath: ReferenceWritableKeyPath<Settings, Double> {
         switch self {
         case .claudeFiveHour:  return \.claudeFiveHourCoinFraction

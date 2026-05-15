@@ -92,6 +92,103 @@ actor RankingAPI {
         let period: String?
         /// 다음 리셋 시각 (UTC ISO 8601). 보드 헤더의 "리셋까지" 카운트다운 표시용.
         let periodResetAt: Date?
+        /// 직전 달 명예의 전당 — Top 3 동결 기록.
+        let previousMonth: PreviousMonth?
+        /// 본인의 미수령 보상 — 옵트인 + 이전 달 Top 3 진입 시 1개 row.
+        let pendingReward: PendingReward?
+    }
+
+    struct PreviousMonth: Decodable, Sendable {
+        let period: String                  // "YYYY-MM"
+        let entries: [PreviousMonthEntry]
+    }
+
+    struct PreviousMonthEntry: Decodable, Identifiable, Sendable {
+        let rank: Int
+        let nickname: String
+        let totalCoins: Int                 // 직전 달 최종 VP
+        let githubLogin: String?
+        let profileJson: ProfileState?
+        let rewardCoins: Int
+        var id: Int { rank }
+    }
+
+    struct PendingReward: Decodable, Sendable {
+        let period: String                  // "YYYY-MM"
+        let rank: Int                       // 1/2/3
+        let coins: Int                      // 보상 코인
+        /// dedup key — "YYYY-MM.rank" 형식. Settings.claimedPodiumPeriods에 매칭.
+        var dedupKey: String { "\(period).\(rank)" }
+    }
+
+    struct ClaimRewardPayload: Encodable {
+        let deviceId: String
+        let period: String
+        let rank: Int
+        let ts: Int64
+    }
+    struct ClaimRewardRequest: Encodable {
+        let payload: ClaimRewardPayload
+        let signature: String
+    }
+    struct ClaimRewardResponse: Decodable {
+        let alreadyClaimed: Bool
+        let rewardCoins: Int
+        let claimedAt: String
+    }
+
+    // MARK: - Board models
+
+    struct BoardLiker: Decodable, Sendable, Hashable {
+        let nickname: String
+        let createdAt: Date
+    }
+
+    struct BoardPost: Decodable, Identifiable, Sendable {
+        let id: Int
+        let nickname: String
+        let content: String
+        let createdAt: Date
+        let isMine: Bool
+        let likeCount: Int
+        let likedByMe: Bool
+        /// 호버 popover에서 누른 사람 표시. 시간순(오래된 것 → 최근).
+        let likers: [BoardLiker]
+    }
+
+    struct BoardResponse: Decodable, Sendable {
+        let posts: [BoardPost]
+        /// 본인의 다음 글 작성까지 남은 초. 0이면 즉시 작성 가능. 미등록 사용자는 0.
+        let cooldownRemainingSec: Int
+    }
+
+    struct PostBoardPayload: Encodable {
+        let content: String
+        let deviceId: String
+        let ts: Int64
+    }
+    struct PostBoardRequest: Encodable {
+        let payload: PostBoardPayload
+        let signature: String
+    }
+    struct PostBoardResponse: Decodable {
+        let accepted: Bool
+        let postId: Int?
+        let createdAt: Date?
+    }
+
+    struct LikePayload: Encodable {
+        let deviceId: String
+        let postId: Int
+        let ts: Int64
+    }
+    struct LikeRequest: Encodable {
+        let payload: LikePayload
+        let signature: String
+    }
+    struct LikeResponse: Decodable {
+        let liked: Bool
+        let count: Int
     }
 
     struct RecoverByCodeRequest: Encodable {
@@ -121,6 +218,8 @@ actor RankingAPI {
         case invalidRecoveryCode
         case banned
         case privacyNotAccepted
+        /// 게시판 cooldown 위반 (10분 / post). retryAfterSec은 서버가 응답 body에 포함.
+        case rateLimited(retryAfterSec: Int)
         case http(Int, String?)
         case decoding(String)
         case network(String)
@@ -133,6 +232,10 @@ actor RankingAPI {
             case .invalidRecoveryCode: return "복구 코드가 올바르지 않습니다."
             case .banned:              return "이 계정은 운영 정책 위반으로 차단되었습니다."
             case .privacyNotAccepted:  return "처리방침 동의가 필요합니다."
+            case .rateLimited(let s):
+                let m = s / 60, r = s % 60
+                if m > 0 { return "다음 글 작성까지 \(m)분 \(r)초 남았습니다." }
+                return "다음 글 작성까지 \(r)초 남았습니다."
             case .http(let code, let msg):
                 return "서버 오류 \(code)\(msg.map { ": \($0)" } ?? "")"
             case .decoding(let s):     return "응답 디코딩 오류: \(s)"
@@ -192,6 +295,46 @@ actor RankingAPI {
         }
     }
 
+    /// 명예의 전당 보상 수령. 클라이언트가 reward 알림 + credit 후 호출.
+    /// 이미 claim된 경우 서버가 `alreadyClaimed=true`로 idempotent 응답 — 클라이언트는 무시 가능.
+    func claimReward(deviceId: String, period: String, rank: Int,
+                     hmacKeyBase64: String) async throws -> ClaimRewardResponse {
+        let payload = ClaimRewardPayload(deviceId: deviceId, period: period, rank: rank,
+                                         ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signClaim(payload: payload, keyBase64: hmacKeyBase64)
+        let req = ClaimRewardRequest(payload: payload, signature: sig)
+        return try await post(path: "claim-reward", body: req, signed: true)
+    }
+
+    // MARK: - Board
+
+    /// 최근 N개 글 + 좋아요 정보. deviceId가 있으면 isMine/likedByMe/cooldownRemainingSec 채워짐.
+    func fetchBoard(deviceId: String?) async throws -> BoardResponse {
+        let q = deviceId.map { [URLQueryItem(name: "deviceId", value: $0)] }
+        return try await get(path: "board", queryItems: q)
+    }
+
+    /// 게시글 작성. content는 trim 전 그대로 전송 — 서버가 trim + 검증.
+    /// rate limit 위반 시 `.rateLimited(retryAfterSec:)` throw.
+    func submitBoardPost(deviceId: String, content: String,
+                         hmacKeyBase64: String) async throws -> PostBoardResponse {
+        let payload = PostBoardPayload(content: content, deviceId: deviceId,
+                                       ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let req = PostBoardRequest(payload: payload, signature: sig)
+        return try await post(path: "post", body: req, signed: true)
+    }
+
+    /// 좋아요 toggle. 서버가 INSERT/DELETE 결정. 응답의 (liked, count)로 UI 동기화.
+    func likeBoardPost(deviceId: String, postId: Int,
+                       hmacKeyBase64: String) async throws -> LikeResponse {
+        let payload = LikePayload(deviceId: deviceId, postId: postId,
+                                  ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let req = LikeRequest(payload: payload, signature: sig)
+        return try await post(path: "like", body: req, signed: true)
+    }
+
     /// 계정 영구 삭제. 서버측 row + submissions 로그 모두 제거.
     func deleteAccount(deviceId: String, hmacKeyBase64: String) async throws {
         let payload = SubmitPayload(deviceId: deviceId, delta: 0, prevTotal: 0,
@@ -202,12 +345,23 @@ actor RankingAPI {
     }
 
     private struct EmptyResponse: Decodable {}
+    /// 429 응답 body 디코딩용. Swift는 generic 함수 내부 nested struct 불가 → outer scope에 둠.
+    private struct RateLimitedBody: Decodable { let retryAfterSec: Int? }
 
     // MARK: - HMAC
 
     /// payload를 sortedKeys JSON으로 정렬 후 HMAC-SHA256. 서버측도 동일 규칙으로 검증.
     /// hex 소문자 출력.
     static func sign(payload: SubmitPayload, keyBase64: String) throws -> String {
+        try signEncodable(payload, keyBase64: keyBase64)
+    }
+
+    /// ClaimRewardPayload 서명. 위 sign과 동일 알고리즘이지만 별도 타입.
+    static func signClaim(payload: ClaimRewardPayload, keyBase64: String) throws -> String {
+        try signEncodable(payload, keyBase64: keyBase64)
+    }
+
+    private static func signEncodable<T: Encodable>(_ payload: T, keyBase64: String) throws -> String {
         guard let keyData = Data(base64Encoded: keyBase64) else {
             throw RankingError.decoding("invalid HMAC key base64")
         }
@@ -277,6 +431,10 @@ actor RankingAPI {
         if code == 409 { throw RankingError.nicknameTaken }
         if code == 403 { throw RankingError.banned }
         if code == 412 { throw RankingError.privacyNotAccepted }
+        if code == 429 {
+            let s = (try? JSONDecoder().decode(RateLimitedBody.self, from: data))?.retryAfterSec ?? 60
+            throw RankingError.rateLimited(retryAfterSec: s)
+        }
         // 404는 endpoint별로 의미가 다름 — recover-by-code/github의 "not found"는 호출 측이
         // body 메시지(`recovery_code_not_found` / `no_account_linked_to_github`)로 분기 매핑.
         // 여기선 generic .http(404, body)로만 감싸 사용자에게 정확한 메시지 노출.

@@ -21,6 +21,10 @@ Deno.serve(async (req: Request) => {
 
   const db = getDb();
 
+  // 직전 달 finalize lazy trigger — 첫 호출자가 트리거. UNIQUE 제약으로 race-safe.
+  // 호출당 1회 추가 쿼리이지만 EXISTS 가드로 이미 finalized면 즉시 return.
+  await db.rpc("finalize_previous_month_if_needed");
+
   // Top N — 월간 보드 + profile_json
   const { data: top, error: topErr } = await db
     .from("monthly_leaderboard")
@@ -70,6 +74,53 @@ Deno.serve(async (req: Request) => {
     profileJson: row.profile_json,
   }));
 
+  // 직전 달 명예의 전당 — 가장 최근 finalized period의 top 3.
+  // 보드 상단 섹션 + reward 알림용. 클라이언트가 표시.
+  const { data: prevWinners } = await db
+    .from("monthly_winners")
+    .select("period, rank, final_score, nickname_snapshot, profile_json_snapshot, reward_coins")
+    .order("period", { ascending: false })
+    .order("rank", { ascending: true })
+    .limit(3);
+
+  // period가 여러 개 섞여 있을 수 있어 최신 period로 필터.
+  let previousMonth: unknown = null;
+  if (prevWinners && prevWinners.length > 0) {
+    const latestPeriod = prevWinners[0].period;
+    const filtered = prevWinners.filter((w) => w.period === latestPeriod);
+    previousMonth = {
+      period: latestPeriod,
+      entries: filtered.map((w) => ({
+        rank: w.rank,
+        nickname: w.nickname_snapshot,
+        totalCoins: w.final_score,
+        githubLogin: null,
+        profileJson: w.profile_json_snapshot,
+        rewardCoins: w.reward_coins,
+      })),
+    };
+  }
+
+  // 본인의 미수령 보상 — deviceId가 있을 때만 조회.
+  let pendingReward: unknown = null;
+  if (deviceId) {
+    const { data: unclaimed } = await db
+      .from("monthly_winners")
+      .select("period, rank, reward_coins")
+      .eq("device_id", deviceId)
+      .is("reward_claimed_at", null)
+      .order("period", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (unclaimed) {
+      pendingReward = {
+        period: unclaimed.period,
+        rank: unclaimed.rank,
+        coins: unclaimed.reward_coins,
+      };
+    }
+  }
+
   // 다음 달 1일 00:00 KST를 ISO 형태로 노출 — 클라이언트가 "리셋까지 N일" 표시에 사용.
   const now = new Date();
   const seoulOffsetMs = 9 * 60 * 60 * 1000;
@@ -84,5 +135,7 @@ Deno.serve(async (req: Request) => {
     total: totalCount ?? entries.length,
     period: "monthly",
     periodResetAt: nextResetUtc.toISOString(),
+    previousMonth,
+    pendingReward,
   });
 });

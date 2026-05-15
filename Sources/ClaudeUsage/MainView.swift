@@ -181,6 +181,28 @@ struct MainView: View {
             }
             .buttonStyle(.borderless)
             .help("코인 잔액 — 클릭하여 가챠 열기")
+            // 게시판 진입 — 코인 옆에 두어 발견성 ↑. 미확인 글 수가 우상단 빨간 배지로 표시.
+            Button {
+                BoardWindowController.shared.present()
+            } label: {
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.cyan)
+                    .overlay(alignment: .topTrailing) {
+                        if vm.boardUnreadCount > 0 {
+                            Text("\(min(vm.boardUnreadCount, 99))")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 1)
+                                .background(Color.red)
+                                .clipShape(Capsule())
+                                .offset(x: 6, y: -4)
+                        }
+                    }
+            }
+            .buttonStyle(.borderless)
+            .help(vm.boardUnreadCount > 0 ? "게시판 (미확인 \(vm.boardUnreadCount)개)" : "게시판 열기")
             if vm.claudeLoading || vm.cursorLoading {
                 ProgressView().controlSize(.mini)
             }

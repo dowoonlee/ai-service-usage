@@ -13,6 +13,7 @@ struct RankingView: View {
     @State private var error: String?
     @State private var lastRefresh: Date?
     @State private var periodResetAt: Date?
+    @State private var previousMonth: RankingAPI.PreviousMonth?
     @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
@@ -62,6 +63,12 @@ struct RankingView: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let prev = previousMonth, !prev.entries.isEmpty {
+                podiumSection(prev)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                Divider()
+            }
             if let myRank, let myTotal {
                 meBanner(rank: myRank, total: myTotal)
                     .padding(.horizontal, 12)
@@ -83,6 +90,24 @@ struct RankingView: View {
                 }
             }
             footer
+        }
+    }
+
+    /// 직전 달 명예의 전당 카드 — 1/2/3등 가로 배치. 메달 + 펫 아바타 + 닉네임 + 최종 VP + 보상.
+    private func podiumSection(_ prev: RankingAPI.PreviousMonth) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text("🏆").font(.system(size: 13))
+                Text("\(prev.period) 명예의 전당")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.yellow)
+            }
+            HStack(spacing: 8) {
+                ForEach(prev.entries) { entry in
+                    PodiumCard(entry: entry)
+                        .frame(maxWidth: .infinity)
+                }
+            }
         }
     }
 
@@ -141,6 +166,7 @@ struct RankingView: View {
                 myTotal = resp.myTotalCoins
                 totalPlayers = resp.total
                 periodResetAt = resp.periodResetAt
+                previousMonth = resp.previousMonth
                 lastRefresh = Date()
             } catch is CancellationError {
                 // 무시
@@ -289,6 +315,76 @@ private struct LeaderboardRowView: View {
         let fmt = NumberFormatter()
         fmt.numberStyle = .decimal
         return "\(fmt.string(from: NSNumber(value: n)) ?? "\(n)") VP"
+    }
+}
+
+// MARK: - 명예의 전당 카드
+
+/// 직전 달 1/2/3등 카드. 메달 이모지 + 펫 아바타 (hue 적용) + 닉네임 + 최종 VP + 보상 코인.
+private struct PodiumCard: View {
+    let entry: RankingAPI.PreviousMonthEntry
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(medal).font(.system(size: 20))
+            avatarIcon.frame(width: 32, height: 32)
+            Text(entry.nickname)
+                .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Text("\(entry.totalCoins) VP")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 2) {
+                CoinIcon(size: 9)
+                Text("+\(entry.rewardCoins)")
+                    .font(.system(size: 9, weight: .semibold))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(rewardColor)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8).fill(medalColor.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8).stroke(medalColor.opacity(0.4), lineWidth: 1)
+        )
+    }
+
+    private var medal: String {
+        switch entry.rank { case 1: return "🥇"; case 2: return "🥈"; case 3: return "🥉"; default: return "🏆" }
+    }
+    private var medalColor: Color {
+        switch entry.rank {
+        case 1: return .yellow
+        case 2: return .gray
+        case 3: return Color(red: 0.8, green: 0.5, blue: 0.2)
+        default: return .secondary
+        }
+    }
+    private var rewardColor: Color {
+        switch entry.rank { case 1: return .yellow; case 2: return .gray; default: return .orange }
+    }
+
+    @ViewBuilder
+    private var avatarIcon: some View {
+        if let kind = entry.profileJson?.card.avatar.kind {
+            let variant = entry.profileJson?.card.avatar.variant ?? 0
+            if let nsImage = PetSprite.image(for: kind, action: .walk, frameIndex: 0) {
+                Image(nsImage: nsImage)
+                    .interpolation(.none)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
+                    .scaleEffect(x: kind.defaultFacingLeft ? -1 : 1, y: 1)
+            } else {
+                Image(systemName: "questionmark.square.dashed").foregroundStyle(.secondary)
+            }
+        } else {
+            Color.clear
+        }
     }
 }
 

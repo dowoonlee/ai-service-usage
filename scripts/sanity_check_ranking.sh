@@ -158,10 +158,14 @@ echo
 info "5-2. leaderboard 호출"
 http=$(call_json GET /functions/v1/leaderboard "")
 if [ "$http" = "200" ]; then
-  if grep -q '"entries":\[\]' /tmp/sanity_resp.json && grep -q '"total":0' /tmp/sanity_resp.json; then
-    pass "200 OK + 빈 entries + total=0"
+  # Schema 키 존재 확인만 — 실 사용자 data가 있으면 entries 비어있지 않을 수 있음.
+  if grep -q '"entries":' /tmp/sanity_resp.json \
+     && grep -q '"total":' /tmp/sanity_resp.json \
+     && grep -q '"period":' /tmp/sanity_resp.json \
+     && grep -q '"periodResetAt":' /tmp/sanity_resp.json; then
+    pass "200 OK + valid leaderboard schema"
   else
-    fail "200이지만 응답 형태 예상과 다름"
+    fail "200이지만 schema 예상과 다름"
     cat /tmp/sanity_resp.json
   fi
 else

@@ -320,6 +320,11 @@ final class Settings: ObservableObject {
     @Published var rankingScoreFractionVP: Double {
         didSet { UserDefaults.standard.set(rankingScoreFractionVP, forKey: Keys.rankingScoreFractionVP) }
     }
+    /// 이미 수령한 명예의 전당 보상 dedup. 형식: "YYYY-MM.rank" (예: "2026-05.1").
+    /// 한 번 들어가면 영구 — 서버측 idempotency와 함께 이중 지급 방지.
+    @Published var claimedPodiumPeriods: Set<String> {
+        didSet { persist(claimedPodiumPeriods, forKey: Keys.claimedPodiumPeriods) }
+    }
     /// Cursor Pro/Free 사용자의 request delta 추적용. Ultra는 events 기반이라 불필요.
     /// startOfMonth가 바뀌면 reset.
     @Published var cursorLastRequestsSeen: Int? {
@@ -327,6 +332,12 @@ final class Settings: ObservableObject {
     }
     @Published var cursorLastStartOfMonth: Date? {
         didSet { UserDefaults.standard.set(cursorLastStartOfMonth, forKey: Keys.cursorLastStartOfMonth) }
+    }
+    /// 마지막으로 게시판 윈도우를 본 시점. 메인 패널의 진입점에 표시되는 미확인 글 카운트의 기준.
+    /// nil이면 처음 — ViewModel.refreshBoard 첫 cycle에서 현재 시각으로 시드해 과거 글 전체를
+    /// 미확인으로 표시하지 않게 함.
+    @Published var boardLastSeenAt: Date? {
+        didSet { UserDefaults.standard.set(boardLastSeenAt, forKey: Keys.boardLastSeenAt) }
     }
 
     private init() {
@@ -391,8 +402,11 @@ final class Settings: ObservableObject {
         self.rankingPrivacyAccepted    = (d.object(forKey: Keys.rankingPrivacyAccepted) as? Bool) ?? false
         self.rankingScoreEarnedVP      = (d.object(forKey: Keys.rankingScoreEarnedVP) as? Int) ?? 0
         self.rankingScoreFractionVP    = (d.object(forKey: Keys.rankingScoreFractionVP) as? Double) ?? 0
+        let claimedData = d.data(forKey: Keys.claimedPodiumPeriods)
+        self.claimedPodiumPeriods = (claimedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.cursorLastRequestsSeen    = d.object(forKey: Keys.cursorLastRequestsSeen) as? Int
         self.cursorLastStartOfMonth    = d.object(forKey: Keys.cursorLastStartOfMonth) as? Date
+        self.boardLastSeenAt           = d.object(forKey: Keys.boardLastSeenAt) as? Date
 
         // 도장 카운터 로드
         self.wellnessRespondedCount = (d.object(forKey: Keys.wellnessRespondedCount) as? Int) ?? 0
@@ -707,8 +721,10 @@ final class Settings: ObservableObject {
         static let rankingPrivacyAccepted      = "settings.rankingPrivacyAccepted"
         static let rankingScoreEarnedVP        = "settings.rankingScoreEarnedVP"
         static let rankingScoreFractionVP      = "settings.rankingScoreFractionVP"
+        static let claimedPodiumPeriods        = "settings.claimedPodiumPeriods"
         static let cursorLastRequestsSeen      = "settings.cursorLastRequestsSeen"
         static let cursorLastStartOfMonth      = "settings.cursorLastStartOfMonth"
+        static let boardLastSeenAt             = "settings.boardLastSeenAt"
         // 도장 (Gym Badges)
         static let wellnessRespondedCount      = "settings.wellnessRespondedCount"
         static let rateLimitWeeksPassed        = "settings.rateLimitWeeksPassed"

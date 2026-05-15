@@ -86,6 +86,19 @@ final class NotificationManager {
              body: "모든 도장을 정복했습니다 +\(BadgeRegistry.championCoinReward) 코인")
     }
 
+    /// 명예의 전당 보상 알림. 폴링 cycle에서 본인 row 감지 시 1회 호출 (dedup은 호출 측에서).
+    func podiumRewardEarned(period: String, rank: Int, coins: Int) {
+        let medal: String
+        switch rank {
+        case 1: medal = "🥇"
+        case 2: medal = "🥈"
+        case 3: medal = "🥉"
+        default: medal = "🏆"
+        }
+        send(title: "\(medal) \(period) 명예의 전당",
+             body: "\(rank)등 — +\(coins) 코인이 적립되었습니다!")
+    }
+
     /// 기여자 보너스 적립 알림 — `ContributorBonus.sync()`에서 새 PR 발견 시 1회 호출.
     func contributorBonus(prCount: Int, totalCoins: Int, prList: String) {
         let title = "기여자 보너스 +\(totalCoins) 코인"

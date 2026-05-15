@@ -24,10 +24,41 @@ enum Keychain {
     static func clearGitHubToken() { clearItem(account: githubAccount) }
 
     // MARK: - Ranking HMAC key
+    //
+    // ad-hoc 서명은 binary 변경마다 ACL 무효화 → 매 SecItemCopyMatching이 사용자 다이얼로그 트리거.
+    // 게시판 좋아요/글쓰기처럼 호출 빈도가 잦으면 매 호출마다 prompt가 떠 UX 파괴.
+    // 같은 process 내에서는 hmac key가 register/recover 시점에만 변경되므로 in-memory 캐시로
+    // Keychain 접근을 process당 1회로 축소. 아래 saveRankingHmacKey가 캐시도 갱신.
 
-    static func saveRankingHmacKey(_ value: String) { saveItem(value, account: rankingHmacAccount) }
-    static func loadRankingHmacKey() -> String? { loadItem(account: rankingHmacAccount) }
-    static func clearRankingHmacKey() { clearItem(account: rankingHmacAccount) }
+    private static let _hmacKeyQueue = DispatchQueue(label: "Keychain.rankingHmacKey.cache")
+    private static var _cachedRankingHmacKey: String?
+    private static var _hmacKeyLoaded: Bool = false
+
+    static func saveRankingHmacKey(_ value: String) {
+        saveItem(value, account: rankingHmacAccount)
+        _hmacKeyQueue.sync {
+            _cachedRankingHmacKey = value
+            _hmacKeyLoaded = true
+        }
+    }
+
+    static func loadRankingHmacKey() -> String? {
+        _hmacKeyQueue.sync {
+            if _hmacKeyLoaded { return _cachedRankingHmacKey }
+            let v = loadItem(account: rankingHmacAccount)
+            _cachedRankingHmacKey = v
+            _hmacKeyLoaded = true
+            return v
+        }
+    }
+
+    static func clearRankingHmacKey() {
+        clearItem(account: rankingHmacAccount)
+        _hmacKeyQueue.sync {
+            _cachedRankingHmacKey = nil
+            _hmacKeyLoaded = true   // 명시적 clear는 캐시도 nil로 — 다음 load가 prompt 안 뜨고 nil
+        }
+    }
 
     // MARK: - 내부 공통
 

@@ -184,6 +184,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self, selector: #selector(panelWillClose),
             name: NSWindow.willCloseNotification, object: panel
         )
+        // BoardView의 미참여/일시중지 안내에서 "랭킹 등록…/설정 열기…" 클릭 시 설정 윈도우 띄움.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(openRankingSettingsAction),
+            name: .openRankingSettings, object: nil
+        )
 
         // 메뉴바 모드에서 close 버튼이 종료가 아닌 hide 로 동작하도록 delegate 설정.
         panel.delegate = self
@@ -630,6 +635,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let toggleTitle = (panel?.isVisible == true) ? "패널 숨기기" : "패널 보기"
         menu.addItem(withTitle: toggleTitle, action: #selector(togglePanelMenuAction), keyEquivalent: "")
         menu.addItem(.separator())
+        menu.addItem(withTitle: "💬 게시판", action: #selector(presentBoardMenuAction), keyEquivalent: "")
         menu.addItem(withTitle: "설정…", action: #selector(presentSettingsMenuAction), keyEquivalent: ",")
         menu.addItem(.separator())
         menu.addItem(withTitle: "종료", action: #selector(quitMenuAction), keyEquivalent: "q")
@@ -646,6 +652,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func togglePanelMenuAction() { togglePanel() }
     @objc private func presentSettingsMenuAction() { presentSettings() }
+    @objc private func presentBoardMenuAction() { BoardWindowController.shared.present() }
+    @objc private func openRankingSettingsAction() { presentSettings() }
     @objc private func quitMenuAction() { NSApp.terminate(nil) }
 
     // MARK: - NSWindowDelegate

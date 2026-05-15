@@ -11,6 +11,11 @@ enum WellnessDismissResult {
 
 @MainActor
 final class ViewModel: ObservableObject {
+    /// `.boardSeen` 알림 핸들러가 boardUnreadCount를 0으로 만들기 위해 필요한 약한 참조.
+    /// ViewModel 인스턴스는 App.swift에서 1개만 만들어지고 process 수명 동안 유지되므로
+    /// 여기 둔 weak ref가 늘 살아있음. multi-instance를 만들면 마지막 init이 이긴다.
+    fileprivate static weak var sharedRef: ViewModel?
+
     // Claude
     @Published var claudeCurrent: UsageSnapshot?
     @Published var claudeHistory: [UsageSnapshot] = []
@@ -34,6 +39,10 @@ final class ViewModel: ObservableObject {
     // 펫이 외치는 휴식 권유 말풍선. nil이면 표시 안 함.
     // 최근 1시간 동안 거의 쉬지 않고 사용 중이고, 마지막 표시로부터 1시간 이상 지났을 때 설정됨.
     @Published var wellnessNudge: String?
+
+    /// 메인 패널 진입점 옆의 미확인 글 카운트. polling cycle마다 board fetch → boardLastSeenAt
+    /// 이후 + 본인 글 제외로 계산. BoardView가 윈도우 띄울 때 .boardSeen post로 즉시 0.
+    @Published var boardUnreadCount: Int = 0
     /// Wellness 너지 표시 시각은 `Settings.lastWellnessShownAt`에 영구 저장 — 앱 재실행 시 1시간 쿨다운이 유지되어야 함 (#11).
     private var lastWellnessShownAt: Date? {
         get { Settings.shared.lastWellnessShownAt }
@@ -147,6 +156,16 @@ final class ViewModel: ObservableObject {
             .sorted { $0.timestamp < $1.timestamp }
 
         startClock()
+
+        // BoardView가 윈도우 띄우면 즉시 unread를 0으로 — polling cycle을 기다리지 않게.
+        // ViewModel은 process 수명이라 옵저버 토큰 미보관, weak ref로 self 캡처.
+        ViewModel.sharedRef = self
+        NotificationCenter.default.addObserver(forName: .boardSeen, object: nil, queue: .main) { _ in
+            Task { @MainActor in
+                Settings.shared.boardLastSeenAt = Date()
+                ViewModel.sharedRef?.boardUnreadCount = 0
+            }
+        }
     }
 
     func startClock() {
@@ -250,6 +269,8 @@ final class ViewModel: ObservableObject {
                     self.updateBackoffAfterCycle()
                     BadgeRegistry.evaluate()
                     await self.submitRankingIfNeeded()
+                    await self.checkPodiumRewardIfNeeded()
+                    await self.refreshBoardUnread()
                 }
 
                 // sleep 시간 = base × jitter × backoff multiplier.
@@ -410,6 +431,75 @@ final class ViewModel: ObservableObject {
             }
         } catch {
             DebugLog.log("Ranking submit failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 명예의 전당 보상 처리. 폴링 cycle 끝에 호출 — 서버가 직전 달 finalize 했고 본인이
+    /// Top 3에 들었으면 `pendingReward`로 응답. 로컬 dedup + CoinLedger.creditBonus +
+    /// NSUserNotification + 서버 claim까지 일괄 처리.
+    ///
+    /// 네트워크 race 대응:
+    ///   - 로컬 dedup(`claimedPodiumPeriods`)이 1차 방어 — 같은 reward 중복 적립 차단
+    ///   - 서버 idempotent claim이 2차 방어 — `alreadyClaimed=true` 응답 무시
+    ///   - 서버 claim 실패해도 로컬 상태는 이미 갱신됨 → 다음 cycle에 재시도
+    private func checkPodiumRewardIfNeeded() async {
+        let s = Settings.shared
+        guard s.rankingEnabled, s.rankingRegistered,
+              !s.rankingDeviceID.isEmpty,
+              RankingAPI.isConfigured,
+              let hmacKey = Keychain.loadRankingHmacKey() else { return }
+        do {
+            let resp = try await RankingAPI.shared.fetchLeaderboard(deviceId: s.rankingDeviceID)
+            guard let reward = resp.pendingReward else { return }
+            let dedupKey = reward.dedupKey
+            if !s.claimedPodiumPeriods.contains(dedupKey) {
+                CoinLedger.shared.creditBonus(reward.coins, reason: "podium.\(dedupKey)")
+                s.claimedPodiumPeriods.insert(dedupKey)
+                NotificationManager.shared.podiumRewardEarned(
+                    period: reward.period, rank: reward.rank, coins: reward.coins
+                )
+                DebugLog.log("Podium reward: \(dedupKey) +\(reward.coins) coin")
+            }
+            // 서버 측 claim — 실패해도 다음 cycle에 자동 재시도 (idempotent로 안전).
+            do {
+                _ = try await RankingAPI.shared.claimReward(
+                    deviceId: s.rankingDeviceID,
+                    period: reward.period,
+                    rank: reward.rank,
+                    hmacKeyBase64: hmacKey
+                )
+            } catch {
+                DebugLog.log("Podium claim server failed: \(error.localizedDescription) — retry next cycle")
+            }
+        } catch {
+            DebugLog.log("Podium check failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 게시판 미확인 글 카운트 갱신. boardLastSeenAt 이후 + 본인 글 제외.
+    /// boardLastSeenAt이 nil(첫 fetch)이면 현재 시각으로 시드 — 과거 글 전체를 미확인으로
+    /// 표시하지 않게 함. 미등록자는 게시판 사용 불가 → 카운트 0 유지.
+    private func refreshBoardUnread() async {
+        let s = Settings.shared
+        guard s.rankingEnabled, s.rankingRegistered,
+              !s.rankingDeviceID.isEmpty,
+              RankingAPI.isConfigured else {
+            if boardUnreadCount != 0 { boardUnreadCount = 0 }
+            return
+        }
+        do {
+            let resp = try await RankingAPI.shared.fetchBoard(deviceId: s.rankingDeviceID)
+            // 첫 fetch — boardLastSeenAt 시드. 과거 글이 다 unread로 잡히지 않게.
+            if s.boardLastSeenAt == nil {
+                s.boardLastSeenAt = Date()
+                boardUnreadCount = 0
+                return
+            }
+            let lastSeen = s.boardLastSeenAt ?? .distantPast
+            let count = resp.posts.filter { !$0.isMine && $0.createdAt > lastSeen }.count
+            boardUnreadCount = count
+        } catch {
+            // 무시 — 다음 cycle 재시도. UI는 직전 카운트 유지.
         }
     }
 
