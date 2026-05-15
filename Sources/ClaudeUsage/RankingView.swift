@@ -180,6 +180,9 @@ struct RankingView: View {
 // MARK: - 행 (펫 아이콘 + 호버 popover)
 
 /// 보드 한 행. 펫 아이콘 + 닉네임 + 코인. 호버 시 트레이너 카드 popover.
+/// `PetSprite.image(...)`가 @MainActor라 CI strict concurrency가 호출 컨텍스트도 같은 격리
+/// 요구 — 명시. body는 어차피 main actor라 동작 영향 없음.
+@MainActor
 private struct LeaderboardRowView: View {
     let entry: RankingAPI.LeaderboardEntry
     let isMe: Bool
@@ -321,6 +324,8 @@ private struct LeaderboardRowView: View {
 // MARK: - 명예의 전당 카드
 
 /// 직전 달 1/2/3등 카드. 메달 이모지 + 펫 아바타 (hue 적용) + 닉네임 + 최종 VP + 보상 코인.
+/// `@MainActor` 사유는 LeaderboardRowView 와 동일 (CI strict concurrency).
+@MainActor
 private struct PodiumCard: View {
     let entry: RankingAPI.PreviousMonthEntry
 
