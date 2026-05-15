@@ -109,6 +109,10 @@ struct BoardView: View {
         HStack(alignment: .firstTextBaseline) {
             Text("💬").font(.system(size: 14))
             Text("게시판").font(.system(size: 14, weight: .semibold))
+            Text("· 최근 1일만 표시")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .help("작성된 글은 24시간 동안만 보드에 노출됩니다.")
             Spacer()
             if loading {
                 ProgressView().controlSize(.small)

@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-05-15
+
+### Fixed
+- 월간 랭킹 보드에 0 VP 옵트인 사용자가 보이지 않던 문제 — `monthly_leaderboard` view를
+  `LEFT JOIN + COALESCE(monthly_coins, 0)`으로 변경. status=active 사용자는 이번 달 적립이
+  없어도 항상 노출. 명예의 전당 finalize는 별도 raw SQL이라 영향 없음 (보상은 실제 적립자만).
+
+### Changed
+- 게시판 헤더에 "· 최근 1일만 표시" 보조 텍스트 추가. RankingView "리셋까지 N일" 패턴과
+  시각적 통일 — 사용자가 표시 윈도우 정책을 즉시 인지 가능.
+
 ## [0.8.1] — 2026-05-15
 
 ### Added
