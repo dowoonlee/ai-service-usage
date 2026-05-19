@@ -8,6 +8,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { DELETE_POST_WINDOW_SEC } from "../_shared/board_policy.ts";
 
 interface DeletePostPayload {
   deviceId: string;
@@ -20,7 +21,6 @@ interface DeletePostRequest {
 }
 
 const MAX_CLOCK_SKEW_SEC = 3600;
-const DELETE_WINDOW_SEC = 60;          // 작성 후 삭제 가능한 윈도우
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -75,7 +75,7 @@ Deno.serve(async (req: Request) => {
   if (post.device_id !== p.deviceId) return errorResponse(403, "not_post_owner");
 
   const ageSec = (Date.now() - new Date(post.created_at).getTime()) / 1000;
-  if (ageSec > DELETE_WINDOW_SEC) {
+  if (ageSec > DELETE_POST_WINDOW_SEC) {
     return errorResponse(403, "delete_window_expired");
   }
 

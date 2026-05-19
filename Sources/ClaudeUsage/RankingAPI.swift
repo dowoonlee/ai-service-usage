@@ -160,6 +160,15 @@ actor RankingAPI {
         let posts: [BoardPost]
         /// 본인의 다음 글 작성까지 남은 초. 0이면 즉시 작성 가능. 미등록 사용자는 0.
         let cooldownRemainingSec: Int
+        /// 게시판 표시 윈도우(시간 단위). 서버가 권위 — UI 문구를 이 값으로 동적 생성.
+        /// optional은 구버전 서버 호환용 — nil이면 BoardView가 기본 라벨(24h) 사용.
+        let displayWindowHours: Int?
+        /// 글 작성 후 다음 글까지 cooldown 정책값(초). 작성 직후 클라이언트 카운트다운
+        /// 초기치로 사용. nil이면 BoardView fallback(600s).
+        let postCooldownSec: Int?
+        /// 본인 글 작성 후 삭제 가능한 윈도우(초). BoardRow 삭제 버튼 노출 여부 판정.
+        /// nil이면 BoardView fallback(60s).
+        let deletePostWindowSec: Int?
     }
 
     struct PostBoardPayload: Encodable {

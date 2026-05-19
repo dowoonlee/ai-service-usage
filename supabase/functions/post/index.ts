@@ -8,6 +8,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { POST_COOLDOWN_SEC } from "../_shared/board_policy.ts";
 
 interface PostPayload {
   deviceId: string;
@@ -20,7 +21,6 @@ interface PostRequest {
 }
 
 const MAX_CLOCK_SKEW_SEC = 3600;
-const POST_COOLDOWN_SEC = 600;     // 10분
 const MAX_CONTENT_LENGTH = 100;
 
 Deno.serve(async (req: Request) => {

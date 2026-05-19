@@ -36,7 +36,19 @@ struct BoardView: View {
     @State private var clockTask: Task<Void, Never>?
 
     private static let maxContentLength = 100
-    private static let deleteWindowSec: TimeInterval = 60
+    /// 구버전 서버(필드 미포함)와 첫 응답 전 fallback. 서버 값 도착 시 즉시 갱신.
+    /// 서버 측 _shared/board_policy.ts의 default와 일치하게 유지.
+    private static let fallbackDisplayWindowHours = 24
+    private static let fallbackPostCooldownSec = 600
+    private static let fallbackDeleteWindowSec: TimeInterval = 60
+
+    /// 서버가 알려주는 게시판 표시 윈도우(시간). UI 헤더/푸터/help 문구가 이 값을 참조해
+    /// 정책이 서버에서만 변경돼도 클라이언트 라벨이 함께 따라감.
+    @State private var displayWindowHours: Int = BoardView.fallbackDisplayWindowHours
+    /// 글 작성 후 다음 글까지 cooldown(초). submitDraft 직후 클라이언트 카운트다운 초기치.
+    @State private var postCooldownSec: Int = BoardView.fallbackPostCooldownSec
+    /// 본인 글 작성 후 삭제 가능한 윈도우(초). BoardRow 삭제 버튼 노출/카운트 표시 기준.
+    @State private var deleteWindowSec: TimeInterval = BoardView.fallbackDeleteWindowSec
 
     /// 게시판 사용 가능 여부 — 등록 + 활성 둘 다 필요. 일시중지면 false.
     private var rankingActive: Bool {
@@ -109,10 +121,10 @@ struct BoardView: View {
         HStack(alignment: .firstTextBaseline) {
             Text("💬").font(.system(size: 14))
             Text("게시판").font(.system(size: 14, weight: .semibold))
-            Text("· 최근 1일만 표시")
+            Text("· 최근 \(windowLabel(displayWindowHours))만 표시")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .help("작성된 글은 24시간 동안만 보드에 노출됩니다.")
+                .help("작성된 글은 \(windowLabel(displayWindowHours)) 동안만 보드에 노출됩니다.")
             Spacer()
             if loading {
                 ProgressView().controlSize(.small)
@@ -228,8 +240,9 @@ struct BoardView: View {
                             isDeleteBusy: deletingPostIds.contains(post.id),
                             isDeletable: post.isMine
                                 && !deletingPostIds.contains(post.id)
-                                && nowTick.timeIntervalSince(post.createdAt) < Self.deleteWindowSec,
-                            deleteRemainingSec: Int(Self.deleteWindowSec - nowTick.timeIntervalSince(post.createdAt)),
+                                && nowTick.timeIntervalSince(post.createdAt) < deleteWindowSec,
+                            deleteRemainingSec: Int(deleteWindowSec - nowTick.timeIntervalSince(post.createdAt)),
+                            deleteWindowSec: Int(deleteWindowSec),
                             onLikeTap: { toggleLike(postId: post.id) },
                             onDeleteTap: { deletePost(postId: post.id) }
                         )
@@ -249,11 +262,19 @@ struct BoardView: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
             Spacer()
-            Text("최근 1일 · \(posts.count)개")
+            Text("최근 \(windowLabel(displayWindowHours)) · \(posts.count)개")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+
+    /// 24의 배수면 "N일", 그 외엔 "N시간"으로 표기. 정책이 12h/48h/72h 등으로 바뀌어도 자연스럽게 표시.
+    private func windowLabel(_ hours: Int) -> String {
+        if hours >= 24 && hours % 24 == 0 {
+            return "\(hours / 24)일"
+        }
+        return "\(hours)시간"
     }
 
     private func placeholderView(_ msg: String) -> some View {
@@ -278,6 +299,16 @@ struct BoardView: View {
                 posts = resp.posts
                 lastRefresh = Date()
                 error = nil
+                // 서버가 알려준 정책값 동기화. 구버전 서버(nil)는 fallback 유지.
+                if let h = resp.displayWindowHours, h > 0 {
+                    displayWindowHours = h
+                }
+                if let s = resp.postCooldownSec, s > 0 {
+                    postCooldownSec = s
+                }
+                if let s = resp.deletePostWindowSec, s > 0 {
+                    deleteWindowSec = TimeInterval(s)
+                }
                 applyServerCooldown(resp.cooldownRemainingSec)
                 // 윈도우 active 동안에는 새 글이 와도 사용자가 즉시 본 셈 — 메인 패널 배지를 0 유지.
                 // 윈도우 닫히면 polling 멈추고 ViewModel cycle만 새 글 카운트.
@@ -355,7 +386,9 @@ struct BoardView: View {
                     hmacKeyBase64: key
                 )
                 draft = ""
-                clientCooldownSec = 600
+                // 서버 정책값을 카운트다운 초기치로 사용. 곧 이어지는 refresh()가
+                // 서버 측 cooldownRemainingSec로 재정합한다(잔여 시간 권위는 서버).
+                clientCooldownSec = postCooldownSec
                 startCooldownTick()
                 refresh()
             } catch let RankingAPI.RankingError.rateLimited(retryAfterSec: s) {
@@ -474,6 +507,8 @@ private struct BoardRow: View {
     let isDeleteBusy: Bool
     let isDeletable: Bool
     let deleteRemainingSec: Int
+    /// 서버 정책(_shared/board_policy.ts)에서 내려온 삭제 윈도우 길이(초). help 문구 동적 생성용.
+    let deleteWindowSec: Int
     let onLikeTap: () -> Void
     let onDeleteTap: () -> Void
     @State private var hoveringHeart: Bool = false
@@ -482,9 +517,14 @@ private struct BoardRow: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
+                    // 글 단위 익명 — 서버가 post_id 시드로 개발자 밈 닉네임을 생성해 응답.
+                    // 같은 글은 항상 같은 닉네임이지만 작성자는 비식별. 본인 글 구분은
+                    // 이 닉네임과 무관하게 isMyOwnPost("나" 배지) 단독으로 처리.
                     Text(post.nickname)
                         .font(.system(size: 12, weight: isMyOwnPost ? .semibold : .medium))
                         .foregroundStyle(isMyOwnPost ? Color.accentColor : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     Text(relativeTime(post.createdAt))
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
@@ -508,7 +548,7 @@ private struct BoardRow: View {
                         }
                         .buttonStyle(.borderless)
                         .disabled(isDeleteBusy)
-                        .help("작성 1분 이내에 한해 삭제 가능")
+                        .help("작성 \(BoardRow.secondsLabel(deleteWindowSec)) 이내에 한해 삭제 가능")
                     }
                 }
                 Text(post.content)
@@ -543,34 +583,22 @@ private struct BoardRow: View {
 
     @ViewBuilder
     private var likersPopover: some View {
+        // 전면 익명 — 누가 눌렀는지 노출하지 않고 카운트만 표시.
         VStack(alignment: .leading, spacing: 4) {
-            Text("좋아요 \(post.likeCount)")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            if post.likers.isEmpty {
+            HStack(spacing: 4) {
+                Image(systemName: "heart.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.pink)
+                Text("좋아요 \(post.likeCount)개")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            if post.likeCount == 0 {
                 Text("아직 좋아요가 없습니다.")
                     .font(.system(size: 11)).foregroundStyle(.tertiary)
-            } else {
-                // 시간순(오래된 것부터) — 최신 위로 보이게 reverse.
-                let visible = Array(post.likers.reversed().prefix(20))
-                ForEach(visible, id: \.nickname) { l in
-                    HStack(spacing: 6) {
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.pink)
-                        Text(l.nickname).font(.system(size: 11))
-                        Spacer(minLength: 8)
-                        Text(BoardRow.relativeTimeShort(l.createdAt))
-                            .font(.system(size: 10)).foregroundStyle(.tertiary)
-                    }
-                }
-                if post.likers.count > 20 {
-                    Text("외 \(post.likers.count - 20)명")
-                        .font(.system(size: 10)).foregroundStyle(.tertiary)
-                }
             }
         }
-        .frame(minWidth: 160)
+        .frame(minWidth: 120)
     }
 
     private func relativeTime(_ date: Date) -> String {
@@ -586,13 +614,11 @@ private struct BoardRow: View {
         return f.string(from: date)
     }
 
-    static func relativeTimeShort(_ date: Date) -> String {
-        let now = Date()
-        let diff = Int(now.timeIntervalSince(date))
-        if diff < 60 { return "방금" }
-        if diff < 3600 { return "\(diff / 60)m" }
-        if diff < 86400 { return "\(diff / 3600)h" }
-        return "\(diff / 86400)d"
+    /// 60의 배수면 "N분", 그 외엔 자연어 조합. help 문구용. 정책이 30s/90s/120s로 바뀌어도 자연스럽게 표시.
+    static func secondsLabel(_ sec: Int) -> String {
+        if sec < 60 { return "\(sec)초" }
+        if sec % 60 == 0 { return "\(sec / 60)분" }
+        return "\(sec / 60)분 \(sec % 60)초"
     }
 }
 
