@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### Fixed
+- macOS 15.x 실행 직후 크래시 (#15) 재발 — v0.8.4 의 `.utilityWindow` 제거가 오히려 NSPanel HUD
+  chrome 검증("requires NSWindowStyleMaskUtilityWindow for a HUD window")에 걸려 더 깨졌다.
+  styleMask 는 원복하고, 진짜 원인 후보로 NSHostingView 가 zero frame 으로 시작하면서 첫 layout
+  pass 의 safe-area invalidation 이 NSWindow theme frame 과 충돌하는 케이스로 좁힘. NSHostingView
+  초기 frame 을 panel content size 로 명시 + `autoresizingMask` 로 후속 resize 추종, 불필요한
+  container wrapper 제거.
+
+### Build
+- `release.yml` 에 prerelease 가드 추가 — `vX.Y.Z-suffix` (예: `v0.8.5-beta.1`) 태그는 Sparkle
+  appcast 갱신과 Homebrew Cask bump 를 스킵하고 GitHub Release 만 `prerelease: true` 로 생성.
+  베타 빌드가 일반 사용자의 자동 업데이트 경로로 새지 않게 분리.
+
 ## [0.8.4] — 2026-05-21
 
 ### Fixed

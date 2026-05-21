@@ -134,9 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let panel = FloatingPanel(
             contentRect: rect,
-            // macOS 15.x에서 `.utilityWindow + .hudWindow` 동시 사용은 NSThemeFrame chrome 결정 모호로
-            // 첫 layout pass에서 NSException raise (issue #15). chrome 결정은 `.hudWindow` 하나에 위임.
-            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView, .hudWindow],
+            // NSPanel HUD chrome 은 `.utilityWindow` 를 함께 요구한다 — 빠지면 macOS 15 에서
+            // "NSPanel requires NSWindowStyleMaskUtilityWindow for a HUD window" NSException.
+            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView, .utilityWindow, .hudWindow],
             backing: .buffered,
             defer: false
         )
@@ -162,17 +162,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             onBugReport: { BugReportWindowController.shared.present() },
             onQuit: { NSApp.terminate(nil) }
         )
+        // macOS 15 에서 NSHostingView 가 zero frame 으로 시작하면 첫 layout pass 의 safe-area
+        // invalidation 이 NSPanel theme frame 과 충돌해 NSException (issue #15). panel content size
+        // 와 동일한 frame 으로 시작하고 autoresizing 으로 후속 resize 추종 — 별도 container/autolayout
+        // 불필요.
         let host = NSHostingView(rootView: root)
-        host.translatesAutoresizingMaskIntoConstraints = false
-        let container = NSView()
-        container.addSubview(host)
-        NSLayoutConstraint.activate([
-            host.topAnchor.constraint(equalTo: container.topAnchor),
-            host.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            host.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-        ])
-        panel.contentView = container
+        host.frame = NSRect(origin: .zero, size: rect.size)
+        host.autoresizingMask = [.width, .height]
+        panel.contentView = host
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(savePanelFrame),

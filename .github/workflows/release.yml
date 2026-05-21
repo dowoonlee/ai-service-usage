@@ -59,6 +59,9 @@ jobs:
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
 
       - name: Update appcast.xml (Sparkle)
+        # SemVer 의미상 `vX.Y.Z-suffix` (예: v0.8.5-beta.1)는 prerelease — Sparkle 자동 업데이트가
+        # 일반 사용자에게 가지 않도록 appcast 갱신은 정식 태그에만 한정.
+        if: ${{ !contains(github.ref_name, '-') }}
         env:
           SU_PRIVATE_KEY: ${{ secrets.SU_PRIVATE_KEY }}
           VERSION: ${{ steps.ver.outputs.version }}
@@ -96,8 +99,11 @@ jobs:
           files: dist/AIUsage.zip
           generate_release_notes: true
           fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       - name: Bump Homebrew Cask
+        # 정식 태그에서만 cask bump. prerelease(`-suffix`)는 brew upgrade 일반 사용자에게 가지 않도록 스킵.
+        if: ${{ !contains(github.ref_name, '-') }}
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
