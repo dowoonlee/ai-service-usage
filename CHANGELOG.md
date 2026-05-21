@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+## [0.8.4] — 2026-05-21
+
+### Fixed
+- macOS 15.x (Apple Silicon) 환경에서 실행 직후 `EXC_BREAKPOINT` 크래시 (#15) — NSPanel
+  `styleMask`의 `.utilityWindow + .hudWindow` 동시 사용이 NSThemeFrame chrome 결정 모호로
+  첫 layout pass에서 NSException raise. `.hudWindow` 단독으로 chrome 결정을 일원화.
+
 ## [0.8.2] — 2026-05-15
 
 ### Fixed

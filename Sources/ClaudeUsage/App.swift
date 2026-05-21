@@ -134,7 +134,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let panel = FloatingPanel(
             contentRect: rect,
-            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView, .utilityWindow, .hudWindow],
+            // macOS 15.x에서 `.utilityWindow + .hudWindow` 동시 사용은 NSThemeFrame chrome 결정 모호로
+            // 첫 layout pass에서 NSException raise (issue #15). chrome 결정은 `.hudWindow` 하나에 위임.
+            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel, .fullSizeContentView, .hudWindow],
             backing: .buffered,
             defer: false
         )
