@@ -523,11 +523,34 @@ actor RankingAPI {
             return EmptyResponse() as! Resp
         }
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        // Deno `new Date().toISOString()` 은 항상 fractional seconds 포함("…35.123Z").
+        // PostgreSQL timestamptz 응답은 미세 분수초 또는 없는 형태 둘 다 가능.
+        // `.iso8601` 기본은 fractional seconds 미지원 → fortune 응답 같은 곳에서 decode 실패.
+        // 두 포맷 모두 지원하는 custom strategy 로 둘 다 커버.
+        decoder.dateDecodingStrategy = .custom { dec in
+            let s = try dec.singleValueContainer().decode(String.self)
+            if let d = Self.iso8601WithFractional.date(from: s) { return d }
+            if let d = Self.iso8601Basic.date(from: s) { return d }
+            throw DecodingError.dataCorruptedError(
+                in: try dec.singleValueContainer(),
+                debugDescription: "Invalid ISO 8601 date: \(s)"
+            )
+        }
         do {
             return try decoder.decode(Resp.self, from: data)
         } catch {
             throw RankingError.decoding(error.localizedDescription)
         }
     }
+
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let iso8601Basic: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
 }
