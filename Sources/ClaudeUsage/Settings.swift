@@ -530,6 +530,21 @@ final class Settings: ObservableObject {
             d.set(self.coinsTotalEarned, forKey: Keys.coinsTotalEarned)
         }
 
+        // 최근 서버 불안정 이슈 사과 — 모든 사용자 1회 3,000 coin. v0.8.5 캠페인.
+        // May2026Bonus 와 동일하게 init 안에서 직접 mutate (CoinLedger 재진입 회피).
+        applyOnceMigration(key: Keys.hasReceivedServerInstabilityBonus,
+                           onlyExisting: false,
+                           wasExistingUser: wasExistingUser) {
+            self.coins += 3000
+            self.coinsTotalEarned += 3000
+            if self.firstCreditedAt == nil {
+                self.firstCreditedAt = Date()
+                d.set(self.firstCreditedAt, forKey: Keys.firstCreditedAt)
+            }
+            d.set(self.coins, forKey: Keys.coins)
+            d.set(self.coinsTotalEarned, forKey: Keys.coinsTotalEarned)
+        }
+
         // 도장 마이그레이션은 init 안에서 호출 금지 — `BadgeRegistry.evaluate`가 `Settings.shared`를
         // 재진입해서 lazy init이 깨짐. App 시작 후 `applyGymMigrationIfNeeded()`에서 처리.
     }
@@ -705,6 +720,7 @@ final class Settings: ObservableObject {
         static let pendingHighlights           = "settings.pendingHighlights"
         static let hasReceivedV032TicketBonus  = "settings.hasReceivedV032TicketBonus"
         static let hasReceivedMay2026Bonus     = "settings.hasReceivedMay2026Bonus"
+        static let hasReceivedServerInstabilityBonus = "settings.hasReceivedServerInstabilityBonus"
         // GitHub 기여자 보너스
         static let githubLogin                 = "settings.githubLogin"
         static let githubUserID                = "settings.githubUserID"

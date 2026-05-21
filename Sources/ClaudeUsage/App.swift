@@ -57,6 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 디버그 로그 회전 — 5MB 초과 시 .bak으로 rename. 다른 컴포넌트의 첫 log 호출
         // 이전에 회전해야 새 사이클의 로그가 깨끗한 파일에서 시작.
         DebugLog.rotateIfNeeded()
+        // 직전 실행 비정상 종료 여부 — setupPanel 보다 *먼저* 호출해서 키 갱신을 끝낸다.
+        // 다이얼로그 자체는 패널이 뜬 뒤에 보여야 자연스럽기 때문에 record 만 잡아두고 나중에 띄움.
+        let crashRecord = CrashReporter.handleLaunch()
         setupPanel()
         bindSettings()
         NotificationManager.shared.requestAuthorizationIfNeeded()
@@ -77,6 +80,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Settings.shared.applyCollectionMigrationIfNeeded()
         // PR 보너스 50 → 1,000 상향(v0.6.10) 소급 — 기존 적립 PR에 차액 950 × N 추가.
         Settings.shared.applyContributorBonusUpgradeIfNeeded()
+        // 직전 실행이 비정상 종료였고 회수할 .ips 가 있으면 크래시 신고 다이얼로그.
+        // 패널/마이그레이션 다 끝난 뒤 마지막에 — 사용자에겐 "앱이 켜진 직후" 라고 인식되도록.
+        if let record = crashRecord {
+            presentCrashAlert(record)
+        }
+    }
+
+    /// 앱 종료 직전 호출 — kill -9/크래시 시엔 안 불림. 그게 우리가 다음 실행에서 잡고 싶은 경우.
+    func applicationWillTerminate(_ notification: Notification) {
+        CrashReporter.markCleanShutdown()
+    }
+
+    private func presentCrashAlert(_ record: CrashRecord) {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm"
+        let when = df.string(from: record.crashedAt)
+        let alert = NSAlert()
+        alert.messageText = "지난번 비정상 종료가 감지되었어요"
+        alert.informativeText = """
+        \(when)에 앱이 크래시 났습니다.
+        \(record.signalSummary)
+
+        신고해주시면 같은 문제를 겪는 다른 분들에게도 도움이 됩니다.
+        """
+        alert.addButton(withTitle: "지금 신고하기")
+        alert.addButton(withTitle: "무시하기")
+        let response = alert.runModal()
+        // 응답과 무관하게 한 번 보여줬으면 같은 .ips 는 다시 묻지 않음.
+        CrashReporter.markReported(record.ipsPath)
+        if response == .alertFirstButtonReturn {
+            let summary = BugReport.CrashSummary(
+                crashedAtString: when,
+                signalSummary: record.signalSummary,
+                ipsFileName: record.ipsPath.lastPathComponent,
+                bodyExcerpt: record.bodyExcerpt
+            )
+            BugReportWindowController.shared.present(crashPrefill: summary)
+        }
     }
 
     private func bindSettings() {
