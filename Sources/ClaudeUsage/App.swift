@@ -43,6 +43,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var menuBarPetDir: Double = 1
     /// 뒹굴 회전 누적 — big drop 통과 중에만 가속, 빠져나오면 즉시 0.
     private var menuBarRollAngle: Double = 0
+    /// 직전 tick에 그린 composite의 시각적 키. 모두 동일하면 NSImage 생성/할당 skip.
+    /// 사용률 0% 같은 idle 구간에서 frameIdx·petX bucket·pct·rollAngle bucket이 동시에 동결되면
+    /// 시각 결과가 완전히 같음 — 30Hz redraw 비용(NSImage + Core Graphics 합성) 무피해 절감.
+    /// petX bucket=100단위(1% ≈ 0.6pt at chartW=60), rollAngle bucket=5°.
+    private var lastMenuBarRenderKey: MenuBarRenderKey?
+    private struct MenuBarRenderKey: Equatable {
+        let frameIdx: Int
+        let petXBucket: Int       // 0..100
+        let petDir: Int           // +1 / -1
+        let pctBucket: Int        // -1 if nil, else 0..100
+        let rollBucket: Int       // angle / 5
+        let kind: PetKind
+        let theme: PetTheme
+        let action: PetController.Action
+        let historyCount: Int     // history 끝부분이 push되면 변화 감지
+    }
 
     /// [% 영역 (좌하단 정렬)][차트+펫] 한 장 image — button.title 안 씀.
     /// baseline 정밀 제어 위해 button.attributedTitle 대신 NSImage 에 텍스트 직접 그림.
@@ -341,6 +357,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menuBarRollAngle = bigDrop ? menuBarRollAngle + dt * 720 : 0
 
         let action: PetController.Action = pct >= 60 ? .run : .walk
+
+        // 시각 결과를 결정하는 모든 입력을 양자화한 키. 직전 tick과 동일하면 NSImage 합성 skip.
+        let key = MenuBarRenderKey(
+            frameIdx: menuBarFrameIdx,
+            petXBucket: Int(menuBarPetX * 100),
+            petDir: menuBarPetDir > 0 ? 1 : -1,
+            pctBucket: feed.pct.map { Int($0) } ?? -1,
+            rollBucket: Int(menuBarRollAngle / 5),
+            kind: feed.kind,
+            theme: feed.theme,
+            action: action,
+            historyCount: feed.history.count
+        )
+        if key == lastMenuBarRenderKey { return }
+        lastMenuBarRenderKey = key
 
         button.image = renderMenuBarComposite(
             kind: feed.kind,

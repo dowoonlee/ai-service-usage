@@ -13,7 +13,16 @@ enum BadgeTier: String, CaseIterable, Codable, Comparable {
     case localhost, dev, staging, production
 
     static func < (lhs: BadgeTier, rhs: BadgeTier) -> Bool {
-        Self.allCases.firstIndex(of: lhs)! < Self.allCases.firstIndex(of: rhs)!
+        lhs.sortIndex < rhs.sortIndex
+    }
+
+    private var sortIndex: Int {
+        switch self {
+        case .localhost: return 0
+        case .dev: return 1
+        case .staging: return 2
+        case .production: return 3
+        }
     }
 
     var displayName: String {

@@ -60,8 +60,9 @@ actor UsageAPI {
         let url = base.appendingPathComponent("api/organizations")
         let (data, resp) = try await get(sess: sess, url: url)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
-        let preview = String(data: data.prefix(600), encoding: .utf8) ?? "<binary>"
-        DebugLog.log(" GET /api/organizations -> status=\(status) body=\(preview)")
+        // body는 organization uuid·billing·capabilities를 포함 — 평문 로그 + BugReport
+        // GitHub Issue 첨부 동선에 노출되지 않게 status/length만 기록.
+        DebugLog.log(" GET /api/organizations -> status=\(status) bytes=\(data.count)")
         try assertOK(resp)
         do {
             let orgs = try JSONDecoder().decode([APIOrganization].self, from: data)
@@ -102,8 +103,9 @@ actor UsageAPI {
         let url = base.appendingPathComponent("api/organizations/\(orgID)/usage")
         let (data, resp) = try await get(sess: sess, url: url)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
-        let preview = String(data: data.prefix(1200), encoding: .utf8) ?? "<binary>"
-        DebugLog.log(" GET /api/organizations/\(orgID)/usage -> status=\(status) body=\(preview)")
+        // orgID 자체도 식별자라 로그에서 마스킹 (앞 8자만).
+        let maskedOrg = orgID.prefix(8) + "…"
+        DebugLog.log(" GET /api/organizations/\(maskedOrg)/usage -> status=\(status) bytes=\(data.count)")
         try assertOK(resp)
         do {
             return try JSONDecoder().decode(APIUsageResponse.self, from: data)

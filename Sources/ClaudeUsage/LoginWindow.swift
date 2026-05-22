@@ -5,6 +5,18 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate {
     var onCaptured: ((String) -> Void)?
     private var webView: WKWebView!
     private var pollTimer: Timer?
+    private static let allowedLoginHostSuffixes = [
+        "claude.ai",
+        "anthropic.com",
+        "google.com",
+        "gstatic.com",
+        "googleusercontent.com",
+        "apple.com",
+        "icloud.com",
+        "github.com",
+        "workos.com",
+        "auth0.com",
+    ]
 
     convenience init() {
         let window = NSWindow(
@@ -50,13 +62,49 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate {
         checkForSessionKey()
     }
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        if url.scheme == "about" {
+            decisionHandler(.allow)
+            return
+        }
+        guard url.scheme == "https", let host = url.host?.lowercased() else {
+            decisionHandler(.cancel)
+            return
+        }
+        if Self.isAllowedLoginHost(host) {
+            decisionHandler(.allow)
+        } else {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+        }
+    }
+
     private func checkForSessionKey() {
         let store = WKWebsiteDataStore.default().httpCookieStore
         store.getAllCookies { [weak self] cookies in
             guard let self else { return }
-            if let c = cookies.first(where: { $0.name == "sessionKey" && $0.domain.contains("claude.ai") && !$0.value.isEmpty }) {
+            if let c = cookies.first(where: { $0.name == "sessionKey" && Self.isClaudeCookieDomain($0.domain) && !$0.value.isEmpty }) {
                 self.capture(c.value)
             }
+        }
+    }
+
+    private static func isClaudeCookieDomain(_ domain: String) -> Bool {
+        let normalized = domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return normalized == "claude.ai" || normalized.hasSuffix(".claude.ai")
+    }
+
+    private static func isAllowedLoginHost(_ host: String) -> Bool {
+        allowedLoginHostSuffixes.contains { suffix in
+            host == suffix || host.hasSuffix(".\(suffix)")
         }
     }
 

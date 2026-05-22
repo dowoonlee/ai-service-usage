@@ -10,6 +10,9 @@ enum Keychain {
     static let githubAccount = "githubToken"
     // 랭킹 서버가 register 시 발급한 per-install HMAC 키 (base64). payload 서명에 사용.
     static let rankingHmacAccount = "rankingHmacKey"
+    // 랭킹 서버가 register 시 발급한 복구 코드 (XXXX-XXXX-XXXX). 분실 시 GitHub 연동과 함께
+    // 계정 복구 수단으로 사용. v0.8.10부터 UserDefaults → Keychain으로 저장소 이동.
+    static let rankingRecoveryCodeAccount = "rankingRecoveryCode"
 
     // MARK: - Claude session (legacy API, 인자 없음)
 
@@ -60,12 +63,25 @@ enum Keychain {
         }
     }
 
+    // MARK: - Ranking recovery code
+    //
+    // Settings의 @Published var rankingRecoveryCode가 in-memory 캐시 역할을 하므로 별도 캐시
+    // 불필요 — init에서 1회 load 후 didSet에서만 save.
+
+    @discardableResult
+    static func saveRecoveryCode(_ value: String) -> Bool {
+        saveItem(value, account: rankingRecoveryCodeAccount)
+    }
+    static func loadRecoveryCode() -> String? { loadItem(account: rankingRecoveryCodeAccount) }
+    static func clearRecoveryCode() { clearItem(account: rankingRecoveryCodeAccount) }
+
     // MARK: - 내부 공통
 
     /// SecItemAdd 우선, 이미 존재하면 SecItemUpdate. 기존 Delete+Add 방식은 한 번의 save에
     /// keychain access를 2번 트리거해 ad-hoc 서명 + ACL 무효화 상황에서 사용자에게 다이얼로그가
     /// 두 번 뜨던 문제 — Add/Update 한 번으로 1회로 축소.
-    private static func saveItem(_ value: String, account: String) {
+    @discardableResult
+    private static func saveItem(_ value: String, account: String) -> Bool {
         let data = Data(value.utf8)
         let matchQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -78,8 +94,9 @@ enum Keychain {
         let status = SecItemAdd(addAttrs as CFDictionary, nil)
         if status == errSecDuplicateItem {
             let updateAttrs: [String: Any] = [kSecValueData as String: data]
-            SecItemUpdate(matchQuery as CFDictionary, updateAttrs as CFDictionary)
+            return SecItemUpdate(matchQuery as CFDictionary, updateAttrs as CFDictionary) == errSecSuccess
         }
+        return status == errSecSuccess
     }
 
     private static func loadItem(account: String) -> String? {

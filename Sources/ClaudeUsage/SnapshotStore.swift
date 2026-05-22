@@ -13,18 +13,25 @@ final class JSONLStore<T: Codable> {
         if let directory {
             dir = directory
         } else {
-            let appSupport = try! fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            // Application Support 조회 실패 시 NSTemporaryDirectory()로 폴백 —
+            // ViewModel.init이 SnapshotStore static 초기화를 트리거하므로 try! crash 시 앱 즉사.
+            let appSupport = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+                ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             dir = appSupport.appendingPathComponent("ClaudeUsage", isDirectory: true)
         }
         if !fm.fileExists(atPath: dir.path) {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
         self.fileURL = dir.appendingPathComponent(filename)
         self.queue = DispatchQueue(label: label)
         self.encoder = JSONEncoder()
         self.encoder.dateEncodingStrategy = .iso8601
         self.decoder = JSONDecoder()
         self.decoder.dateDecodingStrategy = .iso8601
+        if fm.fileExists(atPath: fileURL.path) {
+            restrictFilePermissions()
+        }
     }
 
     func append(_ value: T) {
@@ -40,7 +47,12 @@ final class JSONLStore<T: Codable> {
             } else {
                 try? line.write(to: fileURL, options: .atomic)
             }
+            restrictFilePermissions()
         }
+    }
+
+    private func restrictFilePermissions() {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
     }
 
     /// 파일 끝에서부터 청크 단위(64KB)로 거꾸로 읽으며 newline 수가 limit+1 도달하면 멈춘다.

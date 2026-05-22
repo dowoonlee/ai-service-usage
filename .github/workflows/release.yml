@@ -43,6 +43,9 @@ jobs:
 
       - name: Build .app
         env:
+          # RELEASE=1: SU_PUBLIC_KEY 누락 시 package.sh가 fail-fast 종료 — 서명 검증 없는
+          # 산출물이 GitHub Releases에 게시되는 것을 차단. 로컬 빌드는 RELEASE 미설정.
+          RELEASE: "1"
           VERSION: ${{ steps.ver.outputs.version }}
           SU_PUBLIC_KEY: ${{ secrets.SU_PUBLIC_KEY }}
           GITHUB_CLIENT_ID: ${{ secrets.GH_CONTRIBUTOR_CLIENT_ID }}

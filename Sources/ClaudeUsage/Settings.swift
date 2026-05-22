@@ -296,8 +296,17 @@ final class Settings: ObservableObject {
     }
     /// 서버가 register 응답으로 발급한 복구 코드 (XXXX-XXXX-XXXX). 사용자가 1회 보고 별도
     /// 보관. 분실 시 GitHub 연동이 두 번째 복구 수단.
+    /// v0.8.10부터 Keychain 저장 — UserDefaults plist는 백업/iCloud sync로 평문 유출 위험.
     @Published var rankingRecoveryCode: String? {
-        didSet { UserDefaults.standard.set(rankingRecoveryCode, forKey: Keys.rankingRecoveryCode) }
+        didSet {
+            if let v = rankingRecoveryCode {
+                if !Keychain.saveRecoveryCode(v) {
+                    DebugLog.log("Ranking recovery code Keychain save failed")
+                }
+            } else {
+                Keychain.clearRecoveryCode()
+            }
+        }
     }
     /// 옵트인 시점의 `coinsTotalEarned` 스냅샷. 서버에 baseline 이전 데이터는 보내지 않음.
     @Published var rankingBaselineCoins: Int {
@@ -407,7 +416,21 @@ final class Settings: ObservableObject {
         self.rankingEnabled            = (d.object(forKey: Keys.rankingEnabled) as? Bool) ?? false
         self.rankingDeviceID           = d.string(forKey: Keys.rankingDeviceID) ?? ""
         self.rankingNickname           = d.string(forKey: Keys.rankingNickname) ?? ""
-        self.rankingRecoveryCode       = d.string(forKey: Keys.rankingRecoveryCode)
+        // recoveryCode: Keychain 우선 → 없으면 UserDefaults legacy migration → 둘 다 없으면 nil.
+        // 마이그레이션 이후 UserDefaults 잔재는 항상 제거(평문 plist에 남지 않게).
+        if let kc = Keychain.loadRecoveryCode() {
+            self.rankingRecoveryCode = kc
+            d.removeObject(forKey: Keys.rankingRecoveryCode)
+        } else if let legacy = d.string(forKey: Keys.rankingRecoveryCode), !legacy.isEmpty {
+            self.rankingRecoveryCode = legacy
+            if Keychain.saveRecoveryCode(legacy) {
+                d.removeObject(forKey: Keys.rankingRecoveryCode)
+            } else {
+                DebugLog.log("Ranking recovery code migration kept legacy UserDefaults value after Keychain save failure")
+            }
+        } else {
+            self.rankingRecoveryCode = nil
+        }
         self.rankingBaselineCoins      = (d.object(forKey: Keys.rankingBaselineCoins) as? Int) ?? 0
         self.rankingLastSubmittedTotal = (d.object(forKey: Keys.rankingLastSubmittedTotal) as? Int) ?? 0
         self.rankingLastSubmittedAt    = d.object(forKey: Keys.rankingLastSubmittedAt) as? Date
@@ -493,10 +516,11 @@ final class Settings: ObservableObject {
                 owned[self.petClaudeKind] = .initial()
             }
             if hadLegacyCursorKind, !Gacha.isLegendaryOrEpic(self.petCursorKind) {
-                if owned[self.petCursorKind] == nil {
-                    owned[self.petCursorKind] = .initial()
+                if var existing = owned[self.petCursorKind] {
+                    existing.count += 1
+                    owned[self.petCursorKind] = existing
                 } else {
-                    owned[self.petCursorKind]!.count += 1
+                    owned[self.petCursorKind] = .initial()
                 }
             }
             self.ownedPets = owned

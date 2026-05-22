@@ -398,11 +398,17 @@ final class ViewModel: ObservableObject {
     /// 루프에 영향 없음. 옵트인 + 등록 + HMAC 키 + Supabase 설정 모두 갖춰진 경우에만 실제 호출.
     /// delta = `rankingScoreEarnedVP` - `rankingLastSubmittedTotal`. 0 이하면 skip (profile은
     /// 다음 VP 적립 cycle에 piggy-back되어 동기화).
+    /// 랭킹 기능 4개 전제(enabled / registered / deviceID / Supabase 설정) 동시 충족 여부.
+    /// 3곳에서 같은 가드를 반복하던 것을 1곳으로 모음 — 새 조건 추가 시 누락 위험 제거.
+    private var hasRankingPrerequisites: Bool {
+        let s = Settings.shared
+        return s.rankingEnabled && s.rankingRegistered &&
+               !s.rankingDeviceID.isEmpty && RankingAPI.isConfigured
+    }
+
     private func submitRankingIfNeeded() async {
         let s = Settings.shared
-        guard s.rankingEnabled, s.rankingRegistered,
-              !s.rankingDeviceID.isEmpty,
-              RankingAPI.isConfigured,
+        guard hasRankingPrerequisites,
               let hmacKey = Keychain.loadRankingHmacKey() else { return }
         let total = s.rankingScoreEarnedVP
         let delta = total - s.rankingLastSubmittedTotal
@@ -444,9 +450,7 @@ final class ViewModel: ObservableObject {
     ///   - 서버 claim 실패해도 로컬 상태는 이미 갱신됨 → 다음 cycle에 재시도
     private func checkPodiumRewardIfNeeded() async {
         let s = Settings.shared
-        guard s.rankingEnabled, s.rankingRegistered,
-              !s.rankingDeviceID.isEmpty,
-              RankingAPI.isConfigured,
+        guard hasRankingPrerequisites,
               let hmacKey = Keychain.loadRankingHmacKey() else { return }
         do {
             let resp = try await RankingAPI.shared.fetchLeaderboard(deviceId: s.rankingDeviceID)
@@ -481,9 +485,7 @@ final class ViewModel: ObservableObject {
     /// 표시하지 않게 함. 미등록자는 게시판 사용 불가 → 카운트 0 유지.
     private func refreshBoardUnread() async {
         let s = Settings.shared
-        guard s.rankingEnabled, s.rankingRegistered,
-              !s.rankingDeviceID.isEmpty,
-              RankingAPI.isConfigured else {
+        guard hasRankingPrerequisites else {
             if boardUnreadCount != 0 { boardUnreadCount = 0 }
             return
         }

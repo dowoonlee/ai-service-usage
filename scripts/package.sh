@@ -114,6 +114,12 @@ PLIST
 if [ -z "${SU_PUBLIC_KEY}" ]; then
   echo "WARNING: SU_PUBLIC_KEY not set — auto-update signature verification will fail." >&2
   echo "         Generate keys with Sparkle's bin/generate_keys, set SU_PUBLIC_KEY=..., re-run." >&2
+  # release 산출물에 키 누락된 채로 게시되지 않게 RELEASE=1에선 강제 fail.
+  # 로컬 빌드/개발은 RELEASE 미설정이라 그대로 진행 (auto-update만 비활성).
+  if [ "${RELEASE:-0}" = "1" ]; then
+    echo "ERROR: RELEASE=1 build cannot proceed without SU_PUBLIC_KEY." >&2
+    exit 1
+  fi
 fi
 
 if [ -z "${SUPABASE_URL}" ] || [ -z "${SUPABASE_ANON_KEY}" ]; then

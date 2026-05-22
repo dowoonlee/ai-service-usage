@@ -86,14 +86,17 @@ struct WalkingCat: View {
         ctrl.mood = mood
         // kind도 동일 패턴으로 매 render마다 sync — `.quote` 동작 진입 시 종 전용 대사를 뽑는 데 사용.
         ctrl.petKind = kind
+        // bigDropDescent는 O(n) 스캔 + 배열 map — body가 30Hz로 도므로 1번만 계산해
+        // sprite()에 전달. 이전엔 speedMultiplier 결정 + sprite 모션 결정으로 2회 호출됐음.
+        let descent = bigDropDescent(at: ctrl.x)
         // 큰 낙폭 segment 통과 중에는 펫 속도를 1/1.5배로 늦춰서
         // 굴러떨어짐/점프와 말풍선이 1.5배 더 오래 보이도록.
-        ctrl.speedMultiplier = (bigDropDescent(at: ctrl.x) != 0) ? (1.0 / 1.5) : 1.0
+        ctrl.speedMultiplier = (descent != 0) ? (1.0 / 1.5) : 1.0
         // 코인 popping/보상 말풍선은 sprite의 if-let pos 분기 안에 묶여 있으면 차트 데이터가
         // 일시적으로 비어 sprite가 사라질 때 같이 사라진다. ZStack의 sibling으로 빼서 보상
         // 연출이 1초 내내 보이도록 보장.
         return ZStack {
-            sprite()
+            sprite(descent: descent)
             coinPopOverlay.allowsHitTesting(false)
             rewardAmountOverlay.allowsHitTesting(false)
         }
@@ -129,7 +132,7 @@ struct WalkingCat: View {
     }
 
     @ViewBuilder
-    private func sprite() -> some View {
+    private func sprite(descent: Double) -> some View {
         if let pos = positionFor(xNorm: ctrl.x),
            let nsImg = PetSprite.image(for: kind, action: ctrl.action, frameIndex: ctrl.frameIndex) {
             let (cw, ch) = kind.cellSize
@@ -140,8 +143,7 @@ struct WalkingCat: View {
             let jx: Double = mood.jitter > 0 ? Double.random(in: -mood.jitter...mood.jitter) : 0
             let jy: Double = mood.jitter > 0 ? Double.random(in: -mood.jitter...mood.jitter) : 0
 
-            // 큰 낙폭 구간 통과 중일 때의 추가 모션 (walk/run 한정)
-            let descent = bigDropDescent(at: ctrl.x)
+            // descent는 body에서 1회 계산되어 전달됨 (P0-1 최적화).
             let isMoving = ctrl.action == .walk || ctrl.action == .run
             let now = Date().timeIntervalSinceReferenceDate
             // descent > 0: 내려가는 중 → 굴러 떨어짐 (회전 + 비명)
@@ -424,12 +426,13 @@ struct WalkingCat: View {
     // descent를 부호로 반환: +1 = 내려가는 중, -1 = 올라가는 중, 0 = 해당 없음.
     // 임계: |dy| >= bigDropThreshold × (ymax - ymin)
     private func bigDropDescent(at xNorm: Double) -> Double {
-        guard points.count >= 2 else { return 0 }
+        guard points.count >= 2,
+              let first = points.first, let last = points.last else { return 0 }
         let ys = points.map { $0.1 }
         guard let yMin = ys.min(), let yMax = ys.max(), yMax - yMin > 0 else { return 0 }
         let threshold = (yMax - yMin) * bigDropThreshold
-        let xStart = points.first!.0
-        let xEnd = points.last!.0
+        let xStart = first.0
+        let xEnd = last.0
         let span = xEnd.timeIntervalSince(xStart)
         guard span > 0 else { return 0 }
         let targetDate = xStart.addingTimeInterval(span * xNorm)
@@ -449,9 +452,10 @@ struct WalkingCat: View {
     }
 
     private func positionFor(xNorm: Double) -> CGPoint? {
-        guard points.count >= 2 else { return nil }
-        let xStart = points.first!.0
-        let xEnd = points.last!.0
+        guard points.count >= 2,
+              let first = points.first, let last = points.last else { return nil }
+        let xStart = first.0
+        let xEnd = last.0
         let span = xEnd.timeIntervalSince(xStart)
         guard span > 0 else { return nil }
         let targetDate = xStart.addingTimeInterval(span * xNorm)
@@ -464,6 +468,7 @@ struct WalkingCat: View {
     // 인접 두 점 사이 선형 보간. 차트가 .monotone이면 약간 어긋날 수 있으나
     // 작은 sparkline에서는 시각적 차이가 미미하다.
     private func sampleY(at date: Date) -> Double {
+        guard let last = points.last else { return 0 }
         for i in 1..<points.count {
             if points[i].0 >= date {
                 let prev = points[i - 1]
@@ -474,7 +479,7 @@ struct WalkingCat: View {
                 return prev.1 + (next.1 - prev.1) * frac
             }
         }
-        return points.last!.1
+        return last.1
     }
 
     /// variant index → hueRotation 각도 (도).

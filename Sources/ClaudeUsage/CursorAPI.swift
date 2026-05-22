@@ -78,7 +78,7 @@ actor CursorAPI {
         let cookie = "\(pctEncode(userId))%3A%3A\(pctEncode(jwt))"
 
         // /api/usage — startOfMonth(리셋 기준)와 Pro용 request 수를 한 번에 얻음
-        let usageData = try await get("https://cursor.com/api/usage?user=\(userId)", cookie: cookie, label: "GET /api/usage")
+        let usageData = try await get("https://cursor.com/api/usage?user=\(pctEncode(userId))", cookie: cookie, label: "GET /api/usage")
         let base = try parseUsage(data: usageData, planName: planName, plan: plan)
 
         if plan == .ultra {
@@ -174,8 +174,9 @@ actor CursorAPI {
         do { (data, resp) = try await URLSession.shared.data(for: req) }
         catch { throw CursorError.transport(error) }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
-        let preview = String(data: data.prefix(1200), encoding: .utf8) ?? "<binary>"
-        DebugLog.log(" Cursor \(label) -> status=\(status) body=\(preview)")
+        // body는 모델별 cost·사용 패턴 포함 — BugReport GitHub Issue로 흘러가지 않게
+        // status/length만 기록. 향후 디버깅 필요 시 별도 디버그 빌드 플래그로 게이트.
+        DebugLog.log(" Cursor \(label) -> status=\(status) bytes=\(data.count)")
         if status == 401 || status == 403 { throw CursorError.unauthorized }
         if !(200..<300).contains(status) { throw CursorError.http(status) }
         return data
