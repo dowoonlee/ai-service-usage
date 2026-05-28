@@ -733,6 +733,12 @@ private struct RankingSectionView: View {
                 let token: String
                 if let existing = Keychain.loadGitHubToken() {
                     token = existing
+                    // 기존 토큰만 있고 로컬 식별 정보가 비어 있는 상태(이전 복구 실패/구버전)를 보강.
+                    if settings.githubLogin == nil || settings.githubUserID == nil ||
+                        (settings.githubCreatedAt ?? "").isEmpty {
+                        let user = try await GitHubAuth.shared.fetchUser(token: token)
+                        settings.persistGitHubUser(user)
+                    }
                 } else {
                     let code = try await GitHubAuth.shared.requestDeviceCode()
                     NSPasteboard.general.clearContents()
@@ -744,12 +750,12 @@ private struct RankingSectionView: View {
                         interval: code.interval,
                         expiresIn: code.expires_in
                     )
-                    Keychain.saveGitHubToken(token)
-                    ContributorBonus.shared.updateToken(token)
                     // 토큰 확보 직후 user 식별 정보까지 받아둠 — 실패하면 outer catch 로 흐름이
                     // 전환되어 사용자에게 정확한 에러가 노출된다 (이전엔 `try?` 로 silent fail
                     // 후 nil 상태로 peek 단계로 넘어가 UI/실제 상태가 어긋났음).
                     let user = try await GitHubAuth.shared.fetchUser(token: token)
+                    Keychain.saveGitHubToken(token)
+                    ContributorBonus.shared.updateToken(token)
                     settings.persistGitHubUser(user)
                 }
 
