@@ -291,7 +291,7 @@ actor RankingAPI {
         let req = RegisterRequest(deviceId: deviceId, nickname: nickname,
                                   githubLogin: githubLogin, githubUserId: githubUserId,
                                   initialCoins: initialCoins, profileJson: profileJson)
-        return try await post(path: "register", body: req, signed: false)
+        return try await post(path: "register", body: req)
     }
 
     /// 폴링 cycle 직후 호출 (fire-and-forget). delta = 현재 coinsTotalEarned - lastSubmittedTotal.
@@ -303,7 +303,7 @@ actor RankingAPI {
                                     ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.sign(payload: payload, keyBase64: hmacKeyBase64)
         let req = SubmitRequest(payload: payload, signature: sig, profileJson: profileJson)
-        return try await post(path: "submit", body: req, signed: true)
+        return try await post(path: "submit", body: req)
     }
 
     /// Top N + 내 순위. 페이지네이션 없이 한 번에 받음 (50명 규모라 부담 없음).
@@ -316,7 +316,7 @@ actor RankingAPI {
     func recoverWithRecoveryCode(_ code: String, newDeviceId: String) async throws -> RecoverResponse {
         let req = RecoverByCodeRequest(recoveryCode: code, newDeviceId: newDeviceId)
         do {
-            return try await post(path: "recover-by-code", body: req, signed: false)
+            return try await post(path: "recover-by-code", body: req)
         } catch RankingError.http(404, _) {
             throw RankingError.invalidRecoveryCode
         }
@@ -326,7 +326,7 @@ actor RankingAPI {
     func recoverWithGitHub(token: String, newDeviceId: String) async throws -> RecoverResponse {
         let req = RecoverByGitHubRequest(githubToken: token, newDeviceId: newDeviceId)
         do {
-            return try await post(path: "recover-by-github", body: req, signed: false)
+            return try await post(path: "recover-by-github", body: req)
         } catch RankingError.http(404, _) {
             throw RankingError.invalidRecoveryCode
         }
@@ -338,7 +338,7 @@ actor RankingAPI {
     func peekGitHubAccount(token: String) async throws -> GitHubAccountPeek {
         let req = PeekByGitHubRequest(githubToken: token)
         do {
-            return try await post(path: "peek-by-github", body: req, signed: false)
+            return try await post(path: "peek-by-github", body: req)
         } catch RankingError.http(404, _) {
             throw RankingError.invalidRecoveryCode
         }
@@ -352,7 +352,7 @@ actor RankingAPI {
                                          ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signClaim(payload: payload, keyBase64: hmacKeyBase64)
         let req = ClaimRewardRequest(payload: payload, signature: sig)
-        return try await post(path: "claim-reward", body: req, signed: true)
+        return try await post(path: "claim-reward", body: req)
     }
 
     // MARK: - Board
@@ -371,7 +371,7 @@ actor RankingAPI {
                                        ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let req = PostBoardRequest(payload: payload, signature: sig)
-        return try await post(path: "post", body: req, signed: true)
+        return try await post(path: "post", body: req)
     }
 
     /// 좋아요 toggle. 서버가 INSERT/DELETE 결정. 응답의 (liked, count)로 UI 동기화.
@@ -381,7 +381,7 @@ actor RankingAPI {
                                   ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let req = LikeRequest(payload: payload, signature: sig)
-        return try await post(path: "like", body: req, signed: true)
+        return try await post(path: "like", body: req)
     }
 
     /// 본인 글 1분 이내 삭제. 윈도우 만료/타인 글이면 서버가 403 → `.http(403, _)` throw.
@@ -392,7 +392,7 @@ actor RankingAPI {
                                         ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let req = DeletePostRequest(payload: payload, signature: sig)
-        return try await post(path: "delete-post", body: req, signed: true)
+        return try await post(path: "delete-post", body: req)
     }
 
     /// 계정 영구 삭제. 서버측 row + submissions 로그 모두 제거.
@@ -401,10 +401,9 @@ actor RankingAPI {
                                     ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.sign(payload: payload, keyBase64: hmacKeyBase64)
         let req = SubmitRequest(payload: payload, signature: sig, profileJson: nil)
-        let _: EmptyResponse = try await post(path: "delete", body: req, signed: true)
+        try await postVoid(path: "delete", body: req)
     }
 
-    private struct EmptyResponse: Decodable {}
     /// 429 응답 body 디코딩용. Swift는 generic 함수 내부 nested struct 불가 → outer scope에 둠.
     private struct RateLimitedBody: Decodable { let retryAfterSec: Int? }
 
@@ -435,9 +434,9 @@ actor RankingAPI {
 
     // MARK: - HTTP helpers
 
-    private func post<Req: Encodable, Resp: Decodable>(
-        path: String, body: Req, signed: Bool
-    ) async throws -> Resp {
+    /// 서명은 body 내부 `signature` 필드로 전달되며 헤더에는 anon key만 실음 — 호출 측에서
+    /// `signed` 플래그를 따로 넘길 필요 없음 (v0.8.12 dead parameter 정리).
+    private func buildPostRequest<Req: Encodable>(path: String, body: Req) throws -> URLRequest {
         guard let base = Self.baseURL, let anon = Self.anonKey else {
             throw RankingError.notConfigured
         }
@@ -456,9 +455,18 @@ actor RankingAPI {
         } catch {
             throw RankingError.decoding("encode: \(error.localizedDescription)")
         }
-        _ = signed // 서명은 body 내부 signature 필드로 전달, header는 anon key만.
+        return req
+    }
 
+    private func post<Req: Encodable, Resp: Decodable>(path: String, body: Req) async throws -> Resp {
+        let req = try buildPostRequest(path: path, body: body)
         return try await execute(req)
+    }
+
+    /// 응답 본문이 없는 endpoint 전용. `deleteAccount` 등에서 사용.
+    private func postVoid<Req: Encodable>(path: String, body: Req) async throws {
+        let req = try buildPostRequest(path: path, body: body)
+        try await executeVoid(req)
     }
 
     private func get<Resp: Decodable>(path: String, queryItems: [URLQueryItem]? = nil) async throws -> Resp {
@@ -518,17 +526,14 @@ actor RankingAPI {
         )
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let req = FortuneRequest(payload: payload, signature: sig)
-        let resp: FortuneResponse = try await post(path: "fortune", body: req, signed: true)
+        let resp: FortuneResponse = try await post(path: "fortune", body: req)
         return resp.row
     }
 
-    private func execute<Resp: Decodable>(_ req: URLRequest) async throws -> Resp {
-        let (data, response): (Data, URLResponse)
-        do {
-            (data, response) = try await URLSession.shared.data(for: req)
-        } catch {
-            throw RankingError.network(error.localizedDescription)
-        }
+    /// 응답 statusline + body 만 검증. 본문 디코드가 없는 endpoint(`executeVoid`)와
+    /// 공유하기 위해 추출. 404는 호출 측이 body 메시지로 분기 매핑하므로 여기선
+    /// generic `.http(404, body)`만 throw — 사용자에게 정확한 메시지 노출.
+    private func validateHTTPStatus(data: Data, response: URLResponse) throws {
         let http = response as? HTTPURLResponse
         let code = http?.statusCode ?? 0
 
@@ -539,16 +544,32 @@ actor RankingAPI {
             let s = (try? JSONDecoder().decode(RateLimitedBody.self, from: data))?.retryAfterSec ?? 60
             throw RankingError.rateLimited(retryAfterSec: s)
         }
-        // 404는 endpoint별로 의미가 다름 — recover-by-code/github의 "not found"는 호출 측이
-        // body 메시지(`recovery_code_not_found` / `no_account_linked_to_github`)로 분기 매핑.
-        // 여기선 generic .http(404, body)로만 감싸 사용자에게 정확한 메시지 노출.
         guard (200..<300).contains(code) else {
             let body = String(data: data, encoding: .utf8)
             throw RankingError.http(code, body)
         }
-        if Resp.self == EmptyResponse.self {
-            return EmptyResponse() as! Resp
+    }
+
+    /// 응답 본문이 없는 endpoint 전용 (`delete` 등). `execute<Resp>`의 generic 분기에서
+    /// `EmptyResponse() as! Resp` force cast로 처리하던 경로를 타입 안전하게 분리.
+    private func executeVoid(_ req: URLRequest) async throws {
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: req)
+        } catch {
+            throw RankingError.network(error.localizedDescription)
         }
+        try validateHTTPStatus(data: data, response: response)
+    }
+
+    private func execute<Resp: Decodable>(_ req: URLRequest) async throws -> Resp {
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: req)
+        } catch {
+            throw RankingError.network(error.localizedDescription)
+        }
+        try validateHTTPStatus(data: data, response: response)
         let decoder = JSONDecoder()
         // Deno `new Date().toISOString()` 은 항상 fractional seconds 포함("…35.123Z").
         // PostgreSQL timestamptz 응답은 미세 분수초 또는 없는 형태 둘 다 가능.
