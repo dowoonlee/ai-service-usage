@@ -672,6 +672,15 @@ final class Settings: ObservableObject {
         githubCreatedAt = nil
     }
 
+    /// GitHub user 식별 정보를 Settings에 영구 반영. 최초 연결(`GitHubLinkView`)과 랭킹 GitHub
+    /// 복구(`RankingSectionView`) 두 곳에서 동일하게 3개 필드를 세팅하던 것을 SSOT로 모음.
+    /// 새 필드가 추가될 때 두 호출처를 동시에 업데이트해야 했던 회귀 위험을 제거.
+    func persistGitHubUser(_ user: GitHubAuth.GitHubUser) {
+        githubLogin = user.login
+        githubUserID = user.id
+        githubCreatedAt = user.createdAt
+    }
+
     /// 랭킹 계정 로컬 상태 클리어. 서버측 데이터 삭제는 별도 `RankingAPI.deleteAccount()` 호출
     /// 후 본 메서드 호출. HMAC 키도 Keychain에서 제거.
     /// `rankingScoreEarnedVP`는 의도적으로 유지 — 누적 VP는 보드 참여와 무관한 사용량 기록.

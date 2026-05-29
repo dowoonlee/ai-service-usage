@@ -8,8 +8,25 @@ import { isValidUUID } from "../_shared/validation.ts";
 
 const TOP_N = 100;
 
-// profile_json.backup은 본인 복구용 — 다른 사용자에게 노출되면 안 됨.
-// leaderboard/previousMonth 응답에서 모두 제거.
+// =========================================================================
+// SSOT: profile_json.backup 누출 방지.
+// `BackupPayload` (ProfileState.swift) 는 본인 디바이스 복구 전용 페이로드이며
+// 다른 사용자에게는 절대 노출되면 안 된다. 보드 응답으로 새는 일을 막는 단일
+// 차단 지점이 이 함수다.
+//
+// 호출 의무:
+//   - leaderboard entries[].profileJson         (line ~84)
+//   - previousMonth.entries[].profileJson       (line ~108)
+//   - profileJson 을 응답에 싣는 새 endpoint 가 추가되면 반드시 stripBackup 경유
+//
+// 새 백업 필드 추가 시 점검:
+//   - ProfileState.BackupPayload 에 필드 추가
+//   - Settings.applyBackup 머지 정책 정의
+//   - 본 함수는 키 화이트리스트 방식이 아니라 "backup" 키 자체를 통째로 drop
+//     하므로 백업 페이로드 내부 필드 추가는 본 함수 수정 불필요. 단, 백업이
+//     아닌 새 민감 필드를 ProfileState 에 직접 추가한다면 키 화이트리스트
+//     방식으로 전환 검토.
+// =========================================================================
 function stripBackup(pj: unknown): unknown {
   if (pj && typeof pj === "object" && pj !== null && "backup" in pj) {
     const { backup: _drop, ...rest } = pj as Record<string, unknown>;

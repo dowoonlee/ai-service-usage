@@ -322,10 +322,8 @@ private struct GitHubLinkView: View {
                 let user = try await GitHubAuth.shared.fetchUser(token: token)
                 Keychain.saveGitHubToken(token)
                 ContributorBonus.shared.updateToken(token)
-                settings.githubLogin = user.login
-                settings.githubUserID = user.id
-                // 오늘의 개발 운세에서 사주 "생년월일" 로 활용. 한번 받아두면 변하지 않음.
-                settings.githubCreatedAt = user.createdAt
+                // 사용자 식별 3개 필드 + 사주 "생년월일" 한 번에 반영. SSOT 헬퍼 경유.
+                settings.persistGitHubUser(user)
                 state = .idle
                 // 연결 직후 첫 sync — 과거 PR 일괄 보너스 트리거.
                 await ContributorBonus.shared.sync()
@@ -606,8 +604,16 @@ private struct RankingSectionView: View {
             Text("GitHub: @\(peek.githubLogin)").font(.system(size: 11)).foregroundStyle(.secondary)
             Text("누적 점수: \(peek.totalCoins.formatted())").font(.system(size: 11)).foregroundStyle(.secondary)
         }
-        Text("현재 디바이스의 진행도와 합쳐서 더 많은 쪽이 보존됩니다.")
-            .font(.system(size: 10)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("코인·펫 인벤토리·뱃지는 양쪽을 합쳐 더 많은 쪽이 보존됩니다.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            // applyBackup이 backup 값으로 overwrite하는 항목 — 현재 디바이스에서 사용자가
+            // 의식적으로 바꿔둔 설정이 사라질 수 있다는 점을 명시 (Settings.swift:702-762 머지 정책).
+            Text("단, 다음 설정은 백업 시점 값으로 덮어쓰여집니다:")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            Text("• 펫 선택, 메뉴바 표시, 알림 토글·임계값, 운세 표시 기록")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+        }
         HStack {
             Button("복원 진행") { performGitHubRestore(token: token) }
                 .keyboardShortcut(.defaultAction)
@@ -727,6 +733,12 @@ private struct RankingSectionView: View {
                 let token: String
                 if let existing = Keychain.loadGitHubToken() {
                     token = existing
+                    // 기존 토큰만 있고 로컬 식별 정보가 비어 있는 상태(이전 복구 실패/구버전)를 보강.
+                    if settings.githubLogin == nil || settings.githubUserID == nil ||
+                        (settings.githubCreatedAt ?? "").isEmpty {
+                        let user = try await GitHubAuth.shared.fetchUser(token: token)
+                        settings.persistGitHubUser(user)
+                    }
                 } else {
                     let code = try await GitHubAuth.shared.requestDeviceCode()
                     NSPasteboard.general.clearContents()
@@ -738,13 +750,13 @@ private struct RankingSectionView: View {
                         interval: code.interval,
                         expiresIn: code.expires_in
                     )
+                    // 토큰 확보 직후 user 식별 정보까지 받아둠 — 실패하면 outer catch 로 흐름이
+                    // 전환되어 사용자에게 정확한 에러가 노출된다 (이전엔 `try?` 로 silent fail
+                    // 후 nil 상태로 peek 단계로 넘어가 UI/실제 상태가 어긋났음).
+                    let user = try await GitHubAuth.shared.fetchUser(token: token)
                     Keychain.saveGitHubToken(token)
                     ContributorBonus.shared.updateToken(token)
-                    if let user = try? await GitHubAuth.shared.fetchUser(token: token) {
-                        settings.githubLogin = user.login
-                        settings.githubUserID = user.id
-                        settings.githubCreatedAt = user.createdAt
-                    }
+                    settings.persistGitHubUser(user)
                 }
 
                 // peek — 변경 없이 메타만 조회. 사용자 컨펌 후 실제 복원.

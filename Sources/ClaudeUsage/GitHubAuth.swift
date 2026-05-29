@@ -75,10 +75,13 @@ actor GitHubAuth {
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         req.httpBody = "client_id=\(clientID)&scope=\(scope)".data(using: .utf8)
         do {
-            let (data, _) = try await URLSession.shared.data(for: req)
+            let (data, response) = try await URLSession.shared.data(for: req)
+            try Self.assertHTTPOK(response: response, data: data)
             return try JSONDecoder().decode(DeviceCodeResponse.self, from: data)
         } catch let e as DecodingError {
             throw AuthError.decode("\(e)")
+        } catch let e as AuthError {
+            throw e
         } catch {
             throw AuthError.network(error.localizedDescription)
         }
@@ -138,12 +141,26 @@ actor GitHubAuth {
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         do {
-            let (data, _) = try await URLSession.shared.data(for: req)
+            let (data, response) = try await URLSession.shared.data(for: req)
+            try Self.assertHTTPOK(response: response, data: data)
             return try JSONDecoder().decode(GitHubUser.self, from: data)
         } catch let e as DecodingError {
             throw AuthError.decode("\(e)")
+        } catch let e as AuthError {
+            throw e
         } catch {
             throw AuthError.network(error.localizedDescription)
         }
+    }
+
+    /// 4xx/5xx 응답을 명시적 `AuthError.network` 로 변환. 응답 본문 일부를 메시지에
+    /// 포함해 사용자가 보는 에러 다이얼로그에 진짜 원인이 드러나도록 함.
+    /// `pollOnce` 는 GitHub OAuth 표준상 `authorization_pending` 등을 200 + body error 필드로
+    /// 돌려주는 패턴이라 이 헬퍼를 거치지 않고 body 를 직접 디코드한다.
+    private static func assertHTTPOK(response: URLResponse, data: Data) throws {
+        guard let http = response as? HTTPURLResponse else { return }
+        guard !(200..<300).contains(http.statusCode) else { return }
+        let bodyExcerpt = String(data: data.prefix(200), encoding: .utf8) ?? ""
+        throw AuthError.network("HTTP \(http.statusCode): \(bodyExcerpt)")
     }
 }
