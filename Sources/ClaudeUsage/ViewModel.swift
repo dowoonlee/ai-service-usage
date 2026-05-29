@@ -376,11 +376,12 @@ final class ViewModel: ObservableObject {
         var usage = s.petUsageSeconds
         var owned = s.ownedPets
 
-        @MainActor func creditOne(_ kind: PetKind) {
+        func creditOne(_ kind: PetKind) {
             usage[kind, default: 0] += credited
             guard var o = owned[kind] else { return }
-            if let v = o.registerUsage(totalSeconds: usage[kind] ?? 0) {
-                DebugLog.log("Pet usage unlock: \(kind.rawValue) variant \(v) @ \(Int((usage[kind] ?? 0) / 86400))d")
+            let total = usage[kind, default: 0]
+            if let v = o.registerUsage(totalSeconds: total) {
+                DebugLog.log("Pet usage unlock: \(kind.rawValue) variant \(v) @ \(Int(total / 86400))d")
                 // 도감 강조 — 사용자가 직접 슬롯 클릭해 확인하기 전까지 NEW 뱃지 유지.
                 s.pendingHighlights.insert(kind)
             }
