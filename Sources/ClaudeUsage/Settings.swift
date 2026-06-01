@@ -359,6 +359,28 @@ final class Settings: ObservableObject {
     @Published var boardLastSeenAt: Date? {
         didSet { UserDefaults.standard.set(boardLastSeenAt, forKey: Keys.boardLastSeenAt) }
     }
+    /// 본인 누적 메달 캐시 — 진실은 서버 `monthly_winners`. leaderboard 응답의 `myMedals`로
+    /// 갱신해 리포트 카드가 서버 round-trip 없이 즉시 그릴 수 있게 한다. 백업 대상 아님(재집계 가능).
+    @Published var myMedalGold: Int {
+        didSet { UserDefaults.standard.set(myMedalGold, forKey: Keys.myMedalGold) }
+    }
+    @Published var myMedalSilver: Int {
+        didSet { UserDefaults.standard.set(myMedalSilver, forKey: Keys.myMedalSilver) }
+    }
+    @Published var myMedalBronze: Int {
+        didSet { UserDefaults.standard.set(myMedalBronze, forKey: Keys.myMedalBronze) }
+    }
+    /// 카드 렌더 주입용 — 캐시된 3개 카운트를 `MedalTally`로 묶음.
+    var medalTally: MedalTally {
+        MedalTally(gold: myMedalGold, silver: myMedalSilver, bronze: myMedalBronze)
+    }
+    /// leaderboard 응답의 `myMedals`를 캐시에 반영. nil(구버전 서버/미등록)이면 no-op.
+    func applyMyMedals(_ m: MedalTally?) {
+        guard let m else { return }
+        if myMedalGold != m.gold { myMedalGold = m.gold }
+        if myMedalSilver != m.silver { myMedalSilver = m.silver }
+        if myMedalBronze != m.bronze { myMedalBronze = m.bronze }
+    }
 
     private init() {
         let d = UserDefaults.standard
@@ -443,6 +465,9 @@ final class Settings: ObservableObject {
         self.cursorLastRequestsSeen    = d.object(forKey: Keys.cursorLastRequestsSeen) as? Int
         self.cursorLastStartOfMonth    = d.object(forKey: Keys.cursorLastStartOfMonth) as? Date
         self.boardLastSeenAt           = d.object(forKey: Keys.boardLastSeenAt) as? Date
+        self.myMedalGold               = (d.object(forKey: Keys.myMedalGold) as? Int) ?? 0
+        self.myMedalSilver             = (d.object(forKey: Keys.myMedalSilver) as? Int) ?? 0
+        self.myMedalBronze             = (d.object(forKey: Keys.myMedalBronze) as? Int) ?? 0
 
         // 도장 카운터 로드
         self.wellnessRespondedCount = (d.object(forKey: Keys.wellnessRespondedCount) as? Int) ?? 0
@@ -862,6 +887,9 @@ final class Settings: ObservableObject {
         static let cursorLastRequestsSeen      = "settings.cursorLastRequestsSeen"
         static let cursorLastStartOfMonth      = "settings.cursorLastStartOfMonth"
         static let boardLastSeenAt             = "settings.boardLastSeenAt"
+        static let myMedalGold                 = "settings.myMedalGold"
+        static let myMedalSilver               = "settings.myMedalSilver"
+        static let myMedalBronze               = "settings.myMedalBronze"
         // 도장 (Gym Badges)
         static let wellnessRespondedCount      = "settings.wellnessRespondedCount"
         static let rateLimitWeeksPassed        = "settings.rateLimitWeeksPassed"

@@ -38,6 +38,9 @@ struct TrainerCardView: View {
     /// 액세서리 transform 편집 가능한 binding. nil이면 정적 표시 (export 캡처용).
     /// Set이면 액세서리 sprite에 DragGesture가 붙어 마우스로 위치 조정 가능.
     var accessoryEditing: Binding<AccessoryTransform>? = nil
+    /// 금/은/동 메달 누적 — 서버 집계(`monthly_winners`) 권위 값. nil이거나 total 0이면 메달 행 미표시.
+    /// `stats`(profile_json)와 분리해 위조 불가능한 서버 값만 별도 주입받는다.
+    var medals: MedalTally? = nil
 
     var body: some View {
         ZStack {
@@ -196,6 +199,10 @@ struct TrainerCardView: View {
             statRow(icon: "die.face.5.fill", text: "\(stats.totalPulls) pulls")
             statRow(icon: "trophy.fill", text: "\(stats.badgesCleared)/\(stats.badgesTotal) badges")
             statRow(icon: "checkmark.seal.fill", text: "\(stats.collectionsComplete)/\(stats.collectionsTotal) sets")
+            // 금/은/동 메달 — 서버 집계값. 하나라도 있을 때만 노출 (대부분 사용자는 0 → 행 숨김).
+            if let m = medals, m.total > 0 {
+                medalRow(m)
+            }
         }
     }
 
@@ -206,6 +213,26 @@ struct TrainerCardView: View {
                 .foregroundStyle(.yellow)
                 .frame(width: 16)
             Text(text)
+                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.4), radius: 0.5)
+        }
+    }
+
+    /// 1·2·3위 누적 메달 — 올림픽 메달 테이블처럼 🥇🥈🥉 셋을 항상 함께 노출(0 포함).
+    /// 행 자체는 total > 0 일 때만 렌더되므로 "전부 0"인 카드엔 안 보인다.
+    private func medalRow(_ m: MedalTally) -> some View {
+        HStack(spacing: 10) {
+            medalChip("🥇", m.gold)
+            medalChip("🥈", m.silver)
+            medalChip("🥉", m.bronze)
+        }
+    }
+
+    private func medalChip(_ emoji: String, _ count: Int) -> some View {
+        HStack(spacing: 3) {
+            Text(emoji).font(.system(size: 13))
+            Text("\(count)")
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.4), radius: 0.5)
@@ -365,4 +392,15 @@ struct TrainerStats: Codable {
             collectionsTotal: PetCollection.allCases.count
         )
     }
+}
+
+/// 금/은/동 메달 누적 집계. 서버 `monthly_winners`(rank 1/2/3)에서 집계해 leaderboard 응답
+/// top-level로 내려오는 권위 값 — `TrainerStats`(profile_json, 클라 작성=위조 가능)와 달리
+/// 클라이언트가 위조할 수 없다. 카드 렌더 시 별도 주입한다.
+struct MedalTally: Codable, Equatable, Sendable {
+    let gold: Int
+    let silver: Int
+    let bronze: Int
+    var total: Int { gold + silver + bronze }
+    static let zero = MedalTally(gold: 0, silver: 0, bronze: 0)
 }

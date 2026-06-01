@@ -66,7 +66,8 @@ struct ReportView: View {
                 collections: collectionRows,
                 showWatermark: true,
                 width: Self.previewWidth,
-                accessoryEditing: accessoryTransformBinding
+                accessoryEditing: accessoryTransformBinding,
+                medals: settings.medalTally
             )
             Spacer()
         }
@@ -566,7 +567,8 @@ struct ReportView: View {
             badges: badgeRows,
             collections: collectionRows,
             showWatermark: true,
-            width: TrainerCardView.standardWidth
+            width: TrainerCardView.standardWidth,
+            medals: settings.medalTally
         )
         let renderer = ImageRenderer(content: cardView)
         renderer.scale = 2.0  // Retina export — 캡처 PNG 960×720

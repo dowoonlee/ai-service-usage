@@ -48,6 +48,21 @@ enum Gacha {
     /// `calibrationGracePeriod`/`pullCostBounds`/`pullCostDayMultiplier`는 향후 재도입 여지로 남김.
     static var pullCost: Int { seedPullCost }
 
+    /// 한 번에 진행하는 연차 뽑기 수.
+    static let multiPullCount: Int = 10
+    /// 10연차 보너스: coin 지불 draw 중 이만큼은 무료(할인). "1회 무료" = 9배 가격.
+    static let multiPullBonusFreeDraws: Int = 1
+
+    /// 보유 티켓 수 기준 10연차 비용 분해.
+    /// 정책: 티켓 우선 `min(보유, 10)`장 소모 → 남은 draw 중 보너스만큼 무료 → 나머지 × `pullCost`.
+    /// 예) 티켓 0 → 9×300=2700 / 티켓 1 → 8×300=2400 / 티켓 9+ → 0.
+    static func multiPullCost(tickets: Int) -> (ticketsUsed: Int, coinCost: Int) {
+        let ticketsUsed = min(max(0, tickets), multiPullCount)
+        let paidDraws = multiPullCount - ticketsUsed
+        let chargedDraws = max(0, paidDraws - multiPullBonusFreeDraws)
+        return (ticketsUsed, chargedDraws * pullCost)
+    }
+
     /// Rarity 가중 랜덤 → 등급 내 균등 랜덤. (kind, rarity) 결정만.
     static func drawKind<RNG: RandomNumberGenerator>(using rng: inout RNG) -> (PetKind, Rarity) {
         let r = Double.random(in: 0..<1, using: &rng)
@@ -85,6 +100,45 @@ enum Gacha {
         }
         let (kind, rarity) = drawKind()
         return GachaPull(pulledAt: Date(), kind: kind, rarity: rarity, variantUnlocked: nil)
+    }
+
+    /// 10연차 roll — 티켓/코인 선차감 후 10개의 (kind, rarity)만 결정한다.
+    /// 단일 `roll`과 동일하게 **보유 상태는 변경하지 않음** — `commitMulti(_:)`를 애니메이션
+    /// 완료 시점에 호출해 반영한다. 차감은 `multiPullCost(tickets:)` 정책을 따른다.
+    @discardableResult
+    static func rollMulti() throws -> [GachaPull] {
+        let s = Settings.shared
+        let (ticketsUsed, coinCost) = multiPullCost(tickets: s.gachaTickets)
+        guard s.coins >= coinCost else { throw GachaError.insufficientCoins }
+        // 결정 전에 선차감 (단일 roll과 동일 패턴 — 더블클릭 이중 차감은 호출측 가드가 막음).
+        s.gachaTickets -= ticketsUsed
+        s.coins -= coinCost
+        var pulls: [GachaPull] = []
+        pulls.reserveCapacity(multiPullCount)
+        for _ in 0..<multiPullCount {
+            let (kind, rarity) = drawKind()
+            pulls.append(GachaPull(pulledAt: Date(), kind: kind, rarity: rarity, variantUnlocked: nil))
+        }
+        return pulls
+    }
+
+    /// `rollMulti()` 결과 10개를 순차 commit. 순차 처리라 같은 종이 배치 안에서 두 번 나오면
+    /// 첫 칸은 신규(`isNew=true`), 둘째 칸은 중복으로 정확히 갈린다.
+    /// 컬렉션 평가/하이라이트/첫 펫 자동 할당은 기존 `commit(_:)`을 그대로 재사용한다
+    /// (여러 컬렉션이 한 배치에서 완성되면 `pendingCollectionCelebration`은 마지막 것만 남는다 —
+    /// 단일 슬롯 한계, 결과 배너는 1건만 노출).
+    @discardableResult
+    static func commitMulti(_ pulls: [GachaPull]) -> [MultiPullResult] {
+        let s = Settings.shared
+        var out: [MultiPullResult] = []
+        out.reserveCapacity(pulls.count)
+        for pull in pulls {
+            let wasOwned = s.ownedPets[pull.kind] != nil
+            let resolved = commit(pull)
+            let count = s.ownedPets[pull.kind]?.count ?? 1
+            out.append(MultiPullResult(pull: resolved, isNew: !wasOwned, count: count))
+        }
+        return out
     }
 
     /// `roll(useTicket:)` 결과를 보유 상태에 반영. 부화 애니메이션의 hatched 진입 시점에 호출.

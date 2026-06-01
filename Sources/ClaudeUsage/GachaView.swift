@@ -21,6 +21,12 @@ struct GachaView: View {
     @State private var crackStartedAt: Date?
     /// 임계 도달 후 Task spawn race 방지. 부화 시퀀스가 한 번만 commit하도록 가드.
     @State private var hatchInProgress: Bool = false
+    /// 10연차 결과 그리드에서 지금까지 공개된 칸 수. 0부터 한 칸씩 "다다다닥" 늘어난다.
+    @State private var revealedCount: Int = 0
+    /// 순차 공개 타이머 Task — 재진입 시 취소용.
+    @State private var revealTask: Task<Void, Never>?
+    /// 10연차 진행 확인 alert 트리거. 버튼 클릭 시 즉시 진행 대신 이 값을 set → yes/no 확인.
+    @State private var confirmingMultiPull: Bool = false
     /// 상점/도장/레포트/랭킹 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
     @State private var selectedTab: Tab = .shop
 
@@ -46,6 +52,10 @@ struct GachaView: View {
     /// hatched/revealing 단계 sprite의 y offset (영역 center 기준).
     /// 두 view가 sprite를 같은 위치에 그려야 cross-fade 시 점프가 없다.
     private static let spriteRestY: CGFloat = -38
+    /// 10연차 placeholder 연출 길이. 전용 에셋 도입 시 이 값/`multiRollingView`만 교체하면 된다.
+    private static let multiRevealDuration: TimeInterval = 2.0
+    /// 결과 그리드 칸 사이 공개 간격(초). 짧을수록 "다다다닥" 빨라진다.
+    private static let multiRevealStagger: TimeInterval = 0.065
 
     enum ResultPhase {
         case idle
@@ -54,6 +64,8 @@ struct GachaView: View {
         case revealing(GachaPull)  // 암전 + flash + 실루엣 + fade in
         case hatched(GachaPull)
         case preview(PetKind, Int) // 인벤토리에서 클릭한 보유 펫 미리보기
+        case multiRolling([GachaPull])       // 10연차 연출 재생 중 (commit 전)
+        case multiHatched([MultiPullResult]) // 10연차 결과 그리드
     }
 
     var body: some View {
@@ -95,6 +107,23 @@ struct GachaView: View {
             inventorySection
         }
         .padding(20)
+        .alert("10연차 뽑기", isPresented: $confirmingMultiPull) {
+            Button("진행") { pull10() }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text(multiPullConfirmMessage)
+        }
+    }
+
+    /// 10연차 확인 alert 메시지 — 차감될 가챠권/코인 + 현재 잔액을 명시.
+    private var multiPullConfirmMessage: String {
+        let (used, coin) = Gacha.multiPullCost(tickets: settings.gachaTickets)
+        var parts: [String] = []
+        if used > 0 { parts.append("가챠권 \(used)장") }
+        if coin > 0 { parts.append("\(coin)코인") }
+        if parts.isEmpty { parts.append("무료") }
+        let cost = parts.joined(separator: " + ")
+        return "10회를 한 번에 뽑습니다.\n비용: \(cost)\n현재 잔액: \(settings.coins)코인 · 가챠권 \(settings.gachaTickets)장"
     }
 
     /// 가챠 hatch 시퀀스(cracking/revealing)는 펫 commit 전이라 picker 잠금.
@@ -102,7 +131,7 @@ struct GachaView: View {
     /// (`hatchInProgress`는 .hatched 진입 후 reset 안 되어 picker 영구 잠금 버그가 있어 — phase만 검사)
     private var isHatchingMidAction: Bool {
         switch phase {
-        case .cracking, .revealing: return true
+        case .cracking, .revealing, .multiRolling: return true
         default: return false
         }
     }
@@ -125,15 +154,29 @@ struct GachaView: View {
                     .monospacedDigit()
             }
             Spacer()
-            Button(action: pull) {
-                if settings.gachaTickets > 0 {
-                    Label("무료 뽑기", systemImage: "ticket.fill")
-                } else {
-                    Label("\(Gacha.pullCost)코인 뽑기", systemImage: "sparkles")
+            HStack(spacing: 8) {
+                Button(action: pull) {
+                    VStack(spacing: 1) {
+                        Text("1회 뽑기").font(.system(size: 12, weight: .bold))
+                        Text(settings.gachaTickets > 0 ? "무료" : "\(Gacha.pullCost)코인")
+                            .font(.system(size: 9, design: .monospaced))
+                    }
+                    .frame(minWidth: 56)
                 }
+                .buttonStyle(.bordered)
+                .disabled(!canPull)
+
+                Button(action: { confirmingMultiPull = true }) {
+                    VStack(spacing: 1) {
+                        Text("10연차").font(.system(size: 12, weight: .bold))
+                        Text(multiPullCostLabel)
+                            .font(.system(size: 9, design: .monospaced))
+                    }
+                    .frame(minWidth: 64)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canPull10)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(!canPull)
         }
     }
 
@@ -141,13 +184,26 @@ struct GachaView: View {
         !isPullInProgress && (settings.gachaTickets > 0 || settings.coins >= Gacha.pullCost)
     }
 
+    /// 10연차 가능 여부 — 티켓 우선 차감 후 남는 코인 비용을 감당할 수 있으면 OK.
+    private var canPull10: Bool {
+        !isPullInProgress && Gacha.multiPullCost(tickets: settings.gachaTickets).coinCost <= settings.coins
+    }
+
+    /// 10연차 버튼 비용 라벨. 티켓 소모분 + 코인 분담을 짧게 표기.
+    private var multiPullCostLabel: String {
+        let (used, coin) = Gacha.multiPullCost(tickets: settings.gachaTickets)
+        if used > 0 && coin > 0 { return "🎟️\(used)+\(coin)" }
+        if used > 0 && coin == 0 { return "🎟️\(used) 무료" }
+        return "\(coin)코인"
+    }
+
     /// 가챠 부화 시퀀스가 시작된 후 commit 직전까지의 phase 집합. 이 동안엔 새 가챠 진입을
     /// 막아야 한다 — 안 막으면 빠른 더블 클릭이 `pull()`을 두 번 호출해서 잔액만 두 번
     /// 차감되고 첫 결과는 `phase = .egg(pull2)`로 덮어쓰여 commit 안 되고 사라짐.
     private var isPullInProgress: Bool {
         switch phase {
-        case .egg, .cracking, .revealing: return true
-        case .idle, .hatched, .preview:   return false
+        case .egg, .cracking, .revealing, .multiRolling:    return true
+        case .idle, .hatched, .preview, .multiHatched:      return false
         }
     }
 
@@ -165,6 +221,28 @@ struct GachaView: View {
             eggShakeAngle = 0
             hatchInProgress = false
             errorMessage = nil
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            phase = .idle
+        }
+    }
+
+    /// 10연차 진행. 단일 `pull`과 달리 탭 없이 자동 재생 — `rollMulti`로 선차감 + 10개 결정 후
+    /// placeholder 연출(`multiRevealDuration`) 재생, 완료 시점에 `commitMulti`로 일괄 반영한다.
+    /// 전용 에셋이 들어오면 `multiRollingView`/`multiRevealDuration`만 교체하면 된다.
+    private func pull10() {
+        guard !isPullInProgress else { return }
+        do {
+            let pulls = try Gacha.rollMulti()
+            phase = .multiRolling(pulls)
+            errorMessage = nil
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(Self.multiRevealDuration * 1_000_000_000))
+                // 연출 완료 시점에 비로소 보유 상태 반영 (인벤토리 해금).
+                let results = Gacha.commitMulti(pulls)
+                revealedCount = 0   // 첫 프레임부터 0칸 → onAppear에서 한 칸씩 공개 (깜빡임 방지).
+                phase = .multiHatched(results)
+            }
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             phase = .idle
@@ -237,6 +315,10 @@ struct GachaView: View {
                 PetPreviewView(kind: k, variant: v, settings: settings)
                     .id("\(k.rawValue)-\(v)")
                     .transition(.opacity)
+            case .multiRolling(let pulls):
+                multiRollingView(pulls).transition(.opacity)
+            case .multiHatched(let results):
+                multiHatchedView(results).transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 180)
@@ -256,6 +338,8 @@ struct GachaView: View {
         case .revealing: return 3
         case .hatched:   return 4
         case .preview:   return 5
+        case .multiRolling:  return 6
+        case .multiHatched:  return 7
         }
     }
 
@@ -433,6 +517,139 @@ struct GachaView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: settings.pendingCollectionCelebration)
+    }
+
+    // MARK: - 10연차 (multi pull)
+
+    /// 10연차 placeholder 연출 — 전용 에셋 도입 전까지의 임시 화면. 텍스트 없이 알이 격하게
+    /// 흔들/팝하고 뒤에서 glow가 throb, sparkle 링이 회전해 "곧 터질 듯한" 역동성을 준다.
+    /// 자산이 들어오면 이 함수와 `multiRevealDuration`만 교체하면 된다.
+    private func multiRollingView(_ pulls: [GachaPull]) -> some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            // 고주파 흔들림 + 팝 스케일 + 상하 바운스.
+            let wobble = sin(t * 24) * 16 + sin(t * 9) * 6
+            let pop = 1.0 + 0.14 * sin(t * 13)
+            let bob = sin(t * 17) * 5
+            let throb = abs(sin(t * 5))
+            ZStack {
+                // 뒤에서 맥동하는 glow.
+                Circle()
+                    .fill(Color.yellow)
+                    .frame(width: 120, height: 120)
+                    .scaleEffect(0.85 + 0.3 * throb)
+                    .blur(radius: 26)
+                    .opacity(0.25 + 0.35 * throb)
+                // 회전하는 sparkle 링.
+                ForEach(0..<6, id: \.self) { i in
+                    let ang = t * 2.4 + Double(i) * (.pi * 2 / 6)
+                    let radius = 58.0 + 10 * sin(t * 6 + Double(i))
+                    Image(systemName: "sparkle")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.yellow)
+                        .opacity(0.4 + 0.6 * abs(sin(t * 4 + Double(i))))
+                        .offset(x: cos(ang) * radius, y: sin(ang) * radius)
+                }
+                // 알.
+                eggSprite
+                    .frame(width: 96, height: 96)
+                    .scaleEffect(pop)
+                    .rotationEffect(.degrees(wobble), anchor: .bottom)
+                    .offset(y: bob)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 결과 그리드 진입 시 0칸부터 한 칸씩 빠르게 공개. 재진입 대비 이전 Task는 취소.
+    private func startSequentialReveal(total: Int) {
+        revealTask?.cancel()
+        revealedCount = 0
+        revealTask = Task { @MainActor in
+            for i in 1...max(1, total) {
+                try? await Task.sleep(nanoseconds: UInt64(Self.multiRevealStagger * 1_000_000_000))
+                if Task.isCancelled { return }
+                revealedCount = i
+            }
+        }
+    }
+
+    /// 10연차 결과 그리드 — 2×5. halo로 신규/중복 구분, 상단 요약 + 하단 확인 버튼.
+    /// 컬렉션 컴플리트 배너는 `hatchedView`와 동일하게 상단 오버레이로 재사용.
+    private func multiHatchedView(_ results: [MultiPullResult]) -> some View {
+        let newCount = results.filter { $0.isNew }.count
+        let dupCount = results.count - newCount
+        let revealDone = revealedCount >= results.count
+        return VStack(spacing: 10) {
+            // 모든 칸 공개가 끝난 뒤에야 요약 노출 — 카운트 스포일러 방지. 자리는 항상 차지(레이아웃 고정).
+            HStack(spacing: 12) {
+                Label("신규 \(newCount)", systemImage: "sparkles")
+                    .foregroundStyle(.green)
+                Label("중복 \(dupCount)", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .opacity(revealDone ? 1 : 0)
+            .animation(.easeIn(duration: 0.2), value: revealDone)
+
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5), spacing: 10) {
+                ForEach(Array(results.enumerated()), id: \.offset) { (i, r) in
+                    // 슬롯은 항상 자리 차지(레이아웃 고정), 내용만 i < revealedCount일 때 팝-인.
+                    multiResultCell(r)
+                        .opacity(i < revealedCount ? 1 : 0)
+                        .scaleEffect(i < revealedCount ? 1 : 0.4)
+                        .animation(.spring(response: 0.28, dampingFraction: 0.55), value: revealedCount)
+                }
+            }
+
+            Button("확인") { phase = .idle }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+        .onAppear { startSequentialReveal(total: results.count) }
+        .overlay(alignment: .top) {
+            if let raw = settings.pendingCollectionCelebration,
+               let c = PetCollection(rawValue: raw) {
+                CollectionCompleteBanner(collection: c) {
+                    settings.pendingCollectionCelebration = nil
+                }
+                .padding(.top, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.3), value: settings.pendingCollectionCelebration)
+    }
+
+    /// 결과 한 칸 — halo로 신규/중복 구분 (신규=밝은 등급색, 중복=회색+흐림). 별도 뱃지 없음.
+    private func multiResultCell(_ r: MultiPullResult) -> some View {
+        let variant = r.pull.variantUnlocked ?? 0
+        let haloColor = r.isNew ? r.pull.rarity.color : Color.gray
+        return VStack(spacing: 3) {
+            ZStack {
+                Circle()
+                    .fill(haloColor)
+                    .frame(width: 52, height: 52)
+                    .blur(radius: 9)
+                    .opacity(r.isNew ? 0.85 : 0.30)
+                if let img = PetSprite.image(for: r.pull.kind, action: .sit, frameIndex: 0) {
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.none)
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 44, height: 44)
+                        .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
+                        .saturation(r.isNew ? (variant > 0 ? 1.15 : 1.0) : 0.55)
+                        .opacity(r.isNew ? 1.0 : 0.6)
+                }
+            }
+            Text(r.pull.kind.displayName)
+                .font(.system(size: 9))
+                .lineLimit(1)
+                .foregroundStyle(r.isNew ? .primary : .secondary)
+                .frame(maxWidth: .infinity)
+        }
     }
 
     // MARK: - Inventory

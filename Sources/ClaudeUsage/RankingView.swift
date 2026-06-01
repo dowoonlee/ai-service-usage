@@ -15,6 +15,14 @@ struct RankingView: View {
     @State private var periodResetAt: Date?
     @State private var previousMonth: RankingAPI.PreviousMonth?
     @State private var refreshTask: Task<Void, Never>?
+    /// 시상대 한마디 입력 alert 트리거 + 초안.
+    @State private var editingPodium: Bool = false
+    @State private var podiumDraft: String = ""
+
+    /// 한마디 미등록 시 말풍선 기본 placeholder (남의 칸 기준). 자유롭게 교체 가능.
+    private static let defaultPodiumPlaceholder = "🎉"
+    /// 시상대 한마디 최대 글자수.
+    private static let podiumMessageMaxLen = 50
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -31,6 +39,18 @@ struct RankingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { refresh() }
         .onDisappear { refreshTask?.cancel() }
+        .alert("시상대 한마디", isPresented: $editingPodium) {
+            TextField("축하 인사를 남겨보세요", text: $podiumDraft)
+                .onChange(of: podiumDraft) { newValue in
+                    if newValue.count > Self.podiumMessageMaxLen {
+                        podiumDraft = String(newValue.prefix(Self.podiumMessageMaxLen))
+                    }
+                }
+            Button("등록") { submitPodiumMessage() }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("한 번 등록하면 수정할 수 없습니다. \(Self.podiumMessageMaxLen)자 이내.")
+        }
     }
 
     private var header: some View {
@@ -108,21 +128,75 @@ struct RankingView: View {
             // 캐릭터만 단 위에 서고, 닉네임·VP·보상 코인은 단 블록 안에 적힌다.
             // 참여자가 3명 미만이면 해당 자리는 빈 단으로 형태만 유지한다.
             HStack(alignment: .bottom, spacing: 0) {
-                podiumColumn(prev.entries.first { $0.rank == 2 }, rank: 2)
-                podiumColumn(prev.entries.first { $0.rank == 1 }, rank: 1)
-                podiumColumn(prev.entries.first { $0.rank == 3 }, rank: 3)
+                podiumColumn(prev.entries.first { $0.rank == 2 }, rank: 2, prev: prev)
+                podiumColumn(prev.entries.first { $0.rank == 1 }, rank: 1, prev: prev)
+                podiumColumn(prev.entries.first { $0.rank == 3 }, rank: 3, prev: prev)
             }
             .frame(maxWidth: .infinity)
         }
     }
 
-    /// 시상대 한 열 — 캐릭터(단 위) + 등수별 높이의 단(텍스트 포함). 빈 자리는 둘 다 placeholder.
-    private func podiumColumn(_ entry: RankingAPI.PreviousMonthEntry?, rank: Int) -> some View {
+    /// 시상대 한 열 — 한마디 말풍선(있을 때) + 캐릭터(단 위) + 등수별 높이의 단. 빈 자리는 placeholder.
+    private func podiumColumn(_ entry: RankingAPI.PreviousMonthEntry?, rank: Int,
+                              prev: RankingAPI.PreviousMonth) -> some View {
         VStack(spacing: 2) {
+            podiumBubble(entry: entry, rank: rank, isMine: prev.myRank == rank)
             PodiumAvatar(entry: entry, rank: rank)
             PodiumStep(entry: entry, rank: rank)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// 시상대 한마디 말풍선. 등록된 메시지 표시 / 내 칸 미등록이면 등록 CTA / 남의 칸 미등록이면 기본 placeholder.
+    /// 폰트는 1위가 가장 크고 3위가 가장 작다. 빈 자리(entry == nil)는 말풍선 없음.
+    @ViewBuilder
+    private func podiumBubble(entry: RankingAPI.PreviousMonthEntry?, rank: Int, isMine: Bool) -> some View {
+        if let entry {
+            let size = podiumBubbleFontSize(rank)
+            if let msg = entry.message, !msg.isEmpty {
+                PodiumSpeechBubble(text: msg, fontSize: size, rank: rank, style: .filled)
+            } else if isMine {
+                Button {
+                    podiumDraft = ""
+                    error = nil
+                    editingPodium = true
+                } label: {
+                    PodiumSpeechBubble(text: "✏️ 한마디 남기기", fontSize: size, rank: rank, style: .cta)
+                }
+                .buttonStyle(.plain)
+                .help("한 번 등록하면 변경할 수 없습니다")
+            } else {
+                PodiumSpeechBubble(text: Self.defaultPodiumPlaceholder, fontSize: size, rank: rank, style: .placeholder)
+            }
+        }
+    }
+
+    /// 등수별 한마디 폰트 크기 — 1위가 가장 크고 3위가 가장 작다.
+    private func podiumBubbleFontSize(_ rank: Int) -> CGFloat {
+        switch rank { case 1: return 13; case 2: return 11; default: return 9 }
+    }
+
+    /// 시상대 한마디 등록 — 본인 우승 칸에 1회. trim + 길이 검증 후 서버 호출, 성공 시 refresh로 잠금 반영.
+    private func submitPodiumMessage() {
+        guard let prev = previousMonth, let rank = prev.myRank else { return }
+        let msg = podiumDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !msg.isEmpty, msg.count <= Self.podiumMessageMaxLen else { return }
+        guard let hmacKey = Keychain.loadRankingHmacKey() else {
+            error = "인증 키를 찾을 수 없습니다."
+            return
+        }
+        let deviceId = settings.rankingDeviceID
+        guard !deviceId.isEmpty else { return }
+        Task { @MainActor in
+            do {
+                _ = try await RankingAPI.shared.setPodiumMessage(
+                    deviceId: deviceId, period: prev.period, rank: rank,
+                    message: msg, hmacKeyBase64: hmacKey)
+                refresh()   // 서버 반영분 재조회 → 말풍선이 등록 메시지로 잠긴다.
+            } catch {
+                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }
     }
 
     private func meBanner(rank: Int, total: Int) -> some View {
@@ -178,6 +252,7 @@ struct RankingView: View {
                 entries = resp.entries
                 myRank = resp.myRank
                 myTotal = resp.myTotalCoins
+                settings.applyMyMedals(resp.myMedals)
                 totalPlayers = resp.total
                 periodResetAt = resp.periodResetAt
                 previousMonth = resp.previousMonth
@@ -240,7 +315,8 @@ private struct LeaderboardRowView: View {
                     badges: profile.badgeRowsForRender(),
                     collections: profile.collectionRowsForRender(),
                     showWatermark: false,
-                    width: 460
+                    width: 460,
+                    medals: entry.medals
                 )
                 .padding(8)
             } else {
@@ -344,7 +420,7 @@ private struct PodiumAvatar: View {
     let entry: RankingAPI.PreviousMonthEntry?
     let rank: Int
 
-    private var size: CGFloat { rank == 1 ? 50 : 38 }
+    private var size: CGFloat { rank == 1 ? 46 : 34 }
 
     var body: some View {
         VStack(spacing: 1) {
@@ -427,7 +503,7 @@ private struct PodiumStep: View {
 
     /// 계단 형성용 — 콘텐츠 아래에 채우는 여분 높이. 1위가 가장 높다.
     private var extraHeight: CGFloat {
-        switch rank { case 1: return 30; case 2: return 15; default: return 0 }
+        switch rank { case 1: return 22; case 2: return 12; default: return 0 }
     }
     private var rewardColor: Color {
         switch rank { case 1: return .yellow; case 2: return .gray; default: return .orange }
@@ -511,6 +587,70 @@ private func podiumColor(_ rank: Int) -> Color {
     case 2: return .gray
     case 3: return Color(red: 0.8, green: 0.5, blue: 0.2)
     default: return .secondary
+    }
+}
+
+// MARK: - 시상대 한마디 말풍선
+
+/// 우승자 한마디 말풍선 — 둥근 사각형 + 아래로 향한 꼬리. 등수색 테두리, style별 색/굵기 차이.
+/// filled = 등록된 메시지 / cta = 내 칸 등록 유도 / placeholder = 남의 칸 미등록 기본값.
+private struct PodiumSpeechBubble: View {
+    enum Style { case filled, cta, placeholder }
+    let text: String
+    let fontSize: CGFloat
+    let rank: Int
+    let style: Style
+
+    private var fillColor: Color {
+        style == .placeholder ? Color.secondary.opacity(0.12) : Color(NSColor.windowBackgroundColor)
+    }
+    private var textColor: Color {
+        switch style {
+        case .cta:         return .accentColor
+        case .placeholder: return .secondary
+        case .filled:      return .primary
+        }
+    }
+    private var borderColor: Color {
+        podiumColor(rank).opacity(style == .placeholder ? 0.25 : 0.55)
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: fontSize, weight: style == .filled ? .semibold : .regular))
+            .foregroundStyle(textColor)
+            .multilineTextAlignment(.center)
+            .lineLimit(7)   // 1위 13pt·한글 50자 ≈ 5줄 → 여유. 안 잘림 보장.
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .frame(maxWidth: 148)   // 칸 폭(~152) 내에서 최대한 넓혀 줄 수↓ (132→148: 1위 7줄→5줄)
+            .background(
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(fillColor)
+                    .overlay(RoundedRectangle(cornerRadius: 9).stroke(borderColor, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+            )
+            .overlay(alignment: .bottom) {
+                // 아래로 향한 꼬리 — fill만(테두리 생략)으로 바닥 seam 회피. 살짝 겹쳐 자연스럽게.
+                PodiumBubbleTail()
+                    .fill(fillColor)
+                    .frame(width: 11, height: 6)
+                    .offset(y: 5)
+            }
+            .padding(.bottom, 5)  // 꼬리 공간 확보
+    }
+}
+
+/// 아래로 향한 말풍선 꼬리 삼각형.
+private struct PodiumBubbleTail: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        p.closeSubpath()
+        return p
     }
 }
 

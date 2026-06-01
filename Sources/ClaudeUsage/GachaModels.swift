@@ -118,3 +118,12 @@ struct GachaPull: Codable, Hashable {
     /// 이번 뽑기로 새로 unlock된 variant index. nil = 새 variant 없음 (단순 중복).
     var variantUnlocked: Int?
 }
+
+/// 10연차 결과 1건 — `commit` 후 확정 상태를 담는다. 결과 그리드의 halo 판정(신규=등급색/중복=회색)과
+/// 흐림 처리에 쓰인다. `isNew`는 그 칸 commit *직전* 보유 여부 기준 — 같은 종이 배치 안에서 두 번
+/// 나오면 첫 칸 isNew=true, 둘째 칸 isNew=false로 정확히 갈린다.
+struct MultiPullResult: Hashable {
+    let pull: GachaPull
+    let isNew: Bool
+    let count: Int
+}

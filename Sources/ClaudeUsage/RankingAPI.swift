@@ -81,12 +81,16 @@ actor RankingAPI {
         let githubLogin: String?
         /// 트레이너 카드 + stats — 보드 행/팝오버 렌더링 입력. 미옵트인/구버전 사용자는 nil.
         let profileJson: ProfileState?
+        /// 누적 금/은/동 메달 — 서버 `monthly_winners` 집계. 구버전 서버는 미반환 → nil.
+        let medals: MedalTally?
         var id: Int { rank }
     }
     struct LeaderboardResponse: Decodable {
         let entries: [LeaderboardEntry]
         let myRank: Int?
         let myTotalCoins: Int?
+        /// 본인 누적 메달 — 보드에 없어도(이번 달 0 VP) deviceId로 집계해 내려준다. 구버전 서버 nil.
+        let myMedals: MedalTally?
         let total: Int
         /// "monthly" — 현재 운영 중인 보드 종류. 추후 weekly/all-time 추가 시 확장.
         let period: String?
@@ -100,6 +104,9 @@ actor RankingAPI {
 
     struct PreviousMonth: Decodable, Sendable {
         let period: String                  // "YYYY-MM"
+        /// 요청자가 이 시상대 우승자면 그 rank(1/2/3), 아니면 nil. "내 칸 한마디 등록" 판정용.
+        /// 구버전 서버는 미반환 → nil.
+        let myRank: Int?
         let entries: [PreviousMonthEntry]
     }
 
@@ -110,6 +117,8 @@ actor RankingAPI {
         let githubLogin: String?
         let profileJson: ProfileState?
         let rewardCoins: Int
+        /// 우승자가 등록한 시상대 한마디. 미등록/구버전 서버는 nil.
+        let message: String?
         var id: Int { rank }
     }
 
@@ -135,6 +144,23 @@ actor RankingAPI {
         let alreadyClaimed: Bool
         let rewardCoins: Int
         let claimedAt: String
+    }
+
+    struct SetPodiumMessagePayload: Encodable {
+        let deviceId: String
+        let message: String
+        let period: String
+        let rank: Int
+        let ts: Int64
+    }
+    struct SetPodiumMessageRequest: Encodable {
+        let payload: SetPodiumMessagePayload
+        let signature: String
+    }
+    struct SetPodiumMessageResponse: Decodable {
+        /// 이미 등록돼 변경 불가였는지(immutable). true면 서버의 기존 값이 `message`로 옴.
+        let alreadySet: Bool
+        let message: String
     }
 
     // MARK: - Board models
@@ -355,6 +381,17 @@ actor RankingAPI {
         return try await post(path: "claim-reward", body: req)
     }
 
+    /// 시상대 한마디 1회 등록. 본인이 그 (period, rank) 우승자일 때만 서버가 수락.
+    /// 이미 등록된 경우 `alreadySet=true`로 기존 값 반환(immutable). `message`는 trim된 상태로 전달.
+    func setPodiumMessage(deviceId: String, period: String, rank: Int, message: String,
+                          hmacKeyBase64: String) async throws -> SetPodiumMessageResponse {
+        let payload = SetPodiumMessagePayload(deviceId: deviceId, message: message, period: period,
+                                              rank: rank, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signPodium(payload: payload, keyBase64: hmacKeyBase64)
+        let req = SetPodiumMessageRequest(payload: payload, signature: sig)
+        return try await post(path: "set-podium-message", body: req)
+    }
+
     // MARK: - Board
 
     /// 최근 N개 글 + 좋아요 정보. deviceId가 있으면 isMine/likedByMe/cooldownRemainingSec 채워짐.
@@ -417,6 +454,11 @@ actor RankingAPI {
 
     /// ClaimRewardPayload 서명. 위 sign과 동일 알고리즘이지만 별도 타입.
     static func signClaim(payload: ClaimRewardPayload, keyBase64: String) throws -> String {
+        try signEncodable(payload, keyBase64: keyBase64)
+    }
+
+    /// SetPodiumMessagePayload 서명. 동일 알고리즘.
+    static func signPodium(payload: SetPodiumMessagePayload, keyBase64: String) throws -> String {
         try signEncodable(payload, keyBase64: keyBase64)
     }
 

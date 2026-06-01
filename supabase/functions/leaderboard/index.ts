@@ -52,10 +52,10 @@ Deno.serve(async (req: Request) => {
   // 호출당 1회 추가 쿼리이지만 EXISTS 가드로 이미 finalized면 즉시 return.
   await db.rpc("finalize_previous_month_if_needed");
 
-  // Top N — 월간 보드 + profile_json
+  // Top N — 월간 보드 + profile_json. device_id는 메달 매핑 internal용 — 응답엔 절대 미노출.
   const { data: top, error: topErr } = await db
     .from("monthly_leaderboard")
-    .select("rank, nickname, github_login, monthly_coins, profile_json")
+    .select("device_id, rank, nickname, github_login, monthly_coins, profile_json")
     .order("rank", { ascending: true })
     .limit(TOP_N);
   if (topErr) {
@@ -93,19 +93,52 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // 누적 메달 집계 — top entries + 본인 device_id를 한 번에 조회 후 매핑.
+  // device_id 자체는 응답 entries에 싣지 않는다 (UUID 신원 누출 방지).
+  const medalDeviceIds = new Set<string>();
+  for (const row of top ?? []) {
+    if (row.device_id) medalDeviceIds.add(row.device_id);
+  }
+  if (deviceId) medalDeviceIds.add(deviceId);
+
+  const zeroMedals = { gold: 0, silver: 0, bronze: 0 };
+  const medalsByDevice = new Map<string, typeof zeroMedals>();
+  if (medalDeviceIds.size > 0) {
+    const { data: medalRows, error: medalErr } = await db
+      .from("device_medals")
+      .select("device_id, gold, silver, bronze")
+      .in("device_id", [...medalDeviceIds]);
+    if (medalErr) {
+      console.error("leaderboard medals fetch failed", medalErr);
+    } else {
+      for (const m of medalRows ?? []) {
+        medalsByDevice.set(m.device_id, {
+          gold: Number(m.gold) || 0,
+          silver: Number(m.silver) || 0,
+          bronze: Number(m.bronze) || 0,
+        });
+      }
+    }
+  }
+
   const entries = (top ?? []).map((row) => ({
     rank: row.rank,
     nickname: row.nickname,
     totalCoins: row.monthly_coins,
     githubLogin: row.github_login,
     profileJson: stripBackup(row.profile_json),
+    medals: medalsByDevice.get(row.device_id) ?? zeroMedals,
   }));
+
+  // 본인 누적 메달 — 보드에 없어도(이번 달 0 VP) deviceId로 집계해 내려준다.
+  const myMedals = deviceId ? (medalsByDevice.get(deviceId) ?? zeroMedals) : null;
 
   // 직전 달 명예의 전당 — 가장 최근 finalized period의 top 3.
   // 보드 상단 섹션 + reward 알림용. 클라이언트가 표시.
+  // device_id/podium_message는 internal·표시용으로 select — device_id는 응답에 미노출.
   const { data: prevWinners } = await db
     .from("monthly_winners")
-    .select("period, rank, final_score, nickname_snapshot, profile_json_snapshot, reward_coins")
+    .select("period, rank, final_score, nickname_snapshot, profile_json_snapshot, reward_coins, device_id, podium_message")
     .order("period", { ascending: false })
     .order("rank", { ascending: true })
     .limit(3);
@@ -115,8 +148,11 @@ Deno.serve(async (req: Request) => {
   if (prevWinners && prevWinners.length > 0) {
     const latestPeriod = prevWinners[0].period;
     const filtered = prevWinners.filter((w) => w.period === latestPeriod);
+    // 요청자가 이 시상대의 우승자면 그 rank — 클라이언트가 "내 칸 한마디 등록" 여부 판정에 사용.
+    const myWinner = deviceId ? filtered.find((w) => w.device_id === deviceId) : undefined;
     previousMonth = {
       period: latestPeriod,
+      myRank: myWinner ? myWinner.rank : null,
       entries: filtered.map((w) => ({
         rank: w.rank,
         nickname: w.nickname_snapshot,
@@ -124,6 +160,7 @@ Deno.serve(async (req: Request) => {
         githubLogin: null,
         profileJson: stripBackup(w.profile_json_snapshot),
         rewardCoins: w.reward_coins,
+        message: w.podium_message ?? null,
       })),
     };
   }
@@ -159,6 +196,7 @@ Deno.serve(async (req: Request) => {
     entries,
     myRank,
     myTotalCoins: myTotal,
+    myMedals,
     total: totalCount ?? entries.length,
     period: "monthly",
     periodResetAt: nextResetUtc.toISOString(),

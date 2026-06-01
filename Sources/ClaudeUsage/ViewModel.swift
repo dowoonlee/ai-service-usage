@@ -455,6 +455,8 @@ final class ViewModel: ObservableObject {
               let hmacKey = Keychain.loadRankingHmacKey() else { return }
         do {
             let resp = try await RankingAPI.shared.fetchLeaderboard(deviceId: s.rankingDeviceID)
+            // 본인 누적 메달 캐시 갱신 — pendingReward 유무와 무관하게 매 cycle 반영.
+            s.applyMyMedals(resp.myMedals)
             guard let reward = resp.pendingReward else { return }
             let dedupKey = reward.dedupKey
             if !s.claimedPodiumPeriods.contains(dedupKey) {
