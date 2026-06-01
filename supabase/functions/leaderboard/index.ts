@@ -41,10 +41,15 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "GET") return errorResponse(405, "method_not_allowed");
 
   const url = new URL(req.url);
-  const deviceId = url.searchParams.get("deviceId");
-  if (deviceId && !isValidUUID(deviceId)) {
+  const deviceIdRaw = url.searchParams.get("deviceId");
+  if (deviceIdRaw && !isValidUUID(deviceIdRaw)) {
     return errorResponse(400, "invalid_device_id");
   }
+  // UUID 정규화(lowercase) — 클라이언트(Swift UUID.uuidString)는 대문자로 보내지만 Postgres는
+  // 소문자로 저장. PostgREST .eq/.in(UUID 컬럼)은 대소문자 무시라 top myRank는 맞았지만,
+  // 아래 JS 매칭(medalsByDevice.get / filtered.find)은 대소문자 구분이라 myMedals/previousMonth.myRank가
+  // 깨졌다(소문자 DB값 !== 대문자 쿼리값). lowercase로 통일해 양쪽 다 매칭되게 한다.
+  const deviceId = deviceIdRaw ? deviceIdRaw.toLowerCase() : null;
 
   const db = getDb();
 
