@@ -93,7 +93,8 @@ struct RankingView: View {
         }
     }
 
-    /// 직전 달 명예의 전당 카드 — 1/2/3등 가로 배치. 메달 + 펫 아바타 + 닉네임 + 최종 VP + 보상.
+    /// 직전 달 명예의 전당 — 올림픽 시상대 구도. 가운데 1위(최고단), 왼쪽 2위, 오른쪽 3위.
+    /// 메달 + 펫 아바타 + 닉네임 + 최종 VP + 보상이 높이가 다른 단(pedestal) 위에 놓인다.
     private func podiumSection(_ prev: RankingAPI.PreviousMonth) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -102,13 +103,26 @@ struct RankingView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.yellow)
             }
-            HStack(spacing: 8) {
-                ForEach(prev.entries) { entry in
-                    PodiumCard(entry: entry)
-                        .frame(maxWidth: .infinity)
-                }
+            // 단(블록)은 .bottom 정렬로 바닥을 맞추고 높이만 다르게 한다. 2-1-3 순으로
+            // 배치해야 1위가 가운데·최고단. 블록끼리는 간격 0으로 맞붙인다(실제 시상대처럼).
+            // 캐릭터만 단 위에 서고, 닉네임·VP·보상 코인은 단 블록 안에 적힌다.
+            // 참여자가 3명 미만이면 해당 자리는 빈 단으로 형태만 유지한다.
+            HStack(alignment: .bottom, spacing: 0) {
+                podiumColumn(prev.entries.first { $0.rank == 2 }, rank: 2)
+                podiumColumn(prev.entries.first { $0.rank == 1 }, rank: 1)
+                podiumColumn(prev.entries.first { $0.rank == 3 }, rank: 3)
             }
+            .frame(maxWidth: .infinity)
         }
+    }
+
+    /// 시상대 한 열 — 캐릭터(단 위) + 등수별 높이의 단(텍스트 포함). 빈 자리는 둘 다 placeholder.
+    private func podiumColumn(_ entry: RankingAPI.PreviousMonthEntry?, rank: Int) -> some View {
+        VStack(spacing: 2) {
+            PodiumAvatar(entry: entry, rank: rank)
+            PodiumStep(entry: entry, rank: rank)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func meBanner(rank: Int, total: Int) -> some View {
@@ -321,62 +335,42 @@ private struct LeaderboardRowView: View {
     }
 }
 
-// MARK: - 명예의 전당 카드
+// MARK: - 시상대 캐릭터 (단 위에 서는 펫)
 
-/// 직전 달 1/2/3등 카드. 메달 이모지 + 펫 아바타 (hue 적용) + 닉네임 + 최종 VP + 보상 코인.
+/// 단 위에 올라간 펫 캐릭터만 렌더. 1위가 가장 크다. 빈 자리는 점선 placeholder.
 /// `@MainActor` 사유는 LeaderboardRowView 와 동일 (CI strict concurrency).
 @MainActor
-private struct PodiumCard: View {
-    let entry: RankingAPI.PreviousMonthEntry
+private struct PodiumAvatar: View {
+    let entry: RankingAPI.PreviousMonthEntry?
+    let rank: Int
+
+    private var size: CGFloat { rank == 1 ? 50 : 38 }
 
     var body: some View {
-        VStack(spacing: 4) {
-            Text(medal).font(.system(size: 20))
-            avatarIcon.frame(width: 32, height: 32)
-            Text(entry.nickname)
-                .font(.system(size: 10, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Text("\(entry.totalCoins) VP")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.secondary)
-            HStack(spacing: 2) {
-                CoinIcon(size: 9)
-                Text("+\(entry.rewardCoins)")
-                    .font(.system(size: 9, weight: .semibold))
-                    .monospacedDigit()
+        VStack(spacing: 1) {
+            // 1위만 왕관 — 한눈에 챔피언임을 알린다.
+            if rank == 1 {
+                Text("👑")
+                    .font(.system(size: 18))
+                    .shadow(color: .yellow.opacity(0.7), radius: 4)
             }
-            .foregroundStyle(rewardColor)
+            ZStack {
+                // 발밑 타원 그림자 — 단 위에 "딛고 선" 안정감.
+                Ellipse()
+                    .fill(Color.black.opacity(0.22))
+                    .frame(width: size * 0.62, height: size * 0.16)
+                    .offset(y: size * 0.46)
+                    .blur(radius: 1.5)
+                avatar
+                    .frame(width: size, height: size)
+            }
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 8).fill(medalColor.opacity(0.10))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8).stroke(medalColor.opacity(0.4), lineWidth: 1)
-        )
-    }
-
-    private var medal: String {
-        switch entry.rank { case 1: return "🥇"; case 2: return "🥈"; case 3: return "🥉"; default: return "🏆" }
-    }
-    private var medalColor: Color {
-        switch entry.rank {
-        case 1: return .yellow
-        case 2: return .gray
-        case 3: return Color(red: 0.8, green: 0.5, blue: 0.2)
-        default: return .secondary
-        }
-    }
-    private var rewardColor: Color {
-        switch entry.rank { case 1: return .yellow; case 2: return .gray; default: return .orange }
     }
 
     @ViewBuilder
-    private var avatarIcon: some View {
-        if let kind = entry.profileJson?.card.avatar.kind {
-            let variant = entry.profileJson?.card.avatar.variant ?? 0
+    private var avatar: some View {
+        if let kind = entry?.profileJson?.card.avatar.kind {
+            let variant = entry?.profileJson?.card.avatar.variant ?? 0
             if let nsImage = PetSprite.image(for: kind, action: .walk, frameIndex: 0) {
                 Image(nsImage: nsImage)
                     .interpolation(.none)
@@ -384,12 +378,139 @@ private struct PodiumCard: View {
                     .aspectRatio(contentMode: .fit)
                     .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
                     .scaleEffect(x: kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    // 1위 캐릭터는 금색 glow로 빛나게.
+                    .shadow(color: rank == 1 ? .yellow.opacity(0.8) : .clear,
+                            radius: rank == 1 ? 8 : 0)
             } else {
                 Image(systemName: "questionmark.square.dashed").foregroundStyle(.secondary)
             }
         } else {
-            Color.clear
+            // 참여자가 없는 자리 — 점선 실루엣으로 형태만 유지.
+            Image(systemName: "person.crop.circle.dashed")
+                .font(.system(size: size * 0.72))
+                .foregroundStyle(.secondary.opacity(0.4))
         }
+    }
+}
+
+// MARK: - 시상대 단 도형 (윗변만 둥근 사각형)
+
+/// 윗변 두 모서리만 둥근 사각형. macOS 13 타깃이라 `UnevenRoundedRectangle`(14+) 대신
+/// 직접 Path로 그린다. 시상대 단의 "윗면만 둥근" 입체 실루엣을 만든다.
+private struct TopRoundedRect: Shape {
+    var radius: CGFloat
+    func path(in rect: CGRect) -> Path {
+        let r = min(radius, rect.width / 2, rect.height)
+        var p = Path()
+        p.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        p.addLine(to: CGPoint(x: rect.minX, y: rect.minY + r))
+        p.addQuadCurve(to: CGPoint(x: rect.minX + r, y: rect.minY),
+                       control: CGPoint(x: rect.minX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX - r, y: rect.minY))
+        p.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + r),
+                       control: CGPoint(x: rect.maxX, y: rect.minY))
+        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        p.closeSubpath()
+        return p
+    }
+}
+
+// MARK: - 시상대 단
+
+/// 시상대 단(pedestal) — 등수 + 메달 + 닉네임 + 최종 VP + 보상 코인을 담는다.
+/// 콘텐츠 높이는 공통이고 등수별 추가 높이(`extraHeight`)를 바닥에 채워 계단(1위 최고)을 만든다.
+/// 윗변만 둥근 모양은 macOS 13 호환 위해 RoundedRectangle 전체 둥글림으로 근사.
+@MainActor
+private struct PodiumStep: View {
+    let entry: RankingAPI.PreviousMonthEntry?
+    let rank: Int
+
+    /// 계단 형성용 — 콘텐츠 아래에 채우는 여분 높이. 1위가 가장 높다.
+    private var extraHeight: CGFloat {
+        switch rank { case 1: return 30; case 2: return 15; default: return 0 }
+    }
+    private var rewardColor: Color {
+        switch rank { case 1: return .yellow; case 2: return .gray; default: return .orange }
+    }
+
+    var body: some View {
+        VStack(spacing: 5) {
+            HStack(spacing: 4) {
+                Text(podiumMedal(rank)).font(.system(size: 18))
+                Text("\(rank)")
+                    .font(.system(size: 24, weight: .heavy, design: .rounded))
+                    .foregroundStyle(podiumColor(rank))
+            }
+            if let entry {
+                Text(entry.nickname)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text("\(entry.totalCoins) VP")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 3) {
+                    CoinIcon(size: 12)
+                    Text("+\(entry.rewardCoins)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .monospacedDigit()
+                }
+                .foregroundStyle(rewardColor)
+            } else {
+                Text("기록 없음").font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            // 등수별 계단 — 콘텐츠 아래에 정확히 extraHeight만큼 바닥을 채운다.
+            // Spacer는 greedy라 조상 maxHeight를 만나면 블록이 끝까지 늘어나므로 고정 높이 filler 사용.
+            Color.clear.frame(height: extraHeight)
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        .padding(.horizontal, 4)
+        .frame(maxWidth: .infinity)
+        .background(podiumPedestal)
+    }
+
+    /// 입체 단 — 윗변만 둥근 메탈릭 그라데이션 + 윗면 하이라이트 띠 + 테두리.
+    private var podiumPedestal: some View {
+        let c = podiumColor(rank)
+        return TopRoundedRect(radius: 8)
+            .fill(
+                LinearGradient(
+                    colors: [c.opacity(0.55), c.opacity(0.32), c.opacity(0.15)],
+                    startPoint: .top, endPoint: .bottom
+                )
+            )
+            .overlay(alignment: .top) {
+                // 윗면 하이라이트 띠 — 빛 반사처럼 보여 입체감을 준다.
+                TopRoundedRect(radius: 8)
+                    .fill(
+                        LinearGradient(
+                            colors: [.white.opacity(0.35), .clear],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(height: 10)
+            }
+            .overlay(
+                TopRoundedRect(radius: 8).stroke(c.opacity(0.55), lineWidth: 0.75)
+            )
+    }
+}
+
+// MARK: - 시상대 공용 헬퍼 (PodiumCard / PodiumStep / emptyPodiumSlot 공유)
+
+/// 등수별 메달 이모지. 1/2/3 외에는 트로피.
+private func podiumMedal(_ rank: Int) -> String {
+    switch rank { case 1: return "🥇"; case 2: return "🥈"; case 3: return "🥉"; default: return "🏆" }
+}
+
+/// 등수별 강조 색 — 금/은/동.
+private func podiumColor(_ rank: Int) -> Color {
+    switch rank {
+    case 1: return .yellow
+    case 2: return .gray
+    case 3: return Color(red: 0.8, green: 0.5, blue: 0.2)
+    default: return .secondary
     }
 }
 
