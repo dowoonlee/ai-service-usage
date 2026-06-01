@@ -522,6 +522,10 @@ actor RankingAPI {
         components?.queryItems = queryItems
         guard let url = components?.url else { throw RankingError.notConfigured }
         var req = URLRequest(url: url)
+        // 라이브 데이터(리더보드/게시판/운세) — 캐시된 옛 응답을 절대 쓰지 않는다.
+        // 기본 정책은 URLSession.shared의 URLCache가 Cache-Control 없는 200 GET을 heuristic
+        // 캐시해 새 필드(previousMonth.myRank 등)가 없는 옛 응답을 계속 내보내는 문제가 있었다.
+        req.cachePolicy = .reloadIgnoringLocalCacheData
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("Bearer \(anon)", forHTTPHeaderField: "Authorization")
         req.setValue(anon, forHTTPHeaderField: "apikey")
