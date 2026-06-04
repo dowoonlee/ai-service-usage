@@ -480,7 +480,7 @@ struct GachaView: View {
             }
 
             VStack(spacing: 5) {
-                Text(pull.kind.displayName)
+                Text(PetMetaStore.shared.displayName(for: pull.kind))
                     .font(.title3.weight(.bold))
                 Text(pull.rarity.displayName)
                     .font(.caption.weight(.bold))
@@ -644,7 +644,7 @@ struct GachaView: View {
                         .opacity(r.isNew ? 1.0 : 0.6)
                 }
             }
-            Text(r.pull.kind.displayName)
+            Text(PetMetaStore.shared.displayName(for: r.pull.kind))
                 .font(.system(size: 9))
                 .lineLimit(1)
                 .foregroundStyle(r.isNew ? .primary : .secondary)
@@ -796,7 +796,7 @@ private struct InventorySlot: View {
             }
             .help(ownership == nil ? "잠김" : (isHighlighted ? "새로 해금 — 클릭하여 확인" : "클릭하여 미리보기"))
 
-            Text(ownership == nil ? "?" : kind.displayName)
+            Text(ownership == nil ? "?" : PetMetaStore.shared.displayName(for: kind))
                 .font(.caption2)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -1036,7 +1036,7 @@ private struct CollectionBadgeTooltip: View {
                     let owned = (ownedPets[kind]?.count ?? 0) > 0
                     HStack(spacing: 6) {
                         spriteThumb(kind: kind, owned: owned)
-                        Text(kind.displayName)
+                        Text(PetMetaStore.shared.displayName(for: kind))
                             .font(.caption2)
                             .foregroundStyle(owned ? .primary : .secondary)
                         Spacer(minLength: 0)
@@ -1250,7 +1250,7 @@ private struct PetPreviewView: View {
                         .animation(.easeInOut(duration: 0.35), value: quoteIdx)
 
                     VStack(spacing: 4) {
-                        Text(kind.displayName)
+                        Text(PetMetaStore.shared.displayName(for: kind))
                             .font(.title3.weight(.medium))
                         if selectedVariant > 0 {
                             Text(String(repeating: "✨", count: selectedVariant))
@@ -1290,7 +1290,7 @@ private struct PetPreviewView: View {
                 Text(String(format: "#%03d", dexNum))
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.85))
-                Text(kind.displayName)
+                Text(PetMetaStore.shared.displayName(for: kind))
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
@@ -1310,7 +1310,7 @@ private struct PetPreviewView: View {
             .background(headerColor)
 
             // 본문 — 도감 화면처럼 살짝 들어간 inset 패널 느낌.
-            Text(PetDescriptions.description(for: kind))
+            Text(PetMetaStore.shared.description(for: kind))
                 .font(.system(size: 11.5, design: .rounded))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)

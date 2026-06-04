@@ -400,6 +400,23 @@ actor RankingAPI {
         return try await get(path: "board", queryItems: q)
     }
 
+    // MARK: - 펫 메타데이터 (실험: 서버 override)
+
+    struct PetMetadataRow: Decodable, Sendable {
+        let kind: String
+        let displayName: String
+        let description: String
+        let quotes: [String]
+    }
+    struct PetMetadataResponse: Decodable, Sendable {
+        let pets: [PetMetadataRow]
+    }
+
+    /// 전 사용자 공통 펫 메타데이터(이름/대사/설명). 읽기 전용 public — HMAC 불필요.
+    func fetchPetMetadata() async throws -> PetMetadataResponse {
+        try await get(path: "pet-metadata")
+    }
+
     /// 게시글 작성. content는 trim 전 그대로 전송 — 서버가 trim + 검증.
     /// rate limit 위반 시 `.rateLimited(retryAfterSec:)` throw.
     func submitBoardPost(deviceId: String, content: String,

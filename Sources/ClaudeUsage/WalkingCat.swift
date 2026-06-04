@@ -637,7 +637,7 @@ final class PetController: ObservableObject {
             actionUntil = now.addingTimeInterval(.random(in: 0.4...1.2))
         } else if r < quoteEnd {
             action = .quote
-            currentQuote = Quotes.random(for: petKind)
+            currentQuote = PetMetaStore.shared.quote(for: petKind)
             actionUntil = now.addingTimeInterval(7.0)
         } else {
             // walk vs run: mood.runChance에 따라 분기. run은 짧은 burst.
