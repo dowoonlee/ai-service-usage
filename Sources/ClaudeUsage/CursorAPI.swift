@@ -253,6 +253,10 @@ actor CursorAPI {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_close(db) }
+        // Cursor 앱이 실행 중이면 state.vscdb(journal_mode=delete)에 짧은 쓰기 lock이 걸린다.
+        // busy_timeout 없이는 lock 순간 SQLITE_BUSY로 즉시 nil 반환 → notLoggedIn으로 오인되어
+        // "Cursor 사용 중엔 사용량 집계가 통째로 누락"되는 문제가 있었다. 최대 3s 재시도하게 둔다.
+        sqlite3_busy_timeout(db, 3000)
 
         var stmt: OpaquePointer?
         let SQLITE_TRANSIENT = unsafeBitCast(OpaquePointer(bitPattern: -1), to: sqlite3_destructor_type.self)

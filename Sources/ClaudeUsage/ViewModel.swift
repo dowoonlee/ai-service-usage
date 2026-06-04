@@ -646,13 +646,17 @@ final class ViewModel: ObservableObject {
             cursorNeedsSetup = true
             cursorError = "Cursor 앱 로그인 필요"
             cursorPollOutcome = .authError
+            // 조용한 실패였던 경로 — JWT 읽기 실패(미설치/미로그인/DB lock)는 사용량 누락으로 직결되므로 로깅.
+            DebugLog.log("refreshCursor: JWT 읽기 실패 → setup needed (미설치/미로그인, 또는 Cursor 앱 실행 중 DB lock 가능성)")
         } catch CursorError.unauthorized {
             cursorNeedsSetup = true
             cursorError = "Cursor 세션 만료 (앱에서 재로그인)"
             cursorPollOutcome = .authError
+            DebugLog.log("refreshCursor: unauthorized (세션 만료)")
         } catch {
             cursorError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             cursorPollOutcome = Self.isSchemaSuspect(error) ? .apiSchemaSuspect : .transientError
+            DebugLog.log("refreshCursor failed: \(cursorError ?? error.localizedDescription) (schemaSuspect=\(Self.isSchemaSuspect(error)))")
         }
     }
 
