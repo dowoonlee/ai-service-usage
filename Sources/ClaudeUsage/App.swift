@@ -96,6 +96,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Settings.shared.applyCollectionMigrationIfNeeded()
         // PR 보너스 50 → 1,000 상향(v0.6.10) 소급 — 기존 적립 PR에 차액 950 × N 추가.
         Settings.shared.applyContributorBonusUpgradeIfNeeded()
+        // (실험) 펫 메타데이터 서버 override — flag on일 때만 디스크 캐시 즉시 로드 + 서버 갱신.
+        // flag off면 전부 코드 하드코딩 fallback이라 호출조차 안 함.
+        if Settings.shared.experimentalRemotePetMeta {
+            PetMetaStore.shared.load()
+            Task { await PetMetaStore.shared.refresh() }
+        }
         // 직전 실행이 비정상 종료였고 회수할 .ips 가 있으면 크래시 신고 다이얼로그.
         // 패널/마이그레이션 다 끝난 뒤 마지막에 — 사용자에겐 "앱이 켜진 직후" 라고 인식되도록.
         if let record = crashRecord {

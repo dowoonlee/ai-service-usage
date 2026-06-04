@@ -109,6 +109,12 @@ struct SettingsView: View {
             Section("랭킹") {
                 RankingSectionView(settings: settings)
             }
+            Section("실험") {
+                Toggle("펫 이름·대사·설명을 서버에서 받기", isOn: $settings.experimentalRemotePetMeta)
+                Text("켜면 앱 업데이트 없이 펫 텍스트가 갱신됩니다. 네트워크 실패·미설정 시 기본값으로 표시.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
             Section("정보") {
                 CreditsView()
             }

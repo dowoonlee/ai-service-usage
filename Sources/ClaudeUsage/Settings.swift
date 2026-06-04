@@ -33,6 +33,16 @@ final class Settings: ObservableObject {
     @Published var petCursorEnabled: Bool {
         didSet { UserDefaults.standard.set(petCursorEnabled, forKey: Keys.petCursorEnabled) }
     }
+    /// (실험) 펫 메타데이터(이름/대사/설명)를 서버에서 받아 코드값 위에 override. 기본 off.
+    /// off / 네트워크 실패 / 누락 kind 면 코드 하드코딩 fallback. 켜는 순간 즉시 서버 갱신.
+    @Published var experimentalRemotePetMeta: Bool {
+        didSet {
+            UserDefaults.standard.set(experimentalRemotePetMeta, forKey: Keys.experimentalRemotePetMeta)
+            if experimentalRemotePetMeta && !oldValue {
+                Task { await PetMetaStore.shared.refresh() }
+            }
+        }
+    }
     @Published var petClaudeKind: PetKind {
         didSet { UserDefaults.standard.set(petClaudeKind.rawValue, forKey: Keys.petClaudeKind) }
     }
@@ -386,6 +396,7 @@ final class Settings: ObservableObject {
         let d = UserDefaults.standard
         self.panelOpacity  = (d.object(forKey: Keys.panelOpacity) as? Double) ?? 1.0
         self.notifyEnabled = (d.object(forKey: Keys.notifyEnabled) as? Bool) ?? true
+        self.experimentalRemotePetMeta = (d.object(forKey: Keys.experimentalRemotePetMeta) as? Bool) ?? false
         let storedThresholds = (d.array(forKey: Keys.notifyThresholds) as? [Int]) ?? []
         self.notifyThresholds = storedThresholds.isEmpty ? [80, 95] : storedThresholds.sorted()
         self.showPace      = (d.object(forKey: Keys.showPace) as? Bool) ?? true
@@ -834,6 +845,7 @@ final class Settings: ObservableObject {
         static let notifyThresholds = "settings.notifyThresholds"
         static let showPace         = "settings.showPace"
         static let showMenuBar      = "settings.showMenuBar"
+        static let experimentalRemotePetMeta = "settings.experimentalRemotePetMeta"
         static let menuBarPetSource = "settings.menuBarPetSource"
         static let petClaudeEnabled = "settings.petClaudeEnabled"
         static let petCursorEnabled = "settings.petCursorEnabled"

@@ -159,7 +159,7 @@ struct ReportView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .help("\(kind.displayName)\(v > 0 ? " · 색상\(v)" : "")")
+                .help("\(PetMetaStore.shared.displayName(for: kind))\(v > 0 ? " · 색상\(v)" : "")")
             }
         }
     }
