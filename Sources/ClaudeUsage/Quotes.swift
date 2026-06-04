@@ -107,6 +107,12 @@ enum Quotes {
         // ─── Treasure Hunters ─────────────────────────────────────────
         .clownCaptain: ["production clown show 거부.", "광대 같지만 칼은 진짜.", "코가 빨개요. 자존심."],
         .fierceTooth:  ["치과 = QA team.", "이빨 자랑하러 왔습니다.", "물기 전에 도망가세요."],
+
+        // ─── Calciumtrice Slime / Ansimuz Sunny Land ──────────────────
+        .jellySlime: ["젤리도 thread-safe 합니다.", "물컹, hot reload 완료!", "초보 사냥터의 전설이죠."],
+        .sunFrog:    ["배 부풀리면 buffer overflow.", "파리 잡기가 제 GC 작업.", "개굴, 점프가 곧 jump문."],
+        .oposum:     ["위협받으면 graceful shutdown.", "주머니에 캐시 넣고 다녀요.", "야행성, night build 담당."],
+        .sunFox:     ["side-scroller 월드의 주인공!", "점프 한 방에 플랫폼 클리어.", "모험은 제 daily routine이죠."],
     ]
 
     /// 종 전용 대사를 무작위로 한 줄 뽑는다. dict에 누락된 종은 `"..."`로 폴백 (무음에 가까움).

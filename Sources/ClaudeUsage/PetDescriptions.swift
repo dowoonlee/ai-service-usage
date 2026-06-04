@@ -104,6 +104,12 @@ enum PetDescriptions {
         // ─── Treasure Hunters ─────────────────────────────────────────
         .clownCaptain: "광대 같지만 칼은 진짜. Production이 clown show가 되는 걸 거부한다.",
         .fierceTooth:  "이빨로 코드를 물어뜯는 QA team의 화신. 치과(deploy review)는 무서워한다.",
+
+        // ─── Calciumtrice Slime / Ansimuz Sunny Land ──────────────────
+        .jellySlime: "초보 사냥터의 영원한 마스코트. 물컹한 겉모습과 달리 속은 의외로 thread-safe하다.",
+        .sunFrog:    "배를 부풀리면 buffer overflow 직전. 파리 잡기가 곧 GC, 점프 한 번이 main loop.",
+        .oposum:     "위협받으면 즉시 죽은 척 graceful shutdown. 주머니에 캐시를 넣고 night build를 돌리는 야행성.",
+        .sunFox:     "side-scroller 월드의 주인공. 점프 한 방에 플랫폼을 클리어하고 모험을 daily routine처럼 떠난다.",
     ]
 
     /// 종 전용 설명 반환. dict에 없으면 폴백.

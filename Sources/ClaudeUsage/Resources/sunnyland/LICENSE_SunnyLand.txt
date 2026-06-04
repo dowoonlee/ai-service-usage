@@ -1,0 +1,17 @@
+Sunny Land (Ansimuz)
+
+Source:  https://ansimuz.itch.io/sunny-land-pixel-game-art
+Author:  Luis Zuno aka Ansimuz (https://ansimuz.com)
+License: Creative Commons Zero (CC0 1.0 Universal)
+         https://creativecommons.org/publicdomain/zero/1.0/
+
+Public domain — free to use in personal, educational, and commercial
+projects without attribution. Crediting the author is appreciated.
+
+Included characters (idle/run strips extracted from the original
+spritesheets):
+
+- SunFox   (33x32) — player character (fox); Idle = sheet row 0 (4f),
+                     Run = row 1 (6f)
+- SunFrog  (35x32) — frog enemy; Idle (4f) + Run = jump cycle (3f)
+- Oposum   (36x28) — oposum enemy; single walk strip (6f) for all actions

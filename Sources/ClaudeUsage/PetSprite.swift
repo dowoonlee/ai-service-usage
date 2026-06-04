@@ -98,6 +98,10 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
     case bombGuy, baldPirate, cucumber, bigGuy, pirateCaptain, whale
     // Treasure Hunters (free demo)
     case clownCaptain, fierceTooth
+    // Calciumtrice Animated Slime (CC-BY 3.0)
+    case jellySlime
+    // Ansimuz Sunny Land (CC0)
+    case sunFox, sunFrog, oposum
 
     var id: String { rawValue }
 
@@ -494,6 +498,33 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  cellSize: (34, 30), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .wilderness)
+
+        // ─── Calciumtrice: Animated Slime (CC-BY 3.0) ─────────────────────
+        // 32x32 멀티애님 grid에서 idle(row0)+walk(row2) 행만 잘라 가로 strip으로.
+        // 5색 시트 중 blue 1색만 사용 — 변형(이로치)은 기존 hueRotation 방식.
+        case .jellySlime:
+            return PetDefinition(prefix: "Jelly", displayName: "젤리",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+
+        // ─── Ansimuz: Sunny Land (CC0) ────────────────────────────────────
+        // Oposum은 walk 한 줄뿐이라 모든 action이 같은 strip을 공유.
+        case .sunFox:
+            return PetDefinition(prefix: "SunFox", displayName: "모험가 여우",
+                                 cellSize: (33, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .sunFrog:
+            return PetDefinition(prefix: "SunFrog", displayName: "통통 개구리",
+                                 cellSize: (35, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .oposum:
+            return PetDefinition(prefix: "Oposum", displayName: "주머니쥐",
+                                 cellSize: (36, 28), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Run",
+                                 defaultTheme: .field)
         }
     }
 

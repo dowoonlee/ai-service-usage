@@ -1,0 +1,14 @@
+Animated Slime (Calciumtrice)
+
+Source:  https://opengameart.org/content/animated-slime
+Author:  Calciumtrice (https://opengameart.org/users/calciumtrice)
+License: Creative Commons Attribution 3.0 (CC-BY 3.0)
+         https://creativecommons.org/licenses/by/3.0/
+
+Attribution required: "Animated Slime by Calciumtrice".
+
+Included character (idle + walk strips extracted from the original
+32x32 multi-animation grid spritesheet; the blue color variant is used,
+in-app color variants are applied via hue rotation):
+
+- Jelly  (32x32) — blue slime; Idle = grid row 0, Run = grid row 2 (walk)

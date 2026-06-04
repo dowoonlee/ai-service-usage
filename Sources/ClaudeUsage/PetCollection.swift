@@ -25,6 +25,7 @@ enum PetCollection: String, CaseIterable, Codable {
     case tokenBurners       // "Token Burners"         — 마법·신성·왕족
     case rustEvangelists    // "Rust Evangelists"      — 이종족 전사
     case noVerify           // "--no-verify"           — 해적단
+    case happyPath          // "Happy Path"            — 밝고 귀여운 마스코트 (메이플풍)
 
     var displayName: String {
         switch self {
@@ -39,6 +40,7 @@ enum PetCollection: String, CaseIterable, Codable {
         case .tokenBurners:     return "Token Burners"
         case .rustEvangelists:  return "Rust Evangelists"
         case .noVerify:         return "--no-verify"
+        case .happyPath:        return "Happy Path"
         }
     }
 
@@ -56,6 +58,7 @@ enum PetCollection: String, CaseIterable, Codable {
         case .tokenBurners:     return "context window를 통째로 태우는 마법사들"
         case .rustEvangelists:  return "Have you tried rewriting it in Rust?"
         case .noVerify:         return "hook? 그게 뭔데"
+        case .happyPath:        return "엣지 케이스 없는, 그 평화로운 실행 경로"
         }
     }
 
@@ -75,6 +78,7 @@ enum PetCollection: String, CaseIterable, Codable {
         case .tokenBurners:     return Color(red: 0.85, green: 0.30, blue: 0.65)  // magenta
         case .rustEvangelists:  return Color(red: 0.80, green: 0.35, blue: 0.15)  // rust
         case .noVerify:         return Color(red: 0.20, green: 0.55, blue: 0.55)  // teal
+        case .happyPath:        return Color(red: 0.55, green: 0.80, blue: 0.40)  // lime
         }
     }
 
@@ -93,6 +97,7 @@ enum PetCollection: String, CaseIterable, Codable {
         case .tokenBurners:     return "flame.fill"                         // 토큰 태우기
         case .rustEvangelists:  return "wrench.and.screwdriver.fill"        // systems programming
         case .noVerify:         return "bolt.slash.fill"                    // hook 무시
+        case .happyPath:        return "sun.max.fill"                       // 엣지 케이스 없는 평화
         }
     }
 
@@ -122,6 +127,8 @@ enum PetCollection: String, CaseIterable, Codable {
             return [.maskedOrc, .orcShaman, .orcWarrior, .lizardF, .lizardM, .goblin]
         case .noVerify:
             return [.bombGuy, .baldPirate, .cucumber, .bigGuy, .pirateCaptain, .whale, .clownCaptain, .fierceTooth]
+        case .happyPath:
+            return [.jellySlime, .sunFrog, .oposum, .sunFox]
         }
     }
 }
