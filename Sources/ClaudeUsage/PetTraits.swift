@@ -8,7 +8,7 @@ import Foundation
 /// 같은 속성을 추가할 때 기존 라인은 건드리지 않는다.
 extension PetKind {
     /// 어느 컬렉션(셋 보너스 단위)에 속하는지. 1:1 매핑 — 모든 75종이 정확히 하나에 속한다.
-    /// 합 검산: 8+6+5+5+8+8+8+8+5+6+8 = 75.
+    /// 합 검산: 8+6+5+5+8+8+8+8+5+6+8+4 = 79.
     var collection: PetCollection {
         switch self {
         // 야생 포유류 (8) — Works on My Machine
@@ -54,6 +54,10 @@ extension PetKind {
         // 해적단 (8) — --no-verify
         case .bombGuy, .baldPirate, .cucumber, .bigGuy, .pirateCaptain, .whale, .clownCaptain, .fierceTooth:
             return .noVerify
+
+        // 밝고 귀여운 마스코트 (4) — Happy Path
+        case .jellySlime, .sunFrog, .oposum, .sunFox:
+            return .happyPath
         }
     }
 

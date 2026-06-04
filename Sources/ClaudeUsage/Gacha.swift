@@ -3,7 +3,7 @@ import Foundation
 /// 가챠 엔진. 등급 분배 + 가중 랜덤 + 보유 상태 반영.
 ///
 /// 분배 정책: 현실 동물 = Common, 의인화/판타지 = 상위 등급.
-/// 75종 풀에서 등급별 4/10/22/39 분배 → 종당 확률 0.5/0.8/1.36/1.54%.
+/// 79종 풀에서 등급별 4/10/24/41 분배 → 종당 확률 0.5/0.8/1.25/1.46%.
 /// 대형 사이즈/보스급 → Legendary, 헤드라이너/전사 → Epic, 등.
 @MainActor
 enum Gacha {
@@ -16,7 +16,7 @@ enum Gacha {
         .rare:      [.mushroom, .slime, .trunk, .radish, .rock1, .rock2, .rock3, .chameleon, .rino,
                      .bigZombie, .necromancer, .fierceTooth, .kingPig, .baldPirate, .bigGuy,
                      .dwarfM, .elfM, .lizardM, .wizardF, .doc, .orcShaman, .orcWarrior,
-                     .maskedOrc],
+                     .maskedOrc, .sunFox],
         .common:    [.fox, .wolf, .bear, .boar, .deer, .rabbit,
                      .angryPig, .bunny, .chicken, .duck, .blueBird, .fatBird,
                      .bat, .bee, .snail, .turtle,
@@ -25,7 +25,8 @@ enum Gacha {
                      .slug, .angel, .goblin, .imp, .skelet, .tinyZombie,
                      .iceZombie, .muddy, .swampy, .tinySlug, .zombie,
                      .pig, .pigBoxer, .pigBomber,
-                     .bombGuy, .cucumber],
+                     .bombGuy, .cucumber,
+                     .jellySlime, .sunFrog, .oposum],
     ]
 
     /// 마이그레이션 시 legacy default petKind를 ownedPets로 옮길 때 등급 화이트리스트.

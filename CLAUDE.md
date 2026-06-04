@@ -72,7 +72,7 @@ Two behaviors that depend on chart shape live in WalkingCat (not the controller)
 
 `WalkingCat` takes `plotFrame: CGRect` (not just `plotOrigin: CGPoint`) precisely so the bubble clamp logic has access to the plot's right/bottom bounds. Always pass the same `points` to `WalkingCat` that the chart line uses — if the two diverge (e.g., chart uses a filtered subset, pet gets the unfiltered array) the pet's `xNorm ∈ [0,1]` maps to dates outside the chart's x-domain and the pet drifts past the plot edges.
 
-`PetKind` covers seven sprite packs side-by-side (75 species total). Six are pixel art, one is the Wild Animals pixel set:
+`PetKind` covers nine sprite packs side-by-side (79 species total). Eight are pixel art, one is the Wild Animals pixel set:
 
 | Directory | Pack | Species | License | Facing |
 |---|---|---|---|---|
@@ -83,6 +83,8 @@ Two behaviors that depend on chart shape live in WalkingCat (not the controller)
 | `Resources/kings-and-pigs/` | Kings and Pigs (Pixel Frog) | 5 | CC-BY 4.0 | right |
 | `Resources/pirate-bomb/` | Pirate Bomb (Pixel Frog) | 6 | CC-BY 4.0 | right |
 | `Resources/treasure-hunters/` | Treasure Hunters demo (Pixel Frog) | 2 | CC-BY 4.0 | right |
+| `Resources/slime-calciumtrice/` | Animated Slime (Calciumtrice) | 1 | CC-BY 3.0 | right |
+| `Resources/sunnyland/` | Sunny Land (Ansimuz) | 3 | CC0 | right |
 
 The CC-BY packs require attribution — kept in each pack's `LICENSE_*.txt`. The OGA mirror of the Pixel Frog packs is CC-BY 4.0 even though the itch.io distribution is CC0; treat all as CC-BY for safety.
 
