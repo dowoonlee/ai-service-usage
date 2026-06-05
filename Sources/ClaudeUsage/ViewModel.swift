@@ -58,6 +58,9 @@ final class ViewModel: ObservableObject {
     }
 
     private var pollTask: Task<Void, Never>?
+    /// 영속 history/events 백그라운드 로드 Task (issue #19-1). startPolling이 첫 cycle 전에
+    /// 이 Task 완료를 await해 초기 로드와 첫 refresh append의 경합을 막는다.
+    private var initialLoadTask: Task<Void, Never>?
     private var clockTimer: Timer?
 
     /// 펫 사용 시간 누적용 마지막 tick 시각. 앱 첫 실행 직후 nil → 첫 tick은 무크레딧 (앱 종료 중 시간을 보정).
@@ -142,18 +145,15 @@ final class ViewModel: ObservableObject {
         self.claudeCollapsed = d.bool(forKey: "section.claude.collapsed")
         self.cursorCollapsed = d.bool(forKey: "section.cursor.collapsed")
 
-        self.claudeHistory = SnapshotStore.claude.loadRecent()
-        self.claudeCurrent = self.claudeHistory.last
-        self.claudeLastSuccess = self.claudeCurrent?.takenAt
         // 시작 시 Keychain을 직접 읽지 않는다(프롬프트 유발). 첫 refresh가 needsLogin을 갱신함.
         self.claudeNeedsLogin = false
 
-        self.cursorHistory = SnapshotStore.cursor.loadRecent()
-        self.cursorCurrent = self.cursorHistory.last
-        self.cursorLastSuccess = self.cursorCurrent?.takenAt
-
-        self.cursorEvents = SnapshotStore.cursorEvents.loadRecent(limit: 20000)
-            .sorted { $0.timestamp < $1.timestamp }
+        // 영속 history/events 로드는 백그라운드로 분리 (issue #19-1).
+        // 동기 loadRecent(특히 cursorEvents 20000 + sort)가 @MainActor init을 store queue.sync로
+        // 블로킹해 콜드 스타트를 파일 크기에 비례해 악화시키던 것을 제거. UI는 빈 상태로 즉시 뜨고
+        // 로드 완료 시 @Published 갱신. polling은 startPolling에서 이 Task 완료를 await한 뒤
+        // 시작하므로 첫 refresh append와 경합하지 않는다.
+        self.initialLoadTask = Task { [weak self] in await self?.loadPersistedHistory() }
 
         startClock()
 
@@ -166,6 +166,27 @@ final class ViewModel: ObservableObject {
                 ViewModel.sharedRef?.boardUnreadCount = 0
             }
         }
+    }
+
+    /// 영속된 history/events를 백그라운드 스레드에서 읽어 @Published에 1회 반영 (issue #19-1).
+    /// 파일 IO + cursorEvents 정렬을 `Task.detached`로 빼 @MainActor를 블로킹하지 않는다.
+    /// startPolling이 `initialLoadTask`를 await한 뒤 첫 refresh를 돌리므로, 여기서의 대입이
+    /// 폴링 append를 덮어쓰는 race는 없다.
+    private func loadPersistedHistory() async {
+        let loaded = await Task.detached(priority: .userInitiated) {
+            let claude = SnapshotStore.claude.loadRecent()
+            let cursor = SnapshotStore.cursor.loadRecent()
+            let events = SnapshotStore.cursorEvents.loadRecent(limit: 20000)
+                .sorted { $0.timestamp < $1.timestamp }
+            return (claude, cursor, events)
+        }.value
+        claudeHistory = loaded.0
+        claudeCurrent = loaded.0.last
+        claudeLastSuccess = loaded.0.last?.takenAt
+        cursorHistory = loaded.1
+        cursorCurrent = loaded.1.last
+        cursorLastSuccess = loaded.1.last?.takenAt
+        cursorEvents = loaded.2
     }
 
     func startClock() {
@@ -256,6 +277,9 @@ final class ViewModel: ObservableObject {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             guard let self else { return }
+            // 영속 history 초기 로드 완료 후 첫 refresh를 돌린다 — append가 초기 로드 대입에
+            // 덮어쓰이지 않도록 (issue #19-1). 파일 IO라 보통 첫 네트워크보다 먼저 끝난다.
+            await self.initialLoadTask?.value
             while !Task.isCancelled {
                 // (visibility gate) panel/menu bar 모두 안 보이면 refresh 스킵.
                 // (sleep gate) macOS sleep 동안에도 스킵 — 깨자마자 폭주 방지.
@@ -375,24 +399,33 @@ final class ViewModel: ObservableObject {
         let s = Settings.shared
         var usage = s.petUsageSeconds
         var owned = s.ownedPets
+        var usageChanged = false
+        var ownedChanged = false
 
         func creditOne(_ kind: PetKind) {
             usage[kind, default: 0] += credited
+            usageChanged = true
             guard var o = owned[kind] else { return }
             let total = usage[kind, default: 0]
+            // registerUsage는 variant unlock 시에만 o를 mutate하고 그 외엔 불변(nil 반환).
+            // nil이면 owned[kind]는 기존 값과 동일하므로 대입 자체를 생략한다.
             if let v = o.registerUsage(totalSeconds: total) {
                 DebugLog.log("Pet usage unlock: \(kind.rawValue) variant \(v) @ \(Int(total / 86400))d")
                 // 도감 강조 — 사용자가 직접 슬롯 클릭해 확인하기 전까지 NEW 뱃지 유지.
                 s.pendingHighlights.insert(kind)
+                owned[kind] = o
+                ownedChanged = true
             }
-            owned[kind] = o
         }
 
         if s.petClaudeEnabled { creditOne(s.petClaudeKind) }
         if s.petCursorEnabled { creditOne(s.petCursorKind) }
 
-        s.petUsageSeconds = usage
-        s.ownedPets = owned
+        // 무조건 대입은 didSet → JSONEncoder encode + UserDefaults write를 매 폴링 강제했다 (issue #19-5).
+        // 실제 변경이 있을 때만 대입한다. usage는 펫 enable 시 매 tick 증가하지만, ownedPets는
+        // variant unlock(4d/8d/12d 임계, 극히 드묾) 시에만 바뀌므로 대부분 폴링에서 write가 사라진다.
+        if usageChanged { s.petUsageSeconds = usage }
+        if ownedChanged { s.ownedPets = owned }
     }
 
     /// 랭킹 서버에 누적 VP delta 제출 + 프로필 동기화. fire-and-forget — 실패해도 본 폴링
@@ -810,22 +843,44 @@ final class ViewModel: ObservableObject {
         cursorEventsFetching = true
         defer { cursorEventsFetching = false }
 
-        // 캐시된 이벤트가 periodStart 밖에 있으면 정리
+        // 캐시된 이벤트가 periodStart 밖에 있으면 정리. cursorEvents는 시간순 불변이라
+        // periodStart 미만은 prefix — 전체 스캔(removeAll) 대신 cut 지점까지만 제거 (issue #19-3).
         if let start = periodStart {
-            cursorEvents.removeAll { $0.timestamp < start }
+            let cut = cursorEvents.firstIndex { $0.timestamp >= start } ?? cursorEvents.count
+            if cut > 0 { cursorEvents.removeFirst(cut) }
         }
         let lastKnown = cursorEvents.last?.timestamp
         do {
             let new = try await CursorAPI.shared.fetchEvents(sinceExclusive: lastKnown, periodStart: periodStart)
             if !new.isEmpty {
                 for ev in new { SnapshotStore.cursorEvents.append(ev) }
-                cursorEvents.append(contentsOf: new)
-                cursorEvents.sort { $0.timestamp < $1.timestamp }
+                // fetchEvents는 서버 응답 순서(최신순)라 new 자체가 역순일 수 있음 → new만 정렬한 뒤
+                // 이미 시간순인 cursorEvents와 O(n+m) merge. 폴링마다 full sort(O(n log n)) 대체 (issue #19-3).
+                let sortedNew = new.sorted { $0.timestamp < $1.timestamp }
+                cursorEvents = Self.mergeSortedByTimestamp(cursorEvents, sortedNew)
                 UsageEventProducer.ingestCursorEvents(new)
                 BadgeRegistry.evaluate()
             }
         } catch {
             DebugLog.log(" fetchEvents failed: \(error.localizedDescription)")
         }
+    }
+
+    /// 시간순 정렬된 두 배열을 O(n+m) 2-pointer로 병합 (issue #19-3).
+    /// 입력은 둘 다 timestamp 오름차순이어야 하며 결과도 오름차순. 폴링마다 도는
+    /// 전체 재정렬(O(n log n))을 대체한다.
+    nonisolated static func mergeSortedByTimestamp(_ a: [CursorEvent], _ b: [CursorEvent]) -> [CursorEvent] {
+        if a.isEmpty { return b }
+        if b.isEmpty { return a }
+        var out: [CursorEvent] = []
+        out.reserveCapacity(a.count + b.count)
+        var i = 0, j = 0
+        while i < a.count && j < b.count {
+            if a[i].timestamp <= b[j].timestamp { out.append(a[i]); i += 1 }
+            else { out.append(b[j]); j += 1 }
+        }
+        if i < a.count { out.append(contentsOf: a[i...]) }
+        if j < b.count { out.append(contentsOf: b[j...]) }
+        return out
     }
 }
