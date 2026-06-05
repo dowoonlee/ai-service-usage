@@ -692,8 +692,11 @@ final class Settings: ObservableObject {
     /// `Codable` 값을 JSON으로 인코딩해 `UserDefaults`에 저장. 인코딩 실패는 무시 — 일시적
     /// 메모리 압박 등 transient 실패에 대해 기존 저장값을 보존하는 게 더 안전 (다음 didSet에서
     /// 재시도). Set/Dict didSet에서 매번 호출되는 hot path이지만 사이즈가 작아 부담 없음.
+    /// persist 전용 공유 인코더 — didSet hot path에서 매번 JSONEncoder를 새로 만들던 비용 제거
+    /// (issue #19-5). Settings는 @MainActor라 persist 호출이 단일 스레드 → 공유 인스턴스 안전.
+    private static let persistEncoder = JSONEncoder()
     private func persist<T: Encodable>(_ value: T, forKey key: String) {
-        if let data = try? JSONEncoder().encode(value) {
+        if let data = try? Self.persistEncoder.encode(value) {
             UserDefaults.standard.set(data, forKey: key)
         }
     }

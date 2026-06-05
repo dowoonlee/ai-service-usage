@@ -539,8 +539,12 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
 
 @MainActor
 enum PetSprite {
-    private static var cache: [String: [NSImage]] = [:]
-    private static var imageCache: [String: NSImage] = [:]
+    /// NSCache는 ObjectType이 AnyObject여야 해서 frame 배열을 box class로 감싼다.
+    private final class FrameBox { let frames: [NSImage]; init(_ frames: [NSImage]) { self.frames = frames } }
+    /// strip→frame 배열 / 단일 이미지 캐시. plain dict는 eviction이 없어 앱 수명 동안 단조 증가했다
+    /// (issue #19-bonus). NSCache로 전환해 메모리 압력 시 OS가 자동 evict하게 한다.
+    private static let cache = NSCache<NSString, FrameBox>()
+    private static let imageCache = NSCache<NSString, NSImage>()
 
     /// SwiftPM 의 자동 생성 Bundle.module 은 .app/<name>.bundle 만 체크하지만
     /// 표준 .app 은 Contents/Resources/ 아래에 리소스가 들어감 → 둘 다 fallback.
@@ -554,8 +558,8 @@ enum PetSprite {
 
     /// 동물+동작에 해당하는 strip을 잘라 frame 배열로 반환. 캐시됨.
     static func frames(for kind: PetKind, action: PetController.Action) -> [NSImage] {
-        let key = "\(kind.rawValue)/\(action)"
-        if let cached = cache[key] { return cached }
+        let key = "\(kind.rawValue)/\(action)" as NSString
+        if let cached = cache.object(forKey: key) { return cached.frames }
 
         let name = kind.resourceName(for: action)
         guard let url = resourceBundle.url(forResource: name, withExtension: "png"),
@@ -565,7 +569,7 @@ enum PetSprite {
               let sheet = bitmap.cgImage
         else {
             DebugLog.log("PetSprite: \(name).png 로드 실패")
-            cache[key] = []
+            cache.setObject(FrameBox([]), forKey: key)
             return []
         }
 
@@ -579,7 +583,7 @@ enum PetSprite {
                 frames.append(NSImage(cgImage: cropped, size: NSSize(width: w, height: h)))
             }
         }
-        cache[key] = frames
+        cache.setObject(FrameBox(frames), forKey: key)
         return frames
     }
 
@@ -595,21 +599,22 @@ enum PetSprite {
 
     /// 단일 PNG 로딩 (sprite strip이 아닌 일반 이미지 — 예: 가챠 알). 캐시됨.
     static func image(named name: String) -> NSImage? {
-        if let cached = imageCache[name] { return cached }
+        let key = name as NSString
+        if let cached = imageCache.object(forKey: key) { return cached }
         guard let url = resourceBundle.url(forResource: name, withExtension: "png"),
               let img = NSImage(contentsOf: url)
         else {
             DebugLog.log("PetSprite: \(name).png 로드 실패")
             return nil
         }
-        imageCache[name] = img
+        imageCache.setObject(img, forKey: key)
         return img
     }
 
     /// PetKind와 무관한 strip PNG (예: 가챠 코인 회전)을 frame 배열로. 캐시됨.
     static func frames(named name: String, cellSize: (w: Int, h: Int)) -> [NSImage] {
-        let key = "\(name)/\(cellSize.w)x\(cellSize.h)"
-        if let cached = cache[key] { return cached }
+        let key = "\(name)/\(cellSize.w)x\(cellSize.h)" as NSString
+        if let cached = cache.object(forKey: key) { return cached.frames }
         guard let url = resourceBundle.url(forResource: name, withExtension: "png"),
               let nsImage = NSImage(contentsOf: url),
               let tiff = nsImage.tiffRepresentation,
@@ -617,7 +622,7 @@ enum PetSprite {
               let sheet = bitmap.cgImage
         else {
             DebugLog.log("PetSprite: \(name).png strip 로드 실패")
-            cache[key] = []
+            cache.setObject(FrameBox([]), forKey: key)
             return []
         }
         let frameCount = max(1, sheet.width / cellSize.w)
@@ -629,7 +634,7 @@ enum PetSprite {
                 frames.append(NSImage(cgImage: cropped, size: NSSize(width: cellSize.w, height: cellSize.h)))
             }
         }
-        cache[key] = frames
+        cache.setObject(FrameBox(frames), forKey: key)
         return frames
     }
 }

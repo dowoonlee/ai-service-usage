@@ -399,24 +399,33 @@ final class ViewModel: ObservableObject {
         let s = Settings.shared
         var usage = s.petUsageSeconds
         var owned = s.ownedPets
+        var usageChanged = false
+        var ownedChanged = false
 
         func creditOne(_ kind: PetKind) {
             usage[kind, default: 0] += credited
+            usageChanged = true
             guard var o = owned[kind] else { return }
             let total = usage[kind, default: 0]
+            // registerUsage는 variant unlock 시에만 o를 mutate하고 그 외엔 불변(nil 반환).
+            // nil이면 owned[kind]는 기존 값과 동일하므로 대입 자체를 생략한다.
             if let v = o.registerUsage(totalSeconds: total) {
                 DebugLog.log("Pet usage unlock: \(kind.rawValue) variant \(v) @ \(Int(total / 86400))d")
                 // 도감 강조 — 사용자가 직접 슬롯 클릭해 확인하기 전까지 NEW 뱃지 유지.
                 s.pendingHighlights.insert(kind)
+                owned[kind] = o
+                ownedChanged = true
             }
-            owned[kind] = o
         }
 
         if s.petClaudeEnabled { creditOne(s.petClaudeKind) }
         if s.petCursorEnabled { creditOne(s.petCursorKind) }
 
-        s.petUsageSeconds = usage
-        s.ownedPets = owned
+        // 무조건 대입은 didSet → JSONEncoder encode + UserDefaults write를 매 폴링 강제했다 (issue #19-5).
+        // 실제 변경이 있을 때만 대입한다. usage는 펫 enable 시 매 tick 증가하지만, ownedPets는
+        // variant unlock(4d/8d/12d 임계, 극히 드묾) 시에만 바뀌므로 대부분 폴링에서 write가 사라진다.
+        if usageChanged { s.petUsageSeconds = usage }
+        if ownedChanged { s.ownedPets = owned }
     }
 
     /// 랭킹 서버에 누적 VP delta 제출 + 프로필 동기화. fire-and-forget — 실패해도 본 폴링
