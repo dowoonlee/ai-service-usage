@@ -23,6 +23,25 @@ final class DailyFortuneVM: ObservableObject {
 
     func load() async {
         state = .loading
+
+        #if DEBUG
+        // 로컬 프리뷰 — GitHub/랭킹 연동·서버 호출 없이 시각화만 확인.
+        // `swift run ClaudeUsage --fortune-preview` 후 sparkles 버튼. 릴리스 빌드엔 미포함.
+        if CommandLine.arguments.contains("--fortune-preview") {
+            let birth = Settings.shared.githubCreatedAt.flatMap(Self.parseISO)
+                ?? Date(timeIntervalSince1970: 1_433_309_400)  // 2015-06-03 14:30 KST
+            let chart = SajuEngine.chart(for: birth)
+            let daily = SajuEngine.daily(for: Date(), against: chart.dayStem)
+            state = .showing(
+                text: "오전의 리뷰 큐가 평소보다 빨리 비고, 막혔던 빌드도 한 번에 통과하는 흐름입니다. "
+                    + "다만 오후 늦게 들어오는 급한 요청이 집중을 흩트릴 수 있으니 작업 단위를 잘게 쪼개 두세요. "
+                    + "퇴근 전에 내일의 첫 작업을 한 줄 메모로 남겨두면 내일 아침이 한결 가볍습니다.",
+                chart: chart, daily: daily
+            )
+            return
+        }
+        #endif
+
         let s = Settings.shared
 
         // 1) ranking opt-in 확인.
@@ -151,7 +170,7 @@ struct DailyFortuneView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-        .frame(width: 400, height: 520)
+        .frame(width: 400, height: 600)
         .task { await vm.load() }
     }
 
@@ -198,12 +217,20 @@ struct DailyFortuneView: View {
     }
 
     private func sajuBlock(chart: SajuChart, daily: DailyFortune) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("사주: \(chart.displayString)")
-            Text("오행: \(formatElements(chart.fiveElementCounts))")
-            Text("오늘 일진: \(daily.today.name) (\(daily.relation.rawValue))")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 8) {
+                SajuPillarsGrid(chart: chart)
+                Spacer(minLength: 0)
+                FiveElementPentagon(
+                    counts: chart.fiveElementCounts,
+                    dayElement: chart.dayStem.element,
+                    todayElement: daily.today.stem.element,
+                    relation: daily.relation
+                )
+            }
+            Text("오늘 일진: \(daily.today.name) · \(daily.relation.rawValue) — \(daily.relation.shortDescription)")
+                .font(.system(size: 11, design: .monospaced))
         }
-        .font(.system(size: 11, design: .monospaced))
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
@@ -299,11 +326,6 @@ struct DailyFortuneView: View {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             withAnimation(.easeOut(duration: 0.2)) { toast = nil }
         }
-    }
-
-    private func formatElements(_ counts: [FiveElement: Int]) -> String {
-        let order: [FiveElement] = [.wood, .fire, .earth, .metal, .water]
-        return order.map { "\($0.rawValue)\(counts[$0] ?? 0)" }.joined(separator: " ")
     }
 
     @ViewBuilder
