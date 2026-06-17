@@ -66,14 +66,46 @@ struct TrainerCardView: View {
     // MARK: - Background
 
     private var backgroundLayer: some View {
-        LinearGradient(
-            colors: [
-                card.background.fillTopColor.opacity(0.55),
-                card.background.fillBottomColor.opacity(0.85),
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
+        ZStack {
+            LinearGradient(
+                colors: [
+                    card.background.fillTopColor.opacity(0.55),
+                    card.background.fillBottomColor.opacity(0.85),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            // 컬렉션 배경은 밈 타이틀(예: "IT'S ALWAYS DNS")을 대각선 반복 워터마크로 깔아
+            // '색만 다른 그라디언트' 느낌을 덜어준다. PetTheme(잔디밭/바다 등 자연 테마)은
+            // 텍스트가 어색해 그라디언트만 유지 — `.collection`일 때만 패턴을 얹는다.
+            if case .collection = card.background {
+                watermarkPattern
+            }
+        }
+    }
+
+    /// 배경명을 기울여 타일링한 반투명 워터마크. 매우 옅은(opacity 0.08) 흰색이라
+    /// 위에 얹히는 흰색 본문 가독성을 해치지 않으면서 질감만 더한다. 행마다 절반씩
+    /// 어긋낸 벽돌 패턴으로 격자 느낌을 제거. 카드 대각선을 덮도록 넉넉히 그린 뒤
+    /// body 최상위 `clipShape`가 카드 밖으로 넘친 부분을 잘라낸다. 본문 제스처(액세서리
+    /// drag)를 가로채지 않도록 hit test 비활성.
+    private var watermarkPattern: some View {
+        let phrase = card.background.displayName.uppercased()
+        let line = Array(repeating: phrase, count: 10).joined(separator: "   ")
+        let fontSize = max(10, width * 0.028)
+        return VStack(alignment: .leading, spacing: fontSize * 0.9) {
+            ForEach(0..<18, id: \.self) { row in
+                Text(line)
+                    .font(.system(size: fontSize, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.15))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .offset(x: row.isMultiple(of: 2) ? 0 : -fontSize * 4)
+            }
+        }
+        .rotationEffect(.degrees(-22))
+        .frame(width: width, height: width / Self.aspectRatio)
+        .allowsHitTesting(false)
     }
 
     /// Frame stroke — `CardFrame`별 색·두께. sparkle은 추가 glow.
