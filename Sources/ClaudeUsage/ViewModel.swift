@@ -241,8 +241,27 @@ final class ViewModel: ObservableObject {
     static let wellnessIntervalSec: TimeInterval = 60 * 60
     /// nudge 표시 후 이 시간 내에 클릭하면 보상 (5분 버퍼).
     static let wellnessRewardWindow: TimeInterval = 5 * 60
-    /// 보상 코인 수.
-    static let wellnessRewardCoins: Int = 30
+    /// 보상 코인 — 표시 직후 +500에서 시작해 1분간 지수감쇠로 +30까지 떨어지고, 이후 유지시간
+    /// (5분) 끝까지 +30 고정. 빨리 반응할수록 보상이 크다.
+    static let wellnessRewardMax: Int = 500
+    static let wellnessRewardMin: Int = 30
+    /// 감쇠 구간 — 이 시간 동안 max→min, 이후엔 min 고정.
+    static let wellnessDecaySec: TimeInterval = 60
+    /// 지수감쇠 시간상수(초). 작을수록 초반에 급히 깎인다. decaySec 안에서 충분히 수렴.
+    static let wellnessDecayTau: TimeInterval = 15
+
+    /// 표시 후 경과 시간(elapsed)에 따른 보상 코인.
+    /// 0초 → max, decaySec(1분)에 정확히 min으로 수렴하는 정규화 지수감쇠. 이후는 min 고정.
+    static func wellnessReward(elapsed: TimeInterval) -> Int {
+        let lo = Double(wellnessRewardMin), hi = Double(wellnessRewardMax)
+        if elapsed <= 0 { return wellnessRewardMax }
+        if elapsed >= wellnessDecaySec { return wellnessRewardMin }
+        let k = 1.0 / wellnessDecayTau
+        let e = exp(-k * elapsed)
+        let eEnd = exp(-k * wellnessDecaySec)
+        let norm = (e - eEnd) / (1 - eEnd)   // t=0 → 1, t=decaySec → 0
+        return Int((lo + (hi - lo) * norm).rounded())
+    }
 
     private func evaluateWellnessNudge() {
         guard wellnessNudge == nil else { return }
@@ -277,7 +296,7 @@ final class ViewModel: ObservableObject {
         defer { wellnessNudge = nil }
         let elapsed = lastWellnessShownAt.map { Date().timeIntervalSince($0) } ?? .infinity
         guard elapsed < Self.wellnessRewardWindow else { return .noReward }
-        let amount = Self.wellnessRewardCoins
+        let amount = Self.wellnessReward(elapsed: elapsed)
         // credit 정책(totalEarned/firstCreditedAt 추적)을 한곳에서만 관리하기 위해 CoinLedger 경유.
         CoinLedger.shared.creditWellness(amount: amount)
         // Standup 도장 — `.rewarded`(60s 안 응답)만 카운트.
