@@ -61,6 +61,8 @@ struct WalkingCat: View {
     /// 색상 변종 (이로치). 0 = 기본, 1/2/3 = shiny tier. hueRotation 각도로 매핑.
     var variant: Int = 0
     var mood: PetMood = .neutral
+    /// 현재 날씨 — `.quote`에서 날씨 공통대사를 섞는 데 사용. clear면 종 전용만.
+    var weather: WeatherCondition = .clear
     var displayHeight: CGFloat = 18
     // 차트 한 구간이 전체 y-range 대비 이 비율 이상일 때 AAAH/WHEE 말풍선 발동. 낮을수록 자주.
     var bigDropThreshold: Double = 0.40
@@ -86,6 +88,8 @@ struct WalkingCat: View {
         ctrl.mood = mood
         // kind도 동일 패턴으로 매 render마다 sync — `.quote` 동작 진입 시 종 전용 대사를 뽑는 데 사용.
         ctrl.petKind = kind
+        // 날씨도 동일 패턴으로 sync — `.quote`에서 날씨 공통대사 노출 여부 결정.
+        ctrl.currentWeather = weather
         // bigDropDescent는 O(n) 스캔 + 배열 map — body가 30Hz로 도므로 1번만 계산해
         // sprite()에 전달. 이전엔 speedMultiplier 결정 + sprite 모션 결정으로 2회 호출됐음.
         let descent = bigDropDescent(at: ctrl.x)
@@ -525,6 +529,10 @@ final class PetController: ObservableObject {
     var speedMultiplier: Double = 1.0
     // 종(kind) 전용 대사를 `.quote` 진입 시점에 뽑기 위한 참조. 첫 render 전엔 임의 기본값.
     var petKind: PetKind = .fox
+    // 현재 날씨 (body에서 sync, @Published 아님). clear가 아니면 `.quote`에서 날씨 공통대사를 섞는다.
+    var currentWeather: WeatherCondition = .clear
+    /// 비/눈/뇌우일 때 `.quote`가 종 전용 대신 날씨 공통대사를 낼 확률.
+    private static let weatherQuoteChance = 0.45
 
     private var direction: Double = 1
     private var actionUntil: Date = .distantPast
@@ -621,6 +629,17 @@ final class PetController: ObservableObject {
         }
     }
 
+    /// `.quote` 진입 시 대사 선택. 비/눈/뇌우면 `weatherQuoteChance` 확률로 날씨 공통대사,
+    /// 그 외(또는 날씨 풀 없음)는 종 전용 대사.
+    private func quoteForContext() -> String {
+        if currentWeather != .clear,
+           Double.random(in: 0...1) < Self.weatherQuoteChance,
+           let wq = Quotes.randomWeather(for: currentWeather) {
+            return wq
+        }
+        return PetMetaStore.shared.quote(for: petKind)
+    }
+
     private func chooseNextAction(now: Date) {
         let r = Double.random(in: 0...1)
         let restEnd = mood.restProbability
@@ -637,7 +656,7 @@ final class PetController: ObservableObject {
             actionUntil = now.addingTimeInterval(.random(in: 0.4...1.2))
         } else if r < quoteEnd {
             action = .quote
-            currentQuote = PetMetaStore.shared.quote(for: petKind)
+            currentQuote = quoteForContext()
             actionUntil = now.addingTimeInterval(7.0)
         } else {
             // walk vs run: mood.runChance에 따라 분기. run은 짧은 burst.

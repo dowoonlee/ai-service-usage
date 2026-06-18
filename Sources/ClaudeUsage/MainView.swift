@@ -52,6 +52,7 @@ fileprivate extension View {
         pct: Double?,
         anxietyAt: Double,
         bigDropThreshold: Double,
+        weather: WeatherCondition = .clear,
         wellnessNudge: String? = nil,
         onDismissWellness: (() -> WellnessDismissResult)? = nil
     ) -> some View {
@@ -66,6 +67,7 @@ fileprivate extension View {
                         kind: kind,
                         variant: variant,
                         mood: PetMood.from(pct: pct, anxietyAt: anxietyAt),
+                        weather: weather,
                         bigDropThreshold: bigDropThreshold,
                         wellnessNudge: wellnessNudge,
                         onDismissWellness: onDismissWellness
@@ -151,6 +153,14 @@ struct MainView: View {
             VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
                 .cornerRadius(10)
         )
+        .overlay {
+            // 실제 날씨 파티클(비/눈/뇌우). clear면 렌더 안 함. 패널 둥근 모서리로 클립.
+            if settings.weatherEffectEnabled, vm.weather != .clear {
+                WeatherParticles(condition: vm.weather, intensity: vm.weatherIntensity)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .allowsHitTesting(false)
+            }
+        }
     }
 
     private var topBar: some View {
@@ -229,6 +239,7 @@ struct MainView: View {
                 Button("지금 새로고침") {
                     Task { await vm.refreshClaude(); await vm.refreshCursor() }
                 }
+                Toggle("날씨 효과 표시", isOn: $settings.weatherEffectEnabled)
                 Button("업데이트 확인...") { Updater.shared.checkForUpdates() }
                 Button("설정...") { onSettings() }
                 Button("기여자 보기...") { onContributors() }
@@ -537,6 +548,7 @@ struct ClaudeSection: View {
                     pct: vm.claudeCurrent?.fiveHourPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
+                    weather: vm.weather,
                     wellnessNudge: vm.wellnessNudge,
                     onDismissWellness: { vm.dismissWellnessNudge() }
                 )
@@ -788,6 +800,7 @@ struct CursorSection: View {
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
+                    weather: vm.weather,
                     wellnessNudge: vm.wellnessNudge,
                     onDismissWellness: { vm.dismissWellnessNudge() }
                 )
@@ -855,6 +868,7 @@ struct CursorSection: View {
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
+                    weather: vm.weather,
                     wellnessNudge: vm.wellnessNudge,
                     onDismissWellness: { vm.dismissWellnessNudge() }
                 )

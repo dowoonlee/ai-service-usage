@@ -36,6 +36,18 @@ final class ViewModel: ObservableObject {
     // Shared
     @Published var now: Date = Date()
 
+    // 날씨 파티클 — 현재 선택 위치의 실제 날씨. 기본 .clear(파티클 없음).
+    @Published var weather: WeatherCondition = .clear
+    /// 강수/강설량 기반 강도(0...1). 파티클 밀도를 비례시킴. clear면 의미 없음.
+    @Published var weatherIntensity: Double = 1.0
+    /// 날씨 갱신 캐시 — 마지막 fetch 시각/위치. 위치가 바뀌면 캐시 무시하고 즉시 갱신.
+    private var lastWeatherFetchAt: Date?
+    private var lastWeatherLocation: WeatherLocation?
+    /// 날씨 갱신 주기 — 사용량(600s)과 분리. 30분이면 비/눈 전환을 충분히 따라감.
+    private static let weatherRefreshInterval: TimeInterval = 1800
+    /// 설정(위치/토글) 변경 구독 — 변경 즉시 날씨를 다시 가져온다.
+    private var weatherCancellables = Set<AnyCancellable>()
+
     // 펫이 외치는 휴식 권유 말풍선. nil이면 표시 안 함.
     // 최근 1시간 동안 거의 쉬지 않고 사용 중이고, 마지막 표시로부터 1시간 이상 지났을 때 설정됨.
     @Published var wellnessNudge: String?
@@ -166,6 +178,17 @@ final class ViewModel: ObservableObject {
                 ViewModel.sharedRef?.boardUnreadCount = 0
             }
         }
+
+        // 날씨 위치/토글 변경을 구독 — 변경 즉시 fetch(force)해 설정 반영을 다음 폴링까지 기다리지 않게.
+        // @Published는 willSet 시점에 발행되므로 Task로 비동기 디스패치해 최신 값을 읽는다.
+        Publishers.Merge(
+            Settings.shared.$weatherLocation.dropFirst().map { _ in () },
+            Settings.shared.$weatherEffectEnabled.dropFirst().map { _ in () }
+        )
+        .sink { [weak self] in
+            Task { @MainActor in await self?.refreshWeather(force: true) }
+        }
+        .store(in: &weatherCancellables)
     }
 
     /// 영속된 history/events를 백그라운드 스레드에서 읽어 @Published에 1회 반영 (issue #19-1).
@@ -218,8 +241,27 @@ final class ViewModel: ObservableObject {
     static let wellnessIntervalSec: TimeInterval = 60 * 60
     /// nudge 표시 후 이 시간 내에 클릭하면 보상 (5분 버퍼).
     static let wellnessRewardWindow: TimeInterval = 5 * 60
-    /// 보상 코인 수.
-    static let wellnessRewardCoins: Int = 30
+    /// 보상 코인 — 표시 직후 +500에서 시작해 1분간 지수감쇠로 +30까지 떨어지고, 이후 유지시간
+    /// (5분) 끝까지 +30 고정. 빨리 반응할수록 보상이 크다.
+    static let wellnessRewardMax: Int = 500
+    static let wellnessRewardMin: Int = 30
+    /// 감쇠 구간 — 이 시간 동안 max→min, 이후엔 min 고정.
+    static let wellnessDecaySec: TimeInterval = 60
+    /// 지수감쇠 시간상수(초). 작을수록 초반에 급히 깎인다. decaySec 안에서 충분히 수렴.
+    static let wellnessDecayTau: TimeInterval = 15
+
+    /// 표시 후 경과 시간(elapsed)에 따른 보상 코인.
+    /// 0초 → max, decaySec(1분)에 정확히 min으로 수렴하는 정규화 지수감쇠. 이후는 min 고정.
+    static func wellnessReward(elapsed: TimeInterval) -> Int {
+        let lo = Double(wellnessRewardMin), hi = Double(wellnessRewardMax)
+        if elapsed <= 0 { return wellnessRewardMax }
+        if elapsed >= wellnessDecaySec { return wellnessRewardMin }
+        let k = 1.0 / wellnessDecayTau
+        let e = exp(-k * elapsed)
+        let eEnd = exp(-k * wellnessDecaySec)
+        let norm = (e - eEnd) / (1 - eEnd)   // t=0 → 1, t=decaySec → 0
+        return Int((lo + (hi - lo) * norm).rounded())
+    }
 
     private func evaluateWellnessNudge() {
         guard wellnessNudge == nil else { return }
@@ -254,7 +296,7 @@ final class ViewModel: ObservableObject {
         defer { wellnessNudge = nil }
         let elapsed = lastWellnessShownAt.map { Date().timeIntervalSince($0) } ?? .infinity
         guard elapsed < Self.wellnessRewardWindow else { return .noReward }
-        let amount = Self.wellnessRewardCoins
+        let amount = Self.wellnessReward(elapsed: elapsed)
         // credit 정책(totalEarned/firstCreditedAt 추적)을 한곳에서만 관리하기 위해 CoinLedger 경유.
         CoinLedger.shared.creditWellness(amount: amount)
         // Standup 도장 — `.rewarded`(60s 안 응답)만 카운트.
@@ -288,6 +330,7 @@ final class ViewModel: ObservableObject {
                     self.updateGymCountersOnCycleStart(sleepSec: interval)
                     await self.refreshClaude()
                     await self.refreshCursor()
+                    await self.refreshWeather()
                     self.accumulatePetUsage()
                     await ContributorBonus.shared.sync()
                     self.updateBackoffAfterCycle()
@@ -380,6 +423,33 @@ final class ViewModel: ObservableObject {
         case authError          // 401/403 등 — backoff 안 함, 사용자 재로그인 필요
         case transientError     // 429/5xx/network — backoff 대상
         case apiSchemaSuspect   // 디코딩 실패 / 4xx (auth/429 제외) — endpoint 변경 의심
+    }
+
+    /// 현재 선택 위치의 날씨를 가져와 `weather`를 갱신. 사용량 폴링과 같은 cycle에서 호출되지만
+    /// 30분 캐시로 묶어 Open-Meteo를 매 폴링(600s)마다 치지 않는다. 위치 변경/토글 시엔
+    /// Combine 구독이 `force: true`로 즉시 호출 → 캐시 무시.
+    /// 실패는 조용히 무시(기존 값 유지) — 날씨는 부가 연출이라 에러를 사용자에게 노출하지 않는다.
+    func refreshWeather(force: Bool = false) async {
+        guard Settings.shared.weatherEffectEnabled else {
+            if weather != .clear { weather = .clear }
+            lastWeatherFetchAt = nil       // 다시 켜면 즉시 fetch 되도록 캐시 초기화
+            return
+        }
+        let loc = Settings.shared.weatherLocation
+        let locChanged = (loc != lastWeatherLocation)
+        if !force, !locChanged, let last = lastWeatherFetchAt,
+           Date().timeIntervalSince(last) < Self.weatherRefreshInterval {
+            return
+        }
+        do {
+            let reading = try await WeatherAPI.shared.fetch(loc)
+            if weather != reading.condition { weather = reading.condition }
+            if weatherIntensity != reading.intensity { weatherIntensity = reading.intensity }
+            lastWeatherFetchAt = Date()
+            lastWeatherLocation = loc
+        } catch {
+            DebugLog.log("Weather fetch 실패: \(error)")
+        }
     }
 
     /// 폴링 tick마다 호출 — 현재 차트에 배치된 펫(`petClaudeKind`/`petCursorKind`)에 실시간 누적.
