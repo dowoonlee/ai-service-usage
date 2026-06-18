@@ -27,6 +27,19 @@ struct SettingsView: View {
                     }
                 }
             }
+            Section("날씨") {
+                Toggle("실제 날씨 효과(비·눈)", isOn: $settings.weatherEffectEnabled)
+                if settings.weatherEffectEnabled {
+                    Picker("위치", selection: $settings.weatherLocation) {
+                        ForEach(WeatherLocation.allCases) { loc in
+                            Text(loc.displayName).tag(loc)
+                        }
+                    }
+                }
+                Text("선택한 위치의 현재 날씨가 비·눈·뇌우면 패널에 파티클이 내립니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
             Section("펫") {
                 Toggle("Claude 차트에 펫 표시", isOn: $settings.petClaudeEnabled)
                 if settings.ownedPets.isEmpty {

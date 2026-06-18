@@ -120,6 +120,41 @@ enum Quotes {
         perPet[kind]?.randomElement() ?? "..."
     }
 
+    /// 날씨별 공통 대사 — 종(kind) 무관. 현재 위치가 비/눈/뇌우일 때 `.quote` 동작에서
+    /// 일정 확률로 종 전용 대사 대신 노출된다 (clear면 사용 안 함).
+    /// 톤은 perPet과 동일하게 dev/CS 밈 + 귀여움. ~20자 이하 권장(말풍선 크기).
+    static let weatherCommon: [WeatherCondition: [String]] = [
+        .rain: [
+            "git push 하기 좋은 비네요.",
+            "빗소리 ASMR로 집중 모드.",
+            "우산 챙겼죠? 난 방수.",
+            "장마철엔 빌드도 눅눅해요.",
+            "비 오니 커밋이 잘돼요.",
+            "비 올 땐 fan-out 폭주 예감.",
+        ],
+        .snow: [
+            "눈 쌓이듯 커밋도 쌓여요.",
+            "함박눈처럼 로그가 쏟아져요.",
+            "눈사람도 stateless해요.",
+            "추워요... GC도 얼겠어요.",
+            "화이트아웃, 화면도 하얘요.",
+            "눈길 배포는 미끄러워요.",
+        ],
+        .thunder: [
+            "번개처럼 빠른 hot reload!",
+            "천둥 칠 땐 prod 안 만져요.",
+            "우르릉... 서버도 떨려요.",
+            "낙뢰 주의! UPS 확인했죠?",
+            "번쩍! 그건 deploy 아니에요.",
+        ],
+    ]
+
+    /// 날씨 공통 대사 한 줄. clear거나 해당 풀이 없으면 nil (→ 호출 측이 종 전용으로 폴백).
+    static func randomWeather(for condition: WeatherCondition) -> String? {
+        guard let pool = weatherCommon[condition], !pool.isEmpty else { return nil }
+        return pool.randomElement()
+    }
+
     // 1시간 동안 쉬지 않고 쓰면 펫이 외치는 휴식 권유 멘트.
     // 노란 spiky 말풍선으로 표시되며 클릭하면 사라진다.
     // (종 무관 — 어떤 펫이든 동일한 wellness 풀에서 뽑는다.)

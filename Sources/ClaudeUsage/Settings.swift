@@ -64,6 +64,17 @@ final class Settings: ObservableObject {
         didSet { UserDefaults.standard.set(bigDropThreshold, forKey: Keys.bigDropThreshold) }
     }
 
+    // MARK: - 날씨 이펙트
+
+    /// 메인 패널에 실제 날씨(비/눈/뇌우) 파티클을 표시할지. 기본 ON.
+    @Published var weatherEffectEnabled: Bool {
+        didSet { UserDefaults.standard.set(weatherEffectEnabled, forKey: Keys.weatherEffectEnabled) }
+    }
+    /// 날씨를 가져올 기준 위치 (고정 2곳). 기본 U타워(정자). IP/위치권한 없이 고정 좌표 사용.
+    @Published var weatherLocation: WeatherLocation {
+        didSet { UserDefaults.standard.set(weatherLocation.rawValue, forKey: Keys.weatherLocation) }
+    }
+
     // MARK: - Gacha (M2)
 
     /// 가챠 화폐 잔액. CoinLedger가 사용량 기반으로 적립.
@@ -411,6 +422,8 @@ final class Settings: ObservableObject {
         self.launchAtLogin = (SMAppService.mainApp.status == .enabled)
         let storedBigDrop = (d.object(forKey: Keys.bigDropThreshold) as? Double) ?? 0.40
         self.bigDropThreshold = max(0.10, min(0.80, storedBigDrop))
+        self.weatherEffectEnabled = (d.object(forKey: Keys.weatherEffectEnabled) as? Bool) ?? true
+        self.weatherLocation = (d.string(forKey: Keys.weatherLocation).flatMap { WeatherLocation(rawValue: $0) }) ?? .utower
 
         // Gacha 필드 로드
         // 마이그레이션 판정용으로 legacy 키 존재 여부를 init 안에서 미리 캡처.
@@ -857,6 +870,9 @@ final class Settings: ObservableObject {
         static let themeClaudeOverride = "settings.themeClaudeOverride"
         static let themeCursorOverride = "settings.themeCursorOverride"
         static let bigDropThreshold = "settings.bigDropThreshold"
+        // 날씨 이펙트
+        static let weatherEffectEnabled = "settings.weatherEffectEnabled"
+        static let weatherLocation      = "settings.weatherLocation"
         // Gacha (M2)
         static let coins                       = "settings.coins"
         static let gachaTickets                = "settings.gachaTickets"
