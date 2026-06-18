@@ -375,9 +375,16 @@ struct WalkingCat: View {
                 if t < Self.rewardAmountDuration {
                     let yOffset = -t * 38
                     let opacity = max(0, 1 - t / Self.rewardAmountDuration)
+                    // 보상 액수가 +30~+500으로 자릿수가 늘 수 있어, 펫이 패널 끝에 있을 때
+                    // 말풍선이 밖으로 잘리지 않게 plot 영역 안으로 x를 클램프 (+ fixedSize로 한 줄 보장).
+                    let halfBubble: CGFloat = 24
+                    let lo = plotFrame.minX + halfBubble
+                    let hi = plotFrame.maxX - halfBubble
+                    let clampedX = hi > lo ? min(max(r.origin.x, lo), hi) : r.origin.x
                     bubble("+\(r.amount)", fontSize: 11, weight: .medium, cornerRadius: 6, padH: 6, padV: 2.5)
+                        .fixedSize()
                         .opacity(opacity)
-                        .position(x: r.origin.x, y: r.origin.y + yOffset - 10)
+                        .position(x: clampedX, y: r.origin.y + yOffset - 10)
                 }
             }
         }

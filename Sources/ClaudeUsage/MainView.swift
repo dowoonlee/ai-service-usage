@@ -239,7 +239,6 @@ struct MainView: View {
                 Button("지금 새로고침") {
                     Task { await vm.refreshClaude(); await vm.refreshCursor() }
                 }
-                Toggle("날씨 효과 표시", isOn: $settings.weatherEffectEnabled)
                 Button("업데이트 확인...") { Updater.shared.checkForUpdates() }
                 Button("설정...") { onSettings() }
                 Button("기여자 보기...") { onContributors() }

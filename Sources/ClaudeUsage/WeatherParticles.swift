@@ -112,7 +112,10 @@ private struct ParticleField: View {
                         let sway = p.swayAmp == 0 ? 0 : p.swayAmp * sin(t * p.swayFreq + p.swayPhase)
                         // 비는 낙하 진행에 비례해 수평으로 흘러 사선이 됨.
                         let xNorm = p.x + sway + p.drift * yNorm
-                        let px = (xNorm.truncatingRemainder(dividingBy: 1.2)) * w
+                        // [0,1)로 정규화 — 음수(왼쪽 시작)·1 초과(사선 drift)를 모두 wrap해
+                        // 좌우 가장자리까지 파티클이 균일하게 채워지도록.
+                        let xWrapped = xNorm - floor(xNorm)
+                        let px = xWrapped * w
                         let py = yNorm * (h + 12) - 6      // 위/아래로 살짝 넘겨 화면 밖에서 진입/이탈
                         Image(nsImage: sprite)
                             .resizable()
