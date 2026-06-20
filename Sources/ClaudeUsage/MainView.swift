@@ -41,15 +41,15 @@ fileprivate extension View {
         }
     }
 
-    /// chartOverlay 안에 펫 (WalkingCat)을 마운트하는 공통 블록.
-    /// proxy + GeometryReader 으로 plotFrame 계산해서 WalkingCat 에 넘긴다.
+    /// chartOverlay 안에 펫 파티(WalkingCat 여러 마리)를 마운트하는 공통 블록.
+    /// proxy + GeometryReader 으로 plotFrame 계산해서 각 멤버 WalkingCat 에 넘긴다.
     /// 차트 라인이 사용하는 것과 동일한 `points`를 넘겨야 펫이 plot 범위를 벗어나지 않는다.
+    /// 멤버별 이펙트는 `equippedEffects` 클로저(kind→set)로 조회. wellness 말풍선은 리더(idx 0)만.
     func chartPet(
         enabled: Bool,
         points: [(Date, Double)],
-        kind: PetKind,
-        variant: Int = 0,
-        effects: Set<EffectKind> = [],
+        party: [PetSelection],
+        equippedEffects: @escaping (PetKind) -> Set<EffectKind>,
         pct: Double?,
         anxietyAt: Double,
         bigDropThreshold: Double,
@@ -58,22 +58,26 @@ fileprivate extension View {
         onDismissWellness: (() -> WellnessDismissResult)? = nil
     ) -> some View {
         chartOverlay { proxy in
-            if enabled {
+            if enabled && !party.isEmpty {
                 GeometryReader { geo in
                     let plotFrame = geo[proxy.plotAreaFrame]
-                    WalkingCat(
-                        points: points,
-                        proxy: proxy,
-                        plotFrame: plotFrame,
-                        kind: kind,
-                        variant: variant,
-                        effects: effects,
-                        mood: PetMood.from(pct: pct, anxietyAt: anxietyAt),
-                        weather: weather,
-                        bigDropThreshold: bigDropThreshold,
-                        wellnessNudge: wellnessNudge,
-                        onDismissWellness: onDismissWellness
-                    )
+                    ForEach(Array(party.enumerated()), id: \.element.kind) { idx, sel in
+                        WalkingCat(
+                            points: points,
+                            proxy: proxy,
+                            plotFrame: plotFrame,
+                            kind: sel.kind,
+                            variant: sel.variant,
+                            effects: equippedEffects(sel.kind),
+                            petIndex: idx,
+                            partyCount: party.count,
+                            mood: PetMood.from(pct: pct, anxietyAt: anxietyAt),
+                            weather: weather,
+                            bigDropThreshold: bigDropThreshold,
+                            wellnessNudge: idx == 0 ? wellnessNudge : nil,
+                            onDismissWellness: idx == 0 ? onDismissWellness : nil
+                        )
+                    }
                 }
             }
         }
@@ -517,13 +521,10 @@ struct ClaudeSection: View {
 
     private var sparkline: some View {
         Group {
-            let recent = Array(vm.claudeHistory.suffix(48))
-            // nil 또는 0 스냅샷은 차트에서 제외.
-            // fiveHourPct=0은 "5h 창은 활성이지만 사용량 0" — 라인이 중간에 y=0 평지가 되어
-            // AreaMark가 0 높이로 텅 비어 보이는 문제를 일으킴.
-            let validData: [(Date, Double)] = recent.compactMap { s in
-                s.fiveHourPct.flatMap { v in v > 0 ? (s.takenAt, v) : nil }
-            }
+            // 현재 5h 창에 속하는 점만 — 이전(만료) 창이 섞이면 두 세션 사이
+            // 수시간 빈 구간을 가로지르는 대각선 + 색칠 튐이 생긴다. (ViewModel 헬퍼 참조)
+            // fiveHourPct=0/nil 도 여기서 함께 제외된다.
+            let validData: [(Date, Double)] = ViewModel.claudeFiveHourSeries(Array(vm.claudeHistory.suffix(48)))
             if validData.count >= 2 {
                 let values = validData.map(\.1)
                 let dataMax = values.max() ?? 0
@@ -541,13 +542,13 @@ struct ClaudeSection: View {
                             x: .value("t", item.0),
                             y: .value("v", item.1)
                         )
-                        .interpolationMethod(.monotone)
+                        .interpolationMethod(.linear)
                         .foregroundStyle(claudeTheme.gradient)
                         LineMark(
                             x: .value("t", item.0),
                             y: .value("v", item.1)
                         )
-                        .interpolationMethod(.monotone)
+                        .interpolationMethod(.linear)
                         .foregroundStyle(claudeTheme.lineColor)
                     }
                     if settings.notifyEnabled {
@@ -567,9 +568,8 @@ struct ClaudeSection: View {
                 .chartPet(
                     enabled: settings.petClaudeEnabled && !settings.ownedPets.isEmpty,
                     points: validData,
-                    kind: settings.petClaudeKind,
-                    variant: settings.petClaudeVariant,
-                    effects: settings.equippedEffects[settings.petClaudeKind] ?? [],
+                    party: settings.petClaudeParty,
+                    equippedEffects: { settings.equippedEffects[$0] ?? [] },
                     pct: vm.claudeCurrent?.fiveHourPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
@@ -820,9 +820,8 @@ struct CursorSection: View {
                 .chartPet(
                     enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty,
                     points: points,
-                    kind: settings.petCursorKind,
-                    variant: settings.petCursorVariant,
-                    effects: settings.equippedEffects[settings.petCursorKind] ?? [],
+                    party: settings.petCursorParty,
+                    equippedEffects: { settings.equippedEffects[$0] ?? [] },
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
@@ -841,11 +840,11 @@ struct CursorSection: View {
     private var proRequestsChart: some View {
         Group {
             let recent = Array(vm.cursorHistory.suffix(96))
-            // nil 또는 0 totalRequests 스냅샷 제거.
-            // 0은 라인을 y=0 평지로 만들어 AreaMark가 텅 비어 보임.
-            let validData: [(Date, Double)] = recent.compactMap { s in
+            // nil 또는 0 totalRequests 스냅샷 제거 (0은 라인을 y=0 평지로 만들어 AreaMark가 텅 빔).
+            // 같은 초 중복 폴은 ForEach(id: \.0) id 충돌로 삼각형 노치를 만드므로 합친다.
+            let validData: [(Date, Double)] = ViewModel.dedupAdjacentByTime(recent.compactMap { s in
                 s.totalRequests.flatMap { v in v > 0 ? (s.takenAt, Double(v)) : nil }
-            }
+            })
             if validData.count >= 2 {
                 let dataMax = (validData.map(\.1).max() ?? 0)
                 let (ymax, yValues) = niceYMax(dataMax: dataMax)
@@ -868,13 +867,13 @@ struct CursorSection: View {
                             x: .value("t", item.0),
                             y: .value("v", item.1)
                         )
-                        .interpolationMethod(.monotone)
+                        .interpolationMethod(.linear)
                         .foregroundStyle(cursorTheme.gradient)
                         LineMark(
                             x: .value("t", item.0),
                             y: .value("v", item.1)
                         )
-                        .interpolationMethod(.monotone)
+                        .interpolationMethod(.linear)
                         .foregroundStyle(cursorTheme.lineColor)
                     }
                     ForEach(thresholdLines, id: \.0) { (t, r) in
@@ -889,9 +888,8 @@ struct CursorSection: View {
                 .chartPet(
                     enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty,
                     points: validData,
-                    kind: settings.petCursorKind,
-                    variant: settings.petCursorVariant,
-                    effects: settings.equippedEffects[settings.petCursorKind] ?? [],
+                    party: settings.petCursorParty,
+                    equippedEffects: { settings.equippedEffects[$0] ?? [] },
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,

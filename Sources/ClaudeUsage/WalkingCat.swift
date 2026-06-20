@@ -62,6 +62,9 @@ struct WalkingCat: View {
     var variant: Int = 0
     /// 이 펫에 적용할 RP 코스메틱 이펙트 (PetKind 단위 귀속). 비어 있으면 렌더 안 함.
     var effects: Set<EffectKind> = []
+    /// 파티 내 인덱스/총원 — 여러 마리가 같은 라인 위에서 겹치지 않도록 표시 x를 분산하는 데 사용.
+    var petIndex: Int = 0
+    var partyCount: Int = 1
     var mood: PetMood = .neutral
     /// 현재 날씨 — `.quote`에서 날씨 공통대사를 섞는 데 사용. clear면 종 전용만.
     var weather: WeatherCondition = .clear
@@ -110,7 +113,7 @@ struct WalkingCat: View {
         }
             .onPreferenceChange(QuoteBubbleSizeKey.self) { bubbleSize = $0 }
             .onPreferenceChange(WellnessBubbleSizeKey.self) { wellnessBubbleSize = $0 }
-            .onAppear { ctrl.start() }
+            .onAppear { ctrl.seedPhase(index: petIndex, count: partyCount); ctrl.start() }
             .onDisappear {
                 ctrl.stop()
                 wellnessBlinkTask?.cancel()
@@ -495,8 +498,14 @@ struct WalkingCat: View {
         let y = sampleY(at: targetDate)
         guard let xPos = proxy.position(forX: targetDate),
               let yPos = proxy.position(forY: y) else { return nil }
-        return CGPoint(x: plotFrame.minX + xPos, y: plotFrame.minY + yPos)
+        // 파티 멤버가 같은 ctrl.x에 있어도 겹치지 않도록 중심 기준 좌우로 분산.
+        let offsetX = partyCount > 1
+            ? (CGFloat(petIndex) - CGFloat(partyCount - 1) / 2) * Self.partySpacing : 0
+        return CGPoint(x: plotFrame.minX + xPos + offsetX, y: plotFrame.minY + yPos)
     }
+
+    /// 파티 멤버 간 표시 x 간격(pt).
+    private static let partySpacing: CGFloat = 16
 
     // 인접 두 점 사이 선형 보간. 차트가 .monotone이면 약간 어긋날 수 있으나
     // 작은 sparkline에서는 시각적 차이가 미미하다.
@@ -568,6 +577,13 @@ final class PetController: ObservableObject {
     private var lastTick: Date = Date()
     private var frameAccumulator: Double = 0
     private var timer: Timer?
+
+    /// 파티 멤버가 같은 위치(기본 x=0.5)에서 동시 출발해 겹치지 않도록 초기 x를 균등 분산.
+    /// 1마리면 0.5 유지. start() 전에 1회 호출. (이후 독립 워킹 + 경계 반사로 자연스럽게 어긋남.)
+    func seedPhase(index: Int, count: Int) {
+        guard count > 1 else { return }
+        x = (Double(index) + 0.5) / Double(count)
+    }
 
     func start() {
         guard timer == nil else { return }
