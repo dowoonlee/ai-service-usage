@@ -296,4 +296,99 @@ actor CursorAPI {
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
     }
+
+    // MARK: - 로컬 진단 (--check)
+
+    // refresh()와 같은 토큰/쿠키/parseUsage/parseAggregatedCents 경로를 그대로 타되, throw 대신
+    // 단계별 status·raw body·파싱 결과를 구조체에 담아 반환한다. raw body엔 모델별 cost가
+    // 들어있으므로 CLI stdout 전용 — BugReport 경로엔 안 쓴다.
+    func diagnose() async -> CursorDiagnostics {
+        var d = CursorDiagnostics()
+        d.dbExists = FileManager.default.fileExists(atPath: dbPath)
+        guard d.dbExists else { d.fatal = "Cursor 앱 미설치 (state.vscdb 없음)"; return d }
+        guard let jwt = try? readAccessToken(), !jwt.isEmpty else {
+            d.fatal = "Cursor 로그인 토큰 없음 (cursorAuth/accessToken)"
+            return d
+        }
+        d.tokenFound = true
+        guard let userId = try? decodeUserID(jwt: jwt) else {
+            d.fatal = "JWT 디코드 실패"
+            return d
+        }
+        d.userIdOK = true
+        let planName = readString(key: "cursorAuth/stripeMembershipType")
+        let plan = CursorPlan.from(planName)
+        d.plan = plan
+        d.planName = planName
+        let cookie = "\(pctEncode(userId))%3A%3A\(pctEncode(jwt))"
+
+        let (usageData, usageStatus) = await rawSend(get: "https://cursor.com/api/usage?user=\(pctEncode(userId))", cookie: cookie)
+        d.usageStatus = usageStatus
+        d.usageRawData = usageData
+        if let usageData, let snap = try? parseUsage(data: usageData, planName: planName, plan: plan) {
+            d.snapshot = snap
+        }
+
+        if plan == .ultra {
+            let (aggData, aggStatus) = await rawSend(
+                post: "https://cursor.com/api/dashboard/get-aggregated-usage-events",
+                cookie: cookie, body: "{}"
+            )
+            d.aggStatus = aggStatus
+            d.aggRawData = aggData
+            if let aggData {
+                let cents = parseAggregatedCents(data: aggData)
+                d.snapshot?.totalCents = cents
+                d.snapshot?.maxCents = 40000
+            }
+        }
+        return d
+    }
+
+    // 진단 전용: send()와 달리 throw하지 않고 (data?, status)를 노출. 헤더는 실제 경로와 동일.
+    private func rawSend(get urlString: String, cookie: String) async -> (Data?, Int) {
+        guard let url = URL(string: urlString) else { return (nil, -1) }
+        var req = URLRequest(url: url, timeoutInterval: 10)
+        req.setValue("WorkosCursorSessionToken=\(cookie)", forHTTPHeaderField: "Cookie")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue(ua, forHTTPHeaderField: "User-Agent")
+        return await perform(req)
+    }
+
+    private func rawSend(post urlString: String, cookie: String, body: String) async -> (Data?, Int) {
+        guard let url = URL(string: urlString) else { return (nil, -1) }
+        var req = URLRequest(url: url, timeoutInterval: 15)
+        req.httpMethod = "POST"
+        req.httpBody = body.data(using: .utf8)
+        req.setValue("WorkosCursorSessionToken=\(cookie)", forHTTPHeaderField: "Cookie")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("https://cursor.com", forHTTPHeaderField: "Origin")
+        req.setValue("https://cursor.com/dashboard", forHTTPHeaderField: "Referer")
+        req.setValue(ua, forHTTPHeaderField: "User-Agent")
+        return await perform(req)
+    }
+
+    private func perform(_ req: URLRequest) async -> (Data?, Int) {
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            return (data, (resp as? HTTPURLResponse)?.statusCode ?? -1)
+        } catch {
+            return (nil, -1)
+        }
+    }
+}
+
+struct CursorDiagnostics: Sendable {
+    var dbExists = false
+    var tokenFound = false
+    var userIdOK = false
+    var plan: CursorPlan = .unknown
+    var planName: String?
+    var usageStatus: Int?
+    var usageRawData: Data?
+    var aggStatus: Int?
+    var aggRawData: Data?
+    var snapshot: CursorSnapshot?
+    var fatal: String?
 }

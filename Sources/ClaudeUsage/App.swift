@@ -11,6 +11,14 @@ struct ClaudeUsageApp {
             TUIApp.run()  // 자체 RunLoop blocks; 여기서 안 돌아옴.
             return
         }
+        // 로컬 진단: 사용량 수집/파싱 정상 여부를 점검하고 stdout 출력 후 종료.
+        // --raw 면 원본 응답 JSON도 덤프. DiagnosticsCLI.run 내부에서 exit() 호출.
+        if CommandLine.arguments.contains("--check") {
+            let raw = CommandLine.arguments.contains("--raw")
+            Task.detached { await DiagnosticsCLI.run(raw: raw) }
+            RunLoop.main.run()  // exit() 호출될 때까지 main thread 유지
+            return
+        }
         MainActor.assumeIsolated {
             let app = NSApplication.shared
             let delegate = AppDelegate()

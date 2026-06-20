@@ -144,4 +144,73 @@ actor UsageAPI {
             extraUsageUsedCredits: r.extra_usage?.used_credits
         )
     }
+
+    // MARK: - 로컬 진단 (--check)
+
+    // refresh()와 같은 session/derivePlanName/toSnapshot 경로를 그대로 타되, throw 대신
+    // 단계별 status·raw body·파싱 결과를 구조체에 담아 반환한다. 캐시는 무시하고 매번 fresh.
+    // raw body엔 org uuid·capabilities가 들어있으므로 CLI stdout 전용 — BugReport 경로엔 안 쓴다.
+    func diagnose() async -> ClaudeDiagnostics {
+        var d = ClaudeDiagnostics()
+        guard let key = currentSessionKey(), !key.isEmpty else {
+            d.fatal = "로그인 안 됨 — Keychain에 sessionKey 없음 (GUI 앱에서 1회 로그인 필요)"
+            return d
+        }
+        d.loggedIn = true
+        let sess = session(for: key)
+
+        let orgURL = base.appendingPathComponent("api/organizations")
+        let (orgData, orgStatus) = await rawGet(sess: sess, url: orgURL)
+        d.orgStatus = orgStatus
+        d.orgRawData = orgData
+        if let orgData,
+           let orgs = try? JSONDecoder().decode([APIOrganization].self, from: orgData),
+           let first = orgs.first {
+            d.orgID = first.uuid
+            if let raw = try? JSONSerialization.jsonObject(with: orgData) as? [[String: Any]],
+               let org0 = raw.first {
+                let caps = (org0["capabilities"] as? [String]) ?? []
+                let tier = (org0["rate_limit_tier"] as? String) ?? ""
+                d.planName = derivePlanName(capabilities: caps, rateLimitTier: tier)
+            }
+        }
+        guard let orgID = d.orgID else {
+            d.fatal = "조직 ID를 파싱하지 못함 (organizations 응답을 --raw로 확인)"
+            return d
+        }
+
+        let usageURL = base.appendingPathComponent("api/organizations/\(orgID)/usage")
+        let (usageData, usageStatus) = await rawGet(sess: sess, url: usageURL)
+        d.usageStatus = usageStatus
+        d.usageRawData = usageData
+        if let usageData,
+           let r = try? JSONDecoder().decode(APIUsageResponse.self, from: usageData) {
+            var snap = toSnapshot(r)
+            snap.planName = d.planName
+            d.snapshot = snap
+        }
+        return d
+    }
+
+    // 진단 전용: 실제 get()과 달리 throw하지 않고 (data?, status)를 그대로 노출한다.
+    private func rawGet(sess: URLSession, url: URL) async -> (Data?, Int) {
+        do {
+            let (data, resp) = try await sess.data(from: url)
+            return (data, (resp as? HTTPURLResponse)?.statusCode ?? -1)
+        } catch {
+            return (nil, -1)
+        }
+    }
+}
+
+struct ClaudeDiagnostics: Sendable {
+    var loggedIn = false
+    var orgStatus: Int?
+    var orgRawData: Data?
+    var orgID: String?
+    var planName: String?
+    var usageStatus: Int?
+    var usageRawData: Data?
+    var snapshot: UsageSnapshot?
+    var fatal: String?   // 더 진행할 수 없게 만든 치명적 사유 (있으면 그 단계에서 중단)
 }
