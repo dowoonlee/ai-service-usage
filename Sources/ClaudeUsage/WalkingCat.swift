@@ -60,6 +60,8 @@ struct WalkingCat: View {
     var kind: PetKind = .fox
     /// 색상 변종 (이로치). 0 = 기본, 1/2/3 = shiny tier. hueRotation 각도로 매핑.
     var variant: Int = 0
+    /// 이 펫에 적용할 RP 코스메틱 이펙트 (PetKind 단위 귀속). 비어 있으면 렌더 안 함.
+    var effects: Set<EffectKind> = []
     var mood: PetMood = .neutral
     /// 현재 날씨 — `.quote`에서 날씨 공통대사를 섞는 데 사용. clear면 종 전용만.
     var weather: WeatherCondition = .clear
@@ -100,7 +102,9 @@ struct WalkingCat: View {
         // 일시적으로 비어 sprite가 사라질 때 같이 사라진다. ZStack의 sibling으로 빼서 보상
         // 연출이 1초 내내 보이도록 보장.
         return ZStack {
+            effectLayer(.backdrop)
             sprite(descent: descent)
+            effectLayer(.particles)
             coinPopOverlay.allowsHitTesting(false)
             rewardAmountOverlay.allowsHitTesting(false)
         }
@@ -133,6 +137,24 @@ struct WalkingCat: View {
                     }
                 }
             }
+    }
+
+    /// RP 코스메틱 이펙트 레이어. 펫과 같은 좌표(`positionFor`)에 backdrop(광원)/particles(파티클)로
+    /// 나눠 그린다. `effects`가 비면 아무것도 렌더하지 않는다.
+    @ViewBuilder
+    private func effectLayer(_ placement: PetEffectOverlay.Placement) -> some View {
+        if !effects.isEmpty, let p = positionFor(xNorm: ctrl.x) {
+            let h = displayHeight
+            PetEffectOverlay(
+                effects: effects,
+                placement: placement,
+                center: CGPoint(x: p.x, y: p.y - h / 2),
+                footY: p.y,
+                petHeight: h,
+                facingRight: ctrl.facingRight,
+                isMoving: ctrl.action == .walk || ctrl.action == .run
+            )
+        }
     }
 
     @ViewBuilder

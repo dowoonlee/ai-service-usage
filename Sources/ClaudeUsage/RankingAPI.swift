@@ -100,6 +100,8 @@ actor RankingAPI {
         let previousMonth: PreviousMonth?
         /// 본인의 미수령 보상 — 옵트인 + 이전 달 Top 3 진입 시 1개 row.
         let pendingReward: PendingReward?
+        /// 본인의 미수령 RP 보상 — 랭킹 순위 정산(월간/주간). coins와 별도 원장. 구버전 서버 nil.
+        let pendingRpReward: PendingRpReward?
     }
 
     struct PreviousMonth: Decodable, Sendable {
@@ -130,6 +132,15 @@ actor RankingAPI {
         var dedupKey: String { "\(period).\(rank)" }
     }
 
+    struct PendingRpReward: Decodable, Sendable {
+        let period: String                  // 월간 "YYYY-MM" / 주간 "IYYY-Www"
+        let periodType: String              // "monthly" | "weekly"
+        let rank: Int                       // 전체 순위 (1~)
+        let rp: Int                         // 보상 RP
+        /// dedup key — "type.period.rank" 형식. Settings.claimedRpRewards에 매칭.
+        var dedupKey: String { "\(periodType).\(period).\(rank)" }
+    }
+
     struct ClaimRewardPayload: Encodable {
         let deviceId: String
         let period: String
@@ -139,10 +150,14 @@ actor RankingAPI {
     struct ClaimRewardRequest: Encodable {
         let payload: ClaimRewardPayload
         let signature: String
+        /// "coins"(기본) | "rp" — 서명 페이로드 밖 라우팅 필드 (서버가 어느 원장에서 수령할지 결정).
+        let rewardType: String?
     }
     struct ClaimRewardResponse: Decodable {
         let alreadyClaimed: Bool
-        let rewardCoins: Int
+        let rewardType: String?      // "coins" | "rp" (구버전 서버 nil)
+        let rewardCoins: Int?        // coins claim 시
+        let rp: Int?                 // rp claim 시
         let claimedAt: String
     }
 
@@ -373,11 +388,14 @@ actor RankingAPI {
     /// 명예의 전당 보상 수령. 클라이언트가 reward 알림 + credit 후 호출.
     /// 이미 claim된 경우 서버가 `alreadyClaimed=true`로 idempotent 응답 — 클라이언트는 무시 가능.
     func claimReward(deviceId: String, period: String, rank: Int,
+                     rewardType: String = "coins",
                      hmacKeyBase64: String) async throws -> ClaimRewardResponse {
+        // 서명 페이로드는 {deviceId, period, rank, ts}로 불변 — rewardType은 서명에 넣지 않는다
+        // (서버 verifyHmac과 일치 + 기존 coins claim 호환). rewardType은 request 레벨 라우팅 필드.
         let payload = ClaimRewardPayload(deviceId: deviceId, period: period, rank: rank,
                                          ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signClaim(payload: payload, keyBase64: hmacKeyBase64)
-        let req = ClaimRewardRequest(payload: payload, signature: sig)
+        let req = ClaimRewardRequest(payload: payload, signature: sig, rewardType: rewardType)
         return try await post(path: "claim-reward", body: req)
     }
 

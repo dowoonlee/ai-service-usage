@@ -56,6 +56,9 @@ Deno.serve(async (req: Request) => {
   // 직전 달 finalize lazy trigger — 첫 호출자가 트리거. UNIQUE 제약으로 race-safe.
   // 호출당 1회 추가 쿼리이지만 EXISTS 가드로 이미 finalized면 즉시 return.
   await db.rpc("finalize_previous_month_if_needed");
+  // RP 정산 — 월간/주간 lazy trigger. 각 함수가 EXISTS 가드로 이미 정산됐으면 즉시 return.
+  await db.rpc("finalize_monthly_rp_if_needed");
+  await db.rpc("finalize_weekly_rp_if_needed");
 
   // Top N — 월간 보드 + profile_json. device_id는 메달 매핑 internal용 — 응답엔 절대 미노출.
   const { data: top, error: topErr } = await db
@@ -190,6 +193,28 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // 본인의 미수령 RP 보상 (rp_rewards) — coins와 별도 원장. periodType으로 월간/주간 구분.
+  // 첫 미수령 1건만 반환 (클라가 claim 후 다음 폴링에서 다음 건 수령).
+  let pendingRpReward: unknown = null;
+  if (deviceId) {
+    const { data: rpUnclaimed } = await db
+      .from("rp_rewards")
+      .select("period, period_type, rank, rp_amount")
+      .eq("device_id", deviceId)
+      .is("claimed_at", null)
+      .order("finalized_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (rpUnclaimed) {
+      pendingRpReward = {
+        period: rpUnclaimed.period,
+        periodType: rpUnclaimed.period_type,
+        rank: rpUnclaimed.rank,
+        rp: rpUnclaimed.rp_amount,
+      };
+    }
+  }
+
   // 다음 달 1일 00:00 KST를 ISO 형태로 노출 — 클라이언트가 "리셋까지 N일" 표시에 사용.
   const now = new Date();
   const seoulOffsetMs = 9 * 60 * 60 * 1000;
@@ -207,5 +232,6 @@ Deno.serve(async (req: Request) => {
     periodResetAt: nextResetUtc.toISOString(),
     previousMonth,
     pendingReward,
+    pendingRpReward,
   });
 });

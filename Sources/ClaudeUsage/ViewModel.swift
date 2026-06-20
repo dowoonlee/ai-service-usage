@@ -560,26 +560,49 @@ final class ViewModel: ObservableObject {
             let resp = try await RankingAPI.shared.fetchLeaderboard(deviceId: s.rankingDeviceID)
             // 본인 누적 메달 캐시 갱신 — pendingReward 유무와 무관하게 매 cycle 반영.
             s.applyMyMedals(resp.myMedals)
-            guard let reward = resp.pendingReward else { return }
-            let dedupKey = reward.dedupKey
-            if !s.claimedPodiumPeriods.contains(dedupKey) {
-                CoinLedger.shared.creditBonus(reward.coins, reason: "podium.\(dedupKey)")
-                s.claimedPodiumPeriods.insert(dedupKey)
-                NotificationManager.shared.podiumRewardEarned(
-                    period: reward.period, rank: reward.rank, coins: reward.coins
-                )
-                DebugLog.log("Podium reward: \(dedupKey) +\(reward.coins) coin")
+            // coins 보상 (명예의 전당 Top3) — credit 먼저 + 로컬 dedup, 서버 claim은 마킹용.
+            if let reward = resp.pendingReward {
+                let dedupKey = reward.dedupKey
+                if !s.claimedPodiumPeriods.contains(dedupKey) {
+                    CoinLedger.shared.creditBonus(reward.coins, reason: "podium.\(dedupKey)")
+                    s.claimedPodiumPeriods.insert(dedupKey)
+                    NotificationManager.shared.podiumRewardEarned(
+                        period: reward.period, rank: reward.rank, coins: reward.coins
+                    )
+                    DebugLog.log("Podium reward: \(dedupKey) +\(reward.coins) coin")
+                }
+                // 서버 측 claim — 실패해도 다음 cycle에 자동 재시도 (idempotent로 안전).
+                do {
+                    _ = try await RankingAPI.shared.claimReward(
+                        deviceId: s.rankingDeviceID,
+                        period: reward.period,
+                        rank: reward.rank,
+                        hmacKeyBase64: hmacKey
+                    )
+                } catch {
+                    DebugLog.log("Podium claim server failed: \(error.localizedDescription) — retry next cycle")
+                }
             }
-            // 서버 측 claim — 실패해도 다음 cycle에 자동 재시도 (idempotent로 안전).
-            do {
-                _ = try await RankingAPI.shared.claimReward(
-                    deviceId: s.rankingDeviceID,
-                    period: reward.period,
-                    rank: reward.rank,
-                    hmacKeyBase64: hmacKey
-                )
-            } catch {
-                DebugLog.log("Podium claim server failed: \(error.localizedDescription) — retry next cycle")
+
+            // RP 보상 (순위 정산, 월간/주간) — 서버 claim의 alreadyClaimed로 중복을 판정한 뒤 credit하므로
+            // 백업 복원 후에도 이중 적립되지 않는다 (coins의 credit-먼저 패턴과 의도적으로 다름).
+            if let rp = resp.pendingRpReward, !s.claimedRpRewards.contains(rp.dedupKey) {
+                do {
+                    let claimResp = try await RankingAPI.shared.claimReward(
+                        deviceId: s.rankingDeviceID,
+                        period: rp.period,
+                        rank: rp.rank,
+                        rewardType: "rp",
+                        hmacKeyBase64: hmacKey
+                    )
+                    if !claimResp.alreadyClaimed {
+                        RankPointLedger.shared.creditReward(rp.rp, reason: "rank.\(rp.dedupKey)")
+                        DebugLog.log("RP reward: \(rp.dedupKey) +\(rp.rp) RP")
+                    }
+                    s.claimedRpRewards.insert(rp.dedupKey)
+                } catch {
+                    DebugLog.log("RP claim failed: \(error.localizedDescription) — retry next cycle")
+                }
             }
         } catch {
             DebugLog.log("Podium check failed: \(error.localizedDescription)")

@@ -49,6 +49,7 @@ fileprivate extension View {
         points: [(Date, Double)],
         kind: PetKind,
         variant: Int = 0,
+        effects: Set<EffectKind> = [],
         pct: Double?,
         anxietyAt: Double,
         bigDropThreshold: Double,
@@ -66,6 +67,7 @@ fileprivate extension View {
                         plotFrame: plotFrame,
                         kind: kind,
                         variant: variant,
+                        effects: effects,
                         mood: PetMood.from(pct: pct, anxietyAt: anxietyAt),
                         weather: weather,
                         bigDropThreshold: bigDropThreshold,
@@ -164,96 +166,119 @@ struct MainView: View {
     }
 
     private var topBar: some View {
-        HStack {
-            Text("Usage")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Spacer()
-            // 코인 잔액 — 클릭하면 가챠/도감 창 열림
-            Button {
-                GachaWindowController.shared.present()
-            } label: {
-                HStack(spacing: 3) {
-                    CoinIcon(size: 12)
-                    Text("\(settings.coins)")
-                        .font(.system(size: 11, weight: .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(.primary)
-                    if settings.gachaTickets > 0 {
-                        Image(systemName: "ticket.fill")
+        VStack(spacing: 4) {
+            // 1줄 — 타이틀 · 화폐(코인/티켓 · RP) · 메뉴
+            HStack {
+                Text("Usage")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // 코인 잔액 — 클릭하면 가챠/도감 창 열림
+                Button {
+                    GachaWindowController.shared.present()
+                } label: {
+                    HStack(spacing: 3) {
+                        CoinIcon(size: 12)
+                        Text("\(settings.coins)")
+                            .font(.system(size: 11, weight: .medium))
+                            .monospacedDigit()
+                            .foregroundStyle(.primary)
+                        if settings.gachaTickets > 0 {
+                            Image(systemName: "ticket.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.blue)
+                            Text("\(settings.gachaTickets)")
+                                .font(.system(size: 11, weight: .medium))
+                                .monospacedDigit()
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                }
+                .buttonStyle(.borderless)
+                .help("코인 잔액 — 클릭하여 가챠 열기")
+                // RP 잔액 — 클릭하면 랭킹. 랭킹 순위 보상으로 적립되는 화폐.
+                Button {
+                    GachaWindowController.shared.present(tab: .ranking)
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "diamond.fill")
                             .font(.system(size: 10))
-                            .foregroundStyle(.blue)
-                        Text("\(settings.gachaTickets)")
+                            .foregroundStyle(.cyan)
+                        Text("\(settings.rp)")
                             .font(.system(size: 11, weight: .medium))
                             .monospacedDigit()
                             .foregroundStyle(.primary)
                     }
                 }
-            }
-            .buttonStyle(.borderless)
-            .help("코인 잔액 — 클릭하여 가챠 열기")
-            // 게시판 진입 — 코인 옆에 두어 발견성 ↑. 미확인 글 수가 우상단 빨간 배지로 표시.
-            Button {
-                BoardWindowController.shared.present()
-            } label: {
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color.cyan)
-                    .overlay(alignment: .topTrailing) {
-                        if vm.boardUnreadCount > 0 {
-                            Text("\(min(vm.boardUnreadCount, 99))")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 3)
-                                .padding(.vertical, 1)
-                                .background(Color.red)
-                                .clipShape(Capsule())
-                                .offset(x: 6, y: -4)
-                        }
-                    }
-            }
-            .buttonStyle(.borderless)
-            .help(vm.boardUnreadCount > 0 ? "게시판 (미확인 \(vm.boardUnreadCount)개)" : "게시판 열기")
-            // 오늘의 개발 운세 — 게시판 옆. 오늘 한 번도 안 봤으면 빨간 dot 배지.
-            Button {
-                onDailyFortune()
-            } label: {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.2))   // 금색 — hud 패널에서 가장 잘 보임
-                    .overlay(alignment: .topTrailing) {
-                        if !Calendar.current.isDateInToday(settings.dailyFortuneLastShownDate ?? .distantPast) {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 5, height: 5)
-                                .offset(x: 4, y: -2)
-                        }
-                    }
-            }
-            .buttonStyle(.borderless)
-            .help("오늘의 개발 운세")
-            if vm.claudeLoading || vm.cursorLoading {
-                ProgressView().controlSize(.mini)
-            }
-            Menu {
-                Button("지금 새로고침") {
-                    Task { await vm.refreshClaude(); await vm.refreshCursor() }
+                .buttonStyle(.borderless)
+                .help("RP — 클릭하여 랭킹 열기")
+                if vm.claudeLoading || vm.cursorLoading {
+                    ProgressView().controlSize(.mini)
                 }
-                Button("업데이트 확인...") { Updater.shared.checkForUpdates() }
-                Button("설정...") { onSettings() }
-                Button("기여자 보기...") { onContributors() }
-                Button("버그 리포트...") { onBugReport() }
-                Divider()
-                Button("Claude 재로그인") { onLogin() }
-                Button("Claude 로그아웃") { vm.claudeLogout() }
-                Divider()
-                Button("종료") { onQuit() }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 12))
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+            // 2줄 — 액션 버튼(게시판 · 운세) · 메뉴 우측 정렬
+            HStack(spacing: 12) {
+                Spacer()
+                // 게시판 진입 — 미확인 글 수가 우상단 빨간 배지로 표시.
+                Button {
+                    BoardWindowController.shared.present()
+                } label: {
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.cyan)
+                        .overlay(alignment: .topTrailing) {
+                            if vm.boardUnreadCount > 0 {
+                                Text("\(min(vm.boardUnreadCount, 99))")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 3)
+                                    .padding(.vertical, 1)
+                                    .background(Color.red)
+                                    .clipShape(Capsule())
+                                    .offset(x: 6, y: -4)
+                            }
+                        }
+                }
+                .buttonStyle(.borderless)
+                .help(vm.boardUnreadCount > 0 ? "게시판 (미확인 \(vm.boardUnreadCount)개)" : "게시판 열기")
+                // 오늘의 개발 운세 — 오늘 한 번도 안 봤으면 빨간 dot 배지.
+                Button {
+                    onDailyFortune()
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.2))
+                        .overlay(alignment: .topTrailing) {
+                            if !Calendar.current.isDateInToday(settings.dailyFortuneLastShownDate ?? .distantPast) {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 5, height: 5)
+                                    .offset(x: 4, y: -2)
+                            }
+                        }
+                }
+                .buttonStyle(.borderless)
+                .help("오늘의 개발 운세")
+                Menu {
+                    Button("지금 새로고침") {
+                        Task { await vm.refreshClaude(); await vm.refreshCursor() }
+                    }
+                    Button("업데이트 확인...") { Updater.shared.checkForUpdates() }
+                    Button("설정...") { onSettings() }
+                    Button("기여자 보기...") { onContributors() }
+                    Button("버그 리포트...") { onBugReport() }
+                    Divider()
+                    Button("Claude 재로그인") { onLogin() }
+                    Button("Claude 로그아웃") { vm.claudeLogout() }
+                    Divider()
+                    Button("종료") { onQuit() }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 12))
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
         }
     }
 }
@@ -544,6 +569,7 @@ struct ClaudeSection: View {
                     points: validData,
                     kind: settings.petClaudeKind,
                     variant: settings.petClaudeVariant,
+                    effects: settings.equippedEffects[settings.petClaudeKind] ?? [],
                     pct: vm.claudeCurrent?.fiveHourPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
@@ -796,6 +822,7 @@ struct CursorSection: View {
                     points: points,
                     kind: settings.petCursorKind,
                     variant: settings.petCursorVariant,
+                    effects: settings.equippedEffects[settings.petCursorKind] ?? [],
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
@@ -864,6 +891,7 @@ struct CursorSection: View {
                     points: validData,
                     kind: settings.petCursorKind,
                     variant: settings.petCursorVariant,
+                    effects: settings.equippedEffects[settings.petCursorKind] ?? [],
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,

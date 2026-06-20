@@ -95,6 +95,28 @@ final class Settings: ObservableObject {
     @Published var petUsageSeconds: [PetKind: TimeInterval] {
         didSet { persist(petUsageSeconds, forKey: Keys.petUsageSeconds) }
     }
+
+    // MARK: - RP / 코스메틱 경제 (랭킹 순위 보상 → WalkingCat 이펙트). cf. docs/DESIGN_RP_ECONOMY.md
+
+    /// RP(Rank Point) 잔액. 랭킹 순위 보상으로만 적립(coins와 수급처 분리), 이펙트 구매로 소비.
+    /// `RankPointLedger` 경유로만 변경 — 직접 mutate 금지 (CoinLedger와 동일 규약).
+    @Published var rp: Int {
+        didSet { UserDefaults.standard.set(rp, forKey: Keys.rp) }
+    }
+    /// 누적 적립 RP (소비 무시). 통계용.
+    @Published var rpTotalEarned: Int {
+        didSet { UserDefaults.standard.set(rpTotalEarned, forKey: Keys.rpTotalEarned) }
+    }
+    /// PetKind별 **보유** 이펙트 (구매한 것). variant/이로치와 무관 — 종 단위 귀속.
+    @Published var petEffects: [PetKind: Set<EffectKind>] {
+        didSet { persist(petEffects, forKey: Keys.petEffects) }
+    }
+    /// PetKind별 **장착(활성)** 이펙트. `petEffects`(보유)의 부분집합 — 실제로 펫에 렌더되는 건 이것.
+    /// 칩 토글로 켜고 끈다. 구매 시 자동 장착.
+    @Published var equippedEffects: [PetKind: Set<EffectKind>] {
+        didSet { persist(equippedEffects, forKey: Keys.equippedEffects) }
+    }
+
     /// 도감에서 강조 표시(NEW! 뱃지 + 노란 테두리)가 필요한 펫 종 집합.
     /// 추가 트리거: 신규 펫 commit / 가챠 중복으로 variant 해금 / 사용 시간으로 variant 해금.
     /// 제거 트리거: 사용자가 그 펫 슬롯을 클릭해 미리보기 진입(아래 `acknowledgeHighlight(_:)` 사용).
@@ -366,6 +388,11 @@ final class Settings: ObservableObject {
     @Published var claimedPodiumPeriods: Set<String> {
         didSet { persist(claimedPodiumPeriods, forKey: Keys.claimedPodiumPeriods) }
     }
+    /// 이미 수령한 RP 순위 보상 dedup. 형식: "type.period.rank" (예: "monthly.2026-05.7").
+    /// 로컬 1차 방어 — 진짜 이중지급 방어는 서버 claim의 alreadyClaimed (백업 복원에도 안전).
+    @Published var claimedRpRewards: Set<String> {
+        didSet { persist(claimedRpRewards, forKey: Keys.claimedRpRewards) }
+    }
     /// Cursor Pro/Free 사용자의 request delta 추적용. Ultra는 events 기반이라 불필요.
     /// startOfMonth가 바뀌면 reset.
     @Published var cursorLastRequestsSeen: Int? {
@@ -435,6 +462,12 @@ final class Settings: ObservableObject {
         self.ownedPets = (ownedData.flatMap { try? JSONDecoder().decode([PetKind: PetOwnership].self, from: $0) }) ?? [:]
         let usageData = d.data(forKey: Keys.petUsageSeconds)
         self.petUsageSeconds = (usageData.flatMap { try? JSONDecoder().decode([PetKind: TimeInterval].self, from: $0) }) ?? [:]
+        self.rp = (d.object(forKey: Keys.rp) as? Int) ?? 0
+        self.rpTotalEarned = (d.object(forKey: Keys.rpTotalEarned) as? Int) ?? 0
+        let effectsData = d.data(forKey: Keys.petEffects)
+        self.petEffects = (effectsData.flatMap { try? JSONDecoder().decode([PetKind: Set<EffectKind>].self, from: $0) }) ?? [:]
+        let equippedData = d.data(forKey: Keys.equippedEffects)
+        self.equippedEffects = (equippedData.flatMap { try? JSONDecoder().decode([PetKind: Set<EffectKind>].self, from: $0) }) ?? [:]
         let highlightData = d.data(forKey: Keys.pendingHighlights)
         self.pendingHighlights = (highlightData.flatMap { try? JSONDecoder().decode(Set<PetKind>.self, from: $0) }) ?? []
         self.petClaudeVariant = (d.object(forKey: Keys.petClaudeVariant) as? Int) ?? 0
@@ -486,6 +519,8 @@ final class Settings: ObservableObject {
         self.rankingScoreFractionVP    = (d.object(forKey: Keys.rankingScoreFractionVP) as? Double) ?? 0
         let claimedData = d.data(forKey: Keys.claimedPodiumPeriods)
         self.claimedPodiumPeriods = (claimedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let claimedRpData = d.data(forKey: Keys.claimedRpRewards)
+        self.claimedRpRewards = (claimedRpData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.cursorLastRequestsSeen    = d.object(forKey: Keys.cursorLastRequestsSeen) as? Int
         self.cursorLastStartOfMonth    = d.object(forKey: Keys.cursorLastStartOfMonth) as? Date
         self.boardLastSeenAt           = d.object(forKey: Keys.boardLastSeenAt) as? Date
@@ -895,6 +930,10 @@ final class Settings: ObservableObject {
         static let githubCreatedAt             = "settings.githubCreatedAt"
         static let petUsageSeconds             = "settings.petUsageSeconds"
         static let pendingHighlights           = "settings.pendingHighlights"
+        static let rp                          = "settings.rp"
+        static let rpTotalEarned               = "settings.rpTotalEarned"
+        static let petEffects                  = "settings.petEffects"
+        static let equippedEffects             = "settings.equippedEffects"
         static let hasReceivedV032TicketBonus  = "settings.hasReceivedV032TicketBonus"
         static let hasReceivedMay2026Bonus     = "settings.hasReceivedMay2026Bonus"
         static let hasReceivedServerInstabilityBonus = "settings.hasReceivedServerInstabilityBonus"
@@ -915,6 +954,7 @@ final class Settings: ObservableObject {
         static let rankingScoreEarnedVP        = "settings.rankingScoreEarnedVP"
         static let rankingScoreFractionVP      = "settings.rankingScoreFractionVP"
         static let claimedPodiumPeriods        = "settings.claimedPodiumPeriods"
+        static let claimedRpRewards            = "settings.claimedRpRewards"
         static let cursorLastRequestsSeen      = "settings.cursorLastRequestsSeen"
         static let cursorLastStartOfMonth      = "settings.cursorLastStartOfMonth"
         static let boardLastSeenAt             = "settings.boardLastSeenAt"

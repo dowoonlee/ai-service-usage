@@ -16,6 +16,9 @@ interface ClaimPayload {
 interface ClaimRequest {
   payload: ClaimPayload;
   signature: string;
+  // rewardType은 서명 페이로드 밖 — coins/rp 라우팅용. 서명은 {deviceId,period,rank,ts}로 불변이라
+  // 기존 클라(coins claim)와 호환된다. period/rank가 이미 서명돼 자기 보상만 수령 가능하므로 평문 OK.
+  rewardType?: "coins" | "rp";
 }
 
 const MAX_CLOCK_SKEW_SEC = 3600;
@@ -37,10 +40,19 @@ Deno.serve(async (req: Request) => {
   if (typeof body.signature !== "string" || body.signature.length !== 64) {
     return errorResponse(400, "invalid_signature");
   }
-  if (typeof p.period !== "string" || !/^\d{4}-\d{2}$/.test(p.period)) {
+  const rewardType = body.rewardType === "rp" ? "rp" : "coins";
+  // period: coins=월간(YYYY-MM). rp=월간(YYYY-MM) 또는 주간(YYYY-Www).
+  const periodOk = rewardType === "rp"
+    ? /^\d{4}-(\d{2}|W\d{2})$/.test(p.period)
+    : /^\d{4}-\d{2}$/.test(p.period);
+  if (typeof p.period !== "string" || !periodOk) {
     return errorResponse(400, "invalid_period");
   }
-  if (typeof p.rank !== "number" || ![1, 2, 3].includes(p.rank)) {
+  // rank: coins=Top3만. rp=전체 순위(1~).
+  const rankOk = rewardType === "rp"
+    ? (Number.isInteger(p.rank) && p.rank >= 1)
+    : [1, 2, 3].includes(p.rank);
+  if (typeof p.rank !== "number" || !rankOk) {
     return errorResponse(400, "invalid_rank");
   }
   if (typeof p.ts !== "number") return errorResponse(400, "invalid_ts");
@@ -66,6 +78,30 @@ Deno.serve(async (req: Request) => {
   );
   if (!ok) return errorResponse(401, "bad_signature");
 
+  // RP 보상 — rp_rewards 원장 (coins의 monthly_winners와 다른 테이블·컬럼). period 형식이 월/주를 함의.
+  if (rewardType === "rp") {
+    const { data: row } = await db
+      .from("rp_rewards")
+      .select("id, rp_amount, claimed_at")
+      .eq("device_id", p.deviceId)
+      .eq("period", p.period)
+      .eq("rank", p.rank)
+      .maybeSingle();
+    if (!row) return errorResponse(404, "no_pending_reward");
+    if (row.claimed_at) {
+      return jsonResponse({ alreadyClaimed: true, rewardType: "rp", rp: row.rp_amount, claimedAt: row.claimed_at });
+    }
+    const { error: rpErr } = await db
+      .from("rp_rewards")
+      .update({ claimed_at: new Date().toISOString() })
+      .eq("id", row.id);
+    if (rpErr) {
+      console.error("rp claim update failed", rpErr);
+      return errorResponse(500, "claim_failed");
+    }
+    return jsonResponse({ alreadyClaimed: false, rewardType: "rp", rp: row.rp_amount, claimedAt: new Date().toISOString() });
+  }
+
   // 해당 row 조회 + claim 여부 확인.
   const { data: winner } = await db
     .from("monthly_winners")
@@ -80,6 +116,7 @@ Deno.serve(async (req: Request) => {
   if (winner.reward_claimed_at) {
     return jsonResponse({
       alreadyClaimed: true,
+      rewardType: "coins",
       rewardCoins: winner.reward_coins,
       claimedAt: winner.reward_claimed_at,
     });
@@ -97,6 +134,7 @@ Deno.serve(async (req: Request) => {
 
   return jsonResponse({
     alreadyClaimed: false,
+    rewardType: "coins",
     rewardCoins: winner.reward_coins,
     claimedAt: new Date().toISOString(),
   });
