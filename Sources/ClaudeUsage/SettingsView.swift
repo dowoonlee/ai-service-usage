@@ -259,7 +259,7 @@ private struct GitHubLinkView: View {
                     state = .idle
                 }
             }
-            Text("머지된 기여 PR마다 \(CoinLedger.coinPerContributorPR) 코인 자동 적립.")
+            Text("머지된 기여 PR마다 \(RankPointLedger.rpPerContributorPR) RP 자동 적립.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             Button("지금 동기화") {
@@ -275,7 +275,7 @@ private struct GitHubLinkView: View {
             switch state {
             case .idle:
                 Button("GitHub 연결하기") { startFlow() }
-                Text("기여한 PR이 머지되면 \(CoinLedger.coinPerContributorPR) 코인이 자동 적립됩니다.")
+                Text("기여한 PR이 머지되면 \(RankPointLedger.rpPerContributorPR) RP가 자동 적립됩니다.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             case .requesting:

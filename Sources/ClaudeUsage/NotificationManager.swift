@@ -100,8 +100,8 @@ final class NotificationManager {
     }
 
     /// 기여자 보너스 적립 알림 — `ContributorBonus.sync()`에서 새 PR 발견 시 1회 호출.
-    func contributorBonus(prCount: Int, totalCoins: Int, prList: String) {
-        let title = "기여자 보너스 +\(totalCoins) 코인"
+    func contributorBonus(prCount: Int, totalRP: Int, prList: String) {
+        let title = "기여자 보너스 +\(totalRP) RP"
         let body  = prCount == 1
             ? "PR \(prList) 머지 감사합니다!"
             : "머지된 PR \(prCount)개 (\(prList)) 보너스가 적립되었습니다."

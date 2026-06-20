@@ -67,6 +67,14 @@ final class RankPointLedger {
         DebugLog.log("RankPointLedger: +\(amount) RP (\(reason)) (total=\(s.rp))")
     }
 
+    /// 외부 기여자 PR 머지 보너스. PR 1개 = `rpPerContributorPR` RP.
+    /// (v0.10 이전엔 coin 지급이었으나 RP로 교체 — 기여 = 코스메틱 화폐.)
+    static let rpPerContributorPR: Int = 500
+    func creditContributorBonus(prCount: Int) {
+        guard prCount > 0 else { return }
+        creditReward(prCount * Self.rpPerContributorPR, reason: "contributor.\(prCount)PR")
+    }
+
     /// RP 차감. 잔액이 부족하면 차감하지 않고 `false`를 반환한다.
     @discardableResult
     func spend(_ amount: Int, reason: String) -> Bool {
