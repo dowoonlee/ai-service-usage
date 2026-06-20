@@ -415,16 +415,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .claude:
             let kind = Settings.shared.petClaudeKind
             let theme = Settings.shared.themeClaudeOverride ?? PetTheme.defaultFor(kind)
-            let history: [(Date, Double)] = vm.claudeHistory.suffix(48).compactMap { s in
-                s.fiveHourPct.flatMap { v in v > 0 ? (s.takenAt, v) : nil }
-            }
+            // 현재 5h 창만 — 만료 창이 섞이면 펫이 빈 구간을 가로질러 걷는다.
+            let history = ViewModel.claudeFiveHourSeries(Array(vm.claudeHistory.suffix(48)))
             return MenuBarFeed(pct: vm.claudeCurrent?.fiveHourPct, history: history, kind: kind, theme: theme)
         case .cursor:
             let kind = Settings.shared.petCursorKind
             let theme = Settings.shared.themeCursorOverride ?? PetTheme.defaultFor(kind)
-            let history: [(Date, Double)] = vm.cursorHistory.suffix(48).compactMap { s in
+            // 같은 초 중복 폴 제거 — Claude 피드와 동일 (id: \.0 충돌 방지).
+            let history = ViewModel.dedupAdjacentByTime(vm.cursorHistory.suffix(48).compactMap { s in
                 Self.cursorPct(s).flatMap { v in v > 0 ? (s.takenAt, v) : nil }
-            }
+            })
             return MenuBarFeed(pct: vm.cursorCurrentPct, history: history, kind: kind, theme: theme)
         }
     }

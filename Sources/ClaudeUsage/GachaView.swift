@@ -31,11 +31,12 @@ struct GachaView: View {
     @State private var selectedTab: Tab = .shop
 
     enum Tab: String, CaseIterable, Identifiable {
-        case shop, gym, report, ranking
+        case shop, party, gym, report, ranking
         var id: String { rawValue }
         var displayName: String {
             switch self {
             case .shop:    return "상점"
+            case .party:   return "파티"
             case .gym:     return "도장"
             case .report:  return "레포트"
             case .ranking: return "랭킹"
@@ -85,6 +86,7 @@ struct GachaView: View {
             ZStack {
                 switch selectedTab {
                 case .shop:    shopTab.transition(.opacity)
+                case .party:   PartyView().transition(.opacity)
                 case .gym:     GymView().transition(.opacity)
                 case .report:  ReportView().transition(.opacity)
                 case .ranking: RankingView().transition(.opacity)
@@ -1182,9 +1184,7 @@ private struct PetPreviewView: View {
     /// 외부에서 variant 변경은 .id() 재마운트로 처리 (다른 펫 → 새 PetPreviewView 인스턴스).
     /// 같은 펫 안에서 이로치 토글은 internal state라 슬라이드 애니메이션 재생 X — 즉시 hue 변경.
     @State private var selectedVariant: Int
-    /// 구매 확인 대기 중인 이펙트. nil이 아니면 확인 alert 표시.
-    @State private var pendingEffect: EffectKind? = nil
-    /// hover 중인 칩의 이펙트 — 구매/장착 전 미리보기 펫에 임시 적용. nil이면 없음.
+    /// hover 중인 칩의 이펙트 — 구매/장착 전 미리보기 펫에 임시 적용. nil이면 없음. (PetEffectShelf가 콜백으로 갱신.)
     @State private var previewEffect: EffectKind? = nil
 
     init(kind: PetKind, variant: Int, settings: Settings) {
@@ -1300,87 +1300,12 @@ private struct PetPreviewView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 칩 바는 미리보기 영역 밖(아래 독립 행) — 펫 슬라이드(slideX)·variant와 분리되어 잘리지 않는다.
-        effectPurchaseRow
+        // 공용 PetEffectShelf 재활용. hover 프리뷰는 previewEffect로 받아 미리보기 펫에 임시 반영.
+        PetEffectShelf(kind: kind, settings: settings, onPreview: { previewEffect = $0 })
+            .padding(.top, 4)
             .padding(.bottom, 6)
         }
         .onAppear { enteredAt = Date() }
-        .alert("이펙트 구매", isPresented: Binding(
-            get: { pendingEffect != nil },
-            set: { if !$0 { pendingEffect = nil } }
-        ), presenting: pendingEffect) { effect in
-            Button("구매 (✦\(effect.price))") {
-                _ = RankPointLedger.shared.purchaseEffect(effect, for: kind)
-                pendingEffect = nil
-            }
-            Button("취소", role: .cancel) { pendingEffect = nil }
-        } message: { effect in
-            Text("\(PetMetaStore.shared.displayName(for: kind))에게 ‘\(effect.displayName)’ 이펙트를 ✦\(effect.price)에 적용할까요?\n보유 RP: \(settings.rp)")
-        }
-    }
-
-    // MARK: - 이펙트 상점 (RP, PetKind 단위 귀속). cf. docs/DESIGN_RP_ECONOMY.md
-
-    /// variantSelector·usage 게이지 아래에 놓이는 이펙트 구매 칩 행. 클릭 시 즉시 사지 않고
-    /// `pendingEffect`를 세팅해 확인 alert를 띄운다. 구매 즉시 `petEffects`가 갱신되어 미리보기 펫과
-    /// 메인 패널 차트의 WalkingCat 이펙트가 reactive하게 반영된다.
-    @ViewBuilder
-    private var effectPurchaseRow: some View {
-        HStack(spacing: 6) {
-            ForEach(EffectKind.allCases) { effect in
-                effectChip(effect)
-            }
-        }
-        .padding(.top, 4)
-    }
-
-    /// 3-state 칩: 미보유=구매(✦가격) / 보유+미장착=OFF / 보유+장착=ON(초록).
-    /// 클릭 — 보유면 장착 토글, 미보유+구매가능이면 확인 alert. hover — 미리보기 펫에 프리뷰.
-    private func effectChip(_ effect: EffectKind) -> some View {
-        let owned = settings.petEffects[kind]?.contains(effect) ?? false
-        let equipped = settings.equippedEffects[kind]?.contains(effect) ?? false
-        let affordable = settings.rp >= effect.price
-        let tint: Color = equipped ? .green : (owned ? .primary : (affordable ? .cyan : .secondary))
-
-        return Button {
-            if owned {
-                RankPointLedger.shared.toggleEquip(effect, for: kind)
-            } else if affordable {
-                pendingEffect = effect
-            }
-        } label: {
-            VStack(spacing: 1) {
-                Image(systemName: effect.iconName)
-                    .font(.system(size: 13))
-                if owned {
-                    Text(equipped ? "ON" : "OFF")
-                        .font(.system(size: 7, weight: .bold))
-                } else {
-                    Text("✦\(effect.price)")
-                        .font(.system(size: 8, weight: .semibold))
-                        .monospacedDigit()
-                }
-            }
-            .foregroundStyle(tint)
-            .frame(width: 40, height: 34)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(equipped ? Color.green.opacity(0.18) : Color.secondary.opacity(0.08))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(equipped ? Color.green.opacity(0.6) : Color.clear, lineWidth: 1)
-            )
-            .opacity(owned || affordable ? 1.0 : 0.4)
-        }
-        .buttonStyle(.plain)
-        .disabled(!owned && !affordable)
-        .onHover { hovering in
-            if hovering { previewEffect = effect }
-            else if previewEffect == effect { previewEffect = nil }
-        }
-        .help(owned
-              ? (equipped ? "\(effect.displayName) 장착됨 — 클릭해 해제" : "\(effect.displayName) 보유 — 클릭해 장착")
-              : "\(effect.displayName) · ✦\(effect.price) — 클릭해 구매")
     }
 
     /// 우측 도감 카드 — 포켓몬 도감 톤. 컬러 헤더 (ID + 이름 + rarity 태그) + 어두운 본문 패널.

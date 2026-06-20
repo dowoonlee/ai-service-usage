@@ -488,8 +488,10 @@ final class ViewModel: ObservableObject {
             }
         }
 
-        if s.petClaudeEnabled { creditOne(s.petClaudeKind) }
-        if s.petCursorEnabled { creditOne(s.petCursorKind) }
+        // 파티 멤버 전원의 종에 적립. "서로 다른 종만" 제약이라 한 파티 내 중복 없음.
+        // 같은 종이 Claude·Cursor 양쪽 파티에 있으면 2배 적립 (기존 더블카운트 정책과 동일, 의도적).
+        if s.petClaudeEnabled { for sel in s.petClaudeParty { creditOne(sel.kind) } }
+        if s.petCursorEnabled { for sel in s.petCursorParty { creditOne(sel.kind) } }
 
         // 무조건 대입은 didSet → JSONEncoder encode + UserDefaults write를 매 폴링 강제했다 (issue #19-5).
         // 실제 변경이 있을 때만 대입한다. usage는 펫 enable 시 매 tick 증가하지만, ownedPets는
@@ -814,6 +816,41 @@ final class ViewModel: ObservableObject {
         let exhaust = now.addingTimeInterval(secondsToFull)
         // 리셋 이후라면 도달 안 함
         return exhaust < resetAt ? exhaust : nil
+    }
+
+    /// 시간순 시계열에서 **인접한 동일 timestamp** 항목을 마지막 값으로 합친다.
+    /// 같은 초에 두 번 폴링되면 takenAt 이 정확히 중복될 수 있는데, 차트가
+    /// `ForEach(series, id: \.0)`로 Date 를 id 로 쓰므로 중복 id 가 AreaMark 폴리곤을
+    /// 잘못 이어 삼각형 노치를 만든다 → 인접 중복을 제거해 id 유일성을 보장.
+    /// (입력은 시간순 정렬 가정 — 중복 폴은 항상 인접하므로 last 만 비교하면 충분.)
+    nonisolated static func dedupAdjacentByTime(_ series: [(Date, Double)]) -> [(Date, Double)] {
+        var out: [(Date, Double)] = []
+        for p in series {
+            if let last = out.last, last.0 == p.0 {
+                out[out.count - 1].1 = p.1
+            } else {
+                out.append(p)
+            }
+        }
+        return out
+    }
+
+    /// Claude 5h 차트/펫용 시계열 — **현재 창에 속하는 점만** 남긴다.
+    /// 이전(만료) 창의 점이 섞이면 두 세션 사이 수시간 빈 구간을 .linear 보간이
+    /// 대각선으로 잇고 그 아래가 채워져 "초반부분 색칠이 튀는" 아티팩트가 생긴다.
+    /// resetAt 은 폴마다 ±1s 흔들리므로 정확 비교 대신 60s slack 으로 같은 창을 묶는다
+    /// (NotificationManager 의 resetAt 비교와 동일한 관례). pct==0/nil 은 제외하고,
+    /// 마지막으로 중복 timestamp 를 합친다(`dedupAdjacentByTime` 참조).
+    nonisolated static func claudeFiveHourSeries(_ history: [UsageSnapshot]) -> [(Date, Double)] {
+        let currentReset = history.last(where: { $0.fiveHourResetAt != nil })?.fiveHourResetAt
+        let filtered: [(Date, Double)] = history.compactMap { s in
+            if let cur = currentReset {
+                guard let reset = s.fiveHourResetAt,
+                      abs(reset.timeIntervalSince(cur)) < 60 else { return nil }
+            }
+            return s.fiveHourPct.flatMap { v in v > 0 ? (s.takenAt, v) : nil }
+        }
+        return dedupAdjacentByTime(filtered)
     }
 
     var claude5hProjectedPct: Double? {

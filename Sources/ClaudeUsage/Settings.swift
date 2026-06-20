@@ -43,11 +43,27 @@ final class Settings: ObservableObject {
             }
         }
     }
-    @Published var petClaudeKind: PetKind {
-        didSet { UserDefaults.standard.set(petClaudeKind.rawValue, forKey: Keys.petClaudeKind) }
+    /// 한 차트 파티 최대 마리 수.
+    static let maxPartySize = 3
+
+    /// Claude/Cursor 차트 산책 파티 (최대 `maxPartySize`, PetKind 유니크). [0] = 리더.
+    /// 멀티 산책 + 코스메틱의 source of truth. 레거시 단수 참조(`petClaudeKind` 등)는 아래 computed가
+    /// 리더를 미러해 무변경으로 동작. cf. docs/DESIGN_PET_PARTY.md
+    @Published var petClaudeParty: [PetSelection] {
+        didSet { persist(petClaudeParty, forKey: Keys.petClaudeParty) }
     }
-    @Published var petCursorKind: PetKind {
-        didSet { UserDefaults.standard.set(petCursorKind.rawValue, forKey: Keys.petCursorKind) }
+    @Published var petCursorParty: [PetSelection] {
+        didSet { persist(petCursorParty, forKey: Keys.petCursorParty) }
+    }
+
+    /// 리더(party[0]) 미러 — 레거시 단수 참조 호환. set은 리더 kind 교체로 라우팅.
+    var petClaudeKind: PetKind {
+        get { petClaudeParty.first?.kind ?? .fox }
+        set { setPartyLeader(claude: true, kind: newValue) }
+    }
+    var petCursorKind: PetKind {
+        get { petCursorParty.first?.kind ?? .wolf }
+        set { setPartyLeader(claude: false, kind: newValue) }
     }
     /// nil = 펫 기본 테마 사용
     @Published var themeClaudeOverride: PetTheme? {
@@ -124,13 +140,14 @@ final class Settings: ObservableObject {
     @Published var pendingHighlights: Set<PetKind> {
         didSet { persist(pendingHighlights, forKey: Keys.pendingHighlights) }
     }
-    /// 차트에 활성화된 펫의 variant index (0 = 기본, 1/2/3 = shiny).
-    /// kind는 기존 petClaudeKind/petCursorKind를 그대로 사용.
-    @Published var petClaudeVariant: Int {
-        didSet { UserDefaults.standard.set(petClaudeVariant, forKey: Keys.petClaudeVariant) }
+    /// 리더(party[0]) variant 미러 — 레거시 단수 참조 호환. kind와 함께 party가 source of truth.
+    var petClaudeVariant: Int {
+        get { petClaudeParty.first?.variant ?? 0 }
+        set { setPartyLeader(claude: true, variant: newValue) }
     }
-    @Published var petCursorVariant: Int {
-        didSet { UserDefaults.standard.set(petCursorVariant, forKey: Keys.petCursorVariant) }
+    var petCursorVariant: Int {
+        get { petCursorParty.first?.variant ?? 0 }
+        set { setPartyLeader(claude: false, variant: newValue) }
     }
     /// 마지막으로 본 Claude 5h/7d 윈도우의 resetAt. 같은 resetAt 안에서 pct delta로 적립.
     @Published var lastClaudeFiveHourReset: Date? {
@@ -442,8 +459,16 @@ final class Settings: ObservableObject {
         self.menuBarPetSource = (d.string(forKey: Keys.menuBarPetSource).flatMap { MenuBarPetSource(rawValue: $0) }) ?? .claude
         self.petClaudeEnabled = (d.object(forKey: Keys.petClaudeEnabled) as? Bool) ?? true
         self.petCursorEnabled = (d.object(forKey: Keys.petCursorEnabled) as? Bool) ?? true
-        self.petClaudeKind = (d.string(forKey: Keys.petClaudeKind).flatMap { PetKind(rawValue: $0) }) ?? .fox
-        self.petCursorKind = (d.string(forKey: Keys.petCursorKind).flatMap { PetKind(rawValue: $0) }) ?? .wolf
+        // 파티 로드 — 저장된 party 우선. 없으면 레거시 단수(petClaudeKind/Variant)에서 1마리로 마이그레이션.
+        // (petClaudeKind/Variant는 이제 party 리더 미러 computed라 여기서 직접 할당하지 않는다.)
+        let claudePartyData = d.data(forKey: Keys.petClaudeParty)
+        self.petClaudeParty = (claudePartyData.flatMap { try? JSONDecoder().decode([PetSelection].self, from: $0) })
+            ?? [PetSelection(kind: d.string(forKey: Keys.petClaudeKind).flatMap { PetKind(rawValue: $0) } ?? .fox,
+                             variant: (d.object(forKey: Keys.petClaudeVariant) as? Int) ?? 0)]
+        let cursorPartyData = d.data(forKey: Keys.petCursorParty)
+        self.petCursorParty = (cursorPartyData.flatMap { try? JSONDecoder().decode([PetSelection].self, from: $0) })
+            ?? [PetSelection(kind: d.string(forKey: Keys.petCursorKind).flatMap { PetKind(rawValue: $0) } ?? .wolf,
+                             variant: (d.object(forKey: Keys.petCursorVariant) as? Int) ?? 0)]
         self.themeClaudeOverride = d.string(forKey: Keys.themeClaudeOverride).flatMap { PetTheme(rawValue: $0) }
         self.themeCursorOverride = d.string(forKey: Keys.themeCursorOverride).flatMap { PetTheme(rawValue: $0) }
         self.launchAtLogin = (SMAppService.mainApp.status == .enabled)
@@ -470,8 +495,7 @@ final class Settings: ObservableObject {
         self.equippedEffects = (equippedData.flatMap { try? JSONDecoder().decode([PetKind: Set<EffectKind>].self, from: $0) }) ?? [:]
         let highlightData = d.data(forKey: Keys.pendingHighlights)
         self.pendingHighlights = (highlightData.flatMap { try? JSONDecoder().decode(Set<PetKind>.self, from: $0) }) ?? []
-        self.petClaudeVariant = (d.object(forKey: Keys.petClaudeVariant) as? Int) ?? 0
-        self.petCursorVariant = (d.object(forKey: Keys.petCursorVariant) as? Int) ?? 0
+        // petClaudeVariant/petCursorVariant는 party 리더 미러 computed — 위 party 로드에 흡수됨.
         self.lastClaudeFiveHourReset = d.object(forKey: Keys.lastClaudeFiveHourReset) as? Date
         self.lastClaudeSevenDayReset = d.object(forKey: Keys.lastClaudeSevenDayReset) as? Date
         self.lastClaudeFiveHourPctSeen = d.object(forKey: Keys.lastClaudeFiveHourPctSeen) as? Double
@@ -749,6 +773,52 @@ final class Settings: ObservableObject {
         }
     }
 
+    // MARK: - 펫 파티 조작 (cf. docs/DESIGN_PET_PARTY.md)
+
+    /// 리더(party[0])의 kind/variant 교체 — 레거시 단수 setter 라우팅용. 파티가 비면 1마리 생성.
+    private func setPartyLeader(claude: Bool, kind: PetKind? = nil, variant: Int? = nil) {
+        var party = claude ? petClaudeParty : petCursorParty
+        if party.isEmpty {
+            party = [PetSelection(kind: kind ?? (claude ? .fox : .wolf), variant: variant ?? 0)]
+        } else {
+            if let kind { party[0].kind = kind }
+            if let variant { party[0].variant = variant }
+        }
+        if claude { petClaudeParty = party } else { petCursorParty = party }
+    }
+
+    /// 파티에 펫 추가. 종 유니크 + 최대 `maxPartySize` — 이미 있거나 꽉 차면 무시.
+    func addToParty(claude: Bool, _ sel: PetSelection) {
+        var party = claude ? petClaudeParty : petCursorParty
+        guard party.count < Self.maxPartySize, !party.contains(where: { $0.kind == sel.kind }) else { return }
+        party.append(sel)
+        if claude { petClaudeParty = party } else { petCursorParty = party }
+    }
+
+    /// 파티에서 종 제거.
+    func removeFromParty(claude: Bool, kind: PetKind) {
+        var party = claude ? petClaudeParty : petCursorParty
+        party.removeAll { $0.kind == kind }
+        if claude { petClaudeParty = party } else { petCursorParty = party }
+    }
+
+    /// 파티 멤버 순서 이동 (from → to). [0]이 리더라 순서가 메뉴바/wellness 대표를 결정.
+    func movePartyMember(claude: Bool, from: Int, to: Int) {
+        var party = claude ? petClaudeParty : petCursorParty
+        guard party.indices.contains(from), to >= 0, to < party.count, from != to else { return }
+        let item = party.remove(at: from)
+        party.insert(item, at: to)
+        if claude { petClaudeParty = party } else { petCursorParty = party }
+    }
+
+    /// 특정 차트 파티의 variant 토글 (슬롯 이로치 선택용).
+    func setPartyVariant(claude: Bool, kind: PetKind, variant: Int) {
+        var party = claude ? petClaudeParty : petCursorParty
+        guard let i = party.firstIndex(where: { $0.kind == kind }) else { return }
+        party[i].variant = variant
+        if claude { petClaudeParty = party } else { petCursorParty = party }
+    }
+
     /// GitHub 연결 해제 — 토큰 폐기 + identity 클리어. creditedPRNumbers는 의도적으로 유지
     /// (재연결 시 같은 PR로 중복 지급 방지).
     func disconnectGitHub() {
@@ -914,6 +984,8 @@ final class Settings: ObservableObject {
         static let ownedPets                   = "settings.ownedPets"
         static let petClaudeVariant            = "settings.petClaudeVariant"
         static let petCursorVariant            = "settings.petCursorVariant"
+        static let petClaudeParty              = "settings.petClaudeParty"
+        static let petCursorParty              = "settings.petCursorParty"
         static let lastClaudeFiveHourReset     = "settings.lastClaudeFiveHourReset"
         static let lastClaudeSevenDayReset     = "settings.lastClaudeSevenDayReset"
         static let lastCursorEventCredited     = "settings.lastCursorEventCredited"
