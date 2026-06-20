@@ -73,6 +73,17 @@ for k in kinds:
         f"  ('{sql_quote(k)}', '{sql_quote(dn)}', '{sql_quote(de)}', '{sql_quote(qjson)}'::jsonb)"
     )
 
+if "--json" in sys.argv:
+    # service_role PostgREST upsert 용 JSON 배열(컬럼명 = snake_case).
+    out = [
+        {"kind": k, "display_name": names[k],
+         "description": descs.get(k, ""), "quotes": quotes.get(k, [])}
+        for k in kinds
+    ]
+    print(json.dumps(out, ensure_ascii=False))
+    print(f"추출 완료(JSON): {len(kinds)}종", file=sys.stderr)
+    sys.exit(0)
+
 print("-- 자동 생성: scripts/extract-pet-meta-seed.py (현재 코드값 snapshot)")
 print("INSERT INTO pet_metadata (kind, display_name, description, quotes) VALUES")
 print(",\n".join(rows))
