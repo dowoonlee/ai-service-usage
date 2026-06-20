@@ -114,54 +114,76 @@ struct ReportView: View {
 
     // MARK: - Avatar (보유 펫 + variant)
 
+    // 한 줄 가로 스크롤이면 보유 펫이 늘수록 끝없이 옆으로 늘어나 선택이 어려워서
+    // 희귀도별 그룹으로 줄바꿈해 표시. 등급마다 라벨 + 별도 그리드 → 등급 경계에서 줄바꿈.
+    // (kind, variant) 쌍을 평탄화하되 같은 펫의 variant는 인접 유지.
+    // 컬렉터처럼 보유가 많을 때 아래 섹션을 밀어내지 않도록 높이를 캡한 내부 스크롤로 감싼다.
     private var avatarRow: some View {
-        let owned = settings.ownedPets.keys.sorted { $0.rawValue < $1.rawValue }
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                if owned.isEmpty {
-                    Text("가챠로 펫을 뽑아 아바타를 선택하세요")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else {
-                    ForEach(owned, id: \.rawValue) { kind in
-                        avatarChoice(kind: kind)
+        let owned = settings.ownedPets.keys
+        // 등급별(Legendary→Common) 그룹. 보유한 등급만 노출.
+        let grouped: [(rarity: Rarity, choices: [PetSelection])] = Rarity.allCases.reversed().compactMap { rarity in
+            let kinds = owned
+                .filter { PetKind.rarityFor($0) == rarity }
+                .sorted { (PetKind.allCases.firstIndex(of: $0) ?? 0) < (PetKind.allCases.firstIndex(of: $1) ?? 0) }
+            guard !kinds.isEmpty else { return nil }
+            let choices = kinds.flatMap { kind in
+                (settings.ownedPets[kind]?.unlockedVariants ?? [0]).sorted()
+                    .map { PetSelection(kind: kind, variant: $0) }
+            }
+            return (rarity, choices)
+        }
+        let columns = [GridItem(.adaptive(minimum: 40, maximum: 44), spacing: 6, alignment: .leading)]
+        return Group {
+            if grouped.isEmpty {
+                Text("가챠로 펫을 뽑아 아바타를 선택하세요")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(grouped, id: \.rarity) { group in
+                            Text(group.rarity.displayName)
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundStyle(group.rarity.color)
+                            LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+                                ForEach(group.choices, id: \.self) { sel in
+                                    avatarChoice(kind: sel.kind, variant: sel.variant)
+                                }
+                            }
+                        }
                     }
+                    .padding(.vertical, 2)
                 }
+                .frame(maxHeight: 200)   // 더 많으면 내부 스크롤
             }
         }
     }
 
-    private func avatarChoice(kind: PetKind) -> some View {
-        let ownership = settings.ownedPets[kind]
-        let variants = (ownership?.unlockedVariants ?? [0]).sorted()
-        return HStack(spacing: 4) {
-            ForEach(variants, id: \.self) { v in
-                let isSelected = (settings.trainerCard.avatar.kind == kind && settings.trainerCard.avatar.variant == v)
-                Button {
-                    settings.trainerCard.avatar = PetSelection(kind: kind, variant: v)
-                } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.10))
-                        if let img = PetSprite.image(for: kind, action: .sit, frameIndex: 0) {
-                            Image(nsImage: img)
-                                .resizable()
-                                .interpolation(.none)
-                                .aspectRatio(contentMode: .fit)
-                                .padding(2)
-                                .hueRotation(.degrees(WalkingCat.hueDegrees(for: v)))
-                                .saturation(v > 0 ? 1.15 : 1.0)
-                        }
-                    }
-                    .frame(width: 36, height: 36)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
-                    )
+    private func avatarChoice(kind: PetKind, variant v: Int) -> some View {
+        let isSelected = (settings.trainerCard.avatar.kind == kind && settings.trainerCard.avatar.variant == v)
+        return Button {
+            settings.trainerCard.avatar = PetSelection(kind: kind, variant: v)
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.10))
+                if let img = PetSprite.image(for: kind, action: .sit, frameIndex: 0) {
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.none)
+                        .aspectRatio(contentMode: .fit)
+                        .padding(2)
+                        .hueRotation(.degrees(WalkingCat.hueDegrees(for: v)))
+                        .saturation(v > 0 ? 1.15 : 1.0)
                 }
-                .buttonStyle(.plain)
-                .help("\(PetMetaStore.shared.displayName(for: kind))\(v > 0 ? " · 색상\(v)" : "")")
             }
+            .frame(width: 36, height: 36)
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+            )
         }
+        .buttonStyle(.plain)
+        .help("\(PetMetaStore.shared.displayName(for: kind))\(v > 0 ? " · 색상\(v)" : "")")
     }
 
     // MARK: - Background
