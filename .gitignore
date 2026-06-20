@@ -8,3 +8,4 @@ dist/
 sparkle_private.key
 scripts/ranking.env
 supabase/.temp/
+docs/SERVICE_OVERVIEW.md
