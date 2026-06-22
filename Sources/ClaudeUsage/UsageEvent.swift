@@ -36,8 +36,10 @@ enum UsageSource: String, Codable, Sendable {
     case cursorProRequests
     case cursorFreeRequests
     case cursorBusinessRequests
+    case codexFiveHour          // Codex Plus/Pro 5h 윈도우 pct delta
+    case codexSevenDay          // Codex Plus/Pro 7d 윈도우 pct delta
 
-    enum VibeCategory { case claude, cursor }
+    enum VibeCategory { case claude, cursor, codex }
 
     /// 도장(Vibe Coder 카테고리) 카운터 분류용.
     var vibeCategory: VibeCategory {
@@ -45,6 +47,7 @@ enum UsageSource: String, Codable, Sendable {
         case .claudeFiveHour, .claudeSevenDay: return .claude
         case .cursorUltra, .cursorProRequests, .cursorFreeRequests, .cursorBusinessRequests:
             return .cursor
+        case .codexFiveHour, .codexSevenDay: return .codex
         }
     }
 
@@ -61,6 +64,8 @@ enum UsageSource: String, Codable, Sendable {
         case .claudeSevenDay:  return \.claudeSevenDayCoinFraction
         case .cursorUltra, .cursorProRequests, .cursorFreeRequests, .cursorBusinessRequests:
             return \.cursorCoinFraction
+        case .codexFiveHour: return \.codexFiveHourCoinFraction
+        case .codexSevenDay: return \.codexSevenDayCoinFraction
         }
     }
 }
@@ -164,6 +169,62 @@ enum UsageEventProducer {
             }
             s.lastClaudeSevenDayReset = resetAt
             s.lastClaudeSevenDayPctSeen = pct
+        }
+    }
+
+    /// Codex 스냅샷 ingest — Plus/Pro의 5h/7d 두 윈도우를 ingestClaude와 동일한 pct-delta 모델로 적립.
+    /// free의 monthly 창은 적립 대상 아님(fiveHourPct/sevenDayPct가 nil이라 자연스럽게 skip).
+    /// coinFactor = codexPlanMultiplier(Plus 1.0 / Pro 2.5), vpFactor = codexPlanPriceVP / maxPureCoin.
+    static func ingestCodex(_ snapshot: CodexSnapshot) {
+        let s = Settings.shared
+        let multiplier = CoinLedger.codexPlanMultiplier(snapshot.planName)
+        let priceVP = CoinLedger.codexPlanPriceVP(snapshot.planName)
+        let vpFactor = Double(priceVP) / CoinLedger.claudeMaxPureCoinPerMonth
+
+        // 5-hour 윈도우
+        if let resetAt = snapshot.fiveHourResetAt, let pct = snapshot.fiveHourPct {
+            if let lastReset = s.lastCodexFiveHourReset,
+               let lastPct = s.lastCodexFiveHourPctSeen,
+               abs(lastReset.timeIntervalSince(resetAt)) <= 60, pct > lastPct {
+                let prev = CoinLedger.curve(lastPct / 100.0) * CoinLedger.codexFiveHourMaxCoin
+                let curr = CoinLedger.curve(pct / 100.0) * CoinLedger.codexFiveHourMaxCoin
+                let pureDelta = curr - prev
+                if pureDelta > 0 {
+                    UsageEventBus.shared.emit(UsageEvent(
+                        timestamp: Date(),
+                        source: .codexFiveHour,
+                        context: UsageContext(planName: snapshot.planName,
+                                              coinFactor: multiplier,
+                                              vpFactor: vpFactor),
+                        pureValue: pureDelta
+                    ))
+                }
+            }
+            s.lastCodexFiveHourReset = resetAt
+            s.lastCodexFiveHourPctSeen = pct
+        }
+
+        // 7-day 윈도우
+        if let resetAt = snapshot.sevenDayResetAt, let pct = snapshot.sevenDayPct {
+            if let lastReset = s.lastCodexSevenDayReset,
+               let lastPct = s.lastCodexSevenDayPctSeen,
+               abs(lastReset.timeIntervalSince(resetAt)) <= 60, pct > lastPct {
+                let prev = CoinLedger.curve(lastPct / 100.0) * CoinLedger.codexSevenDayMaxCoin
+                let curr = CoinLedger.curve(pct / 100.0) * CoinLedger.codexSevenDayMaxCoin
+                let pureDelta = curr - prev
+                if pureDelta > 0 {
+                    UsageEventBus.shared.emit(UsageEvent(
+                        timestamp: Date(),
+                        source: .codexSevenDay,
+                        context: UsageContext(planName: snapshot.planName,
+                                              coinFactor: multiplier,
+                                              vpFactor: vpFactor),
+                        pureValue: pureDelta
+                    ))
+                }
+            }
+            s.lastCodexSevenDayReset = resetAt
+            s.lastCodexSevenDayPctSeen = pct
         }
     }
 

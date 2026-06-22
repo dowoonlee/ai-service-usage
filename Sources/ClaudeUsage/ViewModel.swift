@@ -527,6 +527,7 @@ final class ViewModel: ObservableObject {
         // 같은 종이 Claude·Cursor 양쪽 파티에 있으면 2배 적립 (기존 더블카운트 정책과 동일, 의도적).
         if s.petClaudeEnabled { for sel in s.petClaudeParty { creditOne(sel.kind) } }
         if s.petCursorEnabled { for sel in s.petCursorParty { creditOne(sel.kind) } }
+        if s.petCodexEnabled  { for sel in s.petCodexParty  { creditOne(sel.kind) } }
 
         // 무조건 대입은 didSet → JSONEncoder encode + UserDefaults write를 매 폴링 강제했다 (issue #19-5).
         // 실제 변경이 있을 때만 대입한다. usage는 펫 enable 시 매 tick 증가하지만, ownedPets는
@@ -840,6 +841,8 @@ final class ViewModel: ObservableObject {
             codexLastSuccess = snap.takenAt
             codexNeedsSetup = false
             evaluateCodexAlerts(snap)
+            UsageEventProducer.ingestCodex(snap)
+            BadgeRegistry.evaluate()
             codexPollOutcome = .success
         } catch CodexError.notInstalled, CodexError.notLoggedIn {
             // 미설치/미인증 — 선택적 소스라 조용히 비활성. codexCurrent==nil이면 UI 섹션이 자동 숨김.

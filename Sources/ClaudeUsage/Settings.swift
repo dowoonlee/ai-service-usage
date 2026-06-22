@@ -33,6 +33,9 @@ final class Settings: ObservableObject {
     @Published var petCursorEnabled: Bool {
         didSet { UserDefaults.standard.set(petCursorEnabled, forKey: Keys.petCursorEnabled) }
     }
+    @Published var petCodexEnabled: Bool {
+        didSet { UserDefaults.standard.set(petCodexEnabled, forKey: Keys.petCodexEnabled) }
+    }
     /// (실험) 펫 메타데이터(이름/대사/설명)를 서버에서 받아 코드값 위에 override. 기본 off.
     /// off / 네트워크 실패 / 누락 kind 면 코드 하드코딩 fallback. 켜는 순간 즉시 서버 갱신.
     @Published var experimentalRemotePetMeta: Bool {
@@ -55,6 +58,9 @@ final class Settings: ObservableObject {
     @Published var petCursorParty: [PetSelection] {
         didSet { persist(petCursorParty, forKey: Keys.petCursorParty) }
     }
+    @Published var petCodexParty: [PetSelection] {
+        didSet { persist(petCodexParty, forKey: Keys.petCodexParty) }
+    }
 
     /// 리더(party[0]) 미러 — 레거시 단수 참조 호환. set은 리더 kind 교체로 라우팅.
     var petClaudeKind: PetKind {
@@ -64,6 +70,11 @@ final class Settings: ObservableObject {
     var petCursorKind: PetKind {
         get { petCursorParty.first?.kind ?? .wolf }
         set { setPartyLeader(claude: false, kind: newValue) }
+    }
+    /// Codex 차트 리더(party[0]) 미러 — get-only. 펫 차트 테마(`PetTheme.defaultFor`)용.
+    /// party 편집은 PartyView/SettingsView가 petCodexParty를 직접 갱신한다.
+    var petCodexKind: PetKind {
+        petCodexParty.first?.kind ?? .fox
     }
     /// nil = 펫 기본 테마 사용
     @Published var themeClaudeOverride: PetTheme? {
@@ -171,6 +182,20 @@ final class Settings: ObservableObject {
     @Published var lastClaudeSevenDayPctSeen: Double? {
         didSet { UserDefaults.standard.set(lastClaudeSevenDayPctSeen, forKey: Keys.lastClaudeSevenDayPctSeen) }
     }
+    // Codex 5h/7d 윈도우 적립용 — Claude와 동일한 (resetAt, pctSeen) state machine.
+    // free(monthly)는 코인 적립 대상 아님(Plus/Pro만) → monthly state는 두지 않는다.
+    @Published var lastCodexFiveHourReset: Date? {
+        didSet { UserDefaults.standard.set(lastCodexFiveHourReset, forKey: Keys.lastCodexFiveHourReset) }
+    }
+    @Published var lastCodexSevenDayReset: Date? {
+        didSet { UserDefaults.standard.set(lastCodexSevenDayReset, forKey: Keys.lastCodexSevenDayReset) }
+    }
+    @Published var lastCodexFiveHourPctSeen: Double? {
+        didSet { UserDefaults.standard.set(lastCodexFiveHourPctSeen, forKey: Keys.lastCodexFiveHourPctSeen) }
+    }
+    @Published var lastCodexSevenDayPctSeen: Double? {
+        didSet { UserDefaults.standard.set(lastCodexSevenDayPctSeen, forKey: Keys.lastCodexSevenDayPctSeen) }
+    }
     /// 정수 절단으로 코인이 새지 않도록 폴링마다의 소수부를 누적해서 carry.
     /// (예: 0.835 coin/poll × 60 polls 가 50 coin로 누적되도록)
     @Published var claudeFiveHourCoinFraction: Double {
@@ -181,6 +206,12 @@ final class Settings: ObservableObject {
     }
     @Published var cursorCoinFraction: Double {
         didSet { UserDefaults.standard.set(cursorCoinFraction, forKey: Keys.cursorCoinFraction) }
+    }
+    @Published var codexFiveHourCoinFraction: Double {
+        didSet { UserDefaults.standard.set(codexFiveHourCoinFraction, forKey: Keys.codexFiveHourCoinFraction) }
+    }
+    @Published var codexSevenDayCoinFraction: Double {
+        didSet { UserDefaults.standard.set(codexSevenDayCoinFraction, forKey: Keys.codexSevenDayCoinFraction) }
     }
     /// CoinLedger가 처리한 마지막 Cursor 이벤트 timestamp (그 이후만 적립 대상).
     @Published var lastCursorEventCredited: Date? {
@@ -226,6 +257,9 @@ final class Settings: ObservableObject {
     /// Vibe·Cursor — `CoinLedger.evaluateCursor`가 credit한 코인 누적.
     @Published var cursorCoinsEarned: Int {
         didSet { UserDefaults.standard.set(cursorCoinsEarned, forKey: Keys.cursorCoinsEarned) }
+    }
+    @Published var codexCoinsEarned: Int {
+        didSet { UserDefaults.standard.set(codexCoinsEarned, forKey: Keys.codexCoinsEarned) }
     }
     /// Heartbeat — 36h grace streak. polling 진입 시 갱신.
     @Published var heartbeatStreak: Int {
@@ -467,6 +501,7 @@ final class Settings: ObservableObject {
         self.menuBarPetSource = (d.string(forKey: Keys.menuBarPetSource).flatMap { MenuBarPetSource(rawValue: $0) }) ?? .claude
         self.petClaudeEnabled = (d.object(forKey: Keys.petClaudeEnabled) as? Bool) ?? true
         self.petCursorEnabled = (d.object(forKey: Keys.petCursorEnabled) as? Bool) ?? true
+        self.petCodexEnabled = (d.object(forKey: Keys.petCodexEnabled) as? Bool) ?? true
         // 파티 로드 — 저장된 party 우선. 없으면 레거시 단수(petClaudeKind/Variant)에서 1마리로 마이그레이션.
         // (petClaudeKind/Variant는 이제 party 리더 미러 computed라 여기서 직접 할당하지 않는다.)
         let claudePartyData = d.data(forKey: Keys.petClaudeParty)
@@ -477,6 +512,10 @@ final class Settings: ObservableObject {
         self.petCursorParty = (cursorPartyData.flatMap { try? JSONDecoder().decode([PetSelection].self, from: $0) })
             ?? [PetSelection(kind: d.string(forKey: Keys.petCursorKind).flatMap { PetKind(rawValue: $0) } ?? .wolf,
                              variant: (d.object(forKey: Keys.petCursorVariant) as? Int) ?? 0)]
+        // Codex는 레거시 단수 키가 없으므로(신규 소스) party 저장값 또는 기본 1마리(.fox).
+        let codexPartyData = d.data(forKey: Keys.petCodexParty)
+        self.petCodexParty = (codexPartyData.flatMap { try? JSONDecoder().decode([PetSelection].self, from: $0) })
+            ?? [PetSelection(kind: .fox, variant: 0)]
         self.themeClaudeOverride = d.string(forKey: Keys.themeClaudeOverride).flatMap { PetTheme(rawValue: $0) }
         self.themeCursorOverride = d.string(forKey: Keys.themeCursorOverride).flatMap { PetTheme(rawValue: $0) }
         self.launchAtLogin = (SMAppService.mainApp.status == .enabled)
@@ -511,6 +550,12 @@ final class Settings: ObservableObject {
         self.claudeFiveHourCoinFraction = (d.object(forKey: Keys.claudeFiveHourCoinFraction) as? Double) ?? 0
         self.claudeSevenDayCoinFraction = (d.object(forKey: Keys.claudeSevenDayCoinFraction) as? Double) ?? 0
         self.cursorCoinFraction = (d.object(forKey: Keys.cursorCoinFraction) as? Double) ?? 0
+        self.lastCodexFiveHourReset = d.object(forKey: Keys.lastCodexFiveHourReset) as? Date
+        self.lastCodexSevenDayReset = d.object(forKey: Keys.lastCodexSevenDayReset) as? Date
+        self.lastCodexFiveHourPctSeen = d.object(forKey: Keys.lastCodexFiveHourPctSeen) as? Double
+        self.lastCodexSevenDayPctSeen = d.object(forKey: Keys.lastCodexSevenDayPctSeen) as? Double
+        self.codexFiveHourCoinFraction = (d.object(forKey: Keys.codexFiveHourCoinFraction) as? Double) ?? 0
+        self.codexSevenDayCoinFraction = (d.object(forKey: Keys.codexSevenDayCoinFraction) as? Double) ?? 0
         self.lastCursorEventCredited = d.object(forKey: Keys.lastCursorEventCredited) as? Date
         self.coinsTotalEarned = (d.object(forKey: Keys.coinsTotalEarned) as? Int) ?? 0
         self.firstCreditedAt = d.object(forKey: Keys.firstCreditedAt) as? Date
@@ -565,6 +610,7 @@ final class Settings: ObservableObject {
         self.rateLimitWeeksPassed   = (d.object(forKey: Keys.rateLimitWeeksPassed) as? Int) ?? 0
         self.claudeCoinsEarned      = (d.object(forKey: Keys.claudeCoinsEarned) as? Int) ?? 0
         self.cursorCoinsEarned      = (d.object(forKey: Keys.cursorCoinsEarned) as? Int) ?? 0
+        self.codexCoinsEarned       = (d.object(forKey: Keys.codexCoinsEarned) as? Int) ?? 0
         self.heartbeatStreak        = (d.object(forKey: Keys.heartbeatStreak) as? Int) ?? 0
         self.heartbeatLastActiveAt  = d.object(forKey: Keys.heartbeatLastActiveAt) as? Date
         self.nightOwlSecondsAccumulated = (d.object(forKey: Keys.nightOwlSecondsAccumulated) as? Int) ?? 0
@@ -991,6 +1037,7 @@ final class Settings: ObservableObject {
         static let menuBarPetSource = "settings.menuBarPetSource"
         static let petClaudeEnabled = "settings.petClaudeEnabled"
         static let petCursorEnabled = "settings.petCursorEnabled"
+        static let petCodexEnabled  = "settings.petCodexEnabled"
         static let petClaudeKind    = "settings.petClaudeKind"
         static let petCursorKind    = "settings.petCursorKind"
         static let themeClaudeOverride = "settings.themeClaudeOverride"
@@ -1007,6 +1054,7 @@ final class Settings: ObservableObject {
         static let petCursorVariant            = "settings.petCursorVariant"
         static let petClaudeParty              = "settings.petClaudeParty"
         static let petCursorParty              = "settings.petCursorParty"
+        static let petCodexParty               = "settings.petCodexParty"
         static let lastClaudeFiveHourReset     = "settings.lastClaudeFiveHourReset"
         static let lastClaudeSevenDayReset     = "settings.lastClaudeSevenDayReset"
         static let lastCursorEventCredited     = "settings.lastCursorEventCredited"
@@ -1015,6 +1063,12 @@ final class Settings: ObservableObject {
         static let claudeFiveHourCoinFraction  = "settings.claudeFiveHourCoinFraction"
         static let claudeSevenDayCoinFraction  = "settings.claudeSevenDayCoinFraction"
         static let cursorCoinFraction          = "settings.cursorCoinFraction"
+        static let lastCodexFiveHourReset      = "settings.lastCodexFiveHourReset"
+        static let lastCodexSevenDayReset      = "settings.lastCodexSevenDayReset"
+        static let lastCodexFiveHourPctSeen    = "settings.lastCodexFiveHourPctSeen"
+        static let lastCodexSevenDayPctSeen    = "settings.lastCodexSevenDayPctSeen"
+        static let codexFiveHourCoinFraction   = "settings.codexFiveHourCoinFraction"
+        static let codexSevenDayCoinFraction   = "settings.codexSevenDayCoinFraction"
         static let hasCompletedGachaMigration  = "settings.hasCompletedGachaMigration"
         static let coinsTotalEarned            = "settings.coinsTotalEarned"
         static let firstCreditedAt             = "settings.firstCreditedAt"
@@ -1059,6 +1113,7 @@ final class Settings: ObservableObject {
         static let rateLimitWeeksPassed        = "settings.rateLimitWeeksPassed"
         static let claudeCoinsEarned           = "settings.claudeCoinsEarned"
         static let cursorCoinsEarned           = "settings.cursorCoinsEarned"
+        static let codexCoinsEarned            = "settings.codexCoinsEarned"
         static let heartbeatStreak             = "settings.heartbeatStreak"
         static let heartbeatLastActiveAt       = "settings.heartbeatLastActiveAt"
         static let nightOwlSecondsAccumulated  = "settings.nightOwlSecondsAccumulated"

@@ -74,6 +74,9 @@ final class CoinLedger: UsageConsumer {
     static let claudeFiveHourMaxCoin: Double    = 30
     /// Claude 7d 윈도우 100% 채울 때 받는 coin (Pro 기준).
     static let claudeSevenDayMaxCoin: Double    = 60
+    /// Codex 5h/7d 윈도우 만점 coin — Claude와 동일 스케일(30/60).
+    static let codexFiveHourMaxCoin: Double     = 30
+    static let codexSevenDayMaxCoin: Double     = 60
 
     /// 누적 % 위치 → 누적 coin 비율. 0/1은 고정, 중간은 concave (sqrt). 초반 적립률↑.
     nonisolated static func curve(_ x: Double) -> Double {
@@ -92,6 +95,18 @@ final class CoinLedger: UsageConsumer {
         return 1.0
     }
 
+    /// Codex plan별 coin multiplier (결정 A). 가격 동급 Claude와 일치 — Plus($20)=1.0 / Pro($200)=2.5.
+    /// Claude의 planMultiplier와 분리한 이유: "pro" 문자열이 Claude Pro(1.0)와 Codex Pro(2.5)로 의미가 달라
+    /// 같은 함수로 합치면 오분류된다. "prolite"도 pro 계열로 흡수.
+    nonisolated static func codexPlanMultiplier(_ planName: String?) -> Double {
+        guard let name = planName?.lowercased() else { return 1.0 }
+        if name.contains("pro") { return 2.5 }
+        if name.contains("plus") { return 1.0 }
+        if name.contains("business") || name.contains("team") || name.contains("enterprise") { return 1.5 }
+        if name.contains("free") { return 0.5 }
+        return 1.0
+    }
+
     // MARK: - VP economics (namespace)
 
     /// Claude plan별 한 달 max VP (= 가격 cents). Free는 Pro의 1/4 floor.
@@ -101,6 +116,16 @@ final class CoinLedger: UsageConsumer {
         if name.contains("max 5") || name.contains("max") { return 10000 }
         if name.contains("enterprise") { return 10000 }
         if name.contains("pro") || name.contains("team") { return 2000 }
+        if name.contains("free") { return 500 }
+        return 2000
+    }
+
+    /// Codex plan별 한 달 max VP (결정 B). Claude와 동일 환산 스케일 — Plus($20)=2000 / Pro($200)=20000 cents.
+    nonisolated static func codexPlanPriceVP(_ planName: String?) -> Int {
+        guard let name = planName?.lowercased() else { return 2000 }
+        if name.contains("pro") { return 20000 }
+        if name.contains("plus") { return 2000 }
+        if name.contains("business") || name.contains("team") || name.contains("enterprise") { return 10000 }
         if name.contains("free") { return 500 }
         return 2000
     }
@@ -128,7 +153,12 @@ final class CoinLedger: UsageConsumer {
     func consume(_ event: UsageEvent) {
         let coinAmount = event.pureValue * event.context.coinFactor
         guard coinAmount > 0 else { return }
-        let source: CoinSource = event.source.vibeCategory == .claude ? .claude : .cursor
+        let source: CoinSource
+        switch event.source.vibeCategory {
+        case .claude: source = .claude
+        case .cursor: source = .cursor
+        case .codex:  source = .codex
+        }
         let earned = creditWithCarry(amount: coinAmount,
                                      fraction: event.source.coinFractionKeyPath,
                                      source: source)
@@ -196,7 +226,7 @@ final class CoinLedger: UsageConsumer {
 
     // MARK: - 내부 helpers
 
-    private enum CoinSource { case claude, cursor }
+    private enum CoinSource { case claude, cursor, codex }
 
     /// ① + ④ + (옵션) ② 갱신. 모든 적립의 공통 진입.
     private func credit(_ amount: Int, source: CoinSource? = nil) {
@@ -208,6 +238,7 @@ final class CoinLedger: UsageConsumer {
         switch source {
         case .claude: s.claudeCoinsEarned += amount
         case .cursor: s.cursorCoinsEarned += amount
+        case .codex:  s.codexCoinsEarned += amount
         case .none:   break
         }
     }

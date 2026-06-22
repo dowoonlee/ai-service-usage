@@ -1065,18 +1065,14 @@ struct CodexSection: View {
                 let tickFormat: Date.FormatStyle = span < 24 * 3600
                     ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
                     : .dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted))
-                // PR2는 펫 테마 없음 — 사용량 비례 단색 그라데이션. PR3에서 펫 테마로 교체.
-                let color = SectionFormat.continuousColor(vm.codexPrimaryPct)
                 Chart {
                     ForEach(validData, id: \.0) { item in
                         AreaMark(x: .value("t", item.0), y: .value("v", item.1))
                             .interpolationMethod(.linear)
-                            .foregroundStyle(LinearGradient(
-                                colors: [color.opacity(0.35), color.opacity(0.03)],
-                                startPoint: .top, endPoint: .bottom))
+                            .foregroundStyle(codexTheme.gradient(pct: vm.codexPrimaryPct, threshold: petAnxietyAt))
                         LineMark(x: .value("t", item.0), y: .value("v", item.1))
                             .interpolationMethod(.linear)
-                            .foregroundStyle(color)
+                            .foregroundStyle(codexTheme.lineColor)
                     }
                     if settings.notifyEnabled {
                         ForEach(settings.notifyThresholds.filter { Double($0) <= ymax }, id: \.self) { t in
@@ -1089,6 +1085,19 @@ struct CodexSection: View {
                 .chartYScale(domain: 0...ymax)
                 .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
+                .chartTerrainDecor(enabled: settings.petCodexEnabled && !settings.ownedPets.isEmpty, theme: codexTheme)
+                .chartPet(
+                    enabled: settings.petCodexEnabled && !settings.ownedPets.isEmpty,
+                    points: validData,
+                    party: settings.petCodexParty,
+                    equippedEffects: { settings.equippedEffects[$0] ?? [] },
+                    pct: vm.codexPrimaryPct,
+                    anxietyAt: petAnxietyAt,
+                    bigDropThreshold: settings.bigDropThreshold,
+                    weather: vm.weather,
+                    wellnessNudge: vm.wellnessNudge,
+                    onDismissWellness: { vm.dismissWellnessNudge() }
+                )
                 .frame(height: 44)
             } else {
                 SectionFormat.chartEmptyState()
@@ -1107,6 +1116,15 @@ struct CodexSection: View {
                 Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
             }
         }
+    }
+
+    private var petAnxietyAt: Double {
+        guard settings.notifyEnabled, let t = settings.notifyThresholds.first else { return 0.8 }
+        return Double(t) / 100
+    }
+    /// Codex 차트 펫 테마 — themeCodexOverride는 아직 없음(맵 상점 동적 테마는 후속). 기본 테마만.
+    private var codexTheme: PetTheme {
+        PetTheme.defaultFor(settings.petCodexKind)
     }
 }
 
