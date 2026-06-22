@@ -33,6 +33,14 @@ final class ViewModel: ObservableObject {
     @Published var cursorLastSuccess: Date?
     @Published var cursorNeedsSetup: Bool = false   // Cursor 앱 미설치/미로그인
 
+    // Codex (OpenAI) — 선택적 소스. codexCurrent == nil 이면 미사용으로 보고 UI 섹션 자체를 숨긴다.
+    @Published var codexCurrent: CodexSnapshot?
+    @Published var codexHistory: [CodexSnapshot] = []
+    @Published var codexLoading: Bool = false
+    @Published var codexError: String?
+    @Published var codexLastSuccess: Date?
+    @Published var codexNeedsSetup: Bool = false    // ~/.codex/auth.json 없음/미인증
+
     // Shared
     @Published var now: Date = Date()
 
@@ -68,6 +76,9 @@ final class ViewModel: ObservableObject {
     @Published var cursorCollapsed: Bool {
         didSet { UserDefaults.standard.set(cursorCollapsed, forKey: "section.cursor.collapsed") }
     }
+    @Published var codexCollapsed: Bool {
+        didSet { UserDefaults.standard.set(codexCollapsed, forKey: "section.codex.collapsed") }
+    }
 
     private var pollTask: Task<Void, Never>?
     /// 영속 history/events 백그라운드 로드 Task (issue #19-1). startPolling이 첫 cycle 전에
@@ -102,10 +113,12 @@ final class ViewModel: ObservableObject {
     /// 인증 오류는 backoff 대상 아님 (재로그인이 필요한 사용자 액션).
     private var claudePollOutcome: PollOutcome = .success
     private var cursorPollOutcome: PollOutcome = .success
+    private var codexPollOutcome: PollOutcome = .success
     /// 연속 schema-suspect 카운터. 임계 도달 시 NotificationManager로 1회 알림.
     /// success 시 0으로 reset, auth 에러는 카운터 유지(별개 사용자 액션).
     private var claudeSchemaSuspectCount: Int = 0
     private var cursorSchemaSuspectCount: Int = 0
+    private var codexSchemaSuspectCount: Int = 0
     /// 알림 발사 임계 — N회 연속 schema-suspect 시 1회 발송.
     /// 폴링 600s × 3 = 30분 — 일시적 네트워크 jitter는 통과하고 진짜 변경만 잡힘.
     static let schemaSuspectThreshold: Int = 3
@@ -144,6 +157,14 @@ final class ViewModel: ObservableObject {
             default: return false
             }
         }
+        if let e = error as? CodexError {
+            switch e {
+            case .decoding: return true
+            case .http(let code):
+                return (400..<500).contains(code) && code != 401 && code != 403 && code != 429
+            default: return false
+            }
+        }
         return false
     }
 
@@ -156,6 +177,7 @@ final class ViewModel: ObservableObject {
         let d = UserDefaults.standard
         self.claudeCollapsed = d.bool(forKey: "section.claude.collapsed")
         self.cursorCollapsed = d.bool(forKey: "section.cursor.collapsed")
+        self.codexCollapsed = d.bool(forKey: "section.codex.collapsed")
 
         // 시작 시 Keychain을 직접 읽지 않는다(프롬프트 유발). 첫 refresh가 needsLogin을 갱신함.
         self.claudeNeedsLogin = false
@@ -201,7 +223,8 @@ final class ViewModel: ObservableObject {
             let cursor = SnapshotStore.cursor.loadRecent()
             let events = SnapshotStore.cursorEvents.loadRecent(limit: 20000)
                 .sorted { $0.timestamp < $1.timestamp }
-            return (claude, cursor, events)
+            let codex = SnapshotStore.codex.loadRecent()
+            return (claude, cursor, events, codex)
         }.value
         claudeHistory = loaded.0
         claudeCurrent = loaded.0.last
@@ -210,6 +233,9 @@ final class ViewModel: ObservableObject {
         cursorCurrent = loaded.1.last
         cursorLastSuccess = loaded.1.last?.takenAt
         cursorEvents = loaded.2
+        codexHistory = loaded.3
+        codexCurrent = loaded.3.last
+        codexLastSuccess = loaded.3.last?.takenAt
     }
 
     func startClock() {
@@ -330,6 +356,7 @@ final class ViewModel: ObservableObject {
                     self.updateGymCountersOnCycleStart(sleepSec: interval)
                     await self.refreshClaude()
                     await self.refreshCursor()
+                    await self.refreshCodex()
                     await self.refreshWeather()
                     self.accumulatePetUsage()
                     await ContributorBonus.shared.sync()
@@ -372,7 +399,7 @@ final class ViewModel: ObservableObject {
         func isBackoffWorthy(_ o: PollOutcome) -> Bool {
             return o == .transientError || o == .apiSchemaSuspect
         }
-        let transient = isBackoffWorthy(claudePollOutcome) || isBackoffWorthy(cursorPollOutcome)
+        let transient = isBackoffWorthy(claudePollOutcome) || isBackoffWorthy(cursorPollOutcome) || isBackoffWorthy(codexPollOutcome)
         if transient {
             consecutiveBackoffSteps = min(4, consecutiveBackoffSteps + 1)
             DebugLog.log("Polling backoff step \(consecutiveBackoffSteps) → next sleep ×\(Self.backoffMultiplier(steps: consecutiveBackoffSteps))")
@@ -397,6 +424,14 @@ final class ViewModel: ObservableObject {
             }
         } else if cursorPollOutcome == .success {
             cursorSchemaSuspectCount = 0
+        }
+        if codexPollOutcome == .apiSchemaSuspect {
+            codexSchemaSuspectCount += 1
+            if codexSchemaSuspectCount == Self.schemaSuspectThreshold {
+                NotificationManager.shared.endpointSuspect(source: "Codex")
+            }
+        } else if codexPollOutcome == .success {
+            codexSchemaSuspectCount = 0
         }
     }
 
@@ -670,6 +705,8 @@ final class ViewModel: ObservableObject {
                 claudeCurrent?.fiveHourResetAt,
                 claudeCurrent?.sevenDayResetAt,
                 cursorCurrent?.resetAt,
+                codexCurrent?.fiveHourResetAt,
+                codexCurrent?.sevenDayResetAt,
             ],
             maxInterval: maxInterval,
             resetGuard: Self.resetGuard,
@@ -786,6 +823,98 @@ final class ViewModel: ObservableObject {
             cursorPollOutcome = Self.isSchemaSuspect(error) ? .apiSchemaSuspect : .transientError
             DebugLog.log("refreshCursor failed: \(cursorError ?? error.localizedDescription) (schemaSuspect=\(Self.isSchemaSuspect(error)))")
         }
+    }
+
+    // MARK: - Codex
+
+    func refreshCodex() async {
+        codexLoading = true
+        defer { codexLoading = false }
+        do {
+            let snap = try await CodexAPI.shared.refresh()
+            SnapshotStore.codex.append(snap)
+            codexCurrent = snap
+            codexHistory.append(snap)
+            if codexHistory.count > 1000 { codexHistory.removeFirst(codexHistory.count - 1000) }
+            codexError = nil
+            codexLastSuccess = snap.takenAt
+            codexNeedsSetup = false
+            evaluateCodexAlerts(snap)
+            codexPollOutcome = .success
+        } catch CodexError.notInstalled, CodexError.notLoggedIn {
+            // 미설치/미인증 — 선택적 소스라 조용히 비활성. codexCurrent==nil이면 UI 섹션이 자동 숨김.
+            codexNeedsSetup = true
+            codexError = "Codex 미인증"
+            codexPollOutcome = .authError
+        } catch CodexError.unauthorized {
+            codexNeedsSetup = true
+            codexError = "Codex 세션 만료 (codex login)"
+            codexPollOutcome = .authError
+            DebugLog.log("refreshCodex: unauthorized (세션 만료)")
+        } catch {
+            codexError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            codexPollOutcome = Self.isSchemaSuspect(error) ? .apiSchemaSuspect : .transientError
+            DebugLog.log("refreshCodex failed: \(codexError ?? error.localizedDescription) (schemaSuspect=\(Self.isSchemaSuspect(error)))")
+        }
+    }
+
+    private func evaluateCodexAlerts(_ snap: CodexSnapshot) {
+        NotificationManager.shared.evaluate(
+            key: "codex.5h", value: snap.fiveHourPct, resetAt: snap.fiveHourResetAt,
+            title: "Codex 5시간 창"
+        ) { t in "사용량이 \(t)%를 넘었습니다." }
+        NotificationManager.shared.evaluate(
+            key: "codex.7d", value: snap.sevenDayPct, resetAt: snap.sevenDayResetAt,
+            title: "Codex 주간"
+        ) { t in "주간 사용량이 \(t)%를 넘었습니다." }
+        NotificationManager.shared.evaluate(
+            key: "codex.month", value: snap.monthlyPct, resetAt: snap.monthlyResetAt,
+            title: "Codex 월간"
+        ) { t in "월간 사용량이 \(t)%를 넘었습니다." }
+    }
+
+    // Codex 주력 창 — Plus/Pro는 5h, free는 monthly. 섹션 헤더·큰 숫자·차트의 대표 창.
+    var codexUsesFiveHour: Bool { codexCurrent?.fiveHourPct != nil }
+    var codexPrimaryPct: Double? { codexCurrent.flatMap { $0.fiveHourPct ?? $0.monthlyPct } }
+    var codexPrimaryResetAt: Date? {
+        codexCurrent.flatMap { $0.fiveHourPct != nil ? $0.fiveHourResetAt : $0.monthlyResetAt }
+    }
+    var codexPrimaryLabel: String { codexUsesFiveHour ? "5시간 창" : "월간" }
+    var codexPrimaryPeriodLength: TimeInterval { codexUsesFiveHour ? 5 * 3600 : 30 * 86400 }
+
+    var codexPrimaryProjectedPct: Double? {
+        ViewModel.projectedPct(current: codexPrimaryPct, resetAt: codexPrimaryResetAt,
+                               periodLength: codexPrimaryPeriodLength, now: now)
+    }
+    var codexPrimaryExhaustionAt: Date? {
+        ViewModel.projectedExhaustionDate(current: codexPrimaryPct, resetAt: codexPrimaryResetAt,
+                                          periodLength: codexPrimaryPeriodLength, now: now)
+    }
+    var codex7dProjectedPct: Double? {
+        ViewModel.projectedPct(current: codexCurrent?.sevenDayPct, resetAt: codexCurrent?.sevenDayResetAt,
+                               periodLength: 7 * 86400, now: now)
+    }
+    var codex7dExhaustionAt: Date? {
+        ViewModel.projectedExhaustionDate(current: codexCurrent?.sevenDayPct, resetAt: codexCurrent?.sevenDayResetAt,
+                                          periodLength: 7 * 86400, now: now)
+    }
+
+    /// Codex 주력 창 차트 시계열 — 5h(Plus/Pro) 또는 monthly(free)를 현재 창으로 필터.
+    /// claudeFiveHourSeries와 같은 관례(60s slack으로 현재 창 묶기, pct>0만, 인접 중복 합치기).
+    nonisolated static func codexPrimarySeries(_ history: [CodexSnapshot]) -> [(Date, Double)] {
+        let useFiveHour = history.last?.fiveHourPct != nil
+        let currentReset: Date? = useFiveHour
+            ? history.last(where: { $0.fiveHourResetAt != nil })?.fiveHourResetAt
+            : history.last(where: { $0.monthlyResetAt != nil })?.monthlyResetAt
+        let filtered: [(Date, Double)] = history.compactMap { s in
+            let pct = useFiveHour ? s.fiveHourPct : s.monthlyPct
+            let reset = useFiveHour ? s.fiveHourResetAt : s.monthlyResetAt
+            if let cur = currentReset {
+                guard let r = reset, abs(r.timeIntervalSince(cur)) < 60 else { return nil }
+            }
+            return pct.flatMap { v in v > 0 ? (s.takenAt, v) : nil }
+        }
+        return dedupAdjacentByTime(filtered)
     }
 
     // MARK: - Pace prediction

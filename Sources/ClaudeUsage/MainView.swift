@@ -163,6 +163,12 @@ struct MainView: View {
             ClaudeSection(vm: vm, onLogin: onLogin)
             Divider().opacity(0.3)
             CursorSection(vm: vm)
+            // Codex는 선택적 소스 — 한 번이라도 성공(codexCurrent != nil)했을 때만 노출.
+            // 미설치/미사용자는 빈 섹션이 패널에 보이지 않게 한다.
+            if vm.codexCurrent != nil {
+                Divider().opacity(0.3)
+                CodexSection(vm: vm)
+            }
         }
         .padding(10)
         .frame(minWidth: 260)
@@ -228,7 +234,7 @@ struct MainView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("RP — 클릭하여 랭킹 열기")
-                if vm.claudeLoading || vm.cursorLoading {
+                if vm.claudeLoading || vm.cursorLoading || vm.codexLoading {
                     ProgressView().controlSize(.mini)
                 }
             }
@@ -277,7 +283,7 @@ struct MainView: View {
                 .help("오늘의 개발 운세")
                 Menu {
                     Button("지금 새로고침") {
-                        Task { await vm.refreshClaude(); await vm.refreshCursor() }
+                        Task { await vm.refreshClaude(); await vm.refreshCursor(); await vm.refreshCodex() }
                     }
                     Button("업데이트 확인...") { Updater.shared.checkForUpdates() }
                     Button("설정...") { onSettings() }
@@ -937,6 +943,167 @@ struct CursorSection: View {
             }
             Spacer()
             if let err = vm.cursorError, !vm.cursorNeedsSetup {
+                Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
+            }
+        }
+    }
+}
+
+// MARK: - Codex section
+//
+// PR2(표시) — 펫 차트/코인 적립 없이 게이지+스파크라인만. 펫·경제 통합은 PR3.
+// 주력 창: Plus/Pro는 5h, free는 monthly (ViewModel.codexPrimary*).
+
+struct CodexSection: View {
+    @ObservedObject var vm: ViewModel
+    @ObservedObject var settings = Settings.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            if !vm.codexCollapsed {
+                usageBody
+                sparkline
+                footer
+            }
+        }
+    }
+
+    private var header: some View {
+        sectionHeader(
+            title: "Codex",
+            isCollapsed: vm.codexCollapsed,
+            onToggle: { vm.codexCollapsed.toggle() },
+            planBadge: vm.codexCurrent?.planName.map(prettyPlan),
+            summary: summary,
+            showOnlySummary: false,
+            gaugePct: collapsedPct
+        )
+    }
+
+    private func prettyPlan(_ s: String) -> String {
+        guard let first = s.first else { return s }
+        return first.uppercased() + s.dropFirst()
+    }
+
+    private var summary: String {
+        guard vm.codexCurrent != nil else { return "–" }
+        if vm.codexUsesFiveHour {
+            return "5h \(SectionFormat.pct(vm.codexCurrent?.fiveHourPct)) · 주간 \(SectionFormat.pct(vm.codexCurrent?.sevenDayPct))"
+        }
+        return "월간 \(SectionFormat.pct(vm.codexCurrent?.monthlyPct))"
+    }
+
+    private var collapsedPct: Double? {
+        [vm.codexCurrent?.fiveHourPct, vm.codexCurrent?.sevenDayPct, vm.codexCurrent?.monthlyPct]
+            .compactMap { $0 }.max()
+    }
+
+    private var usageBody: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                Text(SectionFormat.pct(vm.codexPrimaryPct))
+                    .font(.system(size: 24, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                Text(vm.codexPrimaryLabel)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let reset = vm.codexPrimaryResetAt {
+                    Text("⟲ " + SectionFormat.countdown(reset.timeIntervalSince(vm.now)))
+                        .font(.system(size: 10, weight: .medium))
+                        .monospacedDigit()
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(.secondary.opacity(0.15)))
+                }
+            }
+            ProgressView(value: min(1, (vm.codexPrimaryPct ?? 0) / 100))
+                .progressViewStyle(.linear)
+                .tint(SectionFormat.barColor(vm.codexPrimaryPct))
+            if settings.showPace {
+                PaceLine(projected: vm.codexPrimaryProjectedPct, exhaustionAt: vm.codexPrimaryExhaustionAt, now: vm.now)
+            }
+            // 보조 창 — Plus/Pro의 주간(7d). free는 monthly 단일이라 생략.
+            if vm.codexUsesFiveHour {
+                HStack(alignment: .top, spacing: 12) {
+                    smallStat("주간", vm.codexCurrent?.sevenDayPct)
+                    if settings.showPace, vm.codex7dProjectedPct != nil {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("주간 페이스")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                            PaceLine(projected: vm.codex7dProjectedPct, exhaustionAt: vm.codex7dExhaustionAt, now: vm.now)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func smallStat(_ label: String, _ value: Double?) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(label).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(SectionFormat.pct(value))
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .monospacedDigit()
+        }
+    }
+
+    private var sparkline: some View {
+        Group {
+            // codexPrimarySeries: 5h(Plus/Pro) 또는 monthly(free)를 현재 창으로 필터한 시계열.
+            let validData = ViewModel.codexPrimarySeries(Array(vm.codexHistory.suffix(48)))
+            if validData.count >= 2 {
+                let values = validData.map(\.1)
+                let dataMax = values.max() ?? 0
+                let ymax: Double = max(10, (dataMax / 10).rounded(.up) * 10)
+                let step: Double = ymax <= 30 ? 10 : (ymax <= 60 ? 20 : (ymax <= 100 ? 25 : 50))
+                let yValues: [Double] = Array(stride(from: 0.0, through: ymax, by: step))
+                let span = validData.last!.0.timeIntervalSince(validData.first!.0)
+                let tickFormat: Date.FormatStyle = span < 24 * 3600
+                    ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
+                    : .dateTime.month(.twoDigits).day(.twoDigits).hour(.twoDigits(amPM: .omitted))
+                // PR2는 펫 테마 없음 — 사용량 비례 단색 그라데이션. PR3에서 펫 테마로 교체.
+                let color = SectionFormat.continuousColor(vm.codexPrimaryPct)
+                Chart {
+                    ForEach(validData, id: \.0) { item in
+                        AreaMark(x: .value("t", item.0), y: .value("v", item.1))
+                            .interpolationMethod(.linear)
+                            .foregroundStyle(LinearGradient(
+                                colors: [color.opacity(0.35), color.opacity(0.03)],
+                                startPoint: .top, endPoint: .bottom))
+                        LineMark(x: .value("t", item.0), y: .value("v", item.1))
+                            .interpolationMethod(.linear)
+                            .foregroundStyle(color)
+                    }
+                    if settings.notifyEnabled {
+                        ForEach(settings.notifyThresholds.filter { Double($0) <= ymax }, id: \.self) { t in
+                            RuleMark(y: .value("threshold", Double(t)))
+                                .foregroundStyle(SectionFormat.thresholdLineColor(t).opacity(0.5))
+                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                        }
+                    }
+                }
+                .chartYScale(domain: 0...ymax)
+                .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
+                .sparklineXAxis(format: tickFormat)
+                .frame(height: 44)
+            } else {
+                SectionFormat.chartEmptyState()
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack {
+            if let t = vm.codexLastSuccess {
+                Text("갱신 \(SectionFormat.relative(t, now: vm.now))")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let err = vm.codexError, !vm.codexNeedsSetup {
                 Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
             }
         }
