@@ -347,6 +347,12 @@ actor RankingAPI {
         return try await post(path: "submit", body: req)
     }
 
+    /// Codex 파싱 검증용 익명 샘플 제출 (이슈 #36). 보상이 없어 HMAC 서명 없이 anon key POST.
+    /// fire-and-forget 성격이지만 호출 측(버튼)이 성공/실패를 표시할 수 있게 throw는 전파한다.
+    func submitCodexSample(_ sample: CodexSampleRequest) async throws {
+        try await postVoid(path: "codex-sample", body: sample)
+    }
+
     /// Top N + 내 순위. 페이지네이션 없이 한 번에 받음 (50명 규모라 부담 없음).
     func fetchLeaderboard(deviceId: String?) async throws -> LeaderboardResponse {
         let q = deviceId.map { [URLQueryItem(name: "deviceId", value: $0)] }

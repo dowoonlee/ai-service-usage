@@ -957,6 +957,11 @@ struct CursorSection: View {
 struct CodexSection: View {
     @ObservedObject var vm: ViewModel
     @ObservedObject var settings = Settings.shared
+    // 진단 제출(#36) — 미리보기 시트 상태.
+    @State private var pendingSample: CodexSampleRequest? = nil
+    @State private var showSampleSheet = false
+    @State private var sampleSending = false
+    @State private var sampleResult: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -967,6 +972,7 @@ struct CodexSection: View {
                 footer
             }
         }
+        .sheet(isPresented: $showSampleSheet) { sampleSheetView }
     }
 
     private var header: some View {
@@ -1115,6 +1121,20 @@ struct CodexSection: View {
             if let err = vm.codexError, !vm.codexNeedsSetup {
                 Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
             }
+            // 파싱 검증용 익명 진단 제출 (#36) — Plus/Pro 실응답 확보 목적.
+            Button("진단 제출") {
+                Task {
+                    let dev = settings.rankingDeviceID.isEmpty ? nil : settings.rankingDeviceID
+                    pendingSample = await CodexAPI.shared.diagnosticSample(
+                        appVersion: Self.appVersionString, deviceId: dev)
+                    sampleResult = nil
+                    showSampleSheet = true
+                }
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 9))
+            .foregroundStyle(.blue)
+            .help("Codex 사용량 응답 구조를 익명으로 제출해 파싱 정확도 개선에 기여합니다 (개인정보·잔액 미포함)")
         }
     }
 
@@ -1124,6 +1144,75 @@ struct CodexSection: View {
     }
     private var codexTheme: PetTheme {
         settings.themeCodexOverride ?? PetTheme.defaultFor(settings.petCodexKind)
+    }
+
+    // MARK: - 진단 제출 시트 (#36)
+
+    static var appVersionString: String {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
+    }
+
+    static func prettyJSON(_ sample: CodexSampleRequest) -> String {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? enc.encode(sample), let s = String(data: data, encoding: .utf8) else {
+            return "(인코딩 실패)"
+        }
+        return s
+    }
+
+    private var sampleSheetView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Codex 진단 제출").font(.headline)
+            Text("아래 내용이 익명으로 전송됩니다. 이메일·사용자 ID·잔액 등 개인정보는 포함되지 않으며, Codex 사용량 파싱 정확도 확인에만 쓰입니다.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            if let sample = pendingSample {
+                ScrollView {
+                    Text(Self.prettyJSON(sample))
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 220)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+            } else {
+                Text("제출할 Codex 응답이 없습니다 (로그인/폴링 후 다시 시도).")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .frame(height: 220)
+            }
+            if let r = sampleResult {
+                Text(r).font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(r.hasPrefix("전송 완료") ? .green : .red)
+            }
+            if !RankingAPI.isConfigured {
+                Text("이 빌드는 서버 전송이 비활성화되어 있습니다.")
+                    .font(.system(size: 9)).foregroundStyle(.orange)
+            }
+            HStack {
+                Button("닫기") { showSampleSheet = false }
+                Spacer()
+                Button(sampleSending ? "전송 중..." : "전송") {
+                    Task { await sendSample() }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(sampleSending || pendingSample == nil || !RankingAPI.isConfigured)
+            }
+        }
+        .padding(16)
+        .frame(width: 400)
+    }
+
+    private func sendSample() async {
+        guard let s = pendingSample else { return }
+        sampleSending = true
+        defer { sampleSending = false }
+        do {
+            try await RankingAPI.shared.submitCodexSample(s)
+            sampleResult = "전송 완료 — 감사합니다! 🙏"
+        } catch {
+            sampleResult = "전송 실패: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+        }
     }
 }
 
