@@ -37,9 +37,16 @@ enum DiagnosticsCLI {
             if cu.plan == .ultra { printRaw("aggregated-usage-events", cu.aggRawData) }
         }
 
-        let overall = max(cSev, cuSev)
+        let cx = await CodexAPI.shared.diagnose()
+        let (cxSev, cxLines) = evaluateCodex(cx)
+        printBlock(title: "Codex (chatgpt.com)", sev: cxSev, lines: cxLines)
+        if raw {
+            printRaw("wham/usage", cx.usageRawData)
+        }
+
+        let overall = max(max(cSev, cuSev), cxSev)
         print("\n═══════════════════════════════════════════")
-        print(" 종합: \(overall.icon) \(overall.text)   (Claude \(cSev.icon) / Cursor \(cuSev.icon))")
+        print(" 종합: \(overall.icon) \(overall.text)   (Claude \(cSev.icon) / Cursor \(cuSev.icon) / Codex \(cxSev.icon))")
         print("═══════════════════════════════════════════")
 
         exit(overall == .fail ? 1 : 0)
@@ -144,6 +151,54 @@ enum DiagnosticsCLI {
                 lines.append("  ⚠️ 요청 수·한도 모두 비어있음 — 스키마 변경 의심 (--raw로 확인)")
                 bump(.warn)
             }
+        }
+        return (sev, lines)
+    }
+
+    // MARK: - Codex 판정
+
+    // Codex는 **선택적 소스** — 미설치/미인증을 "이상"이 아니라 skip(.ok)으로 본다.
+    // (Claude/Cursor는 미설치를 .fail로 보지만, Codex는 안 쓰는 사용자가 절대다수라
+    //  종합 판정을 깨면 안 됨.) 토큰이 있는데 그 이후가 깨질 때만 warn/fail.
+    private static func evaluateCodex(_ d: CodexDiagnostics) -> (DiagSeverity, [String]) {
+        var lines: [String] = []
+        var sev: DiagSeverity = .ok
+        func bump(_ s: DiagSeverity) { sev = max(sev, s) }
+
+        guard d.authExists else {
+            return (.ok, ["인증: — auth.json 없음 (Codex 미사용 — 건너뜀)"])
+        }
+        guard d.tokenFound else {
+            return (.warn, ["인증: ⚠️ \(d.fatal ?? "토큰 파싱 실패")"])
+        }
+        lines.append("인증: ✅ auth.json 토큰 발견")
+        lines.append("account_id: \(d.accountIdFound ? "✅ 확보" : "⚠️ 없음 (헤더 생략)")")
+
+        let us = d.usageStatus ?? -1
+        lines.append("GET /backend-api/wham/usage: \(statusText(us))")
+        if us != 200 { bump(.fail) }
+
+        if let snap = d.snapshot {
+            lines.append("파싱: ✅  플랜: \(snap.planName ?? "❓")")
+            // Plus/Pro는 5h+7d, free는 monthly 단일. 있는 창만 표시.
+            if snap.fiveHourPct != nil || snap.sevenDayPct != nil {
+                lines.append("  5h 사용률: \(pct(snap.fiveHourPct))  (리셋 \(dateText(snap.fiveHourResetAt)))")
+                lines.append("  7d 사용률: \(pct(snap.sevenDayPct))  (리셋 \(dateText(snap.sevenDayResetAt)))")
+            }
+            if snap.monthlyPct != nil {
+                lines.append("  월간 사용률: \(pct(snap.monthlyPct))  (리셋 \(dateText(snap.monthlyResetAt)))  [무료 플랜]")
+            }
+            if let bal = snap.creditsBalance {
+                lines.append("  크레딧 잔액: \(String(format: "%.2f", bal))")
+            }
+            // 200인데 어떤 창도 안 잡힘 → window 판별 키(limit_window_seconds)나 구조 변경 의심.
+            if us == 200, snap.fiveHourPct == nil, snap.sevenDayPct == nil, snap.monthlyPct == nil {
+                lines.append("  ⚠️ 모든 사용률 창이 nil — 스키마 변경 의심 (--raw로 원본 키 확인)")
+                bump(.warn)
+            }
+        } else if us == 200 {
+            lines.append("파싱: ❌ wham/usage 디코드 실패 (--raw로 원본 확인)")
+            bump(.fail)
         }
         return (sev, lines)
     }
