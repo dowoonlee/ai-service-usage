@@ -82,6 +82,18 @@ fileprivate extension View {
             }
         }
     }
+
+    /// chartOverlay 안에 테마별 지면 장식 모티프(TerrainDecor)를 깐다.
+    /// 펫보다 아래 z 에 와야 하므로 반드시 `.chartPet(...)` **앞에** 적용할 것.
+    func chartTerrainDecor(enabled: Bool, theme: PetTheme) -> some View {
+        chartOverlay { proxy in
+            if enabled {
+                GeometryReader { geo in
+                    TerrainDecor(plotFrame: geo[proxy.plotAreaFrame], theme: theme)
+                }
+            }
+        }
+    }
 }
 
 /// 데이터 최댓값을 받아 보기 좋은 y-상한과 3-tick (0, ymax/2, ymax)을 계산.
@@ -543,7 +555,7 @@ struct ClaudeSection: View {
                             y: .value("v", item.1)
                         )
                         .interpolationMethod(.linear)
-                        .foregroundStyle(claudeTheme.gradient)
+                        .foregroundStyle(claudeTheme.gradient(pct: vm.claudeCurrent?.fiveHourPct, threshold: petAnxietyAt))
                         LineMark(
                             x: .value("t", item.0),
                             y: .value("v", item.1)
@@ -565,6 +577,7 @@ struct ClaudeSection: View {
                 // 차트 라인이 그려지는 validData와 동일한 범위를 펫에 전달.
                 // 다른 데이터(예: recent 0% 포함)를 넘기면 펫의 x-도메인이 차트보다 넓어져
                 // plot 좌/우로 빠져나간다.
+                .chartTerrainDecor(enabled: settings.petClaudeEnabled && !settings.ownedPets.isEmpty, theme: claudeTheme)
                 .chartPet(
                     enabled: settings.petClaudeEnabled && !settings.ownedPets.isEmpty,
                     points: validData,
@@ -800,7 +813,7 @@ struct CursorSection: View {
                         // line과 동일한 stepEnd로 통일.
                         // 다른 보간이면 segment마다 사다리꼴 빈 곳이 생김.
                         .interpolationMethod(.stepEnd)
-                        .foregroundStyle(cursorTheme.gradient)
+                        .foregroundStyle(cursorTheme.gradient(pct: vm.cursorCurrentPct, threshold: petAnxietyAt))
                         LineMark(
                             x: .value("t", p.0),
                             y: .value("$", p.1)
@@ -817,6 +830,7 @@ struct CursorSection: View {
                 .chartYScale(domain: 0...ymax)
                 .sparklineYAxis(values: yValues, format: { "$\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
+                .chartTerrainDecor(enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty, theme: cursorTheme)
                 .chartPet(
                     enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty,
                     points: points,
@@ -868,7 +882,7 @@ struct CursorSection: View {
                             y: .value("v", item.1)
                         )
                         .interpolationMethod(.linear)
-                        .foregroundStyle(cursorTheme.gradient)
+                        .foregroundStyle(cursorTheme.gradient(pct: vm.cursorCurrentPct, threshold: petAnxietyAt))
                         LineMark(
                             x: .value("t", item.0),
                             y: .value("v", item.1)
@@ -885,6 +899,7 @@ struct CursorSection: View {
                 .chartYScale(domain: 0...ymax)
                 .sparklineYAxis(values: yValues, format: { "\(Int($0))" })
                 .sparklineXAxis(format: tickFormat)
+                .chartTerrainDecor(enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty, theme: cursorTheme)
                 .chartPet(
                     enabled: settings.petCursorEnabled && !settings.ownedPets.isEmpty,
                     points: validData,

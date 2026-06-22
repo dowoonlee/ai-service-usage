@@ -72,6 +72,14 @@ final class Settings: ObservableObject {
     @Published var themeCursorOverride: PetTheme? {
         didSet { UserDefaults.standard.set(themeCursorOverride?.rawValue, forKey: Keys.themeCursorOverride) }
     }
+    /// 코인 구매로 unlock한 동적 맵(테마) 인벤토리. PetTheme.rawValue 보관 (정적 4종은 무료라 미포함).
+    @Published var ownedThemes: Set<String> {
+        didSet { persist(ownedThemes, forKey: Keys.ownedThemes) }
+    }
+    /// 테마가 잠금 해제됐는지 — 무료(정적)거나 구매 보유한 동적 테마.
+    func isThemeUnlocked(_ t: PetTheme) -> Bool {
+        t.isFree || ownedThemes.contains(t.rawValue)
+    }
     @Published private(set) var launchAtLogin: Bool
 
     /// 차트 한 구간의 |dy|가 전체 y-range 대비 이 비율 이상이면 펫이 AAAH/WHEE 말풍선을 띄움.
@@ -602,6 +610,8 @@ final class Settings: ObservableObject {
         self.ownedAccessories = (accessoriesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         let titlesData = d.data(forKey: Keys.ownedTitles)
         self.ownedTitles = (titlesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let themesData = d.data(forKey: Keys.ownedThemes)
+        self.ownedThemes = (themesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.showGitHubLoginInCard = (d.object(forKey: Keys.showGitHubLoginInCard) as? Bool) ?? false
 
         // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
@@ -689,6 +699,17 @@ final class Settings: ObservableObject {
             d.set(self.coins, forKey: Keys.coins)
             d.set(self.coinsTotalEarned, forKey: Keys.coinsTotalEarned)
         }
+
+        // 구매제 도입 전부터 동적 테마를 override 로 쓰고 있었다면 보유로 인정 (뺏지 않음).
+        // init 끝(모든 프로퍼티 초기화 후)이라 self 자유 사용. init 중 didSet은 안 도므로 직접 persist.
+        var migratedThemes = false
+        for ov in [themeClaudeOverride, themeCursorOverride] {
+            if let t = ov, t.isDynamic, !ownedThemes.contains(t.rawValue) {
+                ownedThemes.insert(t.rawValue)
+                migratedThemes = true
+            }
+        }
+        if migratedThemes { persist(ownedThemes, forKey: Keys.ownedThemes) }
 
         // 도장 마이그레이션은 init 안에서 호출 금지 — `BadgeRegistry.evaluate`가 `Settings.shared`를
         // 재진입해서 lazy init이 깨짐. App 시작 후 `applyGymMigrationIfNeeded()`에서 처리.
@@ -1057,6 +1078,7 @@ final class Settings: ObservableObject {
         static let trainerCard                 = "settings.trainerCard"
         static let ownedAccessories            = "settings.ownedAccessories"
         static let ownedTitles                 = "settings.ownedTitles"
+        static let ownedThemes                 = "settings.ownedThemes"
         static let showGitHubLoginInCard       = "settings.showGitHubLoginInCard"
         static let hasMigratedContributorBonusUpgrade = "settings.hasMigratedContributorBonusUpgrade"
     }

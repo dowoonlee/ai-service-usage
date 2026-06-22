@@ -677,6 +677,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case (.sea, .line):         return NSColor(hue: 0.58, saturation: 0.75, brightness: 0.55, alpha: 1)
         case (.sea, .top):          return NSColor(hue: 0.58, saturation: 0.40, brightness: 0.60, alpha: 1)
         case (.sea, .bottom):       return NSColor(hue: 0.60, saturation: 0.55, brightness: 0.40, alpha: 1)
+        // 설산은 메뉴바 미니 차트에선 동적 눈 없이 기본 암석 톤으로 표시.
+        case (.snowMountain, .line):  return NSColor(hue: 0.60, saturation: 0.35, brightness: 0.70, alpha: 1)
+        case (.snowMountain, .top):   return NSColor(hue: 0.60, saturation: 0.12, brightness: 0.62, alpha: 1)
+        case (.snowMountain, .bottom):return NSColor(hue: 0.62, saturation: 0.30, brightness: 0.38, alpha: 1)
+        case (.desert, .line):      return NSColor(hue: 0.08, saturation: 0.70, brightness: 0.55, alpha: 1)
+        case (.desert, .top):       return NSColor(hue: 0.11, saturation: 0.35, brightness: 0.62, alpha: 1)
+        case (.desert, .bottom):    return NSColor(hue: 0.09, saturation: 0.55, brightness: 0.45, alpha: 1)
+        case (.volcano, .line):     return NSColor(hue: 0.04, saturation: 0.90, brightness: 0.65, alpha: 1)
+        case (.volcano, .top):      return NSColor(hue: 0.02, saturation: 0.30, brightness: 0.40, alpha: 1)
+        case (.volcano, .bottom):   return NSColor(hue: 0.03, saturation: 0.80, brightness: 0.55, alpha: 1)
+        case (.space, .line):       return NSColor(hue: 0.72, saturation: 0.70, brightness: 0.70, alpha: 1)
+        case (.space, .top):        return NSColor(hue: 0.66, saturation: 0.45, brightness: 0.40, alpha: 1)
+        case (.space, .bottom):     return NSColor(hue: 0.75, saturation: 0.55, brightness: 0.35, alpha: 1)
+        // 동적 테마들도 메뉴바 미니 차트에선 기본(level 0) 톤으로 표시.
+        case (.aurora, .line):      return NSColor(hue: 0.45, saturation: 0.65, brightness: 0.75, alpha: 1)
+        case (.aurora, .top):       return NSColor(hue: 0.70, saturation: 0.45, brightness: 0.30, alpha: 1)
+        case (.aurora, .bottom):    return NSColor(hue: 0.66, saturation: 0.50, brightness: 0.22, alpha: 1)
+        case (.sakura, .line):      return NSColor(hue: 0.95, saturation: 0.55, brightness: 0.72, alpha: 1)
+        case (.sakura, .top):       return NSColor(hue: 0.95, saturation: 0.22, brightness: 0.62, alpha: 1)
+        case (.sakura, .bottom):    return NSColor(hue: 0.96, saturation: 0.38, brightness: 0.50, alpha: 1)
+        case (.storm, .line):       return NSColor(hue: 0.60, saturation: 0.22, brightness: 0.62, alpha: 1)
+        case (.storm, .top):        return NSColor(hue: 0.62, saturation: 0.15, brightness: 0.42, alpha: 1)
+        case (.storm, .bottom):     return NSColor(hue: 0.62, saturation: 0.12, brightness: 0.30, alpha: 1)
+        case (.toxic, .line):       return NSColor(hue: 0.25, saturation: 0.85, brightness: 0.78, alpha: 1)
+        case (.toxic, .top):        return NSColor(hue: 0.25, saturation: 0.30, brightness: 0.35, alpha: 1)
+        case (.toxic, .bottom):     return NSColor(hue: 0.22, saturation: 0.45, brightness: 0.30, alpha: 1)
         }
     }
 

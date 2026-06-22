@@ -179,6 +179,21 @@ final class CoinLedger: UsageConsumer {
         DebugLog.log("CoinLedger: Collection [\(c.displayName)] +\(amount) coin (total=\(Settings.shared.coins))")
     }
 
+    // MARK: - 코인 소비 (구매)
+
+    /// 동적 맵(테마) 구매. 무료/이미 보유/잔액 부족이면 false.
+    /// 잔액만 차감 (누적 coinsTotalEarned 불변 — 소비. Gacha 차감과 동일 정책).
+    @discardableResult
+    func purchaseTheme(_ theme: PetTheme) -> Bool {
+        let s = Settings.shared
+        guard !theme.isFree, !s.ownedThemes.contains(theme.rawValue) else { return false }
+        guard s.coins >= theme.price else { return false }
+        s.coins -= theme.price
+        s.ownedThemes.insert(theme.rawValue)
+        DebugLog.log("CoinLedger: 맵 구매 [\(theme.displayName)] -\(theme.price) coin (total=\(s.coins))")
+        return true
+    }
+
     // MARK: - 내부 helpers
 
     private enum CoinSource { case claude, cursor }

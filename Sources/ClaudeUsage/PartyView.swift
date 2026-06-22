@@ -15,6 +15,8 @@ struct PartyView: View {
     @State private var addingClaude: Bool? = nil
     /// 추가 시트 펫 정렬 기준.
     @State private var sortOrder: PetSortOrder = .dex
+    /// 맵 상점 구매 확인 alert 대상. nil = 닫힘.
+    @State private var pendingThemePurchase: PetTheme? = nil
 
     var body: some View {
         ScrollView {
@@ -22,6 +24,8 @@ struct PartyView: View {
                 partySection(claude: true)
                 Divider()
                 partySection(claude: false)
+                Divider()
+                mapShopSection
                 Divider()
                 commonSettings
             }
@@ -33,6 +37,86 @@ struct PartyView: View {
         )) {
             if let claude = addingClaude { addSheet(claude: claude) }
         }
+        .alert(
+            pendingThemePurchase.map { "\($0.displayName) 맵 구매" } ?? "",
+            isPresented: Binding(
+                get: { pendingThemePurchase != nil },
+                set: { if !$0 { pendingThemePurchase = nil } }
+            ),
+            presenting: pendingThemePurchase
+        ) { theme in
+            Button("\(theme.price) coin 으로 구매") {
+                _ = CoinLedger.shared.purchaseTheme(theme)
+            }
+            Button("취소", role: .cancel) {}
+        } message: { theme in
+            Text("'\(theme.displayName)' 맵을 구매하시겠습니까?\n현재 잔액: \(settings.coins.formatted()) coin → 구매 후 \((settings.coins - theme.price).formatted()) coin")
+        }
+    }
+
+    // MARK: - 맵 상점
+
+    // 동적 맵(테마) 구매 섹션. ownedThemes는 글로벌 — 한 번 사면 Claude·Cursor 양쪽 적용 가능.
+    private var mapShopSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("맵 상점")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("\(settings.coins.formatted()) coin")
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Text("동적 맵은 사용량에 따라 색이 차오릅니다. 구매하면 위 테마 선택에 추가됩니다.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
+                ForEach(PetTheme.allCases.filter { $0.isDynamic }) { theme in
+                    mapCard(theme)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func mapCard(_ theme: PetTheme) -> some View {
+        let owned = settings.isThemeUnlocked(theme)
+        let canBuy = !owned && settings.coins >= theme.price
+        Button {
+            if canBuy { pendingThemePurchase = theme }
+        } label: {
+            VStack(spacing: 3) {
+                RoundedRectangle(cornerRadius: 6)
+                    // 동적 맵 미리보기 — 적당히 차오른 상태(pct 75, 임계값 30%).
+                    .fill(theme.gradient(pct: 75, threshold: 0.30))
+                    .frame(height: 38)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(theme.lineColor.opacity(0.6), lineWidth: 1)
+                    )
+                    .overlay(alignment: .topTrailing) {
+                        Image(systemName: owned ? "checkmark.seal.fill" : "lock.fill")
+                            .font(.system(size: 10))
+                            .foregroundStyle(owned ? .green : .white.opacity(0.85))
+                            .padding(3)
+                    }
+                Text(theme.displayName)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.primary)
+                if owned {
+                    Text("보유")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.green)
+                } else {
+                    Text("\(theme.price) coin")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(canBuy ? .orange : .secondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!canBuy)
+        .opacity(owned || canBuy ? 1.0 : 0.5)
     }
 
     // MARK: - 파티 섹션
@@ -261,7 +345,8 @@ struct PartyView: View {
         let leaderKind = claude ? settings.petClaudeKind : settings.petCursorKind
         return Picker("테마", selection: binding) {
             Text("기본 (\(PetTheme.defaultFor(leaderKind).displayName))").tag(PetTheme?.none)
-            ForEach(PetTheme.allCases) { t in
+            // 보유한 테마만 적용 가능 — 미보유 동적 맵은 아래 "맵 상점"에서 구매.
+            ForEach(PetTheme.allCases.filter { settings.isThemeUnlocked($0) }) { t in
                 Text(t.displayName).tag(PetTheme?.some(t))
             }
         }
