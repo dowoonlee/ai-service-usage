@@ -316,6 +316,52 @@ actor CodexAPI {
             return (data, (resp as? HTTPURLResponse)?.statusCode ?? -1)
         } catch { return (nil, -1) }
     }
+
+    // MARK: - 파싱 검증용 익명 샘플 (이슈 #36)
+
+    // diagnose()의 raw 응답에서 **PII·잔액을 제거하고** rate_limit 구조 + plan_type + 우리 파서
+    // 결과만 추려 서버 제출용 페이로드를 만든다. rate_limit은 우리가 모르는 새 필드도 보존돼야
+    // "어떻게 오는지" 확인이 되므로 원본 JSON 문자열 그대로 담는다 (email/user_id/credits는
+    // 최상위에 있고 rate_limit 안엔 없으므로 rate_limit만 떼면 PII가 섞이지 않는다).
+    func diagnosticSample(appVersion: String, deviceId: String?) async -> CodexSampleRequest? {
+        let d = await diagnose()
+        guard d.tokenFound, let data = d.usageRawData,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var rateLimitJson: String?
+        if let rl = obj["rate_limit"], JSONSerialization.isValidJSONObject(rl),
+           let rlData = try? JSONSerialization.data(withJSONObject: rl, options: [.sortedKeys]) {
+            rateLimitJson = String(data: rlData, encoding: .utf8)
+        }
+        let snap = d.snapshot
+        return CodexSampleRequest(
+            deviceId: deviceId,
+            appVersion: appVersion,
+            planType: obj["plan_type"] as? String,
+            rateLimitJson: rateLimitJson,
+            parsed: CodexSampleRequest.Parsed(
+                fiveHourPct: snap?.fiveHourPct,
+                sevenDayPct: snap?.sevenDayPct,
+                monthlyPct: snap?.monthlyPct
+            ),
+            rawTopKeys: obj.keys.sorted()
+        )
+    }
+}
+
+/// codex-sample Edge Function 제출 페이로드. PII·잔액 제외 — rate_limit 구조 + plan_type + 파서 결과만.
+struct CodexSampleRequest: Encodable, Sendable {
+    let deviceId: String?
+    let appVersion: String?
+    let planType: String?
+    let rateLimitJson: String?              // rate_limit 객체 원본을 직렬화한 JSON 문자열
+    let parsed: Parsed
+    let rawTopKeys: [String]                // 응답 최상위 키 (새 필드/드리프트 감지)
+
+    struct Parsed: Encodable, Sendable {
+        let fiveHourPct: Double?
+        let sevenDayPct: Double?
+        let monthlyPct: Double?
+    }
 }
 
 struct CodexDiagnostics: Sendable {
