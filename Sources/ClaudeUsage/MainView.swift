@@ -1122,9 +1122,8 @@ struct CodexSection: View {
         guard settings.notifyEnabled, let t = settings.notifyThresholds.first else { return 0.8 }
         return Double(t) / 100
     }
-    /// Codex 차트 펫 테마 — themeCodexOverride는 아직 없음(맵 상점 동적 테마는 후속). 기본 테마만.
     private var codexTheme: PetTheme {
-        PetTheme.defaultFor(settings.petCodexKind)
+        settings.themeCodexOverride ?? PetTheme.defaultFor(settings.petCodexKind)
     }
 }
 

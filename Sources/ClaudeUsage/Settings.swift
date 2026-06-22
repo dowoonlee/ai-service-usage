@@ -65,11 +65,11 @@ final class Settings: ObservableObject {
     /// 리더(party[0]) 미러 — 레거시 단수 참조 호환. set은 리더 kind 교체로 라우팅.
     var petClaudeKind: PetKind {
         get { petClaudeParty.first?.kind ?? .fox }
-        set { setPartyLeader(claude: true, kind: newValue) }
+        set { setPartyLeader(source: .claude, kind: newValue) }
     }
     var petCursorKind: PetKind {
         get { petCursorParty.first?.kind ?? .wolf }
-        set { setPartyLeader(claude: false, kind: newValue) }
+        set { setPartyLeader(source: .cursor, kind: newValue) }
     }
     /// Codex 차트 리더(party[0]) 미러 — get-only. 펫 차트 테마(`PetTheme.defaultFor`)용.
     /// party 편집은 PartyView/SettingsView가 petCodexParty를 직접 갱신한다.
@@ -82,6 +82,9 @@ final class Settings: ObservableObject {
     }
     @Published var themeCursorOverride: PetTheme? {
         didSet { UserDefaults.standard.set(themeCursorOverride?.rawValue, forKey: Keys.themeCursorOverride) }
+    }
+    @Published var themeCodexOverride: PetTheme? {
+        didSet { UserDefaults.standard.set(themeCodexOverride?.rawValue, forKey: Keys.themeCodexOverride) }
     }
     /// 코인 구매로 unlock한 동적 맵(테마) 인벤토리. PetTheme.rawValue 보관 (정적 4종은 무료라 미포함).
     @Published var ownedThemes: Set<String> {
@@ -162,11 +165,11 @@ final class Settings: ObservableObject {
     /// 리더(party[0]) variant 미러 — 레거시 단수 참조 호환. kind와 함께 party가 source of truth.
     var petClaudeVariant: Int {
         get { petClaudeParty.first?.variant ?? 0 }
-        set { setPartyLeader(claude: true, variant: newValue) }
+        set { setPartyLeader(source: .claude, variant: newValue) }
     }
     var petCursorVariant: Int {
         get { petCursorParty.first?.variant ?? 0 }
-        set { setPartyLeader(claude: false, variant: newValue) }
+        set { setPartyLeader(source: .cursor, variant: newValue) }
     }
     /// 마지막으로 본 Claude 5h/7d 윈도우의 resetAt. 같은 resetAt 안에서 pct delta로 적립.
     @Published var lastClaudeFiveHourReset: Date? {
@@ -518,6 +521,7 @@ final class Settings: ObservableObject {
             ?? [PetSelection(kind: .fox, variant: 0)]
         self.themeClaudeOverride = d.string(forKey: Keys.themeClaudeOverride).flatMap { PetTheme(rawValue: $0) }
         self.themeCursorOverride = d.string(forKey: Keys.themeCursorOverride).flatMap { PetTheme(rawValue: $0) }
+        self.themeCodexOverride = d.string(forKey: Keys.themeCodexOverride).flatMap { PetTheme(rawValue: $0) }
         self.launchAtLogin = (SMAppService.mainApp.status == .enabled)
         let storedBigDrop = (d.object(forKey: Keys.bigDropThreshold) as? Double) ?? 0.40
         self.bigDropThreshold = max(0.10, min(0.80, storedBigDrop))
@@ -749,7 +753,7 @@ final class Settings: ObservableObject {
         // 구매제 도입 전부터 동적 테마를 override 로 쓰고 있었다면 보유로 인정 (뺏지 않음).
         // init 끝(모든 프로퍼티 초기화 후)이라 self 자유 사용. init 중 didSet은 안 도므로 직접 persist.
         var migratedThemes = false
-        for ov in [themeClaudeOverride, themeCursorOverride] {
+        for ov in [themeClaudeOverride, themeCursorOverride, themeCodexOverride] {
             if let t = ov, t.isDynamic, !ownedThemes.contains(t.rawValue) {
                 ownedThemes.insert(t.rawValue)
                 migratedThemes = true
@@ -842,48 +846,65 @@ final class Settings: ObservableObject {
 
     // MARK: - 펫 파티 조작 (cf. docs/DESIGN_PET_PARTY.md)
 
-    /// 리더(party[0])의 kind/variant 교체 — 레거시 단수 setter 라우팅용. 파티가 비면 1마리 생성.
-    private func setPartyLeader(claude: Bool, kind: PetKind? = nil, variant: Int? = nil) {
-        var party = claude ? petClaudeParty : petCursorParty
-        if party.isEmpty {
-            party = [PetSelection(kind: kind ?? (claude ? .fox : .wolf), variant: variant ?? 0)]
-        } else {
-            if let kind { party[0].kind = kind }
-            if let variant { party[0].variant = variant }
+    /// 파티 source별 get/set — 3-way 분기를 한 곳에 모아 아래 helper들이 재사용.
+    func party(for source: PetChartSource) -> [PetSelection] {
+        switch source {
+        case .claude: return petClaudeParty
+        case .cursor: return petCursorParty
+        case .codex:  return petCodexParty
         }
-        if claude { petClaudeParty = party } else { petCursorParty = party }
+    }
+    private func setParty(_ party: [PetSelection], for source: PetChartSource) {
+        switch source {
+        case .claude: petClaudeParty = party
+        case .cursor: petCursorParty = party
+        case .codex:  petCodexParty = party
+        }
+    }
+
+    /// 리더(party[0])의 kind/variant 교체 — 레거시 단수 setter 라우팅용. 파티가 비면 1마리 생성.
+    private func setPartyLeader(source: PetChartSource, kind: PetKind? = nil, variant: Int? = nil) {
+        var p = party(for: source)
+        let dflt: PetKind = source == .cursor ? .wolf : .fox
+        if p.isEmpty {
+            p = [PetSelection(kind: kind ?? dflt, variant: variant ?? 0)]
+        } else {
+            if let kind { p[0].kind = kind }
+            if let variant { p[0].variant = variant }
+        }
+        setParty(p, for: source)
     }
 
     /// 파티에 펫 추가. 종 유니크 + 최대 `maxPartySize` — 이미 있거나 꽉 차면 무시.
-    func addToParty(claude: Bool, _ sel: PetSelection) {
-        var party = claude ? petClaudeParty : petCursorParty
-        guard party.count < Self.maxPartySize, !party.contains(where: { $0.kind == sel.kind }) else { return }
-        party.append(sel)
-        if claude { petClaudeParty = party } else { petCursorParty = party }
+    func addToParty(source: PetChartSource, _ sel: PetSelection) {
+        var p = party(for: source)
+        guard p.count < Self.maxPartySize, !p.contains(where: { $0.kind == sel.kind }) else { return }
+        p.append(sel)
+        setParty(p, for: source)
     }
 
     /// 파티에서 종 제거.
-    func removeFromParty(claude: Bool, kind: PetKind) {
-        var party = claude ? petClaudeParty : petCursorParty
-        party.removeAll { $0.kind == kind }
-        if claude { petClaudeParty = party } else { petCursorParty = party }
+    func removeFromParty(source: PetChartSource, kind: PetKind) {
+        var p = party(for: source)
+        p.removeAll { $0.kind == kind }
+        setParty(p, for: source)
     }
 
     /// 파티 멤버 순서 이동 (from → to). [0]이 리더라 순서가 메뉴바/wellness 대표를 결정.
-    func movePartyMember(claude: Bool, from: Int, to: Int) {
-        var party = claude ? petClaudeParty : petCursorParty
-        guard party.indices.contains(from), to >= 0, to < party.count, from != to else { return }
-        let item = party.remove(at: from)
-        party.insert(item, at: to)
-        if claude { petClaudeParty = party } else { petCursorParty = party }
+    func movePartyMember(source: PetChartSource, from: Int, to: Int) {
+        var p = party(for: source)
+        guard p.indices.contains(from), to >= 0, to < p.count, from != to else { return }
+        let item = p.remove(at: from)
+        p.insert(item, at: to)
+        setParty(p, for: source)
     }
 
     /// 특정 차트 파티의 variant 토글 (슬롯 이로치 선택용).
-    func setPartyVariant(claude: Bool, kind: PetKind, variant: Int) {
-        var party = claude ? petClaudeParty : petCursorParty
-        guard let i = party.firstIndex(where: { $0.kind == kind }) else { return }
-        party[i].variant = variant
-        if claude { petClaudeParty = party } else { petCursorParty = party }
+    func setPartyVariant(source: PetChartSource, kind: PetKind, variant: Int) {
+        var p = party(for: source)
+        guard let i = p.firstIndex(where: { $0.kind == kind }) else { return }
+        p[i].variant = variant
+        setParty(p, for: source)
     }
 
     /// GitHub 연결 해제 — 토큰 폐기 + identity 클리어. creditedPRNumbers는 의도적으로 유지
@@ -1042,6 +1063,7 @@ final class Settings: ObservableObject {
         static let petCursorKind    = "settings.petCursorKind"
         static let themeClaudeOverride = "settings.themeClaudeOverride"
         static let themeCursorOverride = "settings.themeCursorOverride"
+        static let themeCodexOverride  = "settings.themeCodexOverride"
         static let bigDropThreshold = "settings.bigDropThreshold"
         // 날씨 이펙트
         static let weatherEffectEnabled = "settings.weatherEffectEnabled"
@@ -1149,6 +1171,20 @@ enum MenuBarPetSource: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .claude: return "Claude"
         case .cursor: return "Cursor"
+        }
+    }
+}
+
+/// 펫 파티 편성/차트 표시의 데이터 출처 (Claude / Cursor / Codex). PartyView·Settings 파티 helper의
+/// 3-way 분기 키. MenuBarPetSource(claude/cursor 2-way, 메뉴바 전용)와는 의도적으로 분리한다.
+enum PetChartSource: String, CaseIterable, Identifiable, Hashable {
+    case claude, cursor, codex
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .cursor: return "Cursor"
+        case .codex:  return "Codex"
         }
     }
 }
