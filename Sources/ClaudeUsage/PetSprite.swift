@@ -482,8 +482,10 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .wilderness)
         case .whale:
+            // Whale 스프라이트만 같은 Pirate Bomb 팩에서 유일하게 왼쪽을 향함
+            // (주둥이가 왼쪽). 나머지 팩 캐릭터는 오른쪽 향함.
             return PetDefinition(prefix: "Whale", displayName: "고래 해적",
-                                 cellSize: (68, 46), defaultFacingLeft: false,
+                                 cellSize: (68, 46), defaultFacingLeft: true,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
 
