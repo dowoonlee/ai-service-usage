@@ -122,4 +122,8 @@ enum SnapshotStore {
         filename: "cursor-events.jsonl",
         label: "ClaudeUsage.CursorEvents"
     )
+    static let codex = JSONLStore<CodexSnapshot>(
+        filename: "codex-snapshots.jsonl",
+        label: "ClaudeUsage.CodexStore"
+    )
 }
