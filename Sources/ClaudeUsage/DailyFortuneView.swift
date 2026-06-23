@@ -108,12 +108,13 @@ final class DailyFortuneVM: ObservableObject {
     }()
     private static func parseISO(_ s: String) -> Date? { isoFormatter.date(from: s) }
 
-    private static func todayDateString() -> String {
+    private static let ymdFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = SajuEngine.kst
-        return f.string(from: Date())
-    }
+        return f
+    }()
+    private static func todayDateString() -> String { ymdFormatter.string(from: Date()) }
 }
 
 /// 사용자 에러 표현 — 메시지 + 권장 후속 액션 (설정 열기 vs 다시 시도).
@@ -363,13 +364,14 @@ struct DailyFortuneView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private static func todayDisplayString() -> String {
+    private static let displayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy년 M월 d일"
         f.locale = Locale(identifier: "ko_KR")
         f.timeZone = SajuEngine.kst
-        return f.string(from: Date())
-    }
+        return f
+    }()
+    private static func todayDisplayString() -> String { displayFormatter.string(from: Date()) }
 }
 
 /// 말풍선 — body(라운드 사각형) + tail(아래쪽 삼각형) 한 path. ZStack 으로 fill + stroke 두 번 그림.

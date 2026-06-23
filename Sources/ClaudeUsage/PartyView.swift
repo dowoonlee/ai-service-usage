@@ -374,14 +374,8 @@ struct PartyView: View {
         .frame(width: 130)
     }
 
-    private func variantColor(_ v: Int) -> Color {
-        switch v {
-        case 1:  return .yellow
-        case 2:  return .orange
-        case 3:  return .purple
-        default: return .gray
-        }
-    }
+    // WalkingCat.variantDotColor 단일 정의에 위임 — 인벤토리와 같은 색으로 통일.
+    private func variantColor(_ v: Int) -> Color { WalkingCat.variantDotColor(v) }
 }
 
 private extension PetKind {

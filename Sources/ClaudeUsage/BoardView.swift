@@ -609,10 +609,14 @@ private struct BoardRow: View {
         if diff < 86400 { return "\(diff / 3600)시간 전" }
         let days = diff / 86400
         if days < 7 { return "\(days)일 전" }
+        return Self.monthDayFormatter.string(from: date)
+    }
+
+    private static let monthDayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "M월 d일"
-        return f.string(from: date)
-    }
+        return f
+    }()
 
     /// 60의 배수면 "N분", 그 외엔 자연어 조합. help 문구용. 정책이 30s/90s/120s로 바뀌어도 자연스럽게 표시.
     static func secondsLabel(_ sec: Int) -> String {

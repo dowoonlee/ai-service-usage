@@ -212,11 +212,7 @@ struct RankingView: View {
     }
 
     /// VP 점수 표시 — 천 단위 콤마 + " VP" 접미사. monospaced 폰트와 함께 사용.
-    private func formatVP(_ n: Int) -> String {
-        let fmt = NumberFormatter()
-        fmt.numberStyle = .decimal
-        return "\(fmt.string(from: NSNumber(value: n)) ?? "\(n)") VP"
-    }
+    private func formatVP(_ n: Int) -> String { formatVPLabel(n) }
 
     private var footer: some View {
         HStack {
@@ -404,11 +400,18 @@ private struct LeaderboardRowView: View {
     private var avatarKind: PetKind? { entry.profileJson?.card.avatar.kind }
     private var avatarVariant: Int { entry.profileJson?.card.avatar.variant ?? 0 }
 
-    private func formatVPRow(_ n: Int) -> String {
-        let fmt = NumberFormatter()
-        fmt.numberStyle = .decimal
-        return "\(fmt.string(from: NSNumber(value: n)) ?? "\(n)") VP"
-    }
+    private func formatVPRow(_ n: Int) -> String { formatVPLabel(n) }
+}
+
+/// VP 점수 표시용 공유 포매터·헬퍼 — 천 단위 콤마 + " VP". body 경로에서 매번 NumberFormatter를
+/// 생성하지 않도록 1회만 만들고 RankingView·LeaderboardRowView가 공유한다.
+private let vpDecimalFormatter: NumberFormatter = {
+    let f = NumberFormatter()
+    f.numberStyle = .decimal
+    return f
+}()
+private func formatVPLabel(_ n: Int) -> String {
+    "\(vpDecimalFormatter.string(from: NSNumber(value: n)) ?? "\(n)") VP"
 }
 
 // MARK: - 시상대 캐릭터 (단 위에 서는 펫)
