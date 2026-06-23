@@ -36,16 +36,28 @@ final class JSONLStore<T: Codable> {
 
     func append(_ value: T) {
         queue.sync {
-            guard let data = try? encoder.encode(value) else { return }
+            let data: Data
+            do {
+                data = try encoder.encode(value)
+            } catch {
+                // 인코딩 실패를 조용히 삼키면 재시작 후 history·코인 적립 기준점이 어긋나도 진단이 안 됨.
+                DebugLog.log("JSONLStore.append 인코딩 실패 \(fileURL.lastPathComponent): \(error)")
+                return
+            }
             var line = data
             line.append(0x0A)
-            if FileManager.default.fileExists(atPath: fileURL.path),
-               let handle = try? FileHandle(forWritingTo: fileURL) {
-                defer { try? handle.close() }
-                _ = try? handle.seekToEnd()
-                try? handle.write(contentsOf: line)
-            } else {
-                try? line.write(to: fileURL, options: .atomic)
+            do {
+                if FileManager.default.fileExists(atPath: fileURL.path) {
+                    let handle = try FileHandle(forWritingTo: fileURL)
+                    defer { try? handle.close() }
+                    try handle.seekToEnd()
+                    try handle.write(contentsOf: line)
+                } else {
+                    try line.write(to: fileURL, options: .atomic)
+                }
+            } catch {
+                DebugLog.log("JSONLStore.append 쓰기 실패 \(fileURL.lastPathComponent): \(error)")
+                return
             }
             restrictFilePermissions()
         }
