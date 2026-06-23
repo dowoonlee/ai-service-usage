@@ -349,7 +349,7 @@ struct MainView: View {
                 } label: {
                     Image(systemName: "sparkles")
                         .font(.system(size: 11))
-                        .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.2))
+                        .foregroundStyle(AppColors.gold)
                         .overlay(alignment: .topTrailing) {
                             if !Calendar.current.isDateInToday(settings.dailyFortuneLastShownDate ?? .distantPast) {
                                 Circle()

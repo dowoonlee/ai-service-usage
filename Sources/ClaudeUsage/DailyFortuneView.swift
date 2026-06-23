@@ -178,7 +178,7 @@ struct DailyFortuneView: View {
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: "sparkles")
-                .foregroundStyle(Color(red: 1.0, green: 0.78, blue: 0.2))  // 금색 — hud 어두운 배경에서 가장 잘 보임
+                .foregroundStyle(AppColors.gold)  // 금색 — hud 어두운 배경에서 가장 잘 보임
             Text("오늘의 개발 운세")
                 .font(.system(size: 16, weight: .semibold))
             Spacer()
@@ -236,7 +236,7 @@ struct DailyFortuneView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(Color(red: 1.0, green: 0.78, blue: 0.2).opacity(0.10))
+                .fill(AppColors.gold.opacity(0.10))
         )
     }
 

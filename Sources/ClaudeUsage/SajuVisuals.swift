@@ -144,7 +144,7 @@ struct FiveElementPentagon: View {
     var body: some View {
         Canvas { ctx, size in
             let dark = scheme == .dark
-            let gold = Color(red: 1.0, green: 0.78, blue: 0.2)
+            let gold = AppColors.gold
             let faint = Color.secondary.opacity(dark ? 0.30 : 0.35)
 
             // 상단 라벨 2줄(오행+카운트 / 나·오늘)이 들어갈 헤드룸 확보를 위해

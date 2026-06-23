@@ -368,7 +368,7 @@ private struct LeaderboardRowView: View {
         switch entry.rank {
         case 1: return .yellow
         case 2: return .gray
-        case 3: return Color(red: 0.8, green: 0.5, blue: 0.2)
+        case 3: return AppColors.bronze
         default: return .primary
         }
     }
@@ -588,7 +588,7 @@ private func podiumColor(_ rank: Int) -> Color {
     switch rank {
     case 1: return .yellow
     case 2: return .gray
-    case 3: return Color(red: 0.8, green: 0.5, blue: 0.2)
+    case 3: return AppColors.bronze
     default: return .secondary
     }
 }
