@@ -106,6 +106,86 @@ fileprivate func niceYMax(dataMax: Double) -> (ymax: Double, ticks: [Double]) {
     return (ymax, [0, ymax / 2, ymax])
 }
 
+/// pct(%) sparkline y축 상한·눈금 — 10 단위 올림 + 구간별 step. Claude/Codex 섹션이 공유.
+fileprivate func pctYTicks(dataMax: Double) -> (ymax: Double, yValues: [Double]) {
+    let ymax = max(10, (dataMax / 10).rounded(.up) * 10)
+    let step: Double = ymax <= 30 ? 10 : (ymax <= 60 ? 20 : (ymax <= 100 ? 25 : 50))
+    return (ymax, Array(stride(from: 0.0, through: ymax, by: step)))
+}
+
+/// 작은 보조 통계(라벨 + pct) — Claude/Codex 섹션이 공유.
+fileprivate func smallStatView(_ label: String, _ value: Double?) -> some View {
+    VStack(alignment: .leading, spacing: 1) {
+        Text(label)
+            .font(.system(size: 9))
+            .foregroundStyle(.secondary)
+        Text(SectionFormat.pct(value))
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .monospacedDigit()
+    }
+}
+
+/// reset 카운트다운 캡슐 배지 — 세 섹션(Claude/Cursor/Codex)이 공유.
+private struct ResetBadge: View {
+    let reset: Date
+    let now: Date
+    var body: some View {
+        Text("⟲ " + SectionFormat.countdown(reset.timeIntervalSince(now)))
+            .font(.system(size: 10, weight: .medium))
+            .monospacedDigit()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(.secondary.opacity(0.15)))
+    }
+}
+
+extension Settings {
+    /// 펫 불안 임계 — notify 임계 첫 값(%)을 0~1로, 없으면 기본 0.8. 세 섹션이 공유.
+    var petAnxietyThreshold: Double {
+        guard notifyEnabled, let t = notifyThresholds.first else { return 0.8 }
+        return Double(t) / 100
+    }
+}
+
+/// 섹션 하단 "갱신 N분 전 · 에러" 줄 — 세 섹션이 공유. Codex만 진단 버튼을 extra로 덧붙인다.
+private struct SectionFooter<Extra: View>: View {
+    let lastSuccess: Date?
+    let now: Date
+    let error: String?
+    let showError: Bool
+    let extra: Extra
+
+    init(lastSuccess: Date?, now: Date, error: String?, showError: Bool,
+         @ViewBuilder extra: () -> Extra) {
+        self.lastSuccess = lastSuccess
+        self.now = now
+        self.error = error
+        self.showError = showError
+        self.extra = extra()
+    }
+
+    var body: some View {
+        HStack {
+            if let t = lastSuccess {
+                Text("갱신 \(SectionFormat.relative(t, now: now))")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let err = error, showError {
+                Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
+            }
+            extra
+        }
+    }
+}
+
+extension SectionFooter where Extra == EmptyView {
+    init(lastSuccess: Date?, now: Date, error: String?, showError: Bool) {
+        self.init(lastSuccess: lastSuccess, now: now, error: error, showError: showError) { EmptyView() }
+    }
+}
+
 /// Claude/Cursor 섹션이 공유하는 토글 가능 헤더.
 /// 접혔을 때는 우측에 요약 게이지(또는 needsLogin/needsSetup 같은 단순 텍스트)를 표시.
 @ViewBuilder
@@ -495,12 +575,7 @@ struct ClaudeSection: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if let reset = vm.claudeCurrent?.fiveHourResetAt {
-                    Text("⟲ " + SectionFormat.countdown(reset.timeIntervalSince(vm.now)))
-                        .font(.system(size: 10, weight: .medium))
-                        .monospacedDigit()
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(.secondary.opacity(0.15)))
+                    ResetBadge(reset: reset, now: vm.now)
                 }
             }
             ProgressView(value: (vm.claudeCurrent?.fiveHourPct ?? 0) / 100)
@@ -525,16 +600,7 @@ struct ClaudeSection: View {
     }
 
     @ViewBuilder
-    private func smallStat(_ label: String, _ value: Double?) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(label)
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-            Text(SectionFormat.pct(value))
-                .font(.system(size: 12, weight: .medium, design: .rounded))
-                .monospacedDigit()
-        }
-    }
+    private func smallStat(_ label: String, _ value: Double?) -> some View { smallStatView(label, value) }
 
 
     private var sparkline: some View {
@@ -546,9 +612,7 @@ struct ClaudeSection: View {
             if validData.count >= 2 {
                 let values = validData.map(\.1)
                 let dataMax = values.max() ?? 0
-                let ymax: Double = max(10, (dataMax / 10).rounded(.up) * 10)
-                let step: Double = ymax <= 30 ? 10 : (ymax <= 60 ? 20 : (ymax <= 100 ? 25 : 50))
-                let yValues: [Double] = Array(stride(from: 0.0, through: ymax, by: step))
+                let (ymax, yValues) = pctYTicks(dataMax: dataMax)
                 let span = validData.last!.0.timeIntervalSince(validData.first!.0)
                 let tickFormat: Date.FormatStyle = span < 24 * 3600
                     ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
@@ -603,27 +667,15 @@ struct ClaudeSection: View {
         }
     }
 
-    private var petAnxietyAt: Double {
-        guard settings.notifyEnabled, let t = settings.notifyThresholds.first else { return 0.8 }
-        return Double(t) / 100
-    }
+    private var petAnxietyAt: Double { settings.petAnxietyThreshold }
 
     private var claudeTheme: PetTheme {
         settings.themeClaudeOverride ?? PetTheme.defaultFor(settings.petClaudeKind)
     }
 
     private var footer: some View {
-        HStack {
-            if let t = vm.claudeLastSuccess {
-                Text("갱신 \(SectionFormat.relative(t, now: vm.now))")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let err = vm.claudeError, !vm.claudeNeedsLogin {
-                Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
-            }
-        }
+        SectionFooter(lastSuccess: vm.claudeLastSuccess, now: vm.now,
+                      error: vm.claudeError, showError: !vm.claudeNeedsLogin)
     }
 }
 
@@ -723,12 +775,7 @@ struct CursorSection: View {
                 }
                 Spacer()
                 if let reset = vm.cursorCurrent?.resetAt {
-                    Text("⟲ " + SectionFormat.countdown(reset.timeIntervalSince(vm.now)))
-                        .font(.system(size: 10, weight: .medium))
-                        .monospacedDigit()
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(.secondary.opacity(0.15)))
+                    ResetBadge(reset: reset, now: vm.now)
                 }
             }
             if let c = vm.cursorCurrent {
@@ -925,27 +972,15 @@ struct CursorSection: View {
         }
     }
 
-    private var petAnxietyAt: Double {
-        guard settings.notifyEnabled, let t = settings.notifyThresholds.first else { return 0.8 }
-        return Double(t) / 100
-    }
+    private var petAnxietyAt: Double { settings.petAnxietyThreshold }
 
     private var cursorTheme: PetTheme {
         settings.themeCursorOverride ?? PetTheme.defaultFor(settings.petCursorKind)
     }
 
     private var footer: some View {
-        HStack {
-            if let t = vm.cursorLastSuccess {
-                Text("갱신 \(SectionFormat.relative(t, now: vm.now))")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let err = vm.cursorError, !vm.cursorNeedsSetup {
-                Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
-            }
-        }
+        SectionFooter(lastSuccess: vm.cursorLastSuccess, now: vm.now,
+                      error: vm.cursorError, showError: !vm.cursorNeedsSetup)
     }
 }
 
@@ -1016,12 +1051,7 @@ struct CodexSection: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if let reset = vm.codexPrimaryResetAt {
-                    Text("⟲ " + SectionFormat.countdown(reset.timeIntervalSince(vm.now)))
-                        .font(.system(size: 10, weight: .medium))
-                        .monospacedDigit()
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Capsule().fill(.secondary.opacity(0.15)))
+                    ResetBadge(reset: reset, now: vm.now)
                 }
             }
             ProgressView(value: min(1, (vm.codexPrimaryPct ?? 0) / 100))
@@ -1064,9 +1094,7 @@ struct CodexSection: View {
             if validData.count >= 2 {
                 let values = validData.map(\.1)
                 let dataMax = values.max() ?? 0
-                let ymax: Double = max(10, (dataMax / 10).rounded(.up) * 10)
-                let step: Double = ymax <= 30 ? 10 : (ymax <= 60 ? 20 : (ymax <= 100 ? 25 : 50))
-                let yValues: [Double] = Array(stride(from: 0.0, through: ymax, by: step))
+                let (ymax, yValues) = pctYTicks(dataMax: dataMax)
                 let span = validData.last!.0.timeIntervalSince(validData.first!.0)
                 let tickFormat: Date.FormatStyle = span < 24 * 3600
                     ? .dateTime.hour(.twoDigits(amPM: .omitted)).minute()
@@ -1112,15 +1140,8 @@ struct CodexSection: View {
     }
 
     private var footer: some View {
-        HStack {
-            if let t = vm.codexLastSuccess {
-                Text("갱신 \(SectionFormat.relative(t, now: vm.now))")
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let err = vm.codexError, !vm.codexNeedsSetup {
-                Text(err).font(.system(size: 9)).foregroundStyle(.red).lineLimit(1)
-            }
+        SectionFooter(lastSuccess: vm.codexLastSuccess, now: vm.now,
+                      error: vm.codexError, showError: !vm.codexNeedsSetup) {
             // 파싱 검증용 익명 진단 제출 (#36) — Plus/Pro 실응답 확보 목적.
             Button("진단 제출") {
                 Task {
@@ -1138,10 +1159,7 @@ struct CodexSection: View {
         }
     }
 
-    private var petAnxietyAt: Double {
-        guard settings.notifyEnabled, let t = settings.notifyThresholds.first else { return 0.8 }
-        return Double(t) / 100
-    }
+    private var petAnxietyAt: Double { settings.petAnxietyThreshold }
     private var codexTheme: PetTheme {
         settings.themeCodexOverride ?? PetTheme.defaultFor(settings.petCodexKind)
     }

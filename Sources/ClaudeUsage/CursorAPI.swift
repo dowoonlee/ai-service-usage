@@ -130,10 +130,9 @@ actor CursorAPI {
                     pageHadOlder = true
                     continue
                 }
-                var charged: Double = 0
-                if let c = e["chargedCents"] as? Double { charged = c }
-                else if let c = e["chargedCents"] as? Int { charged = Double(c) }
-                else if let tu = e["tokenUsage"] as? [String: Any], let c = tu["totalCents"] as? Double { charged = c }
+                let charged = Self.jsonDouble(e["chargedCents"])
+                    ?? Self.jsonDouble((e["tokenUsage"] as? [String: Any])?["totalCents"])
+                    ?? 0
                 let model = e["model"] as? String
                 all.append(CursorEvent(timestamp: ts, model: model, chargedCents: charged))
             }
@@ -194,20 +193,21 @@ actor CursorAPI {
         return data
     }
 
+    /// JSON 숫자 필드가 Double/Int/String 중 무엇으로 와도 Double로. 비공식 엔드포인트라
+    /// 응답마다 숫자 타입이 흔들려서 필요.
+    private static func jsonDouble(_ value: Any?) -> Double? {
+        if let d = value as? Double { return d }
+        if let i = value as? Int { return Double(i) }
+        if let s = value as? String { return Double(s) }
+        return nil
+    }
+
     private func parseAggregatedCents(data: Data) -> Double {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return 0 }
-        if let t = obj["totalCostCents"] as? Double { return t }
-        if let t = obj["totalCostCents"] as? Int { return Double(t) }
-        if let s = obj["totalCostCents"] as? String, let t = Double(s) { return t }
+        if let t = Self.jsonDouble(obj["totalCostCents"]) { return t }
         // fallback: aggregations의 totalCents 합
         guard let aggs = obj["aggregations"] as? [[String: Any]] else { return 0 }
-        var total: Double = 0
-        for a in aggs {
-            if let c = a["totalCents"] as? Double { total += c }
-            else if let c = a["totalCents"] as? Int { total += Double(c) }
-            else if let s = a["totalCents"] as? String, let c = Double(s) { total += c }
-        }
-        return total
+        return aggs.reduce(0) { $0 + (Self.jsonDouble($1["totalCents"]) ?? 0) }
     }
 
     // MARK: - Response parsing

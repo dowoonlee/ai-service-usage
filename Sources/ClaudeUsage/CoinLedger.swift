@@ -250,10 +250,19 @@ final class CoinLedger: UsageConsumer {
                                  fraction: ReferenceWritableKeyPath<Settings, Double>,
                                  source: CoinSource? = nil) -> Int {
         let s = Settings.shared
-        let total = amount + s[keyPath: fraction]
-        let whole = Int(total.rounded(.down))
-        s[keyPath: fraction] = total - Double(whole)
+        var frac = s[keyPath: fraction]
+        let whole = consumeFractionalCarry(amount: amount, into: &frac)
+        s[keyPath: fraction] = frac
         if whole > 0 { credit(whole, source: source) }
         return whole
     }
+}
+
+/// 소수 누적 carry — 정수부를 반환하고 소수부는 fraction에 누적해 다음 호출에 합산한다.
+/// 폴링마다 Int(...) 절단으로 소수 적립이 사라지는 것을 막는다. CoinLedger·VPLedger가 공유.
+func consumeFractionalCarry(amount: Double, into fraction: inout Double) -> Int {
+    let total = amount + fraction
+    let whole = Int(total.rounded(.down))
+    fraction = total - Double(whole)
+    return whole
 }
