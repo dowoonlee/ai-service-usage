@@ -16,9 +16,9 @@ final class VPLedger: UsageConsumer {
         let raw = event.pureValue * event.context.vpFactor
         guard raw > 0 else { return }
 
-        let total = raw + s.rankingScoreFractionVP
-        let whole = Int(total.rounded(.down))
-        s.rankingScoreFractionVP = total - Double(whole)
+        var frac = s.rankingScoreFractionVP
+        let whole = consumeFractionalCarry(amount: raw, into: &frac)
+        s.rankingScoreFractionVP = frac
         if whole > 0 {
             s.rankingScoreEarnedVP += whole
             DebugLog.log("VPLedger: +\(whole) VP (source=\(event.source.rawValue), total=\(s.rankingScoreEarnedVP))")

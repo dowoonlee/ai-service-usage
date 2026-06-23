@@ -302,24 +302,19 @@ enum BadgeRegistry {
 
     /// 특정 region 진행도 (cleared / total). 잠긴 카테고리는 분모에서 제외해서 표시.
     static func progress(forRegion region: BadgeRegion, _ s: Settings) -> (cleared: Int, total: Int) {
-        var cleared = 0
-        var total = 0
-        for cat in region.categories where cat.isAvailable(s) {
-            for tier in BadgeTier.allCases {
-                total += 1
-                if s.clearedBadges.contains(BadgeID(category: cat, tier: tier).key) {
-                    cleared += 1
-                }
-            }
-        }
-        return (cleared, total)
+        progress(forCategories: region.categories, s)
     }
 
     /// 전체 진행도.
     static func totalProgress(_ s: Settings) -> (cleared: Int, total: Int) {
+        progress(forCategories: BadgeCategory.allCases, s)
+    }
+
+    /// 잠긴 카테고리는 분모에서 제외하고 (cleared / total) 집계 — region/전체가 공유.
+    private static func progress(forCategories categories: [BadgeCategory], _ s: Settings) -> (cleared: Int, total: Int) {
         var cleared = 0
         var total = 0
-        for cat in BadgeCategory.allCases where cat.isAvailable(s) {
+        for cat in categories where cat.isAvailable(s) {
             for tier in BadgeTier.allCases {
                 total += 1
                 if s.clearedBadges.contains(BadgeID(category: cat, tier: tier).key) {
