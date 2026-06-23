@@ -27,35 +27,10 @@ enum Keychain {
     // 흐름이 각자 load를 치는데 캐시 없이는 process당 4+회 접근. in-memory 캐시로 1회로 축소.
     // ContributorBonus의 자체 캐시는 그대로 두어도 무해 (첫 hit 후 둘 다 cache hit).
 
-    private static let _githubTokenQueue = DispatchQueue(label: "Keychain.githubToken.cache")
-    private static var _cachedGitHubToken: String?
-    private static var _githubTokenLoaded: Bool = false
-
-    static func saveGitHubToken(_ value: String) {
-        saveItem(value, account: githubAccount)
-        _githubTokenQueue.sync {
-            _cachedGitHubToken = value
-            _githubTokenLoaded = true
-        }
-    }
-
-    static func loadGitHubToken() -> String? {
-        _githubTokenQueue.sync {
-            if _githubTokenLoaded { return _cachedGitHubToken }
-            let v = loadItem(account: githubAccount)
-            _cachedGitHubToken = v
-            _githubTokenLoaded = true
-            return v
-        }
-    }
-
-    static func clearGitHubToken() {
-        clearItem(account: githubAccount)
-        _githubTokenQueue.sync {
-            _cachedGitHubToken = nil
-            _githubTokenLoaded = true   // 명시적 clear는 캐시도 nil — 다음 load가 prompt 없이 nil
-        }
-    }
+    private static let githubTokenCache = CachedItem(account: githubAccount)
+    static func saveGitHubToken(_ value: String) { githubTokenCache.save(value) }
+    static func loadGitHubToken() -> String? { githubTokenCache.load() }
+    static func clearGitHubToken() { githubTokenCache.clear() }
 
     // MARK: - Ranking HMAC key
     //
@@ -64,35 +39,10 @@ enum Keychain {
     // 같은 process 내에서는 hmac key가 register/recover 시점에만 변경되므로 in-memory 캐시로
     // Keychain 접근을 process당 1회로 축소. 아래 saveRankingHmacKey가 캐시도 갱신.
 
-    private static let _hmacKeyQueue = DispatchQueue(label: "Keychain.rankingHmacKey.cache")
-    private static var _cachedRankingHmacKey: String?
-    private static var _hmacKeyLoaded: Bool = false
-
-    static func saveRankingHmacKey(_ value: String) {
-        saveItem(value, account: rankingHmacAccount)
-        _hmacKeyQueue.sync {
-            _cachedRankingHmacKey = value
-            _hmacKeyLoaded = true
-        }
-    }
-
-    static func loadRankingHmacKey() -> String? {
-        _hmacKeyQueue.sync {
-            if _hmacKeyLoaded { return _cachedRankingHmacKey }
-            let v = loadItem(account: rankingHmacAccount)
-            _cachedRankingHmacKey = v
-            _hmacKeyLoaded = true
-            return v
-        }
-    }
-
-    static func clearRankingHmacKey() {
-        clearItem(account: rankingHmacAccount)
-        _hmacKeyQueue.sync {
-            _cachedRankingHmacKey = nil
-            _hmacKeyLoaded = true   // 명시적 clear는 캐시도 nil로 — 다음 load가 prompt 안 뜨고 nil
-        }
-    }
+    private static let rankingHmacKeyCache = CachedItem(account: rankingHmacAccount)
+    static func saveRankingHmacKey(_ value: String) { rankingHmacKeyCache.save(value) }
+    static func loadRankingHmacKey() -> String? { rankingHmacKeyCache.load() }
+    static func clearRankingHmacKey() { rankingHmacKeyCache.clear() }
 
     // MARK: - Ranking recovery code
     //
@@ -152,5 +102,40 @@ enum Keychain {
             kSecAttrAccount as String: account,
         ]
         SecItemDelete(query as CFDictionary)
+    }
+
+    /// account별 in-memory 캐시 wrapper. ad-hoc 서명 환경에서 ACL 무효화 시 매 Keychain 접근이
+    /// 사용자 다이얼로그를 띄우는 것을 process당 1회로 축소. 인스턴스마다 자체 직렬 큐로 보호하고,
+    /// 명시적 clear는 캐시도 nil로 만들어 다음 load가 prompt 없이 nil을 반환하게 한다.
+    private final class CachedItem {
+        private let account: String
+        private let queue: DispatchQueue
+        private var cached: String?
+        private var loaded = false
+
+        init(account: String) {
+            self.account = account
+            self.queue = DispatchQueue(label: "Keychain.\(account).cache")
+        }
+
+        func save(_ value: String) {
+            Keychain.saveItem(value, account: account)
+            queue.sync { cached = value; loaded = true }
+        }
+
+        func load() -> String? {
+            queue.sync {
+                if loaded { return cached }
+                let v = Keychain.loadItem(account: account)
+                cached = v
+                loaded = true
+                return v
+            }
+        }
+
+        func clear() {
+            Keychain.clearItem(account: account)
+            queue.sync { cached = nil; loaded = true }
+        }
     }
 }
