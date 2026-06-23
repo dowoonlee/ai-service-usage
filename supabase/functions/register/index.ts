@@ -53,9 +53,16 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
   if (existingDevice) return errorResponse(409, "device_already_registered");
 
+  // githubUserId는 number만 신뢰 — 문자열이 PostgREST .or() 필터에 그대로 보간되면 필터
+  // 인젝션(예: "x,nickname_normalized.eq.victim")이 되므로 타입/정수 검증을 통과 못 하면 null로 떨군다.
+  const githubUserId =
+    typeof body.githubUserId === "number" && Number.isInteger(body.githubUserId)
+      ? body.githubUserId
+      : null;
+
   // 2) nickname + github_user_id 충돌 검사 — 한 번에 select로 처리해 race 줄임.
   const conflictFilters = [`nickname_normalized.eq.${normalized}`];
-  if (body.githubUserId) conflictFilters.push(`github_user_id.eq.${body.githubUserId}`);
+  if (githubUserId !== null) conflictFilters.push(`github_user_id.eq.${githubUserId}`);
   const { data: conflicts } = await db
     .from("users")
     .select("nickname_normalized, github_user_id")
@@ -64,7 +71,7 @@ Deno.serve(async (req: Request) => {
   if (conflicts && conflicts.length > 0) {
     const nameClash = conflicts.find((c) => c.nickname_normalized === normalized);
     if (nameClash) return errorResponse(409, "nickname_taken");
-    const ghClash = conflicts.find((c) => c.github_user_id === body.githubUserId);
+    const ghClash = conflicts.find((c) => c.github_user_id === githubUserId);
     if (ghClash) return errorResponse(409, "github_already_bound");
   }
 
@@ -80,7 +87,7 @@ Deno.serve(async (req: Request) => {
     nickname: body.nickname,
     nickname_normalized: normalized,
     github_login: body.githubLogin ?? null,
-    github_user_id: body.githubUserId ?? null,
+    github_user_id: githubUserId,
     hmac_key_b64: hmacKey,
     recovery_code_hash: recoveryHash,
     total_coins: initialCoins,

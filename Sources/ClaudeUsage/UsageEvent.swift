@@ -120,55 +120,20 @@ enum UsageEventProducer {
     /// Claude 스냅샷 ingest — 5h/7d 두 윈도우를 각각 평가, delta가 양수면 이벤트 emit.
     /// resetAt 변경 시 baseline만 갱신 (소급 적립 X). 60s slack으로 sub-second 흔들림 방어.
     static func ingestClaude(_ snapshot: UsageSnapshot) {
-        let s = Settings.shared
-        let multiplier = CoinLedger.planMultiplier(snapshot.planName)
-        let priceVP = CoinLedger.claudePlanPriceVP(snapshot.planName)
-        let vpFactor = Double(priceVP) / CoinLedger.claudeMaxPureCoinPerMonth
-
-        // 5-hour 윈도우
+        let context = UsageContext(
+            planName: snapshot.planName,
+            coinFactor: CoinLedger.planMultiplier(snapshot.planName),
+            vpFactor: Double(CoinLedger.claudePlanPriceVP(snapshot.planName)) / CoinLedger.claudeMaxPureCoinPerMonth
+        )
         if let resetAt = snapshot.fiveHourResetAt, let pct = snapshot.fiveHourPct {
-            if let lastReset = s.lastClaudeFiveHourReset,
-               let lastPct = s.lastClaudeFiveHourPctSeen,
-               abs(lastReset.timeIntervalSince(resetAt)) <= 60, pct > lastPct {
-                let prev = CoinLedger.curve(lastPct / 100.0) * CoinLedger.claudeFiveHourMaxCoin
-                let curr = CoinLedger.curve(pct / 100.0) * CoinLedger.claudeFiveHourMaxCoin
-                let pureDelta = curr - prev
-                if pureDelta > 0 {
-                    UsageEventBus.shared.emit(UsageEvent(
-                        timestamp: Date(),
-                        source: .claudeFiveHour,
-                        context: UsageContext(planName: snapshot.planName,
-                                              coinFactor: multiplier,
-                                              vpFactor: vpFactor),
-                        pureValue: pureDelta
-                    ))
-                }
-            }
-            s.lastClaudeFiveHourReset = resetAt
-            s.lastClaudeFiveHourPctSeen = pct
+            ingestWindow(pct: pct, resetAt: resetAt, source: .claudeFiveHour,
+                         maxCoin: CoinLedger.claudeFiveHourMaxCoin, context: context,
+                         lastResetKey: \.lastClaudeFiveHourReset, lastPctKey: \.lastClaudeFiveHourPctSeen)
         }
-
-        // 7-day 윈도우
         if let resetAt = snapshot.sevenDayResetAt, let pct = snapshot.sevenDayPct {
-            if let lastReset = s.lastClaudeSevenDayReset,
-               let lastPct = s.lastClaudeSevenDayPctSeen,
-               abs(lastReset.timeIntervalSince(resetAt)) <= 60, pct > lastPct {
-                let prev = CoinLedger.curve(lastPct / 100.0) * CoinLedger.claudeSevenDayMaxCoin
-                let curr = CoinLedger.curve(pct / 100.0) * CoinLedger.claudeSevenDayMaxCoin
-                let pureDelta = curr - prev
-                if pureDelta > 0 {
-                    UsageEventBus.shared.emit(UsageEvent(
-                        timestamp: Date(),
-                        source: .claudeSevenDay,
-                        context: UsageContext(planName: snapshot.planName,
-                                              coinFactor: multiplier,
-                                              vpFactor: vpFactor),
-                        pureValue: pureDelta
-                    ))
-                }
-            }
-            s.lastClaudeSevenDayReset = resetAt
-            s.lastClaudeSevenDayPctSeen = pct
+            ingestWindow(pct: pct, resetAt: resetAt, source: .claudeSevenDay,
+                         maxCoin: CoinLedger.claudeSevenDayMaxCoin, context: context,
+                         lastResetKey: \.lastClaudeSevenDayReset, lastPctKey: \.lastClaudeSevenDayPctSeen)
         }
     }
 
@@ -176,56 +141,60 @@ enum UsageEventProducer {
     /// free의 monthly 창은 적립 대상 아님(fiveHourPct/sevenDayPct가 nil이라 자연스럽게 skip).
     /// coinFactor = codexPlanMultiplier(Plus 1.0 / Pro 2.5), vpFactor = codexPlanPriceVP / maxPureCoin.
     static func ingestCodex(_ snapshot: CodexSnapshot) {
-        let s = Settings.shared
-        let multiplier = CoinLedger.codexPlanMultiplier(snapshot.planName)
-        let priceVP = CoinLedger.codexPlanPriceVP(snapshot.planName)
-        let vpFactor = Double(priceVP) / CoinLedger.claudeMaxPureCoinPerMonth
-
-        // 5-hour 윈도우
+        let context = UsageContext(
+            planName: snapshot.planName,
+            coinFactor: CoinLedger.codexPlanMultiplier(snapshot.planName),
+            vpFactor: Double(CoinLedger.codexPlanPriceVP(snapshot.planName)) / CoinLedger.claudeMaxPureCoinPerMonth
+        )
         if let resetAt = snapshot.fiveHourResetAt, let pct = snapshot.fiveHourPct {
-            if let lastReset = s.lastCodexFiveHourReset,
-               let lastPct = s.lastCodexFiveHourPctSeen,
-               abs(lastReset.timeIntervalSince(resetAt)) <= 60, pct > lastPct {
-                let prev = CoinLedger.curve(lastPct / 100.0) * CoinLedger.codexFiveHourMaxCoin
-                let curr = CoinLedger.curve(pct / 100.0) * CoinLedger.codexFiveHourMaxCoin
-                let pureDelta = curr - prev
-                if pureDelta > 0 {
-                    UsageEventBus.shared.emit(UsageEvent(
-                        timestamp: Date(),
-                        source: .codexFiveHour,
-                        context: UsageContext(planName: snapshot.planName,
-                                              coinFactor: multiplier,
-                                              vpFactor: vpFactor),
-                        pureValue: pureDelta
-                    ))
-                }
-            }
-            s.lastCodexFiveHourReset = resetAt
-            s.lastCodexFiveHourPctSeen = pct
+            ingestWindow(pct: pct, resetAt: resetAt, source: .codexFiveHour,
+                         maxCoin: CoinLedger.codexFiveHourMaxCoin, context: context,
+                         lastResetKey: \.lastCodexFiveHourReset, lastPctKey: \.lastCodexFiveHourPctSeen)
         }
-
-        // 7-day 윈도우
         if let resetAt = snapshot.sevenDayResetAt, let pct = snapshot.sevenDayPct {
-            if let lastReset = s.lastCodexSevenDayReset,
-               let lastPct = s.lastCodexSevenDayPctSeen,
-               abs(lastReset.timeIntervalSince(resetAt)) <= 60, pct > lastPct {
-                let prev = CoinLedger.curve(lastPct / 100.0) * CoinLedger.codexSevenDayMaxCoin
-                let curr = CoinLedger.curve(pct / 100.0) * CoinLedger.codexSevenDayMaxCoin
-                let pureDelta = curr - prev
-                if pureDelta > 0 {
-                    UsageEventBus.shared.emit(UsageEvent(
-                        timestamp: Date(),
-                        source: .codexSevenDay,
-                        context: UsageContext(planName: snapshot.planName,
-                                              coinFactor: multiplier,
-                                              vpFactor: vpFactor),
-                        pureValue: pureDelta
-                    ))
-                }
-            }
-            s.lastCodexSevenDayReset = resetAt
-            s.lastCodexSevenDayPctSeen = pct
+            ingestWindow(pct: pct, resetAt: resetAt, source: .codexSevenDay,
+                         maxCoin: CoinLedger.codexSevenDayMaxCoin, context: context,
+                         lastResetKey: \.lastCodexSevenDayReset, lastPctKey: \.lastCodexSevenDayPctSeen)
         }
+    }
+
+    /// 5h/7d pct-delta 윈도우 공통 처리 — Claude/Codex가 동일 로직을 공유한다.
+    /// curve 기반 delta가 양수면 이벤트 emit, baseline은 같은 윈도우(resetAt 동일, 60s slack)에선
+    /// 후퇴 금지(rolling 윈도우라 pct 감소→재증가 시 겹치는 구간 이중 적립 방지),
+    /// resetAt이 바뀌면 rebase(소급 적립 X).
+    private static func ingestWindow(
+        pct: Double,
+        resetAt: Date,
+        source: UsageSource,
+        maxCoin: Double,
+        context: UsageContext,
+        lastResetKey: ReferenceWritableKeyPath<Settings, Date?>,
+        lastPctKey: ReferenceWritableKeyPath<Settings, Double?>
+    ) {
+        let s = Settings.shared
+        let lastReset = s[keyPath: lastResetKey]
+        let lastPct = s[keyPath: lastPctKey]
+        let sameWindow = lastReset.map { abs($0.timeIntervalSince(resetAt)) <= 60 } ?? false
+
+        if sameWindow, let lastPct, pct > lastPct {
+            let prev = CoinLedger.curve(lastPct / 100.0) * maxCoin
+            let curr = CoinLedger.curve(pct / 100.0) * maxCoin
+            let pureDelta = curr - prev
+            if pureDelta > 0 {
+                UsageEventBus.shared.emit(UsageEvent(
+                    timestamp: Date(),
+                    source: source,
+                    context: context,
+                    pureValue: pureDelta
+                ))
+            }
+        }
+        if sameWindow, let lastPct {
+            s[keyPath: lastPctKey] = max(lastPct, pct)
+        } else {
+            s[keyPath: lastPctKey] = pct
+        }
+        s[keyPath: lastResetKey] = resetAt
     }
 
     /// Cursor Ultra 이벤트 ingest — 새 events의 chargedCents 합산 emit.

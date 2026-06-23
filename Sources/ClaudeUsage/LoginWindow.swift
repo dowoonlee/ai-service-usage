@@ -30,7 +30,10 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate {
         self.init(window: window)
 
         let cfg = WKWebViewConfiguration()
-        cfg.websiteDataStore = WKWebsiteDataStore.default()
+        // sessionKey는 캡처 즉시 Keychain에 저장하므로 WebView에 영구 쿠키를 남길 필요가 없다.
+        // 영구 스토어(~/Library/WebKit)에 세션 쿠키가 평문으로 잔존해 Keychain 보호를 우회하는
+        // 사본이 되는 것을 막기 위해 비영구 스토어를 쓴다.
+        cfg.websiteDataStore = .nonPersistent()
         let wv = WKWebView(frame: .zero, configuration: cfg)
         wv.navigationDelegate = self
         wv.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
