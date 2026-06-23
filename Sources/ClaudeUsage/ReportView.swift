@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import ImageIO
+import UniformTypeIdentifiers
 
 /// "리포트" 탭 — 트레이너 카드 미리보기 + customization + 공유.
 ///
@@ -67,7 +69,9 @@ struct ReportView: View {
                 showWatermark: true,
                 width: Self.previewWidth,
                 accessoryEditing: accessoryTransformBinding,
-                medals: settings.medalTally
+                medals: settings.medalTally,
+                animatedAvatar: true,
+                equippedEffects: settings.equippedEffects[settings.trainerCard.avatar.kind] ?? []
             )
             Spacer()
         }
@@ -508,6 +512,18 @@ struct ReportView: View {
             } label: {
                 Label("공유...", systemImage: "square.and.arrow.up")
             }
+            Divider().frame(height: 16)
+            // 움직이는 GIF — avatar walk 사이클을 애니메이션으로 내보낸다.
+            Button {
+                saveGIFToFile()
+            } label: {
+                Label("GIF 저장", systemImage: "square.and.arrow.down.on.square")
+            }
+            Button {
+                shareGIF()
+            } label: {
+                Label("GIF 공유", systemImage: "square.and.arrow.up.on.square")
+            }
             Spacer()
         }
         .padding(.top, 8)
@@ -590,7 +606,8 @@ struct ReportView: View {
             collections: collectionRows,
             showWatermark: true,
             width: TrainerCardView.standardWidth,
-            medals: settings.medalTally
+            medals: settings.medalTally,
+            equippedEffects: settings.equippedEffects[settings.trainerCard.avatar.kind] ?? []
         )
         let renderer = ImageRenderer(content: cardView)
         renderer.scale = 2.0  // Retina export — 캡처 PNG 960×720
@@ -598,5 +615,82 @@ struct ReportView: View {
         guard let tiff = nsImage.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
+    }
+
+    /// 카드 avatar의 walk 한 사이클을 프레임별로 캡처해 애니메이션 GIF로 합성.
+    /// 각 프레임은 `avatarFrame`을 주입한 `TrainerCardView`를 `ImageRenderer`로 PNG 캡처한 것 —
+    /// avatar 외 나머지(stats·badges 등)는 매 프레임 동일하므로 한 번만 계산해 재사용한다.
+    @MainActor
+    private func renderCardGIF() -> Data? {
+        let kind = settings.trainerCard.avatar.kind
+        let frameCount = PetSprite.frames(for: kind, action: .walk).count
+        guard frameCount > 0 else { return nil }
+
+        let stats = TrainerStats.compute(from: settings)
+        let badges = badgeRows
+        let cols = collectionRows
+        let effects = settings.equippedEffects[kind] ?? []
+        var cgFrames: [CGImage] = []
+        cgFrames.reserveCapacity(frameCount)
+        for i in 0..<frameCount {
+            let cardView = TrainerCardView(
+                card: settings.trainerCard,
+                trainerID: settings.trainerID,
+                trainerName: displayName,
+                stats: stats,
+                badges: badges,
+                collections: cols,
+                showWatermark: true,
+                width: TrainerCardView.standardWidth,
+                medals: settings.medalTally,
+                avatarFrame: i,
+                equippedEffects: effects
+            )
+            let renderer = ImageRenderer(content: cardView)
+            renderer.scale = 2.0
+            if let cg = renderer.cgImage { cgFrames.append(cg) }
+        }
+        return Self.encodeGIF(frames: cgFrames, delay: 1.0 / TrainerCardView.avatarFPS)
+    }
+
+    /// CGImage 배열 → 무한 루프 애니메이션 GIF 데이터 (ImageIO).
+    private static func encodeGIF(frames: [CGImage], delay: Double) -> Data? {
+        guard !frames.isEmpty else { return nil }
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(
+            data, UTType.gif.identifier as CFString, frames.count, nil) else { return nil }
+        CGImageDestinationSetProperties(dest, [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]   // 0 = 무한 루프
+        ] as CFDictionary)
+        let frameProps = [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay]
+        ] as CFDictionary
+        for f in frames { CGImageDestinationAddImage(dest, f, frameProps) }
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return data as Data
+    }
+
+    private func saveGIFToFile() {
+        guard let gif = renderCardGIF() else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.gif]
+        panel.nameFieldStringValue = "trainer-card-\(settings.trainerID).gif"
+        if panel.runModal() == .OK, let url = panel.url {
+            try? gif.write(to: url)
+        }
+    }
+
+    private func shareGIF() {
+        guard let gif = renderCardGIF() else { return }
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("trainer-card-\(settings.trainerID).gif")
+        do {
+            try gif.write(to: tmpURL)
+        } catch { return }
+        let picker = NSSharingServicePicker(items: [tmpURL])
+        if let window = NSApp.keyWindow,
+           let view = window.contentView {
+            picker.show(relativeTo: .zero, of: view, preferredEdge: .minY)
+        }
     }
 }

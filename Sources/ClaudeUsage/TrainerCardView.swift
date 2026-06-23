@@ -41,6 +41,15 @@ struct TrainerCardView: View {
     /// 금/은/동 메달 누적 — 서버 집계(`monthly_winners`) 권위 값. nil이거나 total 0이면 메달 행 미표시.
     /// `stats`(profile_json)와 분리해 위조 불가능한 서버 값만 별도 주입받는다.
     var medals: MedalTally? = nil
+    /// true면 avatar가 walk 사이클로 애니메이션 (preview 전용 — `ImageRenderer` 캡처는 한 순간만 잡는다).
+    var animatedAvatar: Bool = false
+    /// GIF 프레임 캡처용 — 지정 시 avatar를 그 walk frameIndex로 고정 렌더 (preview 애니보다 우선).
+    var avatarFrame: Int? = nil
+    /// 펫에 장착된 RP 코스메틱 이펙트 — avatar 뒤·앞에 광원/무지개/파티클로 렌더 (PNG·GIF·preview 공통).
+    var equippedEffects: Set<EffectKind> = []
+
+    /// avatar walk 애니메이션 속도 (preview·GIF 공통). GIF delay = 1/avatarFPS.
+    static let avatarFPS: Double = 8
 
     var body: some View {
         ZStack {
@@ -175,19 +184,20 @@ struct TrainerCardView: View {
     }
 
     private var avatarView: some View {
-        ZStack {
-            // 펫 sprite — variant hue.
-            if let img = PetSprite.image(for: card.avatar.kind, action: .sit, frameIndex: 0) {
-                Image(nsImage: img)
-                    .resizable()
-                    .interpolation(.none)
-                    .aspectRatio(contentMode: .fit)
-                    .hueRotation(.degrees(WalkingCat.hueDegrees(for: card.avatar.variant)))
-                    .saturation(card.avatar.variant > 0 ? 1.15 : 1.0)
-            }
-            // 액세서리 layer — PNG 자원 있으면 그것, 없으면 SF Symbol fallback.
-            if let acc = card.accessory {
-                accessoryLayer(acc)
+        Group {
+            if let avatarFrame {
+                // GIF 캡처 — 외부 주입 프레임 고정.
+                avatarStack(walkFrame: avatarFrame)
+            } else if animatedAvatar {
+                // 미리보기 — walk 사이클 자체 애니메이션 (ImageRenderer 캡처는 한 순간만 잡는다).
+                TimelineView(.animation) { ctx in
+                    let count = PetSprite.frames(for: card.avatar.kind, action: .walk).count
+                    let idx = count > 0 ? Int(ctx.date.timeIntervalSinceReferenceDate * Self.avatarFPS) % count : 0
+                    avatarStack(walkFrame: idx)
+                }
+            } else {
+                // PNG export·기본 — 정적 sit.
+                avatarStack(walkFrame: nil)
             }
         }
         .frame(width: 110, height: 110)
@@ -195,6 +205,58 @@ struct TrainerCardView: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(.black.opacity(0.22))
         )
+    }
+
+    // 펫 + RP 이펙트 + 액세서리를 한 frameIndex 기준으로 함께 그린다. z-order: 광원/무지개(뒤) →
+    // 펫 → 파티클(앞) → 액세서리(맨 위). `walkFrame`이 nil이면 정적 sit, 값이면 walk 프레임.
+    @ViewBuilder
+    private func avatarStack(walkFrame: Int?) -> some View {
+        let moving = walkFrame != nil
+        ZStack {
+            // RP 코스메틱 — 광원(glow/aura)·무지개는 펫 뒤(backdrop).
+            effectOverlay(.backdrop, moving: moving)
+            if let wf = walkFrame {
+                avatarImage(action: .walk, frameIndex: wf)
+            } else {
+                avatarImage(action: .sit, frameIndex: 0)
+            }
+            // RP 코스메틱 — 발자국·잔상 파티클은 펫 앞(particles).
+            effectOverlay(.particles, moving: moving)
+            // 액세서리 layer — PNG 자원 있으면 그것, 없으면 SF Symbol fallback. 맨 위.
+            if let acc = card.accessory {
+                accessoryLayer(acc)
+            }
+        }
+    }
+
+    // 장착된 RP 이펙트를 카드 셀(110×110) 좌표에 맞춰 그린다. 비어 있으면 아무것도 렌더하지 않는다.
+    // center/petHeight는 셀 안 펫 표시 영역 근사값 — WalkingCat의 차트 좌표 대신 카드 셀 기준.
+    @ViewBuilder
+    private func effectOverlay(_ placement: PetEffectOverlay.Placement, moving: Bool) -> some View {
+        if !equippedEffects.isEmpty {
+            PetEffectOverlay(
+                effects: equippedEffects,
+                placement: placement,
+                center: CGPoint(x: 55, y: 52),
+                footY: 84,
+                petHeight: 54,
+                facingRight: !card.avatar.kind.defaultFacingLeft,
+                isMoving: moving
+            )
+            .frame(width: 110, height: 110)
+        }
+    }
+
+    @ViewBuilder
+    private func avatarImage(action: PetController.Action, frameIndex: Int) -> some View {
+        if let img = PetSprite.image(for: card.avatar.kind, action: action, frameIndex: frameIndex) {
+            Image(nsImage: img)
+                .resizable()
+                .interpolation(.none)
+                .aspectRatio(contentMode: .fit)
+                .hueRotation(.degrees(WalkingCat.hueDegrees(for: card.avatar.variant)))
+                .saturation(card.avatar.variant > 0 ? 1.15 : 1.0)
+        }
     }
 
     @ViewBuilder

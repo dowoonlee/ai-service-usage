@@ -335,7 +335,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menuBarPetTimer = nil
     }
 
-    /// 30Hz tick. Settings.menuBarPetSource (claude / cursor) 에 따라 데이터 소스가 바뀜.
+    /// 30Hz tick. Settings.menuBarPetSource (claude / cursor / codex) 에 따라 데이터 소스가 바뀜.
     private func menuBarPetTick() {
         guard let button = statusItem?.button else { return }
 
@@ -426,6 +426,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 Self.cursorPct(s).flatMap { v in v > 0 ? (s.takenAt, v) : nil }
             })
             return MenuBarFeed(pct: vm.cursorCurrentPct, history: history, kind: kind, theme: theme)
+        case .codex:
+            let kind = Settings.shared.petCodexKind
+            let theme = Settings.shared.themeCodexOverride ?? PetTheme.defaultFor(kind)
+            // 현재 주력 창(Plus/Pro=5h, free=monthly)만 — 만료 창이 섞이면 펫이 빈 구간을 걷는다.
+            let history = ViewModel.codexPrimarySeries(Array(vm.codexHistory.suffix(48)))
+            return MenuBarFeed(pct: vm.codexPrimaryPct, history: history, kind: kind, theme: theme)
         }
     }
 

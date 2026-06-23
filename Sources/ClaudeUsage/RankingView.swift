@@ -141,7 +141,7 @@ struct RankingView: View {
                               prev: RankingAPI.PreviousMonth) -> some View {
         VStack(spacing: 2) {
             podiumBubble(entry: entry, rank: rank, isMine: prev.myRank == rank)
-            PodiumAvatar(entry: entry, rank: rank)
+            PodiumAvatar(entry: entry, rank: rank, isMine: prev.myRank == rank)
             PodiumStep(entry: entry, rank: rank)
         }
         .frame(maxWidth: .infinity)
@@ -423,7 +423,22 @@ private struct PodiumAvatar: View {
     let entry: RankingAPI.PreviousMonthEntry?
     let rank: Int
 
+    /// 본인 칸이면 과거 스냅샷 대신 현재 트레이너 카드(레포트) 아바타·이펙트를 실시간 반영한다.
+    var isMine: Bool = false
+    @ObservedObject private var settings = Settings.shared
+
     private var size: CGFloat { rank == 1 ? 46 : 34 }
+    private var avatarKind: PetKind? {
+        isMine ? settings.trainerCard.avatar.kind : entry?.profileJson?.card.avatar.kind
+    }
+    private var variant: Int {
+        isMine ? settings.trainerCard.avatar.variant : (entry?.profileJson?.card.avatar.variant ?? 0)
+    }
+    /// 시상대 펫에 입힐 RP 이펙트. 본인 칸은 현재 장착분, 남의 칸은 제출 스냅샷(신빌드 제출만 채워짐).
+    private var effects: Set<EffectKind> {
+        if isMine { return settings.equippedEffects[settings.trainerCard.avatar.kind] ?? [] }
+        return Set((entry?.profileJson?.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) })
+    }
 
     var body: some View {
         VStack(spacing: 1) {
@@ -433,41 +448,82 @@ private struct PodiumAvatar: View {
                     .font(.system(size: 18))
                     .shadow(color: .yellow.opacity(0.7), radius: 4)
             }
-            ZStack {
-                // 발밑 타원 그림자 — 단 위에 "딛고 선" 안정감.
-                Ellipse()
-                    .fill(Color.black.opacity(0.22))
-                    .frame(width: size * 0.62, height: size * 0.16)
-                    .offset(y: size * 0.46)
-                    .blur(radius: 1.5)
-                avatar
+            if let kind = avatarKind {
+                // 단 위를 좌우로 돌아다니는 펫 — 이동 폭은 컬럼이 주는 가용 공간(상한 둠).
+                GeometryReader { geo in
+                    TimelineView(.animation) { ctx in
+                        wanderingPet(kind: kind, width: geo.size.width,
+                                     now: ctx.date.timeIntervalSinceReferenceDate)
+                    }
+                }
+                .frame(height: size)
+            } else {
+                // 참여자가 없는 자리 — 점선 실루엣으로 형태만 유지.
+                Image(systemName: "person.crop.circle.dashed")
+                    .font(.system(size: size * 0.72))
+                    .foregroundStyle(.secondary.opacity(0.4))
                     .frame(width: size, height: size)
             }
         }
     }
 
+    // 컬럼 폭 안에서 좌우로 핑퐁하며 walk 사이클을 도는 펫 + RP 이펙트. 그림자도 함께 이동.
     @ViewBuilder
-    private var avatar: some View {
-        if let kind = entry?.profileJson?.card.avatar.kind {
-            let variant = entry?.profileJson?.card.avatar.variant ?? 0
-            if let nsImage = PetSprite.image(for: kind, action: .walk, frameIndex: 0) {
-                Image(nsImage: nsImage)
-                    .interpolation(.none)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
-                    .scaleEffect(x: kind.defaultFacingLeft ? -1 : 1, y: 1)
-                    // 1위 캐릭터는 금색 glow로 빛나게.
-                    .shadow(color: rank == 1 ? .yellow.opacity(0.8) : .clear,
-                            radius: rank == 1 ? 8 : 0)
-            } else {
-                Image(systemName: "questionmark.square.dashed").foregroundStyle(.secondary)
-            }
+    private func wanderingPet(kind: PetKind, width: CGFloat, now: Double) -> some View {
+        let travel = min(max(0, (width - size) / 2), size * 1.3)   // 과도한 이동 방지 상한
+        let period = rank == 1 ? 3.6 : 4.4                          // 왕복 주기 (1위 약간 활발)
+        let phase = (now / period).truncatingRemainder(dividingBy: 1.0)
+        let tri = abs(phase * 2 - 1)                                // 1→0→1 삼각파
+        let x = (1 - tri * 2) * travel                             // 좌 ↔ 우
+        let movingRight = phase < 0.5
+        let count = max(1, PetSprite.frames(for: kind, action: .walk).count)
+        let idx = Int(now * 8) % count
+        ZStack {
+            // 발밑 타원 그림자 — 펫과 함께 이동.
+            Ellipse()
+                .fill(Color.black.opacity(0.22))
+                .frame(width: size * 0.62, height: size * 0.16)
+                .offset(y: size * 0.46)
+                .blur(radius: 1.5)
+            effectLayer(.backdrop, facingRight: movingRight)   // 광원·무지개 (뒤)
+            petSprite(kind: kind, frameIndex: idx, facingRight: movingRight)
+            effectLayer(.particles, facingRight: movingRight)  // 발자국·잔상 (앞)
+        }
+        .frame(width: size, height: size)
+        .offset(x: x)
+        .frame(width: width, height: size, alignment: .center)
+    }
+
+    @ViewBuilder
+    private func petSprite(kind: PetKind, frameIndex: Int, facingRight: Bool) -> some View {
+        if let img = PetSprite.image(for: kind, action: .walk, frameIndex: frameIndex) {
+            Image(nsImage: img)
+                .interpolation(.none)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
+                .scaleEffect(x: kind.defaultFacingLeft == facingRight ? -1 : 1, y: 1)
+                // 1위 캐릭터는 금색 glow로 빛나게.
+                .shadow(color: rank == 1 ? .yellow.opacity(0.8) : .clear,
+                        radius: rank == 1 ? 8 : 0)
         } else {
-            // 참여자가 없는 자리 — 점선 실루엣으로 형태만 유지.
-            Image(systemName: "person.crop.circle.dashed")
-                .font(.system(size: size * 0.72))
-                .foregroundStyle(.secondary.opacity(0.4))
+            Image(systemName: "questionmark.square.dashed").foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func effectLayer(_ placement: PetEffectOverlay.Placement, facingRight: Bool) -> some View {
+        if !effects.isEmpty {
+            PetEffectOverlay(
+                effects: effects,
+                placement: placement,
+                center: CGPoint(x: size / 2, y: size / 2),
+                footY: size * 0.92,
+                petHeight: size * 0.62,
+                facingRight: facingRight,
+                isMoving: true
+            )
+            .frame(width: size, height: size)
         }
     }
 }

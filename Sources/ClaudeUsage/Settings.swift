@@ -1165,18 +1165,20 @@ final class Settings: ObservableObject {
 enum MenuBarPetSource: String, Codable, CaseIterable, Identifiable, Hashable {
     case claude
     case cursor
+    case codex
 
     var id: String { rawValue }
     var displayName: String {
         switch self {
         case .claude: return "Claude"
         case .cursor: return "Cursor"
+        case .codex:  return "Codex"
         }
     }
 }
 
 /// 펫 파티 편성/차트 표시의 데이터 출처 (Claude / Cursor / Codex). PartyView·Settings 파티 helper의
-/// 3-way 분기 키. MenuBarPetSource(claude/cursor 2-way, 메뉴바 전용)와는 의도적으로 분리한다.
+/// 3-way 분기 키. MenuBarPetSource(메뉴바 전용, 단일 펫만 표시)와는 의도적으로 분리한다.
 enum PetChartSource: String, CaseIterable, Identifiable, Hashable {
     case claude, cursor, codex
     var id: String { rawValue }

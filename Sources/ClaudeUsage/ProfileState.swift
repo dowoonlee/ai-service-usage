@@ -19,6 +19,9 @@ struct ProfileState: Codable, Sendable {
     /// `recover-by-code`/`recover-by-github` 응답에만 포함된다. 옛 클라이언트와의 호환성을 위해
     /// 옵셔널 — 미지원 클라이언트는 nil로 디코딩.
     let backup: BackupPayload?
+    /// `card.avatar.kind`에 장착된 RP 코스메틱 이펙트 (`EffectKind.rawValue`). 시상대/보드 펫 렌더용.
+    /// 옛 클라이언트 호환 옵셔널 — 미지원 클라는 nil로 디코딩(이펙트 미표시).
+    let equippedEffects: [String]?
 
     @MainActor
     static func current(from settings: Settings) -> ProfileState {
@@ -28,7 +31,8 @@ struct ProfileState: Codable, Sendable {
             stats: TrainerStats.compute(from: settings),
             clearedBadges: Array(settings.clearedBadges),
             completedCollections: Array(settings.completedCollections),
-            backup: BackupPayload.current(from: settings)
+            backup: BackupPayload.current(from: settings),
+            equippedEffects: (settings.equippedEffects[settings.trainerCard.avatar.kind] ?? []).map(\.rawValue)
         )
     }
 
