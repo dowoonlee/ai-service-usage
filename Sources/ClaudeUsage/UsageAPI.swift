@@ -201,6 +201,18 @@ actor UsageAPI {
             return (nil, -1)
         }
     }
+
+    // 버그리포트 "사용량 이슈"용 PII-free 추출 — 사용률 창(five_hour/seven_day/extra_usage)만
+    // 화이트리스트로 떼어 org uuid·capabilities 가 섞인 최상위에서 식별정보를 배제한다.
+    func usageDiagnostic() async -> UsageDiagnosticExtract? {
+        let d = await diagnose()
+        guard d.loggedIn, let data = d.usageRawData,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return UsageDiagnosticExtract(
+            subtreeJson: DiagnosticExtract.subtreeJSON(from: obj, whitelist: ["five_hour", "seven_day", "extra_usage"]),
+            planType: d.planName
+        )
+    }
 }
 
 struct ClaudeDiagnostics: Sendable {

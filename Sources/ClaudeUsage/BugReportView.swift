@@ -24,7 +24,9 @@ enum BugReport {
         includeOSVersion: Bool,
         includeLog: Bool,
         hasClipboardImage: Bool,
-        crashSummary: CrashSummary? = nil
+        crashSummary: CrashSummary? = nil,
+        diagnosticId: String? = nil,
+        diagnosticFailed: Bool = false
     ) -> String {
         var lines: [String] = []
         if hasClipboardImage {
@@ -50,6 +52,17 @@ enum BugReport {
         lines.append("## 설명")
         lines.append(description.isEmpty ? "_(여기에 내용을 작성해주세요)_" : description)
         lines.append("")
+        // 사용량 이슈: raw 는 GitHub 공개 본문이 아니라 비공개 DB 로 갔고, 여기엔 역참조용 ID 만 남긴다.
+        if let diagnosticId {
+            lines.append("## 진단 데이터")
+            lines.append("- ID: `\(diagnosticId)`")
+            lines.append("- Claude·Cursor·Codex 사용량 응답 원본이 비공개로 첨부되었습니다 (개인정보·잔액 제외). 개발자가 이 ID로 조회합니다.")
+            lines.append("")
+        } else if diagnosticFailed {
+            lines.append("## 진단 데이터")
+            lines.append("- ⚠️ 사용량 응답 자동 첨부에 실패했습니다. 증상과 재현 방법을 설명에 자세히 적어주세요.")
+            lines.append("")
+        }
         if includeAppVersion || includeOSVersion {
             lines.append("## 환경")
             if includeAppVersion {
@@ -110,7 +123,7 @@ enum BugReport {
         return comps.url
     }
 
-    private static func readLogTail() -> String? {
+    static func readLogTail() -> String? {
         guard let data = try? Data(contentsOf: DebugLog.fileURL),
               let text = String(data: data, encoding: .utf8) else { return nil }
         let split = text.split(separator: "\n", omittingEmptySubsequences: true)
@@ -159,6 +172,14 @@ final class ClipboardWatcher: ObservableObject {
     }
 }
 
+/// 버그리포트 템플릿. `.usage` 는 사용량 응답 원본(rate_limit 등)을 비공개 DB 로 첨부하고
+/// 이슈에는 조회용 ID 만 남긴다 — 로그만으로는 진단이 안 되는 사용량 버그를 위해.
+enum ReportTemplate: String, CaseIterable, Identifiable {
+    case general, usage
+    var id: String { rawValue }
+    var label: String { self == .general ? "일반" : "사용량 이슈" }
+}
+
 @MainActor
 struct BugReportView: View {
     @State private var title: String
@@ -167,6 +188,9 @@ struct BugReportView: View {
     @State private var includeOSVersion: Bool = true
     @State private var includeLog: Bool
     @State private var includeCrash: Bool
+    @State private var template: ReportTemplate = .general
+    @State private var submitting = false
+    @State private var submitError: String? = nil
     @ObservedObject var clipboard: ClipboardWatcher = .shared
     private let crashPrefill: BugReport.CrashSummary?
 
@@ -208,6 +232,22 @@ struct BugReportView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.orange.opacity(0.10))
                 )
+            }
+
+            // 크래시 prefill 은 항상 일반 보고라 템플릿 선택을 노출하지 않는다.
+            if crashPrefill == nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("유형").font(.system(size: 11, weight: .medium))
+                    Picker("유형", selection: $template) {
+                        ForEach(ReportTemplate.allCases) { t in Text(t.label).tag(t) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    if template == .usage {
+                        Text("Claude·Cursor·Codex 사용량 응답 구조가 비공개로 첨부됩니다 (개인정보·잔액 제외). GitHub 이슈에는 조회용 ID만 적힙니다.")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                }
             }
 
             VStack(alignment: .leading, spacing: 4) {
@@ -282,20 +322,25 @@ struct BugReportView: View {
 
             Spacer(minLength: 0)
 
+            if let submitError {
+                Text(submitError).font(.system(size: 10)).foregroundStyle(.orange)
+            }
             HStack {
                 Spacer()
                 Button("취소") { close() }
                     .keyboardShortcut(.cancelAction)
+                    .disabled(submitting)
                 Button {
                     submit()
                 } label: {
                     HStack(spacing: 4) {
+                        if submitting { ProgressView().controlSize(.small) }
                         Image(systemName: "arrow.up.right.square")
-                        Text("GitHub에서 작성하기")
+                        Text(submitting ? "진단 수집 중..." : "GitHub에서 작성하기")
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(!canSubmit)
+                .disabled(!canSubmit || submitting)
             }
         }
         .padding(16)
@@ -303,18 +348,72 @@ struct BugReportView: View {
     }
 
     private func submit() {
+        // 사용량 이슈는 raw 수집 + Supabase 전송이 선행돼야 하므로 비동기 경로.
+        if template == .usage && crashPrefill == nil {
+            Task { await submitUsageIssue() }
+        } else {
+            openIssue(diagnosticId: nil)
+        }
+    }
+
+    /// GitHub 이슈를 연다. `diagnosticId` 가 있으면 본문에 역참조 ID 를, `diagnosticFailed` 면 실패 안내를 남긴다.
+    private func openIssue(diagnosticId: String?, diagnosticFailed: Bool = false) {
+        // 사용량 이슈는 로그를 비공개 DB(log_tail)로 보내므로 공개 본문에는 중복 첨부하지 않는다.
+        let bodyIncludeLog = template == .usage ? false : includeLog
         let body = BugReport.composeBody(
             description: description,
             includeAppVersion: includeAppVersion,
             includeOSVersion: includeOSVersion,
-            includeLog: includeLog,
+            includeLog: bodyIncludeLog,
             hasClipboardImage: clipboard.image != nil,
-            crashSummary: includeCrash ? crashPrefill : nil
+            crashSummary: includeCrash ? crashPrefill : nil,
+            diagnosticId: diagnosticId,
+            diagnosticFailed: diagnosticFailed
         )
         if let url = BugReport.makeURL(title: title, body: body) {
             NSWorkspace.shared.open(url)
         }
         close()
+    }
+
+    /// 3소스 사용률 서브트리를 비공개 DB 에 적재한 뒤, 성공 시 그 row UUID 를 이슈 본문에 남기고 연다.
+    /// 전송 실패/미설정 시에는 ID 없이 "자동 첨부 실패" 안내와 함께 일반 이슈로 폴백한다.
+    private func submitUsageIssue() async {
+        submitting = true
+        defer { submitting = false }
+
+        let appVer = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let osVer = ProcessInfo.processInfo.operatingSystemVersionString
+        let dev = Settings.shared.rankingDeviceID
+        var sample = DiagnosticSample.newBugReport(
+            deviceId: dev.isEmpty ? nil : dev,
+            appVersion: appVer,
+            osVersion: osVer
+        )
+        if let codex = await CodexAPI.shared.usageDiagnostic() {
+            sample.rateLimitJson = codex.subtreeJson
+            sample.planType = codex.planType
+        }
+        if let claude = await UsageAPI.shared.usageDiagnostic() {
+            sample.claudeUsageJson = claude.subtreeJson
+        }
+        if let cursor = await CursorAPI.shared.usageDiagnostic() {
+            sample.cursorUsageJson = cursor.subtreeJson
+        }
+        if includeLog { sample.logTail = BugReport.readLogTail() }
+
+        guard RankingAPI.isConfigured else {
+            DebugLog.log(" BugReport usage: RankingAPI 미설정 — 진단 데이터 없이 이슈만 작성")
+            openIssue(diagnosticId: nil, diagnosticFailed: true)
+            return
+        }
+        do {
+            try await RankingAPI.shared.submitDiagnostic(sample)
+            openIssue(diagnosticId: sample.id)
+        } catch {
+            DebugLog.log(" BugReport usage 전송 실패: \(error)")
+            openIssue(diagnosticId: nil, diagnosticFailed: true)
+        }
     }
 
     private func close() {

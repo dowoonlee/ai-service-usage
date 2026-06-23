@@ -376,6 +376,19 @@ actor CursorAPI {
             return (nil, -1)
         }
     }
+
+    // 버그리포트 "사용량 이슈"용 PII-free 추출 — /api/usage 는 모델별 요청수 + startOfMonth 만 담고
+    // cost/cents 는 agg 응답에만 있으므로(첨부 안 함) 통째로 떼어도 안전하다. user_id 는 URL 쿼리지
+    // 응답 body 가 아니다.
+    func usageDiagnostic() async -> UsageDiagnosticExtract? {
+        let d = await diagnose()
+        guard d.tokenFound, let data = d.usageRawData,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return UsageDiagnosticExtract(
+            subtreeJson: DiagnosticExtract.subtreeJSON(from: obj, whitelist: nil),
+            planType: d.planName
+        )
+    }
 }
 
 struct CursorDiagnostics: Sendable {

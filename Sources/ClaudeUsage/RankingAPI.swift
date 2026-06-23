@@ -347,9 +347,10 @@ actor RankingAPI {
         return try await post(path: "submit", body: req)
     }
 
-    /// Codex 파싱 검증용 익명 샘플 제출 (이슈 #36). 보상이 없어 HMAC 서명 없이 anon key POST.
-    /// fire-and-forget 성격이지만 호출 측(버튼)이 성공/실패를 표시할 수 있게 throw는 전파한다.
-    func submitCodexSample(_ sample: CodexSampleRequest) async throws {
+    /// 진단 샘플 제출 (이슈 #36 + 버그리포트 통합). codex_voluntary·bug_report 공용.
+    /// 보상이 없어 HMAC 서명 없이 anon key POST. fire-and-forget 성격이지만 호출 측이
+    /// 성공/실패를 표시할 수 있게 throw는 전파한다.
+    func submitDiagnostic(_ sample: DiagnosticSample) async throws {
         try await postVoid(path: "codex-sample", body: sample)
     }
 

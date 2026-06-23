@@ -993,7 +993,7 @@ struct CodexSection: View {
     @ObservedObject var vm: ViewModel
     @ObservedObject var settings = Settings.shared
     // 진단 제출(#36) — 미리보기 시트 상태.
-    @State private var pendingSample: CodexSampleRequest? = nil
+    @State private var pendingSample: DiagnosticSample? = nil
     @State private var showSampleSheet = false
     @State private var sampleSending = false
     @State private var sampleResult: String? = nil
@@ -1170,7 +1170,7 @@ struct CodexSection: View {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "dev"
     }
 
-    static func prettyJSON(_ sample: CodexSampleRequest) -> String {
+    static func prettyJSON(_ sample: DiagnosticSample) -> String {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         guard let data = try? enc.encode(sample), let s = String(data: data, encoding: .utf8) else {
@@ -1226,7 +1226,7 @@ struct CodexSection: View {
         sampleSending = true
         defer { sampleSending = false }
         do {
-            try await RankingAPI.shared.submitCodexSample(s)
+            try await RankingAPI.shared.submitDiagnostic(s)
             sampleResult = "전송 완료 — 감사합니다! 🙏"
         } catch {
             sampleResult = "전송 실패: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"

@@ -322,7 +322,7 @@ actor CodexAPI {
     // 결과만 추려 서버 제출용 페이로드를 만든다. rate_limit은 우리가 모르는 새 필드도 보존돼야
     // "어떻게 오는지" 확인이 되므로 원본 JSON 문자열 그대로 담는다 (email/user_id/credits는
     // 최상위에 있고 rate_limit 안엔 없으므로 rate_limit만 떼면 PII가 섞이지 않는다).
-    func diagnosticSample(appVersion: String, deviceId: String?) async -> CodexSampleRequest? {
+    func diagnosticSample(appVersion: String, deviceId: String?) async -> DiagnosticSample? {
         let d = await diagnose()
         guard d.tokenFound, let data = d.usageRawData,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -332,34 +332,36 @@ actor CodexAPI {
             rateLimitJson = String(data: rlData, encoding: .utf8)
         }
         let snap = d.snapshot
-        return CodexSampleRequest(
+        return DiagnosticSample(
+            id: UUID().uuidString.lowercased(),
+            origin: "codex_voluntary",
+            category: nil,
             deviceId: deviceId,
             appVersion: appVersion,
+            osVersion: nil,
             planType: obj["plan_type"] as? String,
             rateLimitJson: rateLimitJson,
-            parsed: CodexSampleRequest.Parsed(
+            claudeUsageJson: nil,
+            cursorUsageJson: nil,
+            parsed: DiagnosticSample.Parsed(
                 fiveHourPct: snap?.fiveHourPct,
                 sevenDayPct: snap?.sevenDayPct,
                 monthlyPct: snap?.monthlyPct
             ),
-            rawTopKeys: obj.keys.sorted()
+            rawTopKeys: obj.keys.sorted(),
+            logTail: nil
         )
     }
-}
 
-/// codex-sample Edge Function 제출 페이로드. PII·잔액 제외 — rate_limit 구조 + plan_type + 파서 결과만.
-struct CodexSampleRequest: Encodable, Sendable {
-    let deviceId: String?
-    let appVersion: String?
-    let planType: String?
-    let rateLimitJson: String?              // rate_limit 객체 원본을 직렬화한 JSON 문자열
-    let parsed: Parsed
-    let rawTopKeys: [String]                // 응답 최상위 키 (새 필드/드리프트 감지)
-
-    struct Parsed: Encodable, Sendable {
-        let fiveHourPct: Double?
-        let sevenDayPct: Double?
-        let monthlyPct: Double?
+    // 버그리포트 "사용량 이슈"용 PII-free 추출 — rate_limit 서브트리만 (email/user_id/credits 는 최상위라 제외됨).
+    func usageDiagnostic() async -> UsageDiagnosticExtract? {
+        let d = await diagnose()
+        guard d.tokenFound, let data = d.usageRawData,
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return UsageDiagnosticExtract(
+            subtreeJson: DiagnosticExtract.subtreeJSON(from: obj, whitelist: ["rate_limit"]),
+            planType: obj["plan_type"] as? String
+        )
     }
 }
 
