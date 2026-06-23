@@ -61,13 +61,19 @@ extension PetKind {
         }
     }
 
-    /// `Gacha.pool` 역인덱스. `PetCollection.bonusCoins` 산정에 쓰임.
-    /// pool에 없는 kind(이론상 없음)는 nil 반환 — 호출 측에서 Common 가치로 fallback.
-    /// `Gacha.pool`이 nonisolated static let이라 여기도 nonisolated.
-    static func rarityFor(_ kind: PetKind) -> Rarity? {
-        for (rarity, kinds) in Gacha.pool where kinds.contains(kind) {
-            return rarity
+    /// `Gacha.pool` 역인덱스 캐시(`[PetKind: Rarity]`). pool이 nonisolated static let이라
+    /// 한 번만 빌드해 두고 O(1) 조회. `PetCollection.bonusCoins`·인벤토리 렌더에서 자주 호출돼
+    /// 매 호출 선형 탐색(O(79))을 피한다.
+    nonisolated static let rarityIndex: [PetKind: Rarity] = {
+        var index: [PetKind: Rarity] = [:]
+        for (rarity, kinds) in Gacha.pool {
+            for kind in kinds { index[kind] = rarity }
         }
-        return nil
+        return index
+    }()
+
+    /// pool에 없는 kind(이론상 없음)는 nil 반환 — 호출 측에서 Common 가치로 fallback.
+    static func rarityFor(_ kind: PetKind) -> Rarity? {
+        rarityIndex[kind]
     }
 }

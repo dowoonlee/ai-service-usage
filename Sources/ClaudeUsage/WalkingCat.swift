@@ -534,6 +534,17 @@ struct WalkingCat: View {
         default: return 0
         }
     }
+
+    /// variant(이로치) 표시용 점 색. 인벤토리·미리보기·파티에서 같은 색을 쓰도록 단일 정의.
+    /// 0(기본)=gray, 1=yellow, 2=cyan, 3=pink.
+    static func variantDotColor(_ variant: Int) -> Color {
+        switch variant {
+        case 1: return .yellow
+        case 2: return .cyan
+        case 3: return .pink
+        default: return .gray
+        }
+    }
 }
 
 /// wellness 보상 클릭 시 튀는 코인 한 개의 운동 상태.

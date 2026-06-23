@@ -141,29 +141,10 @@ final class ViewModel: ObservableObject {
     /// - false: 401/403(auth), 429/5xx/network(transient)
     /// 비공식 endpoint를 쓰는 만큼 변경 사실을 사용자에게 빨리 알리기 위한 신호 분류.
     nonisolated static func isSchemaSuspect(_ error: Error) -> Bool {
-        if let e = error as? UsageError {
-            switch e {
-            case .decoding: return true
-            case .http(let code):
-                return (400..<500).contains(code) && code != 401 && code != 403 && code != 429
-            default: return false
-            }
-        }
-        if let e = error as? CursorError {
-            switch e {
-            case .decoding: return true
-            case .http(let code):
-                return (400..<500).contains(code) && code != 401 && code != 403 && code != 429
-            default: return false
-            }
-        }
-        if let e = error as? CodexError {
-            switch e {
-            case .decoding: return true
-            case .http(let code):
-                return (400..<500).contains(code) && code != 401 && code != 403 && code != 429
-            default: return false
-            }
+        guard let e = error as? PollingErrorClassifiable else { return false }
+        if e.isDecodingFailure { return true }
+        if let code = e.httpStatusCode {
+            return (400..<500).contains(code) && code != 401 && code != 403 && code != 429
         }
         return false
     }
@@ -409,29 +390,21 @@ final class ViewModel: ObservableObject {
 
         // Per-source schema-suspect: success가 들어오면 reset, auth 에러는 유지(중립).
         // 임계 도달 정확히 그 cycle에 알림 1회 — NotificationManager가 24h 쿨다운으로 dedup.
-        if claudePollOutcome == .apiSchemaSuspect {
-            claudeSchemaSuspectCount += 1
-            if claudeSchemaSuspectCount == Self.schemaSuspectThreshold {
-                NotificationManager.shared.endpointSuspect(source: "Claude")
+        updateSchemaSuspect(claudePollOutcome, count: &claudeSchemaSuspectCount, source: "Claude")
+        updateSchemaSuspect(cursorPollOutcome, count: &cursorSchemaSuspectCount, source: "Cursor")
+        updateSchemaSuspect(codexPollOutcome, count: &codexSchemaSuspectCount, source: "Codex")
+    }
+
+    /// per-source schema-suspect 카운터 갱신 — success면 reset, suspect 누적이 임계에 정확히
+    /// 도달한 cycle에 1회 알림(NotificationManager가 24h 쿨다운으로 추가 dedup).
+    private func updateSchemaSuspect(_ outcome: PollOutcome, count: inout Int, source: String) {
+        if outcome == .apiSchemaSuspect {
+            count += 1
+            if count == Self.schemaSuspectThreshold {
+                NotificationManager.shared.endpointSuspect(source: source)
             }
-        } else if claudePollOutcome == .success {
-            claudeSchemaSuspectCount = 0
-        }
-        if cursorPollOutcome == .apiSchemaSuspect {
-            cursorSchemaSuspectCount += 1
-            if cursorSchemaSuspectCount == Self.schemaSuspectThreshold {
-                NotificationManager.shared.endpointSuspect(source: "Cursor")
-            }
-        } else if cursorPollOutcome == .success {
-            cursorSchemaSuspectCount = 0
-        }
-        if codexPollOutcome == .apiSchemaSuspect {
-            codexSchemaSuspectCount += 1
-            if codexSchemaSuspectCount == Self.schemaSuspectThreshold {
-                NotificationManager.shared.endpointSuspect(source: "Codex")
-            }
-        } else if codexPollOutcome == .success {
-            codexSchemaSuspectCount = 0
+        } else if outcome == .success {
+            count = 0
         }
     }
 

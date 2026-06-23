@@ -823,15 +823,7 @@ private struct InventorySlot: View {
         }
     }
 
-    private func variantDot(_ i: Int) -> Color {
-        switch i {
-        case 0: return .gray
-        case 1: return .yellow
-        case 2: return .cyan
-        case 3: return .pink
-        default: return .gray
-        }
-    }
+    private func variantDot(_ i: Int) -> Color { WalkingCat.variantDotColor(i) }
 }
 
 /// 컬렉션 컴플리트 배너 — `.hatched` 진입 시 그 가챠로 셋이 완성됐으면 상단에 노출.
@@ -1413,16 +1405,8 @@ private struct PetPreviewView: View {
         .padding(.top, 2)
     }
 
-    /// variant dot 색 — InventorySlot의 variantDot과 동일 매핑 (시각적 일관성).
-    private static func variantDotColor(_ i: Int) -> Color {
-        switch i {
-        case 0: return .gray
-        case 1: return .yellow
-        case 2: return .cyan
-        case 3: return .pink
-        default: return .gray
-        }
-    }
+    /// variant dot 색 — WalkingCat.variantDotColor 단일 정의에 위임 (시각적 일관성).
+    private static func variantDotColor(_ i: Int) -> Color { WalkingCat.variantDotColor(i) }
 
     /// 합산 진행도(가챠 중복 + 사용 시간) 기반 "다음 이로치까지" 게이지. 모든 variant 해금되면 표시 안 함.
     /// 잔여 표기는 "사용 시간 단독"으로 채울 경우 남는 일수 — 가챠로 더 빨리 해금 가능.

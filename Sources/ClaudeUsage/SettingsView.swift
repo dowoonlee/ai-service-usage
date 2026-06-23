@@ -501,15 +501,16 @@ private struct RankingSectionView: View {
         .frame(width: 360)
     }
 
+    private static let backupDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "ko_KR")
+        f.dateFormat = "yyyy년 M월 d일 HH:mm"
+        return f
+    }()
+
     @ViewBuilder
     private func githubConfirmBody(peek: RankingAPI.GitHubAccountPeek, token: String) -> some View {
-        let fmt: DateFormatter = {
-            let f = DateFormatter()
-            f.locale = Locale(identifier: "ko_KR")
-            f.dateFormat = "yyyy년 M월 d일 HH:mm"
-            return f
-        }()
-        Text("\(fmt.string(from: peek.backupAt)) 시점으로 유저 정보를 복원합니다.")
+        Text("\(Self.backupDateFormatter.string(from: peek.backupAt)) 시점으로 유저 정보를 복원합니다.")
             .font(.system(size: 12))
         VStack(alignment: .leading, spacing: 2) {
             Text("닉네임: \(peek.nickname)").font(.system(size: 11)).foregroundStyle(.secondary)

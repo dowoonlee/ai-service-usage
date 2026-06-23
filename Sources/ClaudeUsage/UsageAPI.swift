@@ -4,7 +4,7 @@ actor UsageAPI {
     static let shared = UsageAPI()
 
     private let base = URL(string: "https://claude.ai")!
-    private let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+    private let ua = sharedBrowserUserAgent
     private var cachedOrgID: String?
     private var cachedPlanName: String?
     private var cachedSessionKey: String?

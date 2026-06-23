@@ -161,7 +161,7 @@ actor CodexAPI {
 
     private let usageURL = "https://chatgpt.com/backend-api/wham/usage"
     // Cursor와 동일 — 자체 UA는 봇 검출 신호. chatgpt.com 대시보드와 비슷한 Safari UA.
-    private let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+    private let ua = sharedBrowserUserAgent
 
     /// `$CODEX_HOME` 환경변수 재지정 지원, 기본 `~/.codex`.
     private var authPath: String {
@@ -218,8 +218,9 @@ actor CodexAPI {
 
     // MARK: - HTTP
 
-    private func get(access: String, accountId: String?, label: String) async throws -> Data {
-        guard let url = URL(string: usageURL) else { throw CodexError.http(-1) }
+    // 운영(send)·진단(rawGet) 두 경로가 같은 헤더를 쓰도록 request 빌드를 한 곳에 둔다.
+    private func buildUsageRequest(access: String, accountId: String?) -> URLRequest? {
+        guard let url = URL(string: usageURL) else { return nil }
         var req = URLRequest(url: url, timeoutInterval: 12)
         req.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
         if let accountId { req.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id") }
@@ -227,6 +228,11 @@ actor CodexAPI {
         req.setValue("https://chatgpt.com", forHTTPHeaderField: "Origin")
         req.setValue("https://chatgpt.com/", forHTTPHeaderField: "Referer")
         req.setValue(ua, forHTTPHeaderField: "User-Agent")
+        return req
+    }
+
+    private func get(access: String, accountId: String?, label: String) async throws -> Data {
+        guard let req = buildUsageRequest(access: access, accountId: accountId) else { throw CodexError.http(-1) }
         return try await send(req, label: label)
     }
 
@@ -301,16 +307,9 @@ actor CodexAPI {
         return d
     }
 
-    // 진단 전용: send()와 달리 throw하지 않고 (data?, status) 노출. 헤더는 실제 경로와 동일.
+    // 진단 전용: send()와 달리 throw하지 않고 (data?, status) 노출. builder를 공유하므로 헤더는 운영 경로와 항상 동일.
     private func rawGet(access: String, accountId: String?) async -> (Data?, Int) {
-        guard let url = URL(string: usageURL) else { return (nil, -1) }
-        var req = URLRequest(url: url, timeoutInterval: 12)
-        req.setValue("Bearer \(access)", forHTTPHeaderField: "Authorization")
-        if let accountId { req.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id") }
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("https://chatgpt.com", forHTTPHeaderField: "Origin")
-        req.setValue("https://chatgpt.com/", forHTTPHeaderField: "Referer")
-        req.setValue(ua, forHTTPHeaderField: "User-Agent")
+        guard let req = buildUsageRequest(access: access, accountId: accountId) else { return (nil, -1) }
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             return (data, (resp as? HTTPURLResponse)?.statusCode ?? -1)

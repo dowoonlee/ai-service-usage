@@ -64,7 +64,7 @@ actor CursorAPI {
     }()
     // 'ClaudeUsage/1.0' 같은 자체 UA는 비-브라우저 자동화 신호로 분류돼 ban-risk 가
     // 높음. 사용자가 cursor.com 대시보드를 열 때 보내는 것과 비슷한 Safari UA로 통일.
-    private let ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+    private let ua = sharedBrowserUserAgent
 
     func refresh() async throws -> CursorSnapshot {
         guard FileManager.default.fileExists(atPath: dbPath) else {
@@ -146,17 +146,19 @@ actor CursorAPI {
 
     // MARK: - HTTP helpers
 
-    private func get(_ urlString: String, cookie: String, label: String) async throws -> Data {
-        guard let url = URL(string: urlString) else { throw CursorError.http(-1) }
+    // 운영(send)·진단(perform) 두 경로가 같은 헤더를 쓰도록 request 빌드를 한 곳에 둔다.
+    // 헤더가 갈라지면 진단 결과가 실제 호출과 달라지므로 builder를 단일 소스로 유지.
+    private func buildGetRequest(_ urlString: String, cookie: String) -> URLRequest? {
+        guard let url = URL(string: urlString) else { return nil }
         var req = URLRequest(url: url, timeoutInterval: 10)
         req.setValue("WorkosCursorSessionToken=\(cookie)", forHTTPHeaderField: "Cookie")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue(ua, forHTTPHeaderField: "User-Agent")
-        return try await send(req, label: label)
+        return req
     }
 
-    private func postJSON(_ urlString: String, cookie: String, body: String, label: String) async throws -> Data {
-        guard let url = URL(string: urlString) else { throw CursorError.http(-1) }
+    private func buildPostRequest(_ urlString: String, cookie: String, body: String) -> URLRequest? {
+        guard let url = URL(string: urlString) else { return nil }
         var req = URLRequest(url: url, timeoutInterval: 15)
         req.httpMethod = "POST"
         req.httpBody = body.data(using: .utf8)
@@ -166,6 +168,16 @@ actor CursorAPI {
         req.setValue("https://cursor.com", forHTTPHeaderField: "Origin")
         req.setValue("https://cursor.com/dashboard", forHTTPHeaderField: "Referer")
         req.setValue(ua, forHTTPHeaderField: "User-Agent")
+        return req
+    }
+
+    private func get(_ urlString: String, cookie: String, label: String) async throws -> Data {
+        guard let req = buildGetRequest(urlString, cookie: cookie) else { throw CursorError.http(-1) }
+        return try await send(req, label: label)
+    }
+
+    private func postJSON(_ urlString: String, cookie: String, body: String, label: String) async throws -> Data {
+        guard let req = buildPostRequest(urlString, cookie: cookie, body: body) else { throw CursorError.http(-1) }
         return try await send(req, label: label)
     }
 
@@ -345,27 +357,14 @@ actor CursorAPI {
         return d
     }
 
-    // 진단 전용: send()와 달리 throw하지 않고 (data?, status)를 노출. 헤더는 실제 경로와 동일.
+    // 진단 전용: send()와 달리 throw하지 않고 (data?, status)를 노출. builder를 공유하므로 헤더는 운영 경로와 항상 동일.
     private func rawSend(get urlString: String, cookie: String) async -> (Data?, Int) {
-        guard let url = URL(string: urlString) else { return (nil, -1) }
-        var req = URLRequest(url: url, timeoutInterval: 10)
-        req.setValue("WorkosCursorSessionToken=\(cookie)", forHTTPHeaderField: "Cookie")
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue(ua, forHTTPHeaderField: "User-Agent")
+        guard let req = buildGetRequest(urlString, cookie: cookie) else { return (nil, -1) }
         return await perform(req)
     }
 
     private func rawSend(post urlString: String, cookie: String, body: String) async -> (Data?, Int) {
-        guard let url = URL(string: urlString) else { return (nil, -1) }
-        var req = URLRequest(url: url, timeoutInterval: 15)
-        req.httpMethod = "POST"
-        req.httpBody = body.data(using: .utf8)
-        req.setValue("WorkosCursorSessionToken=\(cookie)", forHTTPHeaderField: "Cookie")
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("https://cursor.com", forHTTPHeaderField: "Origin")
-        req.setValue("https://cursor.com/dashboard", forHTTPHeaderField: "Referer")
-        req.setValue(ua, forHTTPHeaderField: "User-Agent")
+        guard let req = buildPostRequest(urlString, cookie: cookie, body: body) else { return (nil, -1) }
         return await perform(req)
     }
 
