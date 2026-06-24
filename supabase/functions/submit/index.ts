@@ -31,6 +31,15 @@ interface SubmitRequest {
   // 수신 시 항상 최신값으로 update — 변조 위험은 "잘못된 카드 노출" 정도라 50명 + 수동
   // 큐레이션 환경에서 수용 가능.
   profileJson?: unknown;
+  // 클라이언트 버전 텔레메트리. profileJson과 동일하게 서명 대상 밖 display/운영용.
+  // 변조 위험은 "버전 통계 오염" 정도라 수용. 길이만 sanity cap.
+  appVersion?: string;
+  osVersion?: string;
+}
+
+// 버전 문자열 sanity — 문자열 + 1..64자만 통과, 아니면 undefined (해당 컬럼 미갱신).
+function sanitizeVersion(v: unknown): string | undefined {
+  return typeof v === "string" && v.length > 0 && v.length <= 64 ? v : undefined;
 }
 
 // ts 허용 윈도우. 클라이언트 시계가 60분 이상 어긋난 경우만 reject.
@@ -138,6 +147,11 @@ Deno.serve(async (req: Request) => {
   if (body.profileJson !== undefined) {
     updates.profile_json = body.profileJson;
   }
+  // 버전 텔레메트리 — accept/reject 무관하게 들어온 값이 유효하면 갱신 (현재 버전 추적이 목적).
+  const appVersion = sanitizeVersion(body.appVersion);
+  const osVersion = sanitizeVersion(body.osVersion);
+  if (appVersion !== undefined) updates.app_version = appVersion;
+  if (osVersion !== undefined) updates.os_version = osVersion;
   if (Object.keys(updates).length > 0) {
     await db.from("users").update(updates).eq("device_id", p.deviceId);
   }

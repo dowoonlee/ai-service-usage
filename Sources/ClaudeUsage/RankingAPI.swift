@@ -38,6 +38,16 @@ actor RankingAPI {
     }
     static var isConfigured: Bool { baseURL != nil && anonKey != nil }
 
+    /// 버전 텔레메트리 — submit 시 서버로 전송. dev 실행(번들 없음)은 nil.
+    static var appVersion: String? {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    }
+    /// macOS major.minor.patch (예: "14.4.1"). build 번호는 분포 over-fragment 방지 위해 제외.
+    static var osVersion: String {
+        let v = ProcessInfo.processInfo.operatingSystemVersion
+        return "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)"
+    }
+
     // MARK: - Models
 
     struct RegisterRequest: Encodable {
@@ -67,6 +77,10 @@ actor RankingAPI {
         let signature: String
         /// payload 외부 — HMAC 서명 대상 아님. 변조 위험 작아 display data로 수용.
         let profileJson: ProfileState?
+        /// 클라이언트 버전 텔레메트리 (서명 대상 밖). 서버가 users.app_version/os_version에 저장.
+        /// dev 실행(번들 없음)·delete 경로는 nil.
+        let appVersion: String?
+        let osVersion: String?
     }
     struct SubmitResponse: Decodable {
         let accepted: Bool
@@ -343,7 +357,8 @@ actor RankingAPI {
         let payload = SubmitPayload(deviceId: deviceId, delta: delta, prevTotal: prevTotal,
                                     ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.sign(payload: payload, keyBase64: hmacKeyBase64)
-        let req = SubmitRequest(payload: payload, signature: sig, profileJson: profileJson)
+        let req = SubmitRequest(payload: payload, signature: sig, profileJson: profileJson,
+                                appVersion: Self.appVersion, osVersion: Self.osVersion)
         return try await post(path: "submit", body: req)
     }
 
@@ -479,7 +494,8 @@ actor RankingAPI {
         let payload = SubmitPayload(deviceId: deviceId, delta: 0, prevTotal: 0,
                                     ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.sign(payload: payload, keyBase64: hmacKeyBase64)
-        let req = SubmitRequest(payload: payload, signature: sig, profileJson: nil)
+        let req = SubmitRequest(payload: payload, signature: sig, profileJson: nil,
+                                appVersion: nil, osVersion: nil)
         try await postVoid(path: "delete", body: req)
     }
 
