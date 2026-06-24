@@ -299,6 +299,11 @@ final class Settings: ObservableObject {
     @Published var creditedBadgeRewards: Set<String> {
         didSet { persist(creditedBadgeRewards, forKey: Keys.creditedBadgeRewards) }
     }
+    /// 마스터한 지역(BadgeRegion.rawValue)의 집합. 한 지역의 모든 도장 클리어 시 1회 프리미엄
+    /// 가챠권 지급 — dedup용. 한 번 들어가면 영구. (clearedBadges/completedCollections와 동일 패턴.)
+    @Published var masteredRegions: Set<String> {
+        didSet { persist(masteredRegions, forKey: Keys.masteredRegions) }
+    }
     /// 챔피언 뱃지(33번째) 획득 시각. nil = 미획득.
     @Published var championBadgeEarnedAt: Date? {
         didSet { UserDefaults.standard.set(championBadgeEarnedAt, forKey: Keys.championBadgeEarnedAt) }
@@ -650,6 +655,7 @@ final class Settings: ObservableObject {
             }
         }
         self.championBadgeEarnedAt = d.object(forKey: Keys.championBadgeEarnedAt) as? Date
+        self.masteredRegions = (d.data(forKey: Keys.masteredRegions).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.hasViewedGymPage      = (d.object(forKey: Keys.hasViewedGymPage) as? Bool) ?? false
 
         // 펫 컬렉션 (셋 보너스) 로드
@@ -1038,6 +1044,7 @@ final class Settings: ObservableObject {
         if let remote = b.creditedPRNumbers { creditedPRNumbers.formUnion(remote) }
         if let remote = b.completedCollections { completedCollections.formUnion(remote) }
         if let remote = b.clearedBadges { clearedBadges.formUnion(remote) }
+        if let remote = b.masteredRegions { masteredRegions.formUnion(remote) }
         if let remote = b.ownedTitles { ownedTitles.formUnion(remote) }
 
         // 사용자 설정 — backup 의도 우선.
@@ -1181,6 +1188,7 @@ final class Settings: ObservableObject {
         static let heartbeatLastActiveAt       = "settings.heartbeatLastActiveAt"
         static let nightOwlSecondsAccumulated  = "settings.nightOwlSecondsAccumulated"
         static let clearedBadges               = "settings.clearedBadges"
+        static let masteredRegions             = "settings.masteredRegions"
         static let creditedBadgeRewards        = "settings.creditedBadgeRewards"
         static let championBadgeEarnedAt       = "settings.championBadgeEarnedAt"
         static let hasViewedGymPage            = "settings.hasViewedGymPage"

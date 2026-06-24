@@ -240,4 +240,9 @@ enum RegionPixelIcons {
         M20 6h2v16h-2z
         """
     )
+    /// Registry — 패키지 버전이 쌓인 스택 (3 레이어).
+    static let registry = PixelIcon(
+        viewBox: CGSize(width: 24, height: 24),
+        pathData: "M3 4h18v4H3zm0 6h18v4H3zm0 6h18v4H3z"
+    )
 }

@@ -46,49 +46,54 @@ enum BadgeTier: String, CaseIterable, Codable, Comparable {
 }
 
 enum BadgeRegion: String, CaseIterable, Codable {
-    case coffee, vibe, cron, repo
+    case coffee, vibe, cron, repo, registry
 
     var displayName: String {
         switch self {
-        case .coffee: return "Coffee"
-        case .vibe:   return "Vibe"
-        case .cron:   return "Cron"
-        case .repo:   return "Repo"
+        case .coffee:   return "Coffee"
+        case .vibe:     return "Vibe"
+        case .cron:     return "Cron"
+        case .repo:     return "Repo"
+        case .registry: return "Registry"
         }
     }
 
     /// 메뉴 아이콘 (SF Symbol — fallback / 콤팩트 표시용).
     var systemImage: String {
         switch self {
-        case .coffee: return "cup.and.saucer.fill"
-        case .vibe:   return "cpu"
-        case .cron:   return "clock.badge.fill"
-        case .repo:   return "archivebox.fill"
+        case .coffee:   return "cup.and.saucer.fill"
+        case .vibe:     return "cpu"
+        case .cron:     return "clock.badge.fill"
+        case .repo:     return "archivebox.fill"
+        case .registry: return "square.stack.3d.up.fill"
         }
     }
 
     /// 도장 페이지 region 그리드용 픽셀 아이콘 (pixelarticons MIT).
     var pixelIcon: PixelIcon {
         switch self {
-        case .coffee: return RegionPixelIcons.coffee
-        case .vibe:   return RegionPixelIcons.robotFace
-        case .cron:   return RegionPixelIcons.clock
-        case .repo:   return RegionPixelIcons.warehouse
+        case .coffee:   return RegionPixelIcons.coffee
+        case .vibe:     return RegionPixelIcons.robotFace
+        case .cron:     return RegionPixelIcons.clock
+        case .repo:     return RegionPixelIcons.warehouse
+        case .registry: return RegionPixelIcons.registry
         }
     }
 
     var categories: [BadgeCategory] {
         switch self {
-        case .coffee: return [.standup, .rateLimit]
-        case .vibe:   return [.claude, .cursor]
-        case .cron:   return [.heartbeat, .nightOwl]
-        case .repo:   return [.stash, .dependency]
+        case .coffee:   return [.standup, .rateLimit]
+        case .vibe:     return [.claude, .cursor, .codex]
+        case .cron:     return [.heartbeat, .nightOwl]
+        case .repo:     return [.stash, .dependency]
+        case .registry: return [.monorepo, .fork]
         }
     }
 }
 
 enum BadgeCategory: String, CaseIterable, Codable {
     case standup, rateLimit, claude, cursor, heartbeat, nightOwl, stash, dependency
+    case codex, monorepo, fork
 
     var displayName: String {
         switch self {
@@ -100,15 +105,19 @@ enum BadgeCategory: String, CaseIterable, Codable {
         case .nightOwl:   return "Night Owl"
         case .stash:      return "Stash"
         case .dependency: return "Dependency"
+        case .codex:      return "Codex"
+        case .monorepo:   return "Monorepo"
+        case .fork:       return "Fork"
         }
     }
 
     var region: BadgeRegion {
         switch self {
         case .standup, .rateLimit:   return .coffee
-        case .claude, .cursor:       return .vibe
+        case .claude, .cursor, .codex: return .vibe
         case .heartbeat, .nightOwl:  return .cron
         case .stash, .dependency:    return .repo
+        case .monorepo, .fork:       return .registry
         }
     }
 
@@ -123,6 +132,9 @@ enum BadgeCategory: String, CaseIterable, Codable {
         case .nightOwl:   return "moon.stars.fill"
         case .stash:      return "dollarsign.circle.fill"
         case .dependency: return "books.vertical.fill"
+        case .codex:      return "chevron.left.forwardslash.chevron.right"
+        case .monorepo:   return "square.stack.3d.down.right.fill"
+        case .fork:       return "arrow.triangle.branch"
         }
     }
 
@@ -137,6 +149,9 @@ enum BadgeCategory: String, CaseIterable, Codable {
         case .nightOwl:   return "#9DBCEC"   // Opal
         case .stash:      return "#FFC93C"   // Gold
         case .dependency: return "#A0E7E5"   // Diamond
+        case .codex:      return "#FEB731"   // Amber
+        case .monorepo:   return "#8AD412"   // Peridot
+        case .fork:       return "#CE0000"   // Garnet
         }
     }
 
@@ -145,7 +160,9 @@ enum BadgeCategory: String, CaseIterable, Codable {
     var gemSymbolDark: Bool {
         switch self {
         case .standup, .nightOwl, .stash, .dependency: return true   // 검정 symbol
+        case .codex, .monorepo:                        return true   // Amber/Peridot 밝음 → 검정
         case .rateLimit, .claude, .cursor, .heartbeat: return false  // 흰 symbol
+        case .fork:                                    return false  // Garnet 어두움 → 흰
         }
     }
 
@@ -161,6 +178,9 @@ enum BadgeCategory: String, CaseIterable, Codable {
         case .nightOwl:   return "Jewel_Opal"
         case .stash:      return "Coins_Gold"
         case .dependency: return "Jewel_Diamond"
+        case .codex:      return "Jewel_Amber"
+        case .monorepo:   return "Jewel_Peridot"
+        case .fork:       return "Jewel_Garnet"
         }
     }
 
@@ -175,6 +195,9 @@ enum BadgeCategory: String, CaseIterable, Codable {
         case .nightOwl:   return "시간"
         case .stash:      return "코인"
         case .dependency: return "종 보유"
+        case .codex:      return "코인"
+        case .monorepo:   return "종 완성"
+        case .fork:       return "개 해금"
         }
     }
 
@@ -190,6 +213,9 @@ enum BadgeCategory: String, CaseIterable, Codable {
         case .nightOwl:   return [.localhost: 3,  .dev: 20,  .staging: 80,    .production: 200]   // 시간(h)
         case .stash:      return [.localhost: 100, .dev: 1_000, .staging: 5_000, .production: 25_000]
         case .dependency: return [.localhost: 3,  .dev: 15,  .staging: 40,    .production: 70]
+        case .codex:      return [.localhost: 50, .dev: 500, .staging: 2_500, .production: 10_000]
+        case .monorepo:   return [.localhost: 1,  .dev: 4,   .staging: 8,     .production: 13]   // 전 컬렉션 13
+        case .fork:       return [.localhost: 3,  .dev: 10,  .staging: 30,    .production: 80]   // shiny variant 해금
         }
     }
 
@@ -205,6 +231,9 @@ enum BadgeCategory: String, CaseIterable, Codable {
         case .nightOwl:   return s.nightOwlSecondsAccumulated / 3600
         case .stash:      return s.coinsTotalEarned
         case .dependency: return s.ownedPets.count
+        case .codex:      return s.codexCoinsEarned
+        case .monorepo:   return s.completedCollections.count
+        case .fork:       return s.ownedPets.values.reduce(0) { $0 + $1.unlockedVariants.filter { $0 > 0 }.count }
         }
     }
 
@@ -214,6 +243,7 @@ enum BadgeCategory: String, CaseIterable, Codable {
     func isAvailable(_ s: Settings) -> Bool {
         switch self {
         case .cursor: return s.cursorCoinsEarned > 0 || hasUltraEverHinted(s)
+        case .codex:  return s.codexCoinsEarned > 0
         default:      return true
         }
     }
@@ -285,6 +315,29 @@ enum BadgeRegistry {
                 NotificationManager.shared.championEarned()
             }
         }
+
+        // 지역 마스터 — 한 region의 (가능한) 모든 도장 클리어 시 프리미엄 가챠권 1장. dedup으로 1회만.
+        for region in BadgeRegion.allCases where !s.masteredRegions.contains(region.rawValue) {
+            guard isRegionMastered(region, s) else { continue }
+            s.masteredRegions.insert(region.rawValue)
+            s.premiumTickets += 1
+            DebugLog.log("Region mastered: \(region.rawValue) → +1 premium ticket (total=\(s.premiumTickets))")
+            if !silent {
+                NotificationManager.shared.regionMastered(region: region)
+            }
+        }
+    }
+
+    /// 한 지역의 (사용자 plan에서 가능한) 모든 카테고리×tier 클리어 검사. `isChampionEarned`의 region 한정 버전.
+    static func isRegionMastered(_ region: BadgeRegion, _ s: Settings) -> Bool {
+        let avail = region.categories.filter { $0.isAvailable(s) }
+        guard !avail.isEmpty else { return false }   // 전부 잠긴 지역은 마스터 대상 아님
+        for cat in avail {
+            for tier in BadgeTier.allCases where !s.clearedBadges.contains(BadgeID(category: cat, tier: tier).key) {
+                return false
+            }
+        }
+        return true
     }
 
     /// "사용자 plan에서 가능한 모든 카테고리 풀세트 클리어" 검사.

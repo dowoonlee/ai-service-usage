@@ -86,6 +86,12 @@ final class NotificationManager {
              body: "모든 도장을 정복했습니다 +\(BadgeRegistry.championCoinReward) 코인")
     }
 
+    /// 지역 마스터 — 한 지역의 모든 도장 클리어 시 프리미엄 가챠권 1장.
+    func regionMastered(region: BadgeRegion) {
+        send(title: "🗺️ \(region.displayName) 마스터!",
+             body: "이 지역의 모든 도장을 정복했습니다 +1 프리미엄 가챠권")
+    }
+
     /// 명예의 전당 보상 알림. 폴링 cycle에서 본인 row 감지 시 1회 호출 (dedup은 호출 측에서).
     func podiumRewardEarned(period: String, rank: Int, coins: Int) {
         let medal: String

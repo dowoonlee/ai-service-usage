@@ -79,6 +79,18 @@ struct GymLeader {
                     "정렬된 컬렉션이군. 짐의 schema에 통과되었다."
                 ]
             )
+        case .registry:
+            // Semver — semantic versioning + 큐레이터. 모든 fork·컬렉션을 등재하는 질서의 수호자. Mythic 전사.
+            return GymLeader(
+                region: .registry, kind: .warrior,
+                name: "Semver",
+                dialogues: [
+                    "variant 0뿐인가. fork 한 번 안 떠봤군.",
+                    "shiny가 깨어나는군. 이로치는 노력의 증표다.",
+                    "컬렉션이 채워진다. registry가 살쪄가는군.",
+                    "...모든 fork를 등재했다. 짐의 monorepo에 영원히 기록되리라."
+                ]
+            )
         }
     }
 }

@@ -96,6 +96,7 @@ struct ProfileState: Codable, Sendable {
         let creditedPRNumbers: [Int]?
         let completedCollections: [String]?
         let clearedBadges: [String]?
+        let masteredRegions: [String]?   // v2 — 지역 마스터(프리미엄 가챠권) dedup
 
         // 칭호 인벤토리
         let ownedTitles: [String]?
@@ -134,6 +135,7 @@ struct ProfileState: Codable, Sendable {
                 creditedPRNumbers: Array(s.creditedPRNumbers),
                 completedCollections: Array(s.completedCollections),
                 clearedBadges: Array(s.clearedBadges),
+                masteredRegions: Array(s.masteredRegions),
                 ownedTitles: Array(s.ownedTitles),
                 notifyEnabled: s.notifyEnabled,
                 notifyThresholds: s.notifyThresholds,

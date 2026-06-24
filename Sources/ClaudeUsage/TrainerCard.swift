@@ -192,6 +192,8 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     case fourBadges                // 도장 4뱃지
     case eightBadges               // 도장 8뱃지
     case champion                  // 챔피언 뱃지
+    case stagingLead               // production tier 4개 클리어
+    case prodOwner                 // 모든(가능한) production tier 클리어
 
     // ── 자동 unlock — Wellness ──
     case wellnessGuru              // 응답 50
@@ -245,6 +247,8 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .fourBadges:            return "4뱃지 도전자"
         case .eightBadges:           return "8뱃지 트레이너"
         case .champion:              return "도장 챔피언"
+        case .stagingLead:           return "Staging Lead"
+        case .prodOwner:             return "Prod Owner"
         case .wellnessGuru:          return "Wellness Guru"
         case .wellnessLegend:        return "Wellness Legend"
         case .dayOneBeliever:        return "Day One"
@@ -293,6 +297,8 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .fourBadges:            return "도장 4뱃지 클리어"
         case .eightBadges:           return "도장 8뱃지 클리어"
         case .champion:              return "도장 챔피언 뱃지 획득"
+        case .stagingLead:           return "production tier 도장 4개 클리어"
+        case .prodOwner:             return "가능한 모든 production tier 도장 클리어"
         case .wellnessGuru:          return "Wellness 응답 50회"
         case .wellnessLegend:        return "Wellness 응답 200회"
         case .dayOneBeliever:        return "첫 적립 후 7일 경과"
@@ -372,6 +378,13 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         if cleared >= 4 { set.insert(.fourBadges) }
         if cleared >= 8 { set.insert(.eightBadges) }
         if s.championBadgeEarnedAt != nil { set.insert(.champion) }
+        // production tier 단계 칭호.
+        let prodCleared = s.clearedBadges.filter { $0.hasSuffix(".production") }.count
+        if prodCleared >= 4 { set.insert(.stagingLead) }
+        if BadgeCategory.allCases.filter({ $0.isAvailable(s) })
+            .allSatisfy({ s.clearedBadges.contains("\($0.rawValue).production") }) {
+            set.insert(.prodOwner)
+        }
 
         // ── Wellness ──
         if s.wellnessRespondedCount >= 50  { set.insert(.wellnessGuru) }
