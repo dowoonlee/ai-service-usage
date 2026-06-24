@@ -1,0 +1,13 @@
+Tiny Swords — by Pixel Frog
+Source: https://pixelfrog-assets.itch.io/tiny-swords
+License: CC0 1.0 Universal (Public Domain Dedication)
+
+사용 스프라이트 (Blue Units): Warrior, Lancer, Monk, Archer, Pawn
+  - 각 캐릭터의 Idle / Run 애니메이션 strip만 사용.
+  - Monk의 원본 파일명(Idle.png/Run.png)은 basename 유일성을 위해 Monk_Idle.png/Monk_Run.png로 리네임.
+
+다운로드 경로(미러): https://github.com/ZieIony/TinySwords
+  - 해당 repo의 LICENSE(MIT)는 게임 코드에 적용되며, 위 스프라이트 에셋의 권리는
+    원작자 Pixel Frog의 Tiny Swords(CC0)를 따른다.
+
+CLAUDE.md 정책상 Pixel Frog 팩은 안전하게 CC-BY로 취급해 본 attribution을 남긴다.

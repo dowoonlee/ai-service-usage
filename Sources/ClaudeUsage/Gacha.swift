@@ -10,7 +10,10 @@ enum Gacha {
     /// 풀은 read-only static 데이터 — actor 격리 불필요. nonisolated로 두면 비-MainActor
     /// 컨텍스트(`PetCollection.bonusCoins` 같은 nonisolated computed)에서도 직접 읽을 수 있음.
     nonisolated static let pool: [Rarity: [PetKind]] = [
-        .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale],
+        // 최상위 — 일반 가챠 미등장(weight 0), RP 프리미엄 가챠권 제한 풀 전용.
+        // Tiny Swords 엘리트 기사단 (Pixel Frog, CC0).
+        .mythic:    [.warrior, .lancer, .monk],
+        .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale, .archer, .pawn],
         .epic:      [.maskDude, .ghost, .plant, .skull,
                      .ogre, .bigDemon, .kingHuman, .clownCaptain, .wizardM, .knightF],
         .rare:      [.mushroom, .slime, .trunk, .radish, .rock1, .rock2, .rock3, .chameleon, .rino,
@@ -30,10 +33,12 @@ enum Gacha {
     ]
 
     /// 마이그레이션 시 legacy default petKind를 ownedPets로 옮길 때 등급 화이트리스트.
-    /// Legendary/Epic은 마이그레이션으로 무료 지급되면 안 된다 — 사용자가 가챠로 뽑아야 함.
+    /// Mythic/Legendary/Epic은 마이그레이션으로 무료 지급되면 안 된다 — 사용자가 가챠로 뽑아야 함.
     /// (CLAUDE.md "Migration safety" 항목 참고)
-    static func isLegendaryOrEpic(_ kind: PetKind) -> Bool {
-        (pool[.legendary] ?? []).contains(kind) || (pool[.epic] ?? []).contains(kind)
+    static func isHighRarity(_ kind: PetKind) -> Bool {
+        (pool[.mythic] ?? []).contains(kind)
+            || (pool[.legendary] ?? []).contains(kind)
+            || (pool[.epic] ?? []).contains(kind)
     }
 
     /// 환율 캘리브레이션 그레이스 기간 (이 기간 내엔 시드값 사용).
@@ -85,6 +90,25 @@ enum Gacha {
         return drawKind(using: &rng)
     }
 
+    /// RP 프리미엄 가챠권 전용 제한 풀 draw — `[mythic + legendary]`만, 꽝(common/rare/epic) 없음.
+    /// mythic `eliteMythicChance` / legendary 나머지 가중 후 등급 내 균등. (현재 Mythic 15% / Legendary 85%)
+    /// mythic 풀이 비어있으면(에셋 미등록 단계) legendary로 안전 폴백.
+    static let eliteMythicChance: Double = 0.15
+    static func drawKindElite<RNG: RandomNumberGenerator>(using rng: inout RNG) -> (PetKind, Rarity) {
+        let mythicKinds = pool[.mythic] ?? []
+        let legendaryKinds = pool[.legendary] ?? []
+        let r = Double.random(in: 0..<1, using: &rng)
+        let rarity: Rarity = (!mythicKinds.isEmpty && r < eliteMythicChance) ? .mythic : .legendary
+        let kinds = (rarity == .mythic) ? mythicKinds : legendaryKinds
+        let kind = kinds.randomElement(using: &rng) ?? .ninjaFrog
+        return (kind, rarity)
+    }
+
+    static func drawKindElite() -> (PetKind, Rarity) {
+        var rng = SystemRandomNumberGenerator()
+        return drawKindElite(using: &rng)
+    }
+
     /// 잔액만 차감하고 결과(kind, rarity)를 결정한다.
     /// **보유 상태(`ownedPets`)는 변경하지 않음** — `commit(_:)`을 부화 애니메이션
     /// 완료 시점에 호출해서 반영해야 한다 (인벤토리 미리 해금되는 버그 방지).
@@ -100,6 +124,18 @@ enum Gacha {
             s.coins -= pullCost
         }
         let (kind, rarity) = drawKind()
+        return GachaPull(pulledAt: Date(), kind: kind, rarity: rarity, variantUnlocked: nil)
+    }
+
+    /// RP 프리미엄 가챠권 1장으로 `[mythic+legendary]` 제한 풀 1뽑.
+    /// `roll(useTicket:)`과 동일하게 **보유 상태는 변경하지 않음** — `commit(_:)`을 부화 시점에 호출.
+    /// 가챠권 구매(RP 차감)는 `RankPointLedger.purchasePremiumTicket`에서 별도로 처리된다.
+    @discardableResult
+    static func rollPremium() throws -> GachaPull {
+        let s = Settings.shared
+        guard s.premiumTickets > 0 else { throw GachaError.noPremiumTickets }
+        s.premiumTickets -= 1
+        let (kind, rarity) = drawKindElite()
         return GachaPull(pulledAt: Date(), kind: kind, rarity: rarity, variantUnlocked: nil)
     }
 
@@ -185,11 +221,13 @@ enum Gacha {
 
 enum GachaError: Error, LocalizedError {
     case noTickets
+    case noPremiumTickets
     case insufficientCoins
 
     var errorDescription: String? {
         switch self {
         case .noTickets:         return "가챠권이 없습니다"
+        case .noPremiumTickets:  return "프리미엄 가챠권이 없습니다"
         case .insufficientCoins: return "코인이 부족합니다"
         }
     }

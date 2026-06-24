@@ -123,6 +123,10 @@ final class Settings: ObservableObject {
     @Published var gachaTickets: Int {
         didSet { UserDefaults.standard.set(gachaTickets, forKey: Keys.gachaTickets) }
     }
+    /// RP 프리미엄 가챠권 보유 수 — `[mythic+legendary]` 제한 풀 1뽑용. RP로만 구매(코인/일반티켓과 별개).
+    @Published var premiumTickets: Int {
+        didSet { UserDefaults.standard.set(premiumTickets, forKey: Keys.premiumTickets) }
+    }
     /// 펫 종별 보유 상태 (count + unlockedVariants).
     @Published var ownedPets: [PetKind: PetOwnership] {
         didSet { persist(ownedPets, forKey: Keys.ownedPets) }
@@ -544,6 +548,7 @@ final class Settings: ObservableObject {
         let hadLegacyCursorKind = d.string(forKey: Keys.petCursorKind) != nil
         self.coins = (d.object(forKey: Keys.coins) as? Int) ?? 0
         self.gachaTickets = (d.object(forKey: Keys.gachaTickets) as? Int) ?? 0
+        self.premiumTickets = (d.object(forKey: Keys.premiumTickets) as? Int) ?? 0
         let ownedData = d.data(forKey: Keys.ownedPets)
         self.ownedPets = (ownedData.flatMap { try? JSONDecoder().decode([PetKind: PetOwnership].self, from: $0) }) ?? [:]
         let usageData = d.data(forKey: Keys.petUsageSeconds)
@@ -686,23 +691,34 @@ final class Settings: ObservableObject {
 
         // (1) 첫 실행 시 1회만: 가챠권 3장 지급 + 기존 사용 중이던 펫이 있으면 보유 목록에 등록.
         //
-        // 등급 가드: legacy default petKind가 Legendary/Epic이면 마이그레이션으로 무료 등록하지
-        // 않는다 — 사용자는 가챠로 뽑아야 함. (`Gacha.isLegendaryOrEpic`가 권위 있는 검사.)
+        // 등급 가드: legacy default petKind가 Mythic/Legendary/Epic이면 마이그레이션으로 무료 등록하지
+        // 않는다 — 사용자는 가챠로 뽑아야 함. (`Gacha.isHighRarity`가 권위 있는 검사.)
         // 이론상 legacy default(.fox, .wolf)는 모두 Common이라 현재 가드는 no-op이지만,
         // 향후 default 값이 바뀌거나 사용자가 settings UI에서 상위 등급을 선택해뒀다면 보호된다.
         if !d.bool(forKey: Keys.hasCompletedGachaMigration) {
             var owned = self.ownedPets
             if hadLegacyClaudeKind, owned[self.petClaudeKind] == nil,
-               !Gacha.isLegendaryOrEpic(self.petClaudeKind) {
+               !Gacha.isHighRarity(self.petClaudeKind) {
                 owned[self.petClaudeKind] = .initial()
             }
-            if hadLegacyCursorKind, !Gacha.isLegendaryOrEpic(self.petCursorKind) {
+            if hadLegacyCursorKind, !Gacha.isHighRarity(self.petCursorKind) {
                 if var existing = owned[self.petCursorKind] {
                     existing.count += 1
                     owned[self.petCursorKind] = existing
                 } else {
                     owned[self.petCursorKind] = .initial()
                 }
+            }
+            // 완전 신규(legacy 펫 설정도 없던) 사용자 — 빈 인벤토리 방지 위해 기본 여우 1마리를 지급하고
+            // 양쪽 차트 리더로 세운다. (legacy 마이그레이션으로 펫이 이미 들어왔으면 건드리지 않음.)
+            if owned.isEmpty {
+                owned[.fox] = .initial()
+                let foxParty = [PetSelection(kind: .fox, variant: 0)]
+                self.petClaudeParty = foxParty
+                self.petCursorParty = foxParty
+                // didSet은 init 중 트리거되지 않으므로 직접 persist.
+                persist(self.petClaudeParty, forKey: Keys.petClaudeParty)
+                persist(self.petCursorParty, forKey: Keys.petCursorParty)
             }
             self.ownedPets = owned
             self.gachaTickets = 3
@@ -1004,6 +1020,7 @@ final class Settings: ObservableObject {
         // 경제 — 누적·잔액은 max로 (양쪽 진행 보존).
         if let v = b.coins { coins = max(coins, v) }
         if let v = b.gachaTickets { gachaTickets = max(gachaTickets, v) }
+        if let v = b.premiumTickets { premiumTickets = max(premiumTickets, v) }  // v2, 구버전 nil → no-op
         if let v = b.coinsTotalEarned { coinsTotalEarned = max(coinsTotalEarned, v) }
         if let remote = b.firstCreditedAt {
             firstCreditedAt = firstCreditedAt.map { min($0, remote) } ?? remote
@@ -1084,6 +1101,7 @@ final class Settings: ObservableObject {
         // Gacha (M2)
         static let coins                       = "settings.coins"
         static let gachaTickets                = "settings.gachaTickets"
+        static let premiumTickets              = "settings.premiumTickets"
         static let ownedPets                   = "settings.ownedPets"
         static let petClaudeVariant            = "settings.petClaudeVariant"
         static let petCursorVariant            = "settings.petCursorVariant"

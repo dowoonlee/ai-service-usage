@@ -17,11 +17,19 @@ struct PetEffectOverlay: View {
     let petHeight: CGFloat
     let facingRight: Bool
     let isMoving: Bool         // footsteps/trail은 이동 중에만. glow/aura는 항상.
+    /// Mythic 등급 펫의 기본 오라 — 구매 효과(EffectKind)와 별개로 항상 켜진다. WalkingCat이 주입.
+    var mythicBase: Bool = false
+    /// 펫 점프(올라가는 큰 낙폭)와 동기화 — 오라를 위로 올리는 offset. WalkingCat이 sprite와 같은 값 주입.
+    var mythicJumpY: CGFloat = 0
+    /// 펫 구르기(내려가는 큰 낙폭)와 동기화 — 오라 회전 각도. sprite의 rollAngle과 동일.
+    var mythicRoll: Double = 0
 
     var body: some View {
         ZStack {
             switch placement {
             case .backdrop:
+                // Mythic 기본 오라 — 구매 효과보다 뒤(맨 아래)에 깔린다.
+                if mythicBase { mythicAura }
                 // 무지개 트레일은 펫 뒤로 흐르므로 backdrop. 광원(glow/aura)과 공존 가능.
                 if effects.contains(.rainbow) { rainbow }
                 // aura는 강화 glow를 포함하므로 glow와 중복으로 그리지 않는다.
@@ -66,6 +74,38 @@ struct PetEffectOverlay: View {
                 .frame(width: petHeight * 2.8, height: petHeight * 2.8)
                 .blur(radius: 4)
                 .position(center)
+        }
+    }
+
+    /// Mythic 등급 전용 기본 오라 — 진홍·금 angular 광선이 회전 + 진홍 radial glow 맥동.
+    /// sudo pull 가챠 연출(`GachaView.premiumAura`)과 같은 톤이라 "Mythic = 진홍/금" 정체성을 공유한다.
+    private var mythicAura: some View {
+        let mythic = Rarity.mythic.color
+        let gold = Color(red: 1.0, green: 0.82, blue: 0.35)
+        return TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let spin = (t * 20).truncatingRemainder(dividingBy: 360)
+            let pulse = 0.40 + 0.12 * sin(t * 2.6)
+            ZStack {
+                AngularGradient(
+                    gradient: Gradient(colors: [.clear, mythic.opacity(0.5), .clear,
+                                                gold.opacity(0.4), .clear, mythic.opacity(0.45), .clear]),
+                    center: .center)
+                    .rotationEffect(.degrees(spin))
+                    .blur(radius: 3)
+                    .blendMode(.screen)
+                    .frame(width: petHeight * 1.3, height: petHeight * 1.3)
+                Circle()
+                    .fill(RadialGradient(
+                        gradient: Gradient(colors: [mythic.opacity(pulse), gold.opacity(pulse * 0.4), .clear]),
+                        center: .center, startRadius: 0, endRadius: petHeight * 0.55))
+                    .frame(width: petHeight * 1.2, height: petHeight * 1.2)
+                    .blur(radius: 2)
+            }
+            // 펫 구르기(roll)와 동기화 — 펫과 같은 중심 기준 회전.
+            .rotationEffect(.degrees(mythicRoll))
+            // 펫 점프(jump)와 동기화 — 위로 같은 만큼 offset.
+            .position(x: center.x, y: center.y - mythicJumpY)
         }
     }
 

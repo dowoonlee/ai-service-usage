@@ -60,9 +60,10 @@ struct PetSelection: Codable, Hashable {
     var variant: Int  // 0 = 기본, 1/2/3 = shiny tier
 }
 
-/// 가챠 등급. common = 가장 흔함 → legendary = 가장 희귀.
+/// 가챠 등급. common = 가장 흔함 → legendary → mythic = 가장 희귀(최상위).
+/// mythic은 일반 코인 가챠에 등장하지 않고(weight 0), RP 프리미엄 가챠권으로만 뽑힌다.
 enum Rarity: String, Codable, CaseIterable, Hashable {
-    case common, rare, epic, legendary
+    case common, rare, epic, legendary, mythic
 
     var displayName: String {
         switch self {
@@ -70,16 +71,19 @@ enum Rarity: String, Codable, CaseIterable, Hashable {
         case .rare:      return "Rare"
         case .epic:      return "Epic"
         case .legendary: return "Legendary"
+        case .mythic:    return "Mythic"
         }
     }
 
-    /// 등급 자체가 뽑힐 확률. 등급 내에선 종이 균등 배분.
+    /// 등급 자체가 뽑힐 확률(일반 가챠 `drawKind`). 등급 내에선 종이 균등 배분.
+    /// mythic = 0 — 일반 가챠 미등장(프리미엄 전용). 합은 legendary까지 1.0.
     var weight: Double {
         switch self {
         case .common:    return 0.60
         case .rare:      return 0.30
         case .epic:      return 0.08
         case .legendary: return 0.02
+        case .mythic:    return 0.0
         }
     }
 
@@ -94,6 +98,7 @@ enum Rarity: String, Codable, CaseIterable, Hashable {
         case .rare:      return 300
         case .epic:      return 800
         case .legendary: return 2500
+        case .mythic:    return 5000
         }
     }
 
@@ -106,6 +111,8 @@ enum Rarity: String, Codable, CaseIterable, Hashable {
         case .rare:      return .blue
         case .epic:      return .purple
         case .legendary: return .orange
+        // 최상위 — legendary(orange)와 대비되는 강렬한 진홍/금빛. 그라데이션은 카드 UI에서 별도.
+        case .mythic:    return Color(red: 0.86, green: 0.08, blue: 0.24)
         }
     }
 }

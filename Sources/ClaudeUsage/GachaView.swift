@@ -27,6 +27,9 @@ struct GachaView: View {
     @State private var revealTask: Task<Void, Never>?
     /// 10연차 진행 확인 alert 트리거. 버튼 클릭 시 즉시 진행 대신 이 값을 set → yes/no 확인.
     @State private var confirmingMultiPull: Bool = false
+    @State private var confirmingPremiumPull: Bool = false
+    /// 진행 중인 가챠가 프리미엄(sudo pull)인지 — egg/revealing 연출을 진홍·금 테마로 차별화.
+    @State private var pullIsPremium: Bool = false
     /// 상점/도장/레포트/랭킹 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
     @State private var selectedTab: Tab = .shop
 
@@ -94,7 +97,7 @@ struct GachaView: View {
             }
             .animation(.easeInOut(duration: 0.18), value: selectedTab)
         }
-        .frame(width: 480, height: 640)
+        .frame(width: 560, height: 640)
         .onReceive(NotificationCenter.default.publisher(for: .gachaSwitchTab)) { notif in
             if let tab = notif.object as? Tab { selectedTab = tab }
         }
@@ -109,12 +112,26 @@ struct GachaView: View {
             inventorySection
         }
         .padding(20)
-        .alert("10연차 뽑기", isPresented: $confirmingMultiPull) {
+        .alert("pull ×10", isPresented: $confirmingMultiPull) {
             Button("진행") { pull10() }
             Button("취소", role: .cancel) {}
         } message: {
             Text(multiPullConfirmMessage)
         }
+        .alert("sudo pull", isPresented: $confirmingPremiumPull) {
+            Button("진행") { pullPremium() }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text(premiumPullConfirmMessage)
+        }
+    }
+
+    /// 프리미엄 가챠 확인 alert 메시지 — 가챠권 보유 시 1장 사용, 없으면 RP로 즉시 1장 구매.
+    private var premiumPullConfirmMessage: String {
+        let cost = settings.premiumTickets > 0
+            ? "프리미엄 가챠권 1장"
+            : "RP \(RankPointLedger.premiumTicketCostRP)"
+        return "Mythic · Legendary만 나오는 프리미엄 풀에서 1회 뽑습니다.\n비용: \(cost)\n현재 잔액: RP \(settings.rp) · 프리미엄 가챠권 \(settings.premiumTickets)장"
     }
 
     /// 10연차 확인 alert 메시지 — 차감될 가챠권/코인 + 현재 잔액을 명시.
@@ -141,44 +158,60 @@ struct GachaView: View {
     // MARK: - Header (잔액 + 뽑기 버튼)
 
     private var header: some View {
-        HStack(spacing: 14) {
-            HStack(spacing: 4) {
-                CoinIcon(size: 18)
-                Text("\(settings.coins)")
-                    .font(.title3.weight(.bold))
-                    .monospacedDigit()
+        HStack(spacing: 12) {
+            // 잔액 묶음 — fixedSize로 묶어 가로 공간이 부족해도 숫자가 글자별 세로 줄바꿈되지 않게.
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    CoinIcon(size: 18)
+                    Text("\(settings.coins)")
+                        .font(.title3.weight(.bold))
+                        .monospacedDigit()
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "diamond.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.cyan)
+                    Text("\(settings.rp)")
+                        .font(.title3.weight(.bold))
+                        .monospacedDigit()
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "ticket.fill")
+                        .foregroundStyle(.blue)
+                    Text("\(settings.gachaTickets)")
+                        .font(.title3.weight(.bold))
+                        .monospacedDigit()
+                }
+                // 프리미엄 가챠권은 보유 시에만 노출 (평소 0이라 헤더 공간 절약). RP 가격은 버튼에 표시됨.
+                if settings.premiumTickets > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Rarity.mythic.color)
+                        Text("\(settings.premiumTickets)")
+                            .font(.title3.weight(.bold))
+                            .monospacedDigit()
+                    }
+                    .help("프리미엄 가챠권 — RP로 구매, Mythic·Legendary 전용 풀")
+                }
             }
-            HStack(spacing: 4) {
-                Image(systemName: "diamond.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.cyan)
-                Text("\(settings.rp)")
-                    .font(.title3.weight(.bold))
-                    .monospacedDigit()
-            }
-            HStack(spacing: 4) {
-                Image(systemName: "ticket.fill")
-                    .foregroundStyle(.blue)
-                Text("\(settings.gachaTickets)")
-                    .font(.title3.weight(.bold))
-                    .monospacedDigit()
-            }
-            Spacer()
+            .fixedSize()
+            Spacer(minLength: 8)
             HStack(spacing: 8) {
                 Button(action: pull) {
                     VStack(spacing: 1) {
-                        Text("1회 뽑기").font(.system(size: 12, weight: .bold))
-                        Text(settings.gachaTickets > 0 ? "무료" : "\(Gacha.pullCost)코인")
+                        Text("git pull").font(.system(size: 12, weight: .bold, design: .monospaced))
+                        Text(settings.gachaTickets > 0 ? "🎟 무료" : "\(Gacha.pullCost)코인")
                             .font(.system(size: 9, design: .monospaced))
                     }
-                    .frame(minWidth: 56)
+                    .frame(minWidth: 58)
                 }
                 .buttonStyle(.bordered)
                 .disabled(!canPull)
 
                 Button(action: { confirmingMultiPull = true }) {
                     VStack(spacing: 1) {
-                        Text("10연차").font(.system(size: 12, weight: .bold))
+                        Text("pull ×10").font(.system(size: 12, weight: .bold, design: .monospaced))
                         Text(multiPullCostLabel)
                             .font(.system(size: 9, design: .monospaced))
                     }
@@ -186,7 +219,20 @@ struct GachaView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canPull10)
+
+                Button(action: { confirmingPremiumPull = true }) {
+                    VStack(spacing: 1) {
+                        Text("sudo pull").font(.system(size: 12, weight: .bold, design: .monospaced))
+                        Text(settings.premiumTickets > 0 ? "🎟 보유" : "RP\(RankPointLedger.premiumTicketCostRP)")
+                            .font(.system(size: 9, design: .monospaced))
+                    }
+                    .frame(minWidth: 64)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Rarity.mythic.color)
+                .disabled(!canPullPremium)
             }
+            .fixedSize()
         }
     }
 
@@ -197,6 +243,12 @@ struct GachaView: View {
     /// 10연차 가능 여부 — 티켓 우선 차감 후 남는 코인 비용을 감당할 수 있으면 OK.
     private var canPull10: Bool {
         !isPullInProgress && Gacha.multiPullCost(tickets: settings.gachaTickets).coinCost <= settings.coins
+    }
+
+    /// 프리미엄 가챠 가능 여부 — 프리미엄 가챠권 보유 또는 RP로 1장 살 수 있으면 OK.
+    private var canPullPremium: Bool {
+        !isPullInProgress &&
+            (settings.premiumTickets > 0 || settings.rp >= RankPointLedger.premiumTicketCostRP)
     }
 
     /// 10연차 버튼 비용 라벨. 티켓 소모분 + 코인 분담을 짧게 표기.
@@ -221,11 +273,37 @@ struct GachaView: View {
         // Button.disabled가 1차 가드. 진입 가드는 키보드 단축키·접근성 등 우회 경로
         // 대비한 2차 방어선.
         guard !isPullInProgress else { return }
+        pullIsPremium = false
 
         let useTicket = settings.gachaTickets > 0
         do {
             // 잔액 차감 + 결과 결정만. 보유 상태는 hatched 진입 시점에 commit().
             let result = try Gacha.roll(useTicket: useTicket)
+            phase = .egg(result)
+            eggTapCount = 0
+            eggShakeAngle = 0
+            hatchInProgress = false
+            errorMessage = nil
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            phase = .idle
+        }
+    }
+
+    /// 프리미엄 가챠 — `[mythic+legendary]` 제한 풀 1뽑. 가챠권 보유 시 1장 소비, 없으면 RP로 즉시
+    /// 1장 구매(원스텝) 후 소비. 단일 `pull`과 동일하게 결과는 egg 애니메이션 → hatched 시점 commit.
+    private func pullPremium() {
+        guard !isPullInProgress else { return }
+        pullIsPremium = true   // 연출 차별용
+        // 가챠권이 없으면 RP로 1장 구매 (실패 = RP 부족).
+        if settings.premiumTickets <= 0 {
+            guard RankPointLedger.shared.purchasePremiumTicket() else {
+                errorMessage = "RP가 부족합니다 (\(RankPointLedger.premiumTicketCostRP) 필요)"
+                return
+            }
+        }
+        do {
+            let result = try Gacha.rollPremium()
             phase = .egg(result)
             eggTapCount = 0
             eggShakeAngle = 0
@@ -355,16 +433,48 @@ struct GachaView: View {
 
     private func eggView(_ pull: GachaPull) -> some View {
         VStack(spacing: 8) {
-            eggSprite
-                .frame(width: 96, height: 96)
-                .rotationEffect(.degrees(eggShakeAngle), anchor: .bottom)
-                .onTapGesture { tapEgg(pull) }
-                .contentShape(Rectangle())
+            ZStack {
+                if pullIsPremium { premiumAura(diameter: 150) }
+                eggSprite
+                    .frame(width: 96, height: 96)
+                    .rotationEffect(.degrees(eggShakeAngle), anchor: .bottom)
+                    .onTapGesture { tapEgg(pull) }
+                    .contentShape(Rectangle())
+            }
 
-            Text("탭하여 부화 (\(eggTapCount)/\(Self.eggTapsRequired))")
+            Text(pullIsPremium ? "sudo 권한 확인 중… 탭하여 부화 (\(eggTapCount)/\(Self.eggTapsRequired))"
+                               : "탭하여 부화 (\(eggTapCount)/\(Self.eggTapsRequired))")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(pullIsPremium ? Rarity.mythic.color.opacity(0.9) : Color.secondary)
                 .monospacedDigit()
+        }
+    }
+
+    /// 프리미엄(sudo pull) 전용 연출 오라 — 회전하는 진홍·금 광선 + 맥동 radial glow.
+    /// 등급과 무관하게 프리미엄 가챠 진입 자체를 일반 가챠와 시각적으로 구분한다.
+    @ViewBuilder
+    private func premiumAura(diameter: CGFloat) -> some View {
+        let mythic = Rarity.mythic.color
+        let gold = Color(red: 1.0, green: 0.82, blue: 0.35)
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let spin = (t * 24).truncatingRemainder(dividingBy: 360)
+            let pulse = 0.85 + sin(t * 3) * 0.15
+            ZStack {
+                AngularGradient(
+                    gradient: Gradient(colors: [.clear, mythic.opacity(0.55), .clear,
+                                                gold.opacity(0.45), .clear, mythic.opacity(0.5), .clear]),
+                    center: .center)
+                    .rotationEffect(.degrees(spin))
+                    .blur(radius: 6)
+                    .blendMode(.screen)
+                RadialGradient(colors: [mythic.opacity(0.5), gold.opacity(0.18), .clear],
+                               center: .center, startRadius: 0, endRadius: diameter * 0.42)
+                    .scaleEffect(pulse)
+                    .blendMode(.screen)
+            }
+            .frame(width: diameter, height: diameter)
+            .allowsHitTesting(false)
         }
     }
 
@@ -437,11 +547,17 @@ struct GachaView: View {
                         .opacity(1 - burst)
                 }
 
-                // 흰 flash 깜빡임
+                // flash 깜빡임 — 프리미엄(sudo pull)은 진홍, 일반은 흰색.
                 if elapsed < 0.5 {
                     let envelope = max(0, 1 - elapsed / 0.5)
                     let blink = abs(sin(elapsed * 24))
-                    Color.white.opacity(envelope * blink * 0.85)
+                    (pullIsPremium ? Rarity.mythic.color : Color.white).opacity(envelope * blink * 0.85)
+                }
+
+                // 프리미엄: 펫 뒤에서 회전하는 진홍·금 광선 (일반 가챠엔 없음).
+                if pullIsPremium && elapsed > 0.45 {
+                    premiumAura(diameter: 210)
+                        .opacity(min(1, (elapsed - 0.45) / 0.5))
                 }
 
                 // 펫 등장 (silhouette → fade in)
@@ -678,7 +794,7 @@ struct GachaView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     // 희귀한 등급 먼저 (위 → 아래).
-                    ForEach([Rarity.legendary, .epic, .rare, .common], id: \.self) { r in
+                    ForEach([Rarity.mythic, .legendary, .epic, .rare, .common], id: \.self) { r in
                         raritySection(r)
                     }
                     // 컬렉션 업적 섹션 — rarity 레이아웃 그대로 유지하고 그 아래에 묶음.
@@ -1359,7 +1475,7 @@ private struct PetPreviewView: View {
 
     /// 펫이 속한 rarity 조회. `Gacha.pool`에서 역방향 검색.
     private static func rarity(of kind: PetKind) -> Rarity? {
-        for tier in [Rarity.legendary, .epic, .rare, .common] {
+        for tier in [Rarity.mythic, .legendary, .epic, .rare, .common] {
             if (Gacha.pool[tier] ?? []).contains(kind) { return tier }
         }
         return nil
@@ -1372,6 +1488,7 @@ private struct PetPreviewView: View {
         case .rare:      return "★★"
         case .epic:      return "★★★"
         case .legendary: return "★★★★"
+        case .mythic:    return "★★★★★"
         }
     }
 

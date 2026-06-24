@@ -87,6 +87,7 @@ struct ProfileState: Codable, Sendable {
         // 경제 상태 (가챠 코인 ledger — rankingScoreEarnedVP와 별개)
         let coins: Int?
         let gachaTickets: Int?
+        let premiumTickets: Int?   // v2 — RP 프리미엄 가챠권 (구버전 백업은 nil)
         let coinsTotalEarned: Int?
         let firstCreditedAt: Date?
 
@@ -116,7 +117,7 @@ struct ProfileState: Codable, Sendable {
             let highlights = s.pendingHighlights.map { $0.rawValue }
 
             return BackupPayload(
-                v: 1,
+                v: 2,
                 ownedPets: owned,
                 petUsageSeconds: usage,
                 pendingHighlights: highlights,
@@ -126,6 +127,7 @@ struct ProfileState: Codable, Sendable {
                 petCursorVariant: s.petCursorVariant,
                 coins: s.coins,
                 gachaTickets: s.gachaTickets,
+                premiumTickets: s.premiumTickets,
                 coinsTotalEarned: s.coinsTotalEarned,
                 firstCreditedAt: s.firstCreditedAt,
                 claimedPodiumPeriods: Array(s.claimedPodiumPeriods),

@@ -69,6 +69,11 @@ struct WalkingCat: View {
     /// 현재 날씨 — `.quote`에서 날씨 공통대사를 섞는 데 사용. clear면 종 전용만.
     var weather: WeatherCondition = .clear
     var displayHeight: CGFloat = 18
+
+    /// 실제 렌더 높이 — Mythic 등급 펫은 1.5배 크게 (sprite + 오라가 함께 커진다).
+    private var renderHeight: CGFloat {
+        PetKind.rarityFor(kind) == .mythic ? displayHeight * 1.5 : displayHeight
+    }
     // 차트 한 구간이 전체 y-range 대비 이 비율 이상일 때 AAAH/WHEE 말풍선 발동. 낮을수록 자주.
     var bigDropThreshold: Double = 0.40
     // ViewModel이 1시간 연속 사용 감지 시 채워주는 휴식 권유 멘트.
@@ -105,9 +110,9 @@ struct WalkingCat: View {
         // 일시적으로 비어 sprite가 사라질 때 같이 사라진다. ZStack의 sibling으로 빼서 보상
         // 연출이 1초 내내 보이도록 보장.
         return ZStack {
-            effectLayer(.backdrop)
+            effectLayer(.backdrop, descent: descent)
             sprite(descent: descent)
-            effectLayer(.particles)
+            effectLayer(.particles, descent: descent)
             coinPopOverlay.allowsHitTesting(false)
             rewardAmountOverlay.allowsHitTesting(false)
         }
@@ -143,11 +148,17 @@ struct WalkingCat: View {
     }
 
     /// RP 코스메틱 이펙트 레이어. 펫과 같은 좌표(`positionFor`)에 backdrop(광원)/particles(파티클)로
-    /// 나눠 그린다. `effects`가 비면 아무것도 렌더하지 않는다.
+    /// 나눠 그린다. `effects`가 비어도 **Mythic 등급 펫이면 기본 오라**를 위해 렌더한다.
     @ViewBuilder
-    private func effectLayer(_ placement: PetEffectOverlay.Placement) -> some View {
-        if !effects.isEmpty, let p = positionFor(xNorm: ctrl.x) {
-            let h = displayHeight
+    private func effectLayer(_ placement: PetEffectOverlay.Placement, descent: Double) -> some View {
+        let isMythic = PetKind.rarityFor(kind) == .mythic
+        if !effects.isEmpty || isMythic, let p = positionFor(xNorm: ctrl.x) {
+            let h = renderHeight
+            let isMoving = ctrl.action == .walk || ctrl.action == .run
+            let now = Date().timeIntervalSinceReferenceDate
+            // sprite(descent:)와 동일 공식 — Mythic 오라를 펫 구르기(회전)/점프(offset)에 동기화.
+            let roll: Double = (isMythic && isMoving && descent > 0) ? now * 360 * 2 : 0
+            let jumpY: CGFloat = (isMythic && isMoving && descent < 0) ? abs(sin(now * 4)) * 14 : 0
             PetEffectOverlay(
                 effects: effects,
                 placement: placement,
@@ -155,7 +166,10 @@ struct WalkingCat: View {
                 footY: p.y,
                 petHeight: h,
                 facingRight: ctrl.facingRight,
-                isMoving: ctrl.action == .walk || ctrl.action == .run
+                isMoving: isMoving,
+                mythicBase: isMythic,
+                mythicJumpY: jumpY,
+                mythicRoll: roll
             )
         }
     }
@@ -166,8 +180,8 @@ struct WalkingCat: View {
            let nsImg = PetSprite.image(for: kind, action: ctrl.action, frameIndex: ctrl.frameIndex) {
             let (cw, ch) = kind.cellSize
             let aspect = Double(cw) / Double(ch)
-            let w = displayHeight * aspect
-            let h = displayHeight
+            let w = renderHeight * aspect
+            let h = renderHeight
             // jitter: 불안할수록 매 프레임 위치 떨림
             let jx: Double = mood.jitter > 0 ? Double.random(in: -mood.jitter...mood.jitter) : 0
             let jy: Double = mood.jitter > 0 ? Double.random(in: -mood.jitter...mood.jitter) : 0
