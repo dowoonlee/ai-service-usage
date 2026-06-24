@@ -830,9 +830,16 @@ final class Settings: ObservableObject {
     /// `BadgeRegistry`처럼 `Settings.shared`를 재진입하므로 init 안에서 호출 금지 — App 시작 후 호출.
     func applyCollectionMigrationIfNeeded() {
         let d = UserDefaults.standard
-        guard !d.bool(forKey: Keys.hasMigratedCollectionBonuses) else { return }
-        PetCollectionRegistry.evaluate(silent: true)
-        d.set(true, forKey: Keys.hasMigratedCollectionBonuses)
+        if !d.bool(forKey: Keys.hasMigratedCollectionBonuses) {
+            PetCollectionRegistry.evaluate(silent: true)
+            d.set(true, forKey: Keys.hasMigratedCollectionBonuses)
+        }
+        // On-Call(v0.12.x 신규 컬렉션) 추가 후 1회 재평가 — 이미 멤버를 다 모은 기존 사용자 소급 보너스.
+        // evaluate는 completedCollections 미포함 + 완성된 것만 처리하므로 재호출은 안전(중복 지급 없음).
+        if !d.bool(forKey: Keys.hasReevaluatedOnCall) {
+            PetCollectionRegistry.evaluate(silent: true)
+            d.set(true, forKey: Keys.hasReevaluatedOnCall)
+        }
     }
 
     /// 컬렉션 뱃지 클릭 시 호출 — 그 컬렉션의 강조 표시 해제. 비어있으면 no-op.
@@ -1184,6 +1191,7 @@ final class Settings: ObservableObject {
         static let pendingCollectionCelebration = "settings.pendingCollectionCelebration"
         static let pendingCollectionHighlights = "settings.pendingCollectionHighlights"
         static let hasMigratedCollectionBonuses = "settings.hasMigratedCollectionBonuses"
+        static let hasReevaluatedOnCall = "settings.hasReevaluatedOnCall"
         // 트레이너 카드 (Report 탭)
         static let trainerID                   = "settings.trainerID"
         static let trainerCard                 = "settings.trainerCard"

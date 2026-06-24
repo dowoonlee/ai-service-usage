@@ -26,6 +26,7 @@ enum PetCollection: String, CaseIterable, Codable {
     case rustEvangelists    // "Rust Evangelists"      — 이종족 전사
     case noVerify           // "--no-verify"           — 해적단
     case happyPath          // "Happy Path"            — 밝고 귀여운 마스코트 (메이플풍)
+    case onCall             // "On-Call"               — Tiny Swords 엘리트 기사단 (Mythic/Legendary)
 
     var displayName: String {
         switch self {
@@ -41,6 +42,7 @@ enum PetCollection: String, CaseIterable, Codable {
         case .rustEvangelists:  return "Rust Evangelists"
         case .noVerify:         return "--no-verify"
         case .happyPath:        return "Happy Path"
+        case .onCall:           return "On-Call"
         }
     }
 
@@ -59,6 +61,7 @@ enum PetCollection: String, CaseIterable, Codable {
         case .rustEvangelists:  return "Have you tried rewriting it in Rust?"
         case .noVerify:         return "hook? 그게 뭔데"
         case .happyPath:        return "엣지 케이스 없는, 그 평화로운 실행 경로"
+        case .onCall:           return "삐삐가 울릴 때마다 출동하는 정예들"
         }
     }
 
@@ -79,6 +82,7 @@ enum PetCollection: String, CaseIterable, Codable {
         case .rustEvangelists:  return Color(red: 0.80, green: 0.35, blue: 0.15)  // rust
         case .noVerify:         return Color(red: 0.20, green: 0.55, blue: 0.55)  // teal
         case .happyPath:        return Color(red: 0.55, green: 0.80, blue: 0.40)  // lime
+        case .onCall:           return Color(red: 0.42, green: 0.50, blue: 0.62)  // steel blue-gray
         }
     }
 
@@ -98,6 +102,7 @@ enum PetCollection: String, CaseIterable, Codable {
         case .rustEvangelists:  return "wrench.and.screwdriver.fill"        // systems programming
         case .noVerify:         return "bolt.slash.fill"                    // hook 무시
         case .happyPath:        return "sun.max.fill"                       // 엣지 케이스 없는 평화
+        case .onCall:           return "shield.lefthalf.filled"             // 프로덕션 수호 기사단
         }
     }
 
@@ -129,6 +134,8 @@ enum PetCollection: String, CaseIterable, Codable {
             return [.bombGuy, .baldPirate, .cucumber, .bigGuy, .pirateCaptain, .whale, .clownCaptain, .fierceTooth]
         case .happyPath:
             return [.jellySlime, .sunFrog, .oposum, .sunFox]
+        case .onCall:
+            return [.warrior, .lancer, .monk, .archer, .pawn]
         }
     }
 }
