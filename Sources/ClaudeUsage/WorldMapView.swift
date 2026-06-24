@@ -167,13 +167,14 @@ enum WorldMapDesign {
         [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
     ]
 
-    /// 4 region marker 위치 (col, row). 비대칭 분포 — 4분면 원점대칭 X.
-    /// Coffee: 본토 좌상단 / Vibe: 우상단 반도 안 / Cron: 좌하단 곶 끝 / Repo: 우중하단 본토.
+    /// 5 region marker 위치 (col, row). 비대칭 분포 — 4분면 원점대칭 X.
+    /// Coffee: 본토 좌상단 / Vibe: 우상단 반도 안 / Cron: 좌하단 곶 끝 / Repo: 우중하단 본토 / Registry: 본토 중앙.
     static let regionPositions: [BadgeRegion: (col: Int, row: Int)] = [
-        .coffee: (col: 5,  row: 4),
-        .vibe:   (col: 22, row: 3),
-        .cron:   (col: 7,  row: 14),
-        .repo:   (col: 17, row: 10),
+        .coffee:   (col: 5,  row: 4),
+        .vibe:     (col: 22, row: 3),
+        .cron:     (col: 7,  row: 14),
+        .repo:     (col: 17, row: 10),
+        .registry: (col: 11, row: 8),
     ]
 
     /// 각 land cell이 어느 region 영토에 속하는지 — voronoi (가장 가까운 region marker).

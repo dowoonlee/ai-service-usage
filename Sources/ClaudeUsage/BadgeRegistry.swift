@@ -242,9 +242,18 @@ enum BadgeCategory: String, CaseIterable, Codable {
     @MainActor
     func isAvailable(_ s: Settings) -> Bool {
         switch self {
+        // codex는 무료 플랜도 있어 '잠금'이 아니라 '미진행' — 항상 진행 가능(진척/챔피언 분모 포함).
+        // cursor만 Ultra(유료) 전용이라 미사용 시 잠금(분모 제외).
         case .cursor: return s.cursorCoinsEarned > 0 || hasUltraEverHinted(s)
-        case .codex:  return s.codexCoinsEarned > 0
         default:      return true
+        }
+    }
+
+    /// 잠긴 카테고리(isAvailable=false) 호버 시 표시할 사유. (현재는 cursor만 잠금 가능)
+    var lockReason: String {
+        switch self {
+        case .cursor: return "Cursor Ultra 사용자 전용"
+        default:      return "아직 잠겨 있습니다"
         }
     }
 

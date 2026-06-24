@@ -368,7 +368,7 @@ private struct BadgeTierTooltip: View {
             // 상태별 본문.
             if !available {
                 Label {
-                    Text("Cursor Ultra 사용자 전용")
+                    Text(category.lockReason)
                         .font(.caption)
                 } icon: {
                     Image(systemName: "lock.fill")
