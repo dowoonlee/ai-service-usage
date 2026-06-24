@@ -1,7 +1,7 @@
 import Foundation
 
 /// 머지된 PR 기여자 목록을 GitHub `/pulls` 비인증 API로 fetch.
-/// repo가 public이라 token 없이 60req/h 가능 — 24h 캐시로 사실상 사용자당 1회 호출.
+/// repo가 public이라 token 없이 60req/h 가능 — 6h 캐시로 사용자당 하루 ~4회 호출.
 /// `ContributorBonus`와 별개: 그쪽은 자기 토큰으로 자기 PR 검색 → 코인 적립이 목적이고,
 /// 이쪽은 unauthenticated로 모든 머지된 PR의 author를 모음 → UI 표시가 목적.
 @MainActor
@@ -13,8 +13,8 @@ final class Contributors: ObservableObject {
     private static let repo = "dowoonlee/ai-service-usage"
     /// repo owner는 외부 기여자가 아니므로 표시 대상에서 제외.
     private static let ownerLogin = "dowoonlee"
-    /// Sparkle 자동 업데이트 체크와 동일한 24h 주기 — rate limit 부담 0.
-    private static let cacheTTL: TimeInterval = 24 * 3600
+    /// 6h 주기 — unauthenticated 60req/h 한도 대비 사용자당 하루 ~4회라 부담 0. PR 머지 반영을 빠르게.
+    private static let cacheTTL: TimeInterval = 6 * 3600
     private static let cacheKey = "contributors.cache.v1"
 
     private struct Cache: Codable {
