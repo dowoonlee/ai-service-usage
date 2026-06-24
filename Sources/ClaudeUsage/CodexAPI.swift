@@ -57,7 +57,28 @@ enum CodexError: Error, LocalizedError {
         case .unauthorized: return "Codex 세션 만료 (codex login 재실행)"
         case .http(let c):  return "HTTP \(c)"
         case .transport(let e): return "네트워크 오류: \(e.localizedDescription)"
-        case .decoding(let e):  return "응답 해석 오류: \(e.localizedDescription)"
+        case .decoding(let e):  return "응답 해석 오류: \(Self.decodeFailureSummary(e))"
+        }
+    }
+}
+
+extension CodexError {
+    /// DecodingError를 PII 없이(키 경로만) 사람이 읽을 수 있게 요약한다 — 키 이름은 스키마라 PII가
+    /// 아니다. 표준 `localizedDescription`("...isn't in the correct format")은 어느 필드가 문제인지
+    /// 안 알려줘 원격 진단이 불가능했다(이슈 #47). 비-JSON 응답이면 codingPath가 비어 "비-JSON" 분기로 간다.
+    static func decodeFailureSummary(_ error: Error) -> String {
+        guard let de = error as? DecodingError else { return error.localizedDescription }
+        func path(_ ctx: DecodingError.Context) -> String {
+            ctx.codingPath.map(\.stringValue).joined(separator: ".")
+        }
+        switch de {
+        case .typeMismatch(let t, let ctx):  return "타입 불일치 '\(path(ctx))' (\(t) 기대)"
+        case .valueNotFound(let t, let ctx): return "값 누락 '\(path(ctx))' (\(t))"
+        case .keyNotFound(let k, let ctx):   return "키 없음 '\(path(ctx)).\(k.stringValue)'"
+        case .dataCorrupted(let ctx):
+            let p = path(ctx)
+            return p.isEmpty ? "최상위 JSON 파싱 실패 (비-JSON 응답 의심)" : "데이터 손상 '\(p)'"
+        @unknown default: return "알 수 없는 디코딩 오류"
         }
     }
 }
@@ -77,6 +98,16 @@ struct CodexUsageResponse: Decodable {
         case rateLimit = "rate_limit"
         case credits
     }
+
+    // 비공식 스키마라 한 하위 필드의 타입 변경(예: 유료 플랜 응답의 credits 구조 차이)이 응답 전체
+    // 디코딩을 죽이지 않도록 각 필드를 독립적으로 흡수한다 — "optional"은 키 누락만 막지 타입 불일치는
+    // 막지 못한다. 최상위가 JSON object가 아닌 경우(Cloudflare HTML 등)만 throw → refresh()가 진단 로깅.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        planType  = try? c.decodeIfPresent(String.self, forKey: .planType)
+        rateLimit = try? c.decodeIfPresent(CodexRateLimit.self, forKey: .rateLimit)
+        credits   = try? c.decodeIfPresent(CodexCredits.self, forKey: .credits)
+    }
 }
 
 struct CodexRateLimit: Decodable {
@@ -87,13 +118,22 @@ struct CodexRateLimit: Decodable {
         case primaryWindow   = "primary_window"
         case secondaryWindow = "secondary_window"
     }
+
+    // window 하나의 타입 드리프트가 다른 window까지 nil로 만들지 않도록 각각 독립 흡수.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        primaryWindow   = try? c.decodeIfPresent(CodexRateLimitWindow.self, forKey: .primaryWindow)
+        secondaryWindow = try? c.decodeIfPresent(CodexRateLimitWindow.self, forKey: .secondaryWindow)
+    }
 }
 
 struct CodexRateLimitWindow: Decodable {
     let usedPercent: Double?
-    let limitWindowSeconds: Int?
-    let resetAfterSeconds: Int?
-    let resetAt: Int?               // Unix timestamp (seconds)
+    // 초/타임스탬프는 정수로 오지만, 서버가 실수(123.0)로 주면 Int? 디코딩이 통째로 실패한다.
+    // Double?로 받아 정수·실수를 모두 흡수한다(아래 비교/환산은 어차피 TimeInterval=Double).
+    let limitWindowSeconds: Double?
+    let resetAfterSeconds: Double?
+    let resetAt: Double?            // Unix timestamp (seconds)
 
     enum CodingKeys: String, CodingKey {
         case usedPercent        = "used_percent"
@@ -176,7 +216,13 @@ actor CodexAPI {
         do {
             let resp = try JSONDecoder().decode(CodexUsageResponse.self, from: data)
             return toSnapshot(resp)
-        } catch { throw CodexError.decoding(error) }
+        } catch {
+            // PII 없이 진단: 디코딩 실패 요약 + 응답 첫 바이트("{"=JSON object / "<"=HTML 등) + 바이트 수.
+            // Cloudflare/HTML 200 응답이면 first가 "{"가 아니라 typeMismatch와 구분된다(이슈 #47).
+            let first = data.first.map { String(UnicodeScalar($0)) } ?? "∅"
+            DebugLog.log(" Codex usage 디코딩 실패: \(CodexError.decodeFailureSummary(error)) | first=\(first) bytes=\(data.count)")
+            throw CodexError.decoding(error)
+        }
     }
 
     // MARK: - auth.json
