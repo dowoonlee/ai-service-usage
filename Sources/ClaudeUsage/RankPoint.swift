@@ -51,7 +51,8 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
 }
 
 /// RP 적립/소비 ledger. 코인 경제(`CoinLedger`)와 완전 독립이며, 사용량 이벤트(`UsageConsumer`)에는
-/// 참여하지 않는다 — faucet은 랭킹 순위 보상(`creditReward`), sink는 이펙트 구매(`purchaseEffect`)뿐.
+/// 참여하지 않는다 — faucet은 랭킹 순위 보상(`creditReward`), sink는 이펙트 구매(`purchaseEffect`)와
+/// 프리미엄 가챠권 구매(`purchasePremiumTicket`).
 /// `Settings.rp`는 항상 본 ledger 경유로만 변경한다 (직접 mutate 금지 — `CoinLedger`와 동일 규약).
 @MainActor
 final class RankPointLedger {
@@ -104,6 +105,20 @@ final class RankPointLedger {
         equipped[kind, default: []].insert(effect)
         s.equippedEffects = equipped
         DebugLog.log("RankPointLedger: 이펙트 구매+장착 \(kind.rawValue) ← \(effect.rawValue)")
+        return true
+    }
+
+    /// RP 프리미엄 가챠권 1장 가격. 랭킹 월 1등 수입(2000 RP) 대비 ~0.75개월치 — "신중한 한 방".
+    static let premiumTicketCostRP: Int = 1500
+
+    /// RP로 프리미엄 가챠권 1장 구매 — 잔액 차감 + `premiumTickets += 1`을 한 트랜잭션으로.
+    /// 잔액 부족이면 차감하지 않고 `false`. (이펙트와 달리 중복 개념 없는 소모성 재화.)
+    @discardableResult
+    func purchasePremiumTicket() -> Bool {
+        let s = Settings.shared
+        guard spend(Self.premiumTicketCostRP, reason: "premiumTicket") else { return false }
+        s.premiumTickets += 1
+        DebugLog.log("RankPointLedger: 프리미엄 가챠권 구매 (premiumTickets=\(s.premiumTickets))")
         return true
     }
 

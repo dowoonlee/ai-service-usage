@@ -110,6 +110,12 @@ enum PetDescriptions {
         .sunFrog:    "배를 부풀리면 buffer overflow 직전. 파리 잡기가 곧 GC, 점프 한 번이 main loop.",
         .oposum:     "위협받으면 즉시 죽은 척 graceful shutdown. 주머니에 캐시를 넣고 night build를 돌리는 야행성.",
         .sunFox:     "side-scroller 월드의 주인공. 점프 한 방에 플랫폼을 클리어하고 모험을 daily routine처럼 떠난다.",
+        // Tiny Swords 엘리트 기사단 (Mythic/Legendary)
+        .warrior:    "프로덕션 장애가 터지면 가장 먼저 칼을 빼 든다. main 브랜치의 최후 방어선.",
+        .lancer:     "긴 창으로 멀리서도 레거시 코드를 꿰뚫는다. 기마 배포 속도는 따라올 자가 없다.",
+        .monk:       "조용히 기도하면 빨간 CI도 초록으로. 힐링 스택은 rm -rf node_modules와 재시작.",
+        .archer:     "원거리 저격수. 프로덕션 버그를 핫픽스 화살로 정확히 떨군다.",
+        .pawn:       "묵묵한 막내 일꾼. 잡일과 빌드잡을 도맡지만 언젠가 전설이 될 재목.",
     ]
 
     /// 종 전용 설명 반환. dict에 없으면 폴백.

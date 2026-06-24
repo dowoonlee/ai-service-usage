@@ -278,6 +278,7 @@ enum ContributorRanking {
 
     nonisolated static func color(for rarity: Rarity) -> Color {
         switch rarity {
+        case .mythic:    return Color(red: 0.86, green: 0.08, blue: 0.24)  // 진홍
         case .legendary: return Color(red: 1.0, green: 0.78, blue: 0.20)   // 금색
         case .epic:      return Color(red: 0.62, green: 0.36, blue: 0.86)  // 보라
         case .rare:      return Color(red: 0.30, green: 0.62, blue: 0.96)  // 파랑

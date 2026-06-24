@@ -102,6 +102,8 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
     case jellySlime
     // Ansimuz Sunny Land (CC0)
     case sunFox, sunFrog, oposum
+    // Tiny Swords (Pixel Frog, CC0) — Mythic/Legendary 신규
+    case warrior, lancer, monk, archer, pawn
 
     var id: String { rawValue }
 
@@ -528,6 +530,34 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  cellSize: (36, 28), defaultFacingLeft: true,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Run",
                                  defaultTheme: .field)
+        // Tiny Swords (Pixel Frog) — Idle/Run strip만, walk는 Run으로 alias (Pixel Adventure와 동일).
+        // 원본은 192/320 큰 캔버스(공격 이펙트용 여백 多)라 import 시 캐릭터 bbox 합집합으로 트림했고,
+        // cellSize는 그 실측값(예: 전사 97×95). Idle/Run은 같은 bbox로 잘라 cellSize가 일치한다.
+        case .warrior:
+            return PetDefinition(prefix: "Warrior", displayName: "전사",
+                                 cellSize: (97, 95), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .lancer:
+            return PetDefinition(prefix: "Lancer", displayName: "창기병",
+                                 cellSize: (78, 159), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .storm)
+        case .monk:
+            return PetDefinition(prefix: "Monk", displayName: "수도사",
+                                 cellSize: (87, 75), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .aurora)
+        case .archer:
+            return PetDefinition(prefix: "Archer", displayName: "궁수",
+                                 cellSize: (78, 94), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .pawn:
+            return PetDefinition(prefix: "Pawn", displayName: "일꾼",
+                                 cellSize: (70, 81), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
         }
     }
 

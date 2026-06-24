@@ -113,6 +113,12 @@ enum Quotes {
         .sunFrog:    ["배 부풀리면 buffer overflow.", "파리 잡기가 제 GC 작업.", "개굴, 점프가 곧 jump문."],
         .oposum:     ["위협받으면 graceful shutdown.", "주머니에 캐시 넣고 다녀요.", "야행성, night build 담당."],
         .sunFox:     ["side-scroller 월드의 주인공!", "점프 한 방에 플랫폼 클리어.", "모험은 제 daily routine이죠."],
+        // Tiny Swords 엘리트 기사단 (Mythic/Legendary)
+        .warrior:    ["main 브랜치는 내가 지킨다.", "merge conflict? 칼로 해결.", "리뷰 거부권 행사."],
+        .lancer:     ["창 끝으로 버그를 꿰뚫는다.", "롤백은 후퇴가 아니다.", "기마 배포, 풀스피드."],
+        .monk:       ["기도하면 CI가 초록불.", "힐링 스택: rm -rf node_modules.", "禪과 함께하는 디버깅."],
+        .archer:     ["원거리에서 버그 저격.", "화살 = 핫픽스 한 방.", "조준... PR 머지!"],
+        .pawn:       ["막내 일꾼, 묵묵히 커밋.", "빌드잡은 제가 합니다.", "언젠가 전설이 될 재목."],
     ]
 
     /// 종 전용 대사를 무작위로 한 줄 뽑는다. dict에 누락된 종은 `"..."`로 폴백 (무음에 가까움).

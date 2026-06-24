@@ -294,6 +294,15 @@ struct MainView: View {
                                 .monospacedDigit()
                                 .foregroundStyle(.primary)
                         }
+                        if settings.premiumTickets > 0 {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Rarity.mythic.color)
+                            Text("\(settings.premiumTickets)")
+                                .font(.system(size: 11, weight: .medium))
+                                .monospacedDigit()
+                                .foregroundStyle(.primary)
+                        }
                     }
                 }
                 .buttonStyle(.borderless)
