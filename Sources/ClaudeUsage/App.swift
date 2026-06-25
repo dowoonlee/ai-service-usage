@@ -524,7 +524,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             drawChartAndPet(W: W, H: H, plotMinY: plotMinY, plotMaxY: plotMaxY,
                             history: history, theme: theme, kind: kind, variant: variant,
                             action: action, frameIdx: frameIdx, petXNorm: petXNorm,
-                            facingRight: facingRight, rollAngle: rollAngle)
+                            facingRight: facingRight, rollAngle: rollAngle,
+                            pct: pct, threshold: Settings.shared.petAnxietyThreshold)
         }
 
         canvas.isTemplate = false
@@ -583,7 +584,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         W: CGFloat, H: CGFloat, plotMinY: CGFloat, plotMaxY: CGFloat,
         history: [(Date, Double)], theme: PetTheme, kind: PetKind, variant: Int,
         action: PetController.Action, frameIdx: Int,
-        petXNorm: Double, facingRight: Bool, rollAngle: Double
+        petXNorm: Double, facingRight: Bool, rollAngle: Double,
+        pct: Double?, threshold: Double
     ) {
 
         // 1) gradient backdrop (라인 아래 영역) — 데이터가 있을 때만 색감 입힘.
@@ -613,12 +615,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             fillPath.addLine(to: CGPoint(x: W, y: 0))
             fillPath.closeSubpath()
 
-            let top = nsColor(for: theme, slot: .top).withAlphaComponent(0.18)
-            let bot = nsColor(for: theme, slot: .bottom).withAlphaComponent(0.40)
+            // in-app 차트와 동일한 테마 그라디언트 stop 을 그대로 사용 — 동적 테마는 pct/threshold 가
+            // 반영돼 메뉴바에서도 사용량에 따라 눈·용암·심해 등이 차오른다(맵 테마/배경 싱크).
+            let stops = theme.fillStops(pct: pct, threshold: threshold)
             let cs = CGColorSpaceCreateDeviceRGB()
-            if let grad = CGGradient(colorsSpace: cs,
-                                     colors: [top.cgColor, bot.cgColor] as CFArray,
-                                     locations: [0.0, 1.0]) {
+            let gradColors = stops.map { menuBarCGColor($0.color) } as CFArray
+            let gradLocations = stops.map { CGFloat($0.location) }
+            if let grad = CGGradient(colorsSpace: cs, colors: gradColors, locations: gradLocations) {
                 ctx.saveGState()
                 ctx.addPath(fillPath)
                 ctx.clip()
@@ -636,7 +639,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             let smooth = catmullRomPath(points: linePts)
             ctx.saveGState()
-            ctx.setStrokeColor(nsColor(for: theme, slot: .line).cgColor)
+            ctx.setStrokeColor(menuBarCGColor(theme.lineColor))
             ctx.setLineWidth(1.2)
             ctx.setLineCap(.round)
             ctx.setLineJoin(.round)
@@ -694,49 +697,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// PetTheme HSB 값을 NSColor 로 직접 (SwiftUI Color → NSColor 변환 우회).
-    private enum ThemeSlot { case line, top, bottom }
-    private func nsColor(for theme: PetTheme, slot: ThemeSlot) -> NSColor {
-        switch (theme, slot) {
-        case (.grassland, .line):   return NSColor(hue: 0.30, saturation: 0.70, brightness: 0.45, alpha: 1)
-        case (.grassland, .top):    return NSColor(hue: 0.30, saturation: 0.40, brightness: 0.55, alpha: 1)
-        case (.grassland, .bottom): return NSColor(hue: 0.30, saturation: 0.50, brightness: 0.40, alpha: 1)
-        case (.field, .line):       return NSColor(hue: 0.13, saturation: 0.65, brightness: 0.50, alpha: 1)
-        case (.field, .top):        return NSColor(hue: 0.20, saturation: 0.35, brightness: 0.55, alpha: 1)
-        case (.field, .bottom):     return NSColor(hue: 0.13, saturation: 0.45, brightness: 0.45, alpha: 1)
-        case (.wilderness, .line):  return NSColor(hue: 0.07, saturation: 0.65, brightness: 0.45, alpha: 1)
-        case (.wilderness, .top):   return NSColor(hue: 0.10, saturation: 0.30, brightness: 0.50, alpha: 1)
-        case (.wilderness, .bottom):return NSColor(hue: 0.07, saturation: 0.45, brightness: 0.40, alpha: 1)
-        case (.sea, .line):         return NSColor(hue: 0.58, saturation: 0.75, brightness: 0.55, alpha: 1)
-        case (.sea, .top):          return NSColor(hue: 0.58, saturation: 0.40, brightness: 0.60, alpha: 1)
-        case (.sea, .bottom):       return NSColor(hue: 0.60, saturation: 0.55, brightness: 0.40, alpha: 1)
-        // 설산은 메뉴바 미니 차트에선 동적 눈 없이 기본 암석 톤으로 표시.
-        case (.snowMountain, .line):  return NSColor(hue: 0.60, saturation: 0.35, brightness: 0.70, alpha: 1)
-        case (.snowMountain, .top):   return NSColor(hue: 0.60, saturation: 0.12, brightness: 0.62, alpha: 1)
-        case (.snowMountain, .bottom):return NSColor(hue: 0.62, saturation: 0.30, brightness: 0.38, alpha: 1)
-        case (.desert, .line):      return NSColor(hue: 0.08, saturation: 0.70, brightness: 0.55, alpha: 1)
-        case (.desert, .top):       return NSColor(hue: 0.11, saturation: 0.35, brightness: 0.62, alpha: 1)
-        case (.desert, .bottom):    return NSColor(hue: 0.09, saturation: 0.55, brightness: 0.45, alpha: 1)
-        case (.volcano, .line):     return NSColor(hue: 0.04, saturation: 0.90, brightness: 0.65, alpha: 1)
-        case (.volcano, .top):      return NSColor(hue: 0.02, saturation: 0.30, brightness: 0.40, alpha: 1)
-        case (.volcano, .bottom):   return NSColor(hue: 0.03, saturation: 0.80, brightness: 0.55, alpha: 1)
-        case (.space, .line):       return NSColor(hue: 0.72, saturation: 0.70, brightness: 0.70, alpha: 1)
-        case (.space, .top):        return NSColor(hue: 0.66, saturation: 0.45, brightness: 0.40, alpha: 1)
-        case (.space, .bottom):     return NSColor(hue: 0.75, saturation: 0.55, brightness: 0.35, alpha: 1)
-        // 동적 테마들도 메뉴바 미니 차트에선 기본(level 0) 톤으로 표시.
-        case (.aurora, .line):      return NSColor(hue: 0.45, saturation: 0.65, brightness: 0.75, alpha: 1)
-        case (.aurora, .top):       return NSColor(hue: 0.70, saturation: 0.45, brightness: 0.30, alpha: 1)
-        case (.aurora, .bottom):    return NSColor(hue: 0.66, saturation: 0.50, brightness: 0.22, alpha: 1)
-        case (.sakura, .line):      return NSColor(hue: 0.95, saturation: 0.55, brightness: 0.72, alpha: 1)
-        case (.sakura, .top):       return NSColor(hue: 0.95, saturation: 0.22, brightness: 0.62, alpha: 1)
-        case (.sakura, .bottom):    return NSColor(hue: 0.96, saturation: 0.38, brightness: 0.50, alpha: 1)
-        case (.storm, .line):       return NSColor(hue: 0.60, saturation: 0.22, brightness: 0.62, alpha: 1)
-        case (.storm, .top):        return NSColor(hue: 0.62, saturation: 0.15, brightness: 0.42, alpha: 1)
-        case (.storm, .bottom):     return NSColor(hue: 0.62, saturation: 0.12, brightness: 0.30, alpha: 1)
-        case (.toxic, .line):       return NSColor(hue: 0.25, saturation: 0.85, brightness: 0.78, alpha: 1)
-        case (.toxic, .top):        return NSColor(hue: 0.25, saturation: 0.30, brightness: 0.35, alpha: 1)
-        case (.toxic, .bottom):     return NSColor(hue: 0.22, saturation: 0.45, brightness: 0.30, alpha: 1)
-        }
+    /// SwiftUI Color(PetTheme 의 stop/line 색) → device RGB CGColor. opacity 포함.
+    /// 하드코딩 HSB 테이블을 없애고 PetTheme 를 단일 출처로 삼아 메뉴바가 절대 드리프트하지 않도록.
+    private func menuBarCGColor(_ color: Color) -> CGColor {
+        let ns = NSColor(color)
+        return (ns.usingColorSpace(.deviceRGB) ?? ns).cgColor
     }
 
     /// 이로치(shiny) variant 색조를 sprite 에 입힌다. in-app `WalkingCat` 의

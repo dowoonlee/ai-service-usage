@@ -201,8 +201,14 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
     // pct/threshold 는 PetMood.from 과 동일하게 0~1 정규화( pct는 0~100, threshold는 0~1 )를 따른다.
     // 동적 테마는 pct 로 stop을 재계산하고, 그 외에는 baseStops 를 그대로 쓴다.
     func gradient(pct: Double? = nil, threshold: Double = 1) -> LinearGradient {
-        let stops = isDynamic ? dynamicStops(pct: pct, threshold: threshold) : baseStops
-        return LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
+        LinearGradient(stops: fillStops(pct: pct, threshold: threshold), startPoint: .top, endPoint: .bottom)
+    }
+
+    /// fill 그라디언트의 raw stop 배열 (location 0 = top/라인, 1 = bottom/x축).
+    /// LinearGradient 대신 stop 이 직접 필요한 곳(메뉴바 미니 차트의 CGGradient)에서 재사용 —
+    /// 동적 테마는 pct/threshold 로 재계산해 in-app 차트와 같은 모습을 그린다.
+    func fillStops(pct: Double? = nil, threshold: Double = 1) -> [Gradient.Stop] {
+        isDynamic ? dynamicStops(pct: pct, threshold: threshold) : baseStops
     }
 
     // 호환용 — 정적 그라디언트가 필요한 호출부를 위한 무인자 접근자.
