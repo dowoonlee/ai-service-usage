@@ -126,6 +126,14 @@ struct GymView: View {
 
     // MARK: - Category section
 
+    /// tier 셀 고정 높이 — placeholder 행과 동기화해야 하므로 상수화 (tierCell의 frame과 동일 값).
+    private static let tierCellHeight: CGFloat = 56
+
+    /// 모든 region 중 최대 카테고리 수 (현재 vibe=3, 나머지=2). region 추가/변경 시 자동 반영.
+    private var maxCategoryRows: Int {
+        BadgeRegion.allCases.map { $0.categories.count }.max() ?? 0
+    }
+
     private var categorySection: some View {
         let regionProgress = BadgeRegistry.progress(forRegion: selectedRegion, settings)
         return VStack(alignment: .leading, spacing: 8) {
@@ -144,6 +152,12 @@ struct GymView: View {
             VStack(spacing: 6) {
                 ForEach(selectedRegion.categories, id: \.self) { cat in
                     categoryRow(cat)
+                }
+                // 카테고리 수가 적은 region(2개)은 빈 행으로 높이를 최대치(vibe=3)에 맞춘다 —
+                // 안 그러면 vibe 선택 시 categorySection이 한 행 더 높아져 하단 Spacer가 줄고
+                // 패널 전체 레이아웃이 region마다 점프한다.
+                ForEach(0..<max(0, maxCategoryRows - selectedRegion.categories.count), id: \.self) { _ in
+                    Color.clear.frame(height: Self.tierCellHeight)
                 }
             }
         }
@@ -224,7 +238,7 @@ struct GymView: View {
             .padding(.vertical, 5)
         }
         // cell intrinsic size 고정 — hover 상태와 무관하게 column 폭 일정.
-        .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56)
+        .frame(maxWidth: .infinity, minHeight: Self.tierCellHeight, maxHeight: Self.tierCellHeight)
         .contentShape(Rectangle())
         .onHover { hovering in
             hoveredKey = hovering ? id.key : (hoveredKey == id.key ? nil : hoveredKey)
