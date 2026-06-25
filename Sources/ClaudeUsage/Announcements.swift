@@ -53,7 +53,8 @@ final class AnnouncementManager {
 #if DEBUG
     /// 로컬 미리보기용 — 샘플 새 공지. `presentDemo` + 확성기 브라우즈 데모가 공유.
     /// 실제 발행 본문 초안과 동일하게 맞춰, dev 미리보기에서 copy/스크롤을 그대로 검증한다.
-    static func demoNew() -> [RankingAPI.AnnouncementRow] {
+    /// 순수 데이터 빌더라 `nonisolated` — 비격리 컨텍스트(View.loadBrowse)에서 await 없이 호출.
+    nonisolated static func demoNew() -> [RankingAPI.AnnouncementRow] {
         [
             RankingAPI.AnnouncementRow(
                 version: "0.14.0",
@@ -93,8 +94,8 @@ final class AnnouncementManager {
                 publishedAt: Date()),
         ]
     }
-    /// 로컬 미리보기용 — 샘플 이전 공지.
-    static func demoPrevious() -> [RankingAPI.AnnouncementRow] {
+    /// 로컬 미리보기용 — 샘플 이전 공지. 동일 이유로 `nonisolated`.
+    nonisolated static func demoPrevious() -> [RankingAPI.AnnouncementRow] {
         let now = Date()
         return [
             RankingAPI.AnnouncementRow(
