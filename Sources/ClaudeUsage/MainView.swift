@@ -370,6 +370,16 @@ struct MainView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("오늘의 개발 운세")
+                // 공지사항 — 확성기. 언제든 패치 공지를 다시 볼 수 있음.
+                Button {
+                    AnnouncementWindowController.shared.presentBrowse()
+                } label: {
+                    Image(systemName: "megaphone.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.orange)
+                }
+                .buttonStyle(.borderless)
+                .help("공지사항")
                 Menu {
                     Button("지금 새로고침") {
                         Task { await vm.refreshClaude(); await vm.refreshCursor(); await vm.refreshCodex() }

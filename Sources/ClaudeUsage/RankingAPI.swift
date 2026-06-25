@@ -457,6 +457,42 @@ actor RankingAPI {
         try await get(path: "pet-metadata")
     }
 
+    // MARK: - 패치 공지 (announcements)
+
+    struct AnnouncementRow: Decodable, Sendable {
+        let version: String
+        let title: String
+        let body: String
+        let publishedAt: Date
+    }
+    struct AnnouncementsResponse: Decodable, Sendable {
+        /// 새 공지 — (since, current] 미열람 구간(최신 버전 먼저). 창 표시 여부는 이게 비어있는지로 판단.
+        let announcements: [AnnouncementRow]
+        /// 이전(이미 본) 공지 — since 이하 최근 N개. 구버전 서버는 미반환 → nil.
+        let previous: [AnnouncementRow]?
+    }
+
+    /// 패치 공지. 새 공지(since, current] + 이전 공지(since 이하 최근 `previousCount`개)를 함께 받는다.
+    /// 읽기 전용 public — HMAC 불필요. 서버가 semver 필터링하므로 새 공지가 빈 배열일 수 있음.
+    func fetchAnnouncements(currentVersion: String, sinceVersion: String,
+                            previousCount: Int) async throws -> AnnouncementsResponse {
+        let q = [
+            URLQueryItem(name: "current", value: currentVersion),
+            URLQueryItem(name: "since", value: sinceVersion),
+            URLQueryItem(name: "previous", value: String(previousCount)),
+        ]
+        return try await get(path: "announcements", queryItems: q)
+    }
+
+    /// 확성기 브라우즈용 — 전체 활성 공지(최신순). `since` 없이 호출하므로 모두 `announcements`로 온다.
+    /// currentVersion이 있으면 그 버전 이하만(아직 못 받은 상위 버전 노트는 숨김), 없으면(dev) 전체.
+    func fetchRecentAnnouncements(currentVersion: String?) async throws -> [AnnouncementRow] {
+        var q: [URLQueryItem] = []
+        if let v = currentVersion, !v.isEmpty { q.append(URLQueryItem(name: "current", value: v)) }
+        let resp: AnnouncementsResponse = try await get(path: "announcements", queryItems: q.isEmpty ? nil : q)
+        return resp.announcements
+    }
+
     /// 게시글 작성. content는 trim 전 그대로 전송 — 서버가 trim + 검증.
     /// rate limit 위반 시 `.rateLimited(retryAfterSec:)` throw.
     func submitBoardPost(deviceId: String, content: String,

@@ -15,6 +15,7 @@ struct SettingsView: View {
                         .frame(width: 40, alignment: .trailing)
                 }
                 Toggle("사용 페이스 예측 표시", isOn: $settings.showPace)
+                Toggle("업데이트 후 패치 공지 표시", isOn: $settings.patchNotesEnabled)
                 Toggle("메뉴바 모드 활성화", isOn: $settings.showMenuBar)
                 Text("메뉴바 모드를 설정하면 패널 close 시 메뉴바에 펫이 표시됩니다.")
                     .font(.system(size: 10))

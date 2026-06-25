@@ -46,6 +46,15 @@ final class Settings: ObservableObject {
             }
         }
     }
+    /// 패치 공지 표시 여부 — 업데이트 후 첫 실행 시 별도 창. 기본 on. 시작 시 팝업이라 끌 수 있게 노출.
+    @Published var patchNotesEnabled: Bool {
+        didSet { UserDefaults.standard.set(patchNotesEnabled, forKey: Keys.patchNotesEnabled) }
+    }
+    /// 마지막으로 패치 공지를 확인한 버전(CFBundleShortVersionString). nil이면 신규 설치 →
+    /// 첫 실행에서 현재 버전으로 seed만 하고 공지는 안 띄운다. `AnnouncementManager` 참조.
+    @Published var lastSeenAnnouncementVersion: String? {
+        didSet { UserDefaults.standard.set(lastSeenAnnouncementVersion, forKey: Keys.lastSeenAnnouncementVersion) }
+    }
     /// 한 차트 파티 최대 마리 수.
     static let maxPartySize = 3
 
@@ -516,6 +525,8 @@ final class Settings: ObservableObject {
         self.panelOpacity  = (d.object(forKey: Keys.panelOpacity) as? Double) ?? 1.0
         self.notifyEnabled = (d.object(forKey: Keys.notifyEnabled) as? Bool) ?? true
         self.experimentalRemotePetMeta = (d.object(forKey: Keys.experimentalRemotePetMeta) as? Bool) ?? false
+        self.patchNotesEnabled = (d.object(forKey: Keys.patchNotesEnabled) as? Bool) ?? true
+        self.lastSeenAnnouncementVersion = d.string(forKey: Keys.lastSeenAnnouncementVersion)
         let storedThresholds = (d.array(forKey: Keys.notifyThresholds) as? [Int]) ?? []
         self.notifyThresholds = storedThresholds.isEmpty ? [80, 95] : storedThresholds.sorted()
         self.showPace      = (d.object(forKey: Keys.showPace) as? Bool) ?? true
@@ -1099,6 +1110,8 @@ final class Settings: ObservableObject {
         static let showPace         = "settings.showPace"
         static let showMenuBar      = "settings.showMenuBar"
         static let experimentalRemotePetMeta = "settings.experimentalRemotePetMeta"
+        static let patchNotesEnabled = "settings.patchNotesEnabled"
+        static let lastSeenAnnouncementVersion = "settings.lastSeenAnnouncementVersion"
         static let menuBarPetSource = "settings.menuBarPetSource"
         static let petClaudeEnabled = "settings.petClaudeEnabled"
         static let petCursorEnabled = "settings.petCursorEnabled"
