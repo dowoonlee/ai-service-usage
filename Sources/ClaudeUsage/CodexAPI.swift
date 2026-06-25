@@ -49,6 +49,7 @@ enum CodexError: Error, LocalizedError {
     case http(Int)
     case transport(Error)
     case decoding(Error)
+    case unrecognizedSchema  // 200 + JSON이나 알려진 사용량 필드가 하나도 안 맞음 (전면 스키마 드리프트)
 
     var errorDescription: String? {
         switch self {
@@ -58,6 +59,7 @@ enum CodexError: Error, LocalizedError {
         case .http(let c):  return "HTTP \(c)"
         case .transport(let e): return "네트워크 오류: \(e.localizedDescription)"
         case .decoding(let e):  return "응답 해석 오류: \(Self.decodeFailureSummary(e))"
+        case .unrecognizedSchema: return "Codex 응답 형식이 변경된 것 같습니다 (사용량 필드 인식 불가)"
         }
     }
 }
@@ -68,16 +70,20 @@ extension CodexError {
     /// 안 알려줘 원격 진단이 불가능했다(이슈 #47). 비-JSON 응답이면 codingPath가 비어 "비-JSON" 분기로 간다.
     static func decodeFailureSummary(_ error: Error) -> String {
         guard let de = error as? DecodingError else { return error.localizedDescription }
-        func path(_ ctx: DecodingError.Context) -> String {
-            ctx.codingPath.map(\.stringValue).joined(separator: ".")
+        // 키 경로만 노출하고 Swift 메타타입(\(t))은 노출하지 않는다 — 이 문자열은 errorDescription을 거쳐
+        // UI 에러 배너까지 흘러가므로 'CodexRateLimitWindow' 같은 내부 타입명이 사용자에게 새면 안 된다.
+        // 경로는 codingPath(+선택 키)를 점으로 잇되, 루트(빈 경로)면 "최상위"로 표기해 빈따옴표/선행 점을 피한다.
+        func joinPath(_ ctx: DecodingError.Context, appending extra: String? = nil) -> String {
+            let comps = ctx.codingPath.map(\.stringValue) + (extra.map { [$0] } ?? [])
+            return comps.isEmpty ? "최상위" : comps.joined(separator: ".")
         }
         switch de {
-        case .typeMismatch(let t, let ctx):  return "타입 불일치 '\(path(ctx))' (\(t) 기대)"
-        case .valueNotFound(let t, let ctx): return "값 누락 '\(path(ctx))' (\(t))"
-        case .keyNotFound(let k, let ctx):   return "키 없음 '\(path(ctx)).\(k.stringValue)'"
+        case .typeMismatch(_, let ctx):  return "타입 불일치 '\(joinPath(ctx))'"
+        case .valueNotFound(_, let ctx): return "값 누락 '\(joinPath(ctx))'"
+        case .keyNotFound(let k, let ctx): return "키 없음 '\(joinPath(ctx, appending: k.stringValue))'"
         case .dataCorrupted(let ctx):
-            let p = path(ctx)
-            return p.isEmpty ? "최상위 JSON 파싱 실패 (비-JSON 응답 의심)" : "데이터 손상 '\(p)'"
+            return ctx.codingPath.isEmpty ? "최상위 JSON 파싱 실패 (비-JSON 응답 의심)"
+                                          : "데이터 손상 '\(joinPath(ctx))'"
         @unknown default: return "알 수 없는 디코딩 오류"
         }
     }
@@ -213,16 +219,32 @@ actor CodexAPI {
     func refresh() async throws -> CodexSnapshot {
         let auth = try readAuth()
         let data = try await get(access: auth.access, accountId: auth.accountId, label: "GET /wham/usage")
+        let resp: CodexUsageResponse
         do {
-            let resp = try JSONDecoder().decode(CodexUsageResponse.self, from: data)
-            return toSnapshot(resp)
+            resp = try JSONDecoder().decode(CodexUsageResponse.self, from: data)
         } catch {
             // PII 없이 진단: 디코딩 실패 요약 + 응답 첫 바이트("{"=JSON object / "<"=HTML 등) + 바이트 수.
             // Cloudflare/HTML 200 응답이면 first가 "{"가 아니라 typeMismatch와 구분된다(이슈 #47).
-            let first = data.first.map { String(UnicodeScalar($0)) } ?? "∅"
-            DebugLog.log(" Codex usage 디코딩 실패: \(CodexError.decodeFailureSummary(error)) | first=\(first) bytes=\(data.count)")
+            DebugLog.log(" Codex usage 디코딩 실패: \(CodexError.decodeFailureSummary(error)) | \(Self.bodyHint(data))")
             throw CodexError.decoding(error)
         }
+        let snap = toSnapshot(resp)
+        // 필드별 try? 흡수는 "한 필드 타입 드리프트가 형제 필드까지 죽이는 것"만 막는다. 하지만 plan·
+        // 모든 window·credits가 *전부* nil이면 = 부분 스키마(키 누락)가 아니라 전면 드리프트다. 이걸
+        // .success로 흘리면 refreshCodex가 빈 스냅샷을 저장하고 apiSchemaSuspect 신호를 잃는다. throw해서
+        // 기존 스키마-드리프트 감지 경로가 켜지게 한다 — 정상 응답은 plan_type+window가 있어 오탐 0.
+        if snap.planName == nil, snap.fiveHourPct == nil, snap.sevenDayPct == nil,
+           snap.monthlyPct == nil, snap.creditsBalance == nil, snap.hasCredits == nil {
+            DebugLog.log(" Codex usage 전면 드리프트: 인식 필드 0 | \(Self.bodyHint(data))")
+            throw CodexError.unrecognizedSchema
+        }
+        return snap
+    }
+
+    // 진단 로그용 응답 힌트 — 첫 바이트("{"=JSON / "<"=HTML)와 바이트 수만. body 본문은 PII라 안 남긴다.
+    private static func bodyHint(_ data: Data) -> String {
+        let first = data.first.map { String(UnicodeScalar($0)) } ?? "∅"
+        return "first=\(first) bytes=\(data.count)"
     }
 
     // MARK: - auth.json

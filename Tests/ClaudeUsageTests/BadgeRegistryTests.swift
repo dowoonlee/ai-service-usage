@@ -55,6 +55,12 @@ final class BadgeRegistryTests: XCTestCase {
                        "region 카테고리 합이 전체와 같아야 함 (중복/누락 없음)")
         XCTAssertEqual(Set(fromRegions), Set(BadgeCategory.allCases),
                        "region 카테고리 합집합이 전체 카테고리와 일치해야 함")
+        // 분할만으론 빈 region(다른 region이 몫을 흡수)을 못 잡는다 — GymView가 빈 카드를 렌더하므로
+        // region마다 최소 1개 카테고리를 별도로 보장한다(과거 "정확히 2" 불변식의 핵심을 유지).
+        for region in BadgeRegion.allCases {
+            XCTAssertFalse(region.categories.isEmpty,
+                           "\(region.rawValue) region은 비어있으면 안 됨")
+        }
     }
 
     // Tier 비교 연산자 — Comparable 구현 단조.
