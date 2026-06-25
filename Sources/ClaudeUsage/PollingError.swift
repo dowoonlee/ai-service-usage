@@ -21,6 +21,9 @@ extension CursorError: PollingErrorClassifiable {
 }
 
 extension CodexError: PollingErrorClassifiable {
-    var isDecodingFailure: Bool { if case .decoding = self { return true }; return false }
+    // .unrecognizedSchema(전면 드리프트)도 디코딩 실패와 동급으로 취급 → apiSchemaSuspect 경로로 보냄.
+    var isDecodingFailure: Bool {
+        switch self { case .decoding, .unrecognizedSchema: return true; default: return false }
+    }
     var httpStatusCode: Int? { if case .http(let c) = self { return c }; return nil }
 }

@@ -33,9 +33,13 @@ final class BadgeRegistryTests: XCTestCase {
         }
     }
 
-    // 8 카테고리 × 4 tier = 32. allBadges가 정확히 32개.
+    // allBadges = 카테고리 × tier 전수. 매직넘버 대신 소스에서 파생해 카테고리 확장 시 안 깨지게 하고,
+    // 동시에 중복/누락 없이 (category,tier) 한 쌍당 정확히 하나임을 키 유일성으로 검증한다.
     func testAllBadgesCount() {
-        XCTAssertEqual(BadgeRegistry.allBadges.count, 32)
+        let expected = BadgeCategory.allCases.count * BadgeTier.allCases.count
+        XCTAssertEqual(BadgeRegistry.allBadges.count, expected)
+        XCTAssertEqual(Set(BadgeRegistry.allBadges.map(\.key)).count, expected,
+                       "allBadges에 중복 키가 없어야 함")
     }
 
     // BadgeID.key 형식이 "category.tier"로 정확.
@@ -44,11 +48,18 @@ final class BadgeRegistryTests: XCTestCase {
         XCTAssertEqual(id.key, "standup.production")
     }
 
-    // 4 region × 2 카테고리. region마다 정확히 2 카테고리.
-    func testEachRegionHasTwoCategories() {
+    // region들이 전체 카테고리를 빠짐·중복 없이 분할한다 (region마다 개수가 같진 않음 — 예: vibe는 3).
+    func testRegionsPartitionAllCategories() {
+        let fromRegions = BadgeRegion.allCases.flatMap(\.categories)
+        XCTAssertEqual(fromRegions.count, BadgeCategory.allCases.count,
+                       "region 카테고리 합이 전체와 같아야 함 (중복/누락 없음)")
+        XCTAssertEqual(Set(fromRegions), Set(BadgeCategory.allCases),
+                       "region 카테고리 합집합이 전체 카테고리와 일치해야 함")
+        // 분할만으론 빈 region(다른 region이 몫을 흡수)을 못 잡는다 — GymView가 빈 카드를 렌더하므로
+        // region마다 최소 1개 카테고리를 별도로 보장한다(과거 "정확히 2" 불변식의 핵심을 유지).
         for region in BadgeRegion.allCases {
-            XCTAssertEqual(region.categories.count, 2,
-                           "\(region.rawValue) should have 2 categories")
+            XCTAssertFalse(region.categories.isEmpty,
+                           "\(region.rawValue) region은 비어있으면 안 됨")
         }
     }
 
