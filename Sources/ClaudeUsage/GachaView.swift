@@ -97,7 +97,10 @@ struct GachaView: View {
             }
             .animation(.easeInOut(duration: 0.18), value: selectedTab)
         }
-        .frame(width: 560, height: 640)
+        // alignment: .top — 콘텐츠가 640pt를 다 못 채우는 탭에서 picker+콘텐츠가 세로 중앙으로
+        // 밀려 picker 위 공백이 탭마다 달라지던 문제를 막는다(도장만 Spacer로 꽉 차 공백이 없었음).
+        // 이제 모든 탭에서 picker는 상단 고정, 위 공백은 아래 picker의 .padding(.top)으로 일관.
+        .frame(width: 560, height: 640, alignment: .top)
         .onReceive(NotificationCenter.default.publisher(for: .gachaSwitchTab)) { notif in
             if let tab = notif.object as? Tab { selectedTab = tab }
         }
