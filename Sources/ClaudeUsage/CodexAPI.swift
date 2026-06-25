@@ -177,6 +177,15 @@ struct CodexCredits: Decodable {
         case hasCredits = "has_credits"
         case balance
     }
+
+    // Pro 플랜 등에서 has_credits/balance 타입이 우리 기대와 다르게 와도(이슈 #47/#50) credits 객체
+    // 전체가 죽지 않게 필드별 try? 흡수. 상위 CodexUsageResponse.init의 `try?`와 이중 안전망이지만,
+    // 이렇게 두면 credits를 nil로 통째로 버리지 않고 디코딩 가능한 필드는 보존한다.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        hasCredits = try? c.decodeIfPresent(Bool.self, forKey: .hasCredits)
+        balance    = try? c.decodeIfPresent(Double.self, forKey: .balance)
+    }
 }
 
 // MARK: - auth.json 디코딩 (스키마 A: 공식 codex / 스키마 B: codex-oauth flat)
@@ -386,19 +395,40 @@ actor CodexAPI {
 
     // MARK: - 파싱 검증용 익명 샘플 (이슈 #36)
 
-    // diagnose()의 raw 응답에서 **PII·잔액을 제거하고** rate_limit 구조 + plan_type + 우리 파서
-    // 결과만 추려 서버 제출용 페이로드를 만든다. rate_limit은 우리가 모르는 새 필드도 보존돼야
-    // "어떻게 오는지" 확인이 되므로 원본 JSON 문자열 그대로 담는다 (email/user_id/credits는
-    // 최상위에 있고 rate_limit 안엔 없으므로 rate_limit만 떼면 PII가 섞이지 않는다).
-    // 버그리포트 "사용량 이슈"용 PII-free 추출 — rate_limit 서브트리만 (email/user_id/credits 는 최상위라 제외됨).
+    // diagnose()의 raw 응답에서 PII·민감값을 제거하고 진단용 서브트리만 추려 서버 제출 페이로드를 만든다.
+    // - rate_limit: 사용률 창 구조 그대로 (식별정보 없음 — 새 필드도 보존돼야 "어떻게 오는지" 확인됨).
+    // - credits: 어느 필드가 어떤 타입으로 와서 디코딩이 깨졌는지(이슈 #47/#50: Pro 플랜 credits 드리프트)
+    //   확인하려면 구조(타입)가 필요하나, balance·approx 메시지수는 민감하므로 값을 타입 태그로 치환한다.
+    //   타입만으로 드리프트 원인이 잡히므로 금액·카운트 원값 없이 진단 가치를 유지한다.
+    // email/user_id 등은 whitelist에 없어 애초에 제외된다.
     func usageDiagnostic() async -> UsageDiagnosticExtract? {
         let d = await diagnose()
         guard d.tokenFound, let data = d.usageRawData,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var sanitized = obj
+        if var credits = obj["credits"] as? [String: Any] {
+            for k in ["balance", "approx_cloud_messages", "approx_local_messages"] where credits[k] != nil {
+                credits[k] = Self.typeTag(credits[k]!)
+            }
+            sanitized["credits"] = credits
+        }
         return UsageDiagnosticExtract(
-            subtreeJson: DiagnosticExtract.subtreeJSON(from: obj, whitelist: ["rate_limit"]),
+            subtreeJson: DiagnosticExtract.subtreeJSON(from: sanitized, whitelist: ["rate_limit", "credits"]),
             planType: obj["plan_type"] as? String
         )
+    }
+
+    // JSON 값의 타입만 노출하는 진단 태그 — 민감 값(금액/카운트)은 지우되 "어떤 타입이 왔는지"는 보존.
+    // JSONSerialization은 숫자·불리언을 모두 NSNumber로 주므로 CFBooleanGetTypeID로 둘을 구분한다.
+    private static func typeTag(_ v: Any) -> String {
+        switch v {
+        case is NSNull: return "<null>"
+        case let n as NSNumber: return CFGetTypeID(n) == CFBooleanGetTypeID() ? "<bool>" : "<number>"
+        case is String: return "<string>"
+        case is [Any]: return "<array>"
+        case is [String: Any]: return "<object>"
+        default: return "<unknown>"
+        }
     }
 }
 
