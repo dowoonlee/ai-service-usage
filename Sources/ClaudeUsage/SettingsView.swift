@@ -733,6 +733,10 @@ private struct RankingSectionView: View {
 
 // CC-BY 4.0 attribution은 라이선스 의무 — UI에 노출 필수.
 private struct CreditsView: View {
+    @ObservedObject var settings = Settings.shared
+    @State private var showCoffeeAlert = false
+    @State private var coffeeJustGranted = false
+
     private struct Pack: Identifiable {
         let id = UUID()
         let name: String
@@ -763,6 +767,12 @@ private struct CreditsView: View {
         .init(name: "0x72 DungeonTileset II", author: "0x72",
               license: "CC0",
               url: "https://0x72.itch.io/dungeontileset-ii"),
+        .init(name: "Animated Slime", author: "Calciumtrice",
+              license: "CC-BY 3.0",
+              url: "https://opengameart.org/content/animated-slime"),
+        .init(name: "Sunny Land", author: "Ansimuz",
+              license: "CC0",
+              url: "https://ansimuz.itch.io/sunny-land-pixel-game-art"),
     ]
 
     var body: some View {
@@ -797,7 +807,50 @@ private struct CreditsView: View {
             Text("Pixel Frog 팩은 CC-BY 4.0 — 출처/저작자 표기 의무를 지킵니다.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
+
+            Divider().padding(.vertical, 4)
+            // Buy me a coffee — 후원 대신 "마음만 받을게요" 답례로 1회 보상을 드린다.
+            Button(action: tapCoffee) {
+                HStack(spacing: 6) {
+                    Image(systemName: "cup.and.saucer.fill")
+                    Text("Buy me a coffee")
+                    Spacer()
+                    if settings.hasReceivedCoffeeReward {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.brown)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .frame(maxWidth: .infinity)
+                .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.gold.opacity(0.18)))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(AppColors.gold.opacity(0.5), lineWidth: 1))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
+        .alert("☕️ 마음만 받을게요", isPresented: $showCoffeeAlert) {
+            Button("고마워요 🙏") {}
+        } message: {
+            Text(coffeeJustGranted
+                 ? "마음만 받을게요. 정말 감사합니다!\n대신 응원의 의미로 5,000 coin · 2,000 RP를 드릴게요. ☕️"
+                 : "마음만 받을게요. 늘 감사합니다 🙏")
+        }
+    }
+
+    /// 커피 버튼 탭 — 처음이면 1회 보상(5,000 coin · 2,000 RP) 지급 후 답례 문구, 이후엔 인사만.
+    private func tapCoffee() {
+        coffeeJustGranted = !settings.hasReceivedCoffeeReward
+        if coffeeJustGranted {
+            settings.hasReceivedCoffeeReward = true
+            CoinLedger.shared.creditBonus(5000, reason: "coffee")
+            RankPointLedger.shared.creditReward(2000, reason: "coffee")
+        }
+        showCoffeeAlert = true
     }
 }
 

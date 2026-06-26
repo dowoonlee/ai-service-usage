@@ -327,6 +327,10 @@ final class Settings: ObservableObject {
     @Published var hasViewedGuide: Bool {
         didSet { UserDefaults.standard.set(hasViewedGuide, forKey: Keys.hasViewedGuide) }
     }
+    /// "Buy me a coffee" 답례 보상(5,000 coin · 2,000 RP)을 1회 수령했는지.
+    @Published var hasReceivedCoffeeReward: Bool {
+        didSet { UserDefaults.standard.set(hasReceivedCoffeeReward, forKey: Keys.hasReceivedCoffeeReward) }
+    }
 
     // MARK: - 펫 컬렉션 (셋 보너스)
     //
@@ -674,6 +678,7 @@ final class Settings: ObservableObject {
         self.masteredRegions = (d.data(forKey: Keys.masteredRegions).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.hasViewedGymPage      = (d.object(forKey: Keys.hasViewedGymPage) as? Bool) ?? false
         self.hasViewedGuide        = (d.object(forKey: Keys.hasViewedGuide) as? Bool) ?? false
+        self.hasReceivedCoffeeReward = (d.object(forKey: Keys.hasReceivedCoffeeReward) as? Bool) ?? false
 
         // 펫 컬렉션 (셋 보너스) 로드
         let completedColData = d.data(forKey: Keys.completedCollections)
@@ -1212,6 +1217,7 @@ final class Settings: ObservableObject {
         static let championBadgeEarnedAt       = "settings.championBadgeEarnedAt"
         static let hasViewedGymPage            = "settings.hasViewedGymPage"
         static let hasViewedGuide              = "settings.hasViewedGuide"
+        static let hasReceivedCoffeeReward     = "settings.hasReceivedCoffeeReward"
         static let hasMigratedGymBadges        = "settings.hasMigratedGymBadges"
         // 펫 컬렉션 (셋 보너스)
         static let completedCollections        = "settings.completedCollections"
