@@ -207,6 +207,8 @@ struct PartyView: View {
             .background(RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3]))
                 .foregroundStyle(.secondary.opacity(0.4)))
+            // 배경이 stroke(테두리)뿐이라 빈 내부가 hit-test에서 빠진다 → 사각형 전체를 클릭 범위로.
+            .contentShape(Rectangle())
         }.buttonStyle(.plain)
     }
 
