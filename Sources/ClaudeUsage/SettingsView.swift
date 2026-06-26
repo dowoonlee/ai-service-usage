@@ -773,6 +773,21 @@ private struct CreditsView: View {
         .init(name: "Sunny Land", author: "Ansimuz",
               license: "CC0",
               url: "https://ansimuz.itch.io/sunny-land-pixel-game-art"),
+        .init(name: "Tiny Swords", author: "Pixel Frog",
+              license: "CC0",
+              url: "https://pixelfrog-assets.itch.io/tiny-swords"),
+        .init(name: "Intersect Asset Pack", author: "AscensionGameDev",
+              license: "CC-BY-SA 3.0",
+              url: "https://github.com/AscensionGameDev/Intersect-Assets"),
+        .init(name: "Pixel Art Icons", author: "Gerrit Halfmann",
+              license: "MIT",
+              url: "https://github.com/halfmage/pixelarticons"),
+        .init(name: "Egg Item Sprite", author: "GoopyBus",
+              license: "CC0",
+              url: "https://opengameart.org/content/egg-item-sprite"),
+        .init(name: "Pixel Coins", author: "truezipp",
+              license: "CC0",
+              url: "https://opengameart.org/content/pixel-coins-asset"),
     ]
 
     var body: some View {
@@ -804,7 +819,7 @@ private struct CreditsView: View {
             Text("자동 업데이트는 Sparkle (MIT 라이선스)을 사용합니다.")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
-            Text("Pixel Frog 팩은 CC-BY 4.0 — 출처/저작자 표기 의무를 지킵니다.")
+            Text("CC-BY / CC-BY-SA 에셋은 출처·저작자 표기 의무를 지킵니다. (Pixel Frog·Intersect 등)")
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
 
