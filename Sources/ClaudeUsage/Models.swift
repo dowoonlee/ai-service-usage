@@ -52,7 +52,7 @@ enum UsageError: Error, LocalizedError {
         case .noOrganization: return "조직 정보를 찾을 수 없음"
         case .http(let code): return "HTTP \(code)"
         case .transport(let e): return "네트워크 오류: \(e.localizedDescription)"
-        case .decoding(let e): return "응답 해석 오류: \(e.localizedDescription)"
+        case .decoding(let e): return "응답 해석 오류(Claude): \(e.localizedDescription)"
         }
     }
 }

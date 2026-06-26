@@ -50,7 +50,7 @@ enum CursorError: Error, LocalizedError {
         case .unauthorized: return "Cursor 세션 만료"
         case .http(let c): return "HTTP \(c)"
         case .transport(let e): return "네트워크 오류: \(e.localizedDescription)"
-        case .decoding(let e): return "응답 해석 오류: \(e.localizedDescription)"
+        case .decoding(let e): return "응답 해석 오류(Cursor): \(e.localizedDescription)"
         }
     }
 }

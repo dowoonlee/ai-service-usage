@@ -330,7 +330,7 @@ actor RankingAPI {
                 return "다음 글 작성까지 \(r)초 남았습니다."
             case .http(let code, let msg):
                 return "서버 오류 \(code)\(msg.map { ": \($0)" } ?? "")"
-            case .decoding(let s):     return "응답 디코딩 오류: \(s)"
+            case .decoding(let s):     return "응답 디코딩 오류(랭킹): \(s)"
             case .network(let s):      return "네트워크 오류: \(s)"
             }
         }

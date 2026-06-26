@@ -54,7 +54,7 @@ actor GitHubAuth {
             switch self {
             case .notConfigured:        return "GitHub Client ID가 설정되지 않았습니다."
             case .network(let s):       return "네트워크 오류: \(s)"
-            case .decode(let s):        return "응답 디코딩 오류: \(s)"
+            case .decode(let s):        return "응답 디코딩 오류(GitHub): \(s)"
             case .authorizationPending: return "사용자가 아직 코드를 입력하지 않았습니다."
             case .slowDown:             return "폴링 속도 제한 — 다시 시도합니다."
             case .expiredToken:         return "코드가 만료되었습니다. 다시 시도하세요."

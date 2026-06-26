@@ -58,7 +58,7 @@ enum CodexError: Error, LocalizedError {
         case .unauthorized: return "Codex 세션 만료 (codex login 재실행)"
         case .http(let c):  return "HTTP \(c)"
         case .transport(let e): return "네트워크 오류: \(e.localizedDescription)"
-        case .decoding(let e):  return "응답 해석 오류: \(Self.decodeFailureSummary(e))"
+        case .decoding(let e):  return "응답 해석 오류(Codex): \(Self.decodeFailureSummary(e))"
         case .unrecognizedSchema: return "Codex 응답 형식이 변경된 것 같습니다 (사용량 필드 인식 불가)"
         }
     }
