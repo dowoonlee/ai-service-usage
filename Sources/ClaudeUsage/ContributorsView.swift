@@ -7,6 +7,8 @@ import SwiftUI
 @MainActor
 struct ContributorsPageView: View {
     @ObservedObject var contributors: Contributors
+    /// github_login(소문자) → 그 사람의 트레이너 카드 펫. 리더보드 top-100에서 매핑.
+    @State private var trainerPets: [String: PetSelection] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,6 +19,26 @@ struct ContributorsPageView: View {
             footer
         }
         .frame(width: 460, height: 540)
+        .task { await loadTrainerPets() }
+    }
+
+    /// 리더보드 top-100에서 github_login → 트레이너 카드 펫(레포트카드 아바타) 맵을 만든다.
+    /// 기여자 대표펫을 실제 레포트카드 펫으로 매칭하기 위함 — 매칭 안 되면 카드 측에서 기본 펫(여우).
+    private func loadTrainerPets() async {
+        guard RankingAPI.isConfigured else { return }
+        let dev = Settings.shared.rankingDeviceID
+        do {
+            let board = try await RankingAPI.shared.fetchLeaderboard(deviceId: dev.isEmpty ? nil : dev)
+            var map: [String: PetSelection] = [:]
+            for e in board.entries {
+                if let gh = e.githubLogin?.lowercased(), let avatar = e.profileJson?.card.avatar {
+                    map[gh] = avatar
+                }
+            }
+            trainerPets = map
+        } catch {
+            DebugLog.log("Contributors 트레이너 펫 매핑 실패: \(error)")
+        }
     }
 
     private var header: some View {
@@ -57,7 +79,8 @@ struct ContributorsPageView: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     ForEach(Array(contributors.list.enumerated()), id: \.element.id) { idx, c in
-                        ContributorCardView(contributor: c, rank: idx)
+                        ContributorCardView(contributor: c, rank: idx,
+                                            trainerPet: trainerPets[c.login.lowercased()])
                     }
                 }
                 .padding(16)
@@ -93,11 +116,14 @@ struct ContributorsPageView: View {
 private struct ContributorCardView: View {
     let contributor: Contributor
     let rank: Int
+    /// 리더보드에서 매칭된 실제 트레이너 카드 펫. 매칭 안 된 기여자는 nil → 기본 펫(여우).
+    let trainerPet: PetSelection?
     @State private var expanded: Bool = false
     @State private var showCard: Bool = false
 
     private var rarity: Rarity { ContributorRanking.rarity(forRank: rank) }
-    private var petKind: PetKind? { ContributorRanking.pet(for: rarity, login: contributor.login) }
+    /// 대표펫 = 매칭된 트레이너 카드(레포트카드) 펫, 없으면 기본 펫(여우).
+    private var pet: PetSelection { trainerPet ?? PetSelection(kind: .fox, variant: 0) }
     private var rarityColor: Color { ContributorRanking.color(for: rarity) }
 
     var body: some View {
@@ -164,13 +190,15 @@ private struct ContributorCardView: View {
                 .fill(rarityColor.opacity(0.15))
             Circle()
                 .stroke(rarityColor.opacity(rank < 3 ? 0.8 : 0.4), lineWidth: 1)
-            if let kind = petKind, let img = PetSprite.image(for: kind, action: .walk, frameIndex: 0) {
+            if let img = PetSprite.image(for: pet.kind, action: .walk, frameIndex: 0) {
                 Image(nsImage: img)
                     .resizable()
                     .interpolation(.none)
                     .scaledToFit()
                     .frame(width: 28, height: 28)
-                    .scaleEffect(x: kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    .scaleEffect(x: pet.kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    .hueRotation(.degrees(pet.variant == 0 ? 0 : WalkingCat.hueDegrees(for: pet.variant)))
+                    .saturation(pet.variant == 0 ? 1.0 : 1.15)
             } else {
                 Text(String(rarity.displayName.prefix(1)))
                     .font(.system(size: 14, weight: .bold))
@@ -183,7 +211,7 @@ private struct ContributorCardView: View {
         .onHover { showCard = $0 }
         .popover(isPresented: $showCard, arrowEdge: .leading) {
             ContributorReportCard(contributor: contributor, rank: rank,
-                                  petKind: petKind, rarity: rarity, rarityColor: rarityColor)
+                                  pet: pet, rarity: rarity, rarityColor: rarityColor)
         }
     }
 
@@ -235,7 +263,7 @@ private struct ContributorCardView: View {
 private struct ContributorReportCard: View {
     let contributor: Contributor
     let rank: Int
-    let petKind: PetKind?
+    let pet: PetSelection
     let rarity: Rarity
     let rarityColor: Color
 
@@ -255,10 +283,8 @@ private struct ContributorReportCard: View {
                         .foregroundStyle(rarityColor)
                         .padding(.horizontal, 8).padding(.vertical, 2)
                         .background(Capsule().fill(rarityColor.opacity(0.16)))
-                    if let kind = petKind {
-                        Text("대표펫 · \(PetMetaStore.shared.displayName(for: kind))")
-                            .font(.system(size: 10)).foregroundStyle(.secondary)
-                    }
+                    Text("대표펫 · \(PetMetaStore.shared.displayName(for: pet.kind))")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
                     Text("기여 PR \(contributor.prs.count)개")
                         .font(.system(size: 11, weight: .medium))
                 }
@@ -293,13 +319,15 @@ private struct ContributorReportCard: View {
         ZStack {
             RoundedRectangle(cornerRadius: 12).fill(rarityColor.opacity(0.14))
             RoundedRectangle(cornerRadius: 12).stroke(rarityColor.opacity(0.8), lineWidth: 2)
-            if let kind = petKind, let img = PetSprite.image(for: kind, action: .walk, frameIndex: 0) {
+            if let img = PetSprite.image(for: pet.kind, action: .walk, frameIndex: 0) {
                 Image(nsImage: img)
                     .resizable()
                     .interpolation(.none)
                     .scaledToFit()
                     .frame(width: 60, height: 60)
-                    .scaleEffect(x: kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    .scaleEffect(x: pet.kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    .hueRotation(.degrees(pet.variant == 0 ? 0 : WalkingCat.hueDegrees(for: pet.variant)))
+                    .saturation(pet.variant == 0 ? 1.0 : 1.15)
             } else {
                 Text(String(rarity.displayName.prefix(1)))
                     .font(.system(size: 26, weight: .bold))
@@ -354,16 +382,6 @@ enum ContributorRanking {
         }
     }
 
-    /// rarity 풀에서 login 기반 deterministic 픽. `String.hashValue`는 process마다 달라져
-    /// 앱 재시작 시 펫이 바뀌므로 stable djb2 해시 사용.
-    @MainActor
-    static func pet(for rarity: Rarity, login: String) -> PetKind? {
-        let pool = Gacha.pool[rarity] ?? []
-        guard !pool.isEmpty else { return nil }
-        let h = stableHash(login)
-        return pool[h % pool.count]
-    }
-
     nonisolated static func color(for rarity: Rarity) -> Color {
         switch rarity {
         case .mythic:    return Color(red: 0.86, green: 0.08, blue: 0.24)  // 진홍
@@ -372,13 +390,6 @@ enum ContributorRanking {
         case .rare:      return Color(red: 0.30, green: 0.62, blue: 0.96)  // 파랑
         case .common:    return Color.secondary
         }
-    }
-
-    /// djb2 — 같은 입력에 대해 process/플랫폼 무관하게 동일 정수.
-    nonisolated static func stableHash(_ s: String) -> Int {
-        var h: UInt64 = 5381
-        for byte in s.utf8 { h = ((h << 5) &+ h) &+ UInt64(byte) }
-        return Int(h & UInt64(Int.max))
     }
 }
 
