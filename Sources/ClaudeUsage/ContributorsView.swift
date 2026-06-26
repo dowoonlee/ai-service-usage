@@ -94,6 +94,7 @@ private struct ContributorCardView: View {
     let contributor: Contributor
     let rank: Int
     @State private var expanded: Bool = false
+    @State private var showCard: Bool = false
 
     private var rarity: Rarity { ContributorRanking.rarity(forRank: rank) }
     private var petKind: PetKind? { ContributorRanking.pet(for: rarity, login: contributor.login) }
@@ -177,7 +178,13 @@ private struct ContributorCardView: View {
             }
         }
         .frame(width: 36, height: 36)
-        .help("\(rarity.displayName) · \(contributor.prs.count)개 PR")
+        // 대표펫 호버 → 기여자 레포트카드 popover (랭킹 행과 동일한 hover→카드 UX).
+        .contentShape(Circle())
+        .onHover { showCard = $0 }
+        .popover(isPresented: $showCard, arrowEdge: .leading) {
+            ContributorReportCard(contributor: contributor, rank: rank,
+                                  petKind: petKind, rarity: rarity, rarityColor: rarityColor)
+        }
     }
 
     private var metaText: String {
@@ -222,6 +229,87 @@ private struct ContributorCardView: View {
 }
 
 @MainActor
+/// 기여자 대표펫 호버 시 뜨는 레포트카드 — 큰 대표펫(등급 프레임) + GitHub 아바타 + login +
+/// 등급 + 기여 PR. 랭킹 행 트레이너 카드 popover와 동일한 hover→카드 UX. 기여자는 랭킹 프로필이
+/// 없어 카드 내용은 대표펫·등급·PR 로 구성(빈 통계가 노출되는 트레이너 카드 재사용 대신).
+private struct ContributorReportCard: View {
+    let contributor: Contributor
+    let rank: Int
+    let petKind: PetKind?
+    let rarity: Rarity
+    let rarityColor: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 14) {
+                petAvatar
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        AvatarView(url: contributor.avatarURL, size: 22)
+                        Text("@\(contributor.login)")
+                            .font(.system(size: 14, weight: .semibold))
+                            .lineLimit(1)
+                    }
+                    Text(rarity.displayName)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(rarityColor)
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(Capsule().fill(rarityColor.opacity(0.16)))
+                    if let kind = petKind {
+                        Text("대표펫 · \(PetMetaStore.shared.displayName(for: kind))")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Text("기여 PR \(contributor.prs.count)개")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                Spacer(minLength: 0)
+            }
+            if !contributor.prs.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("최근 기여")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(contributor.prs.prefix(3), id: \.number) { pr in
+                        HStack(spacing: 6) {
+                            Text("#\(pr.number)")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                            Text(pr.title)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: 300)
+    }
+
+    /// 큰 대표펫 — 등급 색 프레임. sprite 로드 실패 시 등급 이니셜.
+    private var petAvatar: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12).fill(rarityColor.opacity(0.14))
+            RoundedRectangle(cornerRadius: 12).stroke(rarityColor.opacity(0.8), lineWidth: 2)
+            if let kind = petKind, let img = PetSprite.image(for: kind, action: .walk, frameIndex: 0) {
+                Image(nsImage: img)
+                    .resizable()
+                    .interpolation(.none)
+                    .scaledToFit()
+                    .frame(width: 60, height: 60)
+                    .scaleEffect(x: kind.defaultFacingLeft ? -1 : 1, y: 1)
+            } else {
+                Text(String(rarity.displayName.prefix(1)))
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(rarityColor)
+            }
+        }
+        .frame(width: 84, height: 84)
+    }
+}
+
 private struct AvatarView: View {
     let url: String?
     let size: CGFloat
