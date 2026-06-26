@@ -127,7 +127,10 @@ struct GymView: View {
     // MARK: - Category section
 
     /// tier 셀 고정 높이 — placeholder 행과 동기화해야 하므로 상수화 (tierCell의 frame과 동일 값).
-    private static let tierCellHeight: CGFloat = 56
+    /// 아이콘(36×30)·게이지(3)는 그대로 두고 셀 내부 여백만 조여 56→44 로 축소 — vibe(3카테고리=12칸)
+    /// 선택 시 categorySection이 3행이라 마지막 행(Codex)이 패널 밖으로 잘리던 문제 해소.
+    /// 행당 12pt × 3행 = 36pt 회수. 빈 패딩 행도 같은 상수를 따라 자동 축소.
+    private static let tierCellHeight: CGFloat = 44
 
     /// 모든 region 중 최대 카테고리 수 (현재 vibe=3, 나머지=2). region 추가/변경 시 자동 반영.
     private var maxCategoryRows: Int {
@@ -215,7 +218,7 @@ struct GymView: View {
                 .shadow(color: (cleared && tier == .production) ? strokeColor.opacity(0.6) : .clear,
                         radius: 4)
 
-            VStack(spacing: 3) {
+            VStack(spacing: 2) {
                 tierSprite(category: category, tier: tier, gemColor: gemColor,
                            cleared: cleared, available: available)
                     .frame(width: 36, height: 30)
@@ -235,7 +238,7 @@ struct GymView: View {
                     Color.clear.frame(height: 3)
                 }
             }
-            .padding(.vertical, 5)
+            .padding(.vertical, 3)
         }
         // cell intrinsic size 고정 — hover 상태와 무관하게 column 폭 일정.
         .frame(maxWidth: .infinity, minHeight: Self.tierCellHeight, maxHeight: Self.tierCellHeight)
