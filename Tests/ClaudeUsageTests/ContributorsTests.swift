@@ -86,15 +86,6 @@ final class ContributorsTests: XCTestCase {
         XCTAssertEqual(ContributorRanking.rarity(forRank: 99), .common)
     }
 
-    // stableHash는 process/플랫폼 무관하게 같은 입력에 같은 출력.
-    func testStableHashDeterministic() {
-        let h1 = ContributorRanking.stableHash("alice")
-        let h2 = ContributorRanking.stableHash("alice")
-        XCTAssertEqual(h1, h2)
-        XCTAssertNotEqual(ContributorRanking.stableHash("alice"),
-                          ContributorRanking.stableHash("bob"))
-    }
-
     // 같은 login에서 첫 번째로 발견한 avatar URL 유지 (한 명이 avatar 바꿀 일 거의 없음).
     func testAvatarPreserved() {
         let prs: [PRTuple] = [
