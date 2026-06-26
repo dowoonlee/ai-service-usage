@@ -22,6 +22,8 @@ struct DiagnosticSample: Encodable, Sendable {
     var parsed: Parsed?             // codex_voluntary 의 파서 결과 (원본 대조용)
     var rawTopKeys: [String]?       // codex_voluntary 의 응답 최상위 키
     var logTail: String?            // 디버그 로그 마지막 N줄 (bug_report, 첨부 동의 시)
+    var rankingResponseJson: String? // 랭킹 디코딩 실패 시 캡처한 마스킹 응답 (#56, valid JSON 문자열)
+    var rankingDecodeError: String?  // 위 캡처 컨텍스트: "path=… status=… err=…"
 
     struct Parsed: Encodable, Sendable {
         let fiveHourPct: Double?
@@ -44,7 +46,9 @@ struct DiagnosticSample: Encodable, Sendable {
             cursorUsageJson: nil,
             parsed: nil,
             rawTopKeys: nil,
-            logTail: nil
+            logTail: nil,
+            rankingResponseJson: nil,
+            rankingDecodeError: nil
         )
     }
 }

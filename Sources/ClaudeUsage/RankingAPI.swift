@@ -727,8 +727,27 @@ actor RankingAPI {
         do {
             return try decoder.decode(Resp.self, from: data)
         } catch {
+            // 디코딩 실패 raw 를 마스킹·캡해 stash — 버그리포트에서 첨부(#56). throw 동작은 불변.
+            Self.captureDecodeFailure(req: req, data: data, response: response, error: error)
             throw RankingError.decoding(error.localizedDescription)
         }
+    }
+
+    /// 랭킹 응답 디코딩 실패 순간의 페이로드를 PII 마스킹 후 1건 보관(#56 — #54류 디버깅 사각지대).
+    /// nonisolated static — UserDefaults/DebugLog 만 건드려 actor 격리가 필요 없다.
+    private static func captureDecodeFailure(req: URLRequest, data: Data,
+                                             response: URLResponse, error: Error) {
+        let path = req.url?.lastPathComponent ?? "?"
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let failure = RankingDecodeFailure(
+            path: path,
+            status: status,
+            errorDesc: error.localizedDescription,
+            maskedJson: RankingResponseMask.maskedJSON(from: data),
+            capturedAt: Date()
+        )
+        RankingDiagnosticStore.record(failure)
+        DebugLog.log(" RankingAPI decode 실패 캡처: path=\(path) status=\(status) (\(data.count)B)")
     }
 
     private static let iso8601WithFractional: ISO8601DateFormatter = {
