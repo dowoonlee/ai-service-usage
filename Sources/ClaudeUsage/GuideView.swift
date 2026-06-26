@@ -376,6 +376,8 @@ final class GuideWindowController: NSWindowController {
     }
 
     func present() {
+        // 가이드를 열면 알림 점 해제 — 사용자가 확인한 것으로 본다(MainView 배지 반응).
+        Settings.shared.hasViewedGuide = true
         let root = GuideView { [weak self] in
             self?.window?.close()
         }
