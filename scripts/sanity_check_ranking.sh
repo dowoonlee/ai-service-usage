@@ -206,6 +206,6 @@ if [ "$FAILED" = "0" ]; then
   echo "다음: ${BOLD}bash scripts/package.sh${RESET} 로 클라이언트 빌드"
   exit 0
 else
-  echo "${RED}${BOLD}일부 check 실패 — 위 출력 확인 후 docs/DEPLOY_RANKING.md 트러블슈팅 참고.${RESET}"
+  echo "${RED}${BOLD}일부 check 실패 — 위 출력 확인 후 supabase-ranking 스킬의 트러블슈팅 참고.${RESET}"
   exit 1
 fi
