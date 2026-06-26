@@ -7,8 +7,9 @@ import SwiftUI
 @MainActor
 struct ContributorsPageView: View {
     @ObservedObject var contributors: Contributors
-    /// github_login(소문자) → 그 사람의 트레이너 카드 펫. 리더보드 top-100에서 매핑.
-    @State private var trainerPets: [String: PetSelection] = [:]
+    /// github_login(소문자) → 그 사람의 리더보드 엔트리(트레이너 카드 프로필 포함). top-100에서 매핑.
+    /// 매칭되면 호버 시 진짜 트레이너 카드 + 실제 대표펫, 매칭 안 되면 기여자 카드 + 여우.
+    @State private var trainerEntries: [String: RankingAPI.LeaderboardEntry] = [:]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,25 +20,23 @@ struct ContributorsPageView: View {
             footer
         }
         .frame(width: 460, height: 540)
-        .task { await loadTrainerPets() }
+        .task { await loadTrainerEntries() }
     }
 
-    /// 리더보드 top-100에서 github_login → 트레이너 카드 펫(레포트카드 아바타) 맵을 만든다.
-    /// 기여자 대표펫을 실제 레포트카드 펫으로 매칭하기 위함 — 매칭 안 되면 카드 측에서 기본 펫(여우).
-    private func loadTrainerPets() async {
+    /// 리더보드 top-100에서 github_login → 엔트리 맵을 만든다. 기여자를 실제 랭킹 프로필과
+    /// 매칭하기 위함 — 매칭 안 된 기여자(외부자·랭킹 미참여 등)는 카드 측에서 여우/기여자 카드로 fallback.
+    private func loadTrainerEntries() async {
         guard RankingAPI.isConfigured else { return }
         let dev = Settings.shared.rankingDeviceID
         do {
             let board = try await RankingAPI.shared.fetchLeaderboard(deviceId: dev.isEmpty ? nil : dev)
-            var map: [String: PetSelection] = [:]
+            var map: [String: RankingAPI.LeaderboardEntry] = [:]
             for e in board.entries {
-                if let gh = e.githubLogin?.lowercased(), let avatar = e.profileJson?.card.avatar {
-                    map[gh] = avatar
-                }
+                if let gh = e.githubLogin?.lowercased() { map[gh] = e }
             }
-            trainerPets = map
+            trainerEntries = map
         } catch {
-            DebugLog.log("Contributors 트레이너 펫 매핑 실패: \(error)")
+            DebugLog.log("Contributors 트레이너 엔트리 매핑 실패: \(error)")
         }
     }
 
@@ -80,7 +79,7 @@ struct ContributorsPageView: View {
                 LazyVStack(spacing: 8) {
                     ForEach(Array(contributors.list.enumerated()), id: \.element.id) { idx, c in
                         ContributorCardView(contributor: c, rank: idx,
-                                            trainerPet: trainerPets[c.login.lowercased()])
+                                            entry: trainerEntries[c.login.lowercased()])
                     }
                 }
                 .padding(16)
@@ -116,14 +115,14 @@ struct ContributorsPageView: View {
 private struct ContributorCardView: View {
     let contributor: Contributor
     let rank: Int
-    /// 리더보드에서 매칭된 실제 트레이너 카드 펫. 매칭 안 된 기여자는 nil → 기본 펫(여우).
-    let trainerPet: PetSelection?
+    /// 리더보드에서 매칭된 랭킹 엔트리(트레이너 카드 프로필 포함). 매칭 안 된 기여자는 nil.
+    let entry: RankingAPI.LeaderboardEntry?
     @State private var expanded: Bool = false
     @State private var showCard: Bool = false
 
     private var rarity: Rarity { ContributorRanking.rarity(forRank: rank) }
-    /// 대표펫 = 매칭된 트레이너 카드(레포트카드) 펫, 없으면 기본 펫(여우).
-    private var pet: PetSelection { trainerPet ?? PetSelection(kind: .fox, variant: 0) }
+    /// 대표펫 = 매칭된 트레이너 카드 아바타 펫, 없으면 기본 펫(여우).
+    private var pet: PetSelection { entry?.profileJson?.card.avatar ?? PetSelection(kind: .fox, variant: 0) }
     private var rarityColor: Color { ContributorRanking.color(for: rarity) }
 
     var body: some View {
@@ -206,12 +205,30 @@ private struct ContributorCardView: View {
             }
         }
         .frame(width: 36, height: 36)
-        // 대표펫 호버 → 기여자 레포트카드 popover (랭킹 행과 동일한 hover→카드 UX).
+        // 대표펫 호버 → 카드 popover (랭킹 행과 동일한 hover→카드 UX).
+        // 매칭된 기여자(랭킹 프로필 보유)는 진짜 트레이너 카드, 아니면 기여자 카드(여우) fallback.
         .contentShape(Circle())
         .onHover { showCard = $0 }
         .popover(isPresented: $showCard, arrowEdge: .leading) {
-            ContributorReportCard(contributor: contributor, rank: rank,
-                                  pet: pet, rarity: rarity, rarityColor: rarityColor)
+            if let entry, let profile = entry.profileJson {
+                TrainerCardView(
+                    card: profile.card,
+                    trainerID: profile.trainerID,
+                    trainerName: entry.nickname,
+                    stats: profile.stats,
+                    badges: profile.badgeRowsForRender(),
+                    collections: profile.collectionRowsForRender(),
+                    showWatermark: false,
+                    width: 440,
+                    medals: entry.medals,
+                    animatedAvatar: true,
+                    equippedEffects: Set((profile.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) })
+                )
+                .padding(8)
+            } else {
+                ContributorReportCard(contributor: contributor, rank: rank,
+                                      pet: pet, rarity: rarity, rarityColor: rarityColor)
+            }
         }
     }
 
