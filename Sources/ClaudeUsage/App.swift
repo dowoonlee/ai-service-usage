@@ -137,6 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.environment["AIUSAGE_ANNOUNCE_DEMO"] != nil {
             AnnouncementManager.shared.presentDemo()
         }
+        // 가이드 창 미리보기 — `AIUSAGE_GUIDE_DEMO=1 swift run`. 콘텐츠는 정적이라 dev에서도 동일.
+        if ProcessInfo.processInfo.environment["AIUSAGE_GUIDE_DEMO"] != nil {
+            GuideWindowController.shared.present()
+        }
 #endif
     }
 

@@ -380,6 +380,16 @@ struct MainView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("공지사항")
+                // 사용 가이드 — 공지사항 옆. 기능별 설명 문서를 창으로 띄운다.
+                Button {
+                    GuideWindowController.shared.present()
+                } label: {
+                    Image(systemName: "book.closed.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.blue)
+                }
+                .buttonStyle(.borderless)
+                .help("가이드")
                 Menu {
                     Button("지금 새로고침") {
                         Task { await vm.refreshClaude(); await vm.refreshCursor(); await vm.refreshCodex() }
