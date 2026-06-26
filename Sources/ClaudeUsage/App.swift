@@ -59,6 +59,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var lastMenuBarRenderKey: MenuBarRenderKey?
     // 이로치 sprite 색조 변환용 — CIContext 는 생성 비용이 커서 1회만 만들어 재사용.
     private let menuBarCIContext = CIContext(options: nil)
+    // 이로치 변환 결과 캐시 — (kind, action, frameIdx, variant) 당 CI 파이프라인을 1회만 돌린다.
+    // 펫이 걸으며 매 재합성마다 재계산하지 않도록. 키 공간이 유한(펫×액션×프레임×variant)해 무한정 커지지 않음.
+    private var tintedSpriteCache: [TintedSpriteKey: NSImage] = [:]
+    private struct TintedSpriteKey: Hashable {
+        let kind: PetKind
+        let action: PetController.Action
+        let frameIdx: Int
+        let variant: Int
+    }
     private struct MenuBarRenderKey: Equatable {
         let frameIdx: Int
         let petXBucket: Int       // 0..100
@@ -658,7 +667,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 3) 펫 — 라인 위 (xNorm → 실제 x 매핑 시 양 끝에서 잘리지 않도록 안쪽으로 inset)
         // variant > 0 이면 이로치(shiny) hue/saturation 을 in-app WalkingCat 과 동일하게 입힌다.
         if let frame = PetSprite.image(for: kind, action: action, frameIndex: frameIdx)
-            .map({ tintedSprite($0, variant: variant) }) {
+            .map({ tintedSprite($0, kind: kind, action: action, frameIdx: frameIdx, variant: variant) }) {
             let (cw, ch) = kind.cellSize
             let aspect = CGFloat(cw) / CGFloat(ch)
             let petH = menuBarPetH
@@ -705,11 +714,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// 이로치(shiny) variant 색조를 sprite 에 입힌다. in-app `WalkingCat` 의
-    /// `.hueRotation(.degrees(hueDegrees(for:)))` + `.saturation(1.15)` 과 동일한 결과.
-    /// variant == 0 이면 변환 비용 없이 원본을 그대로 돌려준다.
-    private func tintedSprite(_ image: NSImage, variant: Int) -> NSImage {
-        guard variant != 0,
-              let tiff = image.tiffRepresentation,
+    /// `.hueRotation(.degrees(hueDegrees(for:)))` + `.saturation(1.15)` 과 사실상 동일하다
+    /// (SwiftUI 와 Core Image 의 색 파이프라인이 달라 픽셀 단위로는 근사). variant == 0 이면
+    /// 변환 비용 없이 원본을 그대로 돌려준다. 결과는 (kind, action, frameIdx, variant) 로 캐시.
+    private func tintedSprite(_ image: NSImage, kind: PetKind, action: PetController.Action,
+                              frameIdx: Int, variant: Int) -> NSImage {
+        guard variant != 0 else { return image }
+        let key = TintedSpriteKey(kind: kind, action: action, frameIdx: frameIdx, variant: variant)
+        if let cached = tintedSpriteCache[key] { return cached }
+        guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let cg = bitmap.cgImage else { return image }
         let angle = Float(WalkingCat.hueDegrees(for: variant) * .pi / 180)
@@ -717,7 +730,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .applyingFilter("CIHueAdjust", parameters: [kCIInputAngleKey: angle])
             .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: Float(1.15)])
         guard let out = menuBarCIContext.createCGImage(ci, from: ci.extent) else { return image }
-        return NSImage(cgImage: out, size: image.size)
+        let tinted = NSImage(cgImage: out, size: image.size)
+        tintedSpriteCache[key] = tinted
+        return tinted
     }
 
     /// 점들을 Catmull-Rom 으로 잇는 부드러운 CGPath. tension 0.5 (Centripetal-ish).
