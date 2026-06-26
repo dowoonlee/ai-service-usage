@@ -56,7 +56,7 @@ enum BugReport {
         if let diagnosticId {
             lines.append("## 진단 데이터")
             lines.append("- ID: `\(diagnosticId)`")
-            lines.append("- Claude·Cursor·Codex 사용량 응답 원본이 비공개로 첨부되었습니다 (개인정보·잔액 제외). 개발자가 이 ID로 조회합니다.")
+            lines.append("- Claude·Cursor·Codex 사용량 응답 원본(랭킹 디코딩 오류 발생 시 해당 응답 포함)이 비공개로 첨부되었습니다 (개인정보·잔액 제외). 개발자가 이 ID로 조회합니다.")
             lines.append("")
         } else if diagnosticFailed {
             lines.append("## 진단 데이터")
@@ -244,7 +244,7 @@ struct BugReportView: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     if template == .usage {
-                        Text("Claude·Cursor·Codex 사용량 응답 구조가 비공개로 첨부됩니다 (개인정보·잔액 제외). GitHub 이슈에는 조회용 ID만 적힙니다.")
+                        Text("Claude·Cursor·Codex 사용량 응답 구조(랭킹 오류 발생 시 해당 응답 포함)가 비공개로 첨부됩니다 (개인정보·잔액 제외). GitHub 이슈에는 조회용 ID만 적힙니다.")
                             .font(.system(size: 10)).foregroundStyle(.secondary)
                     }
                 }
@@ -401,6 +401,11 @@ struct BugReportView: View {
             sample.cursorUsageJson = cursor.subtreeJson
         }
         if includeLog { sample.logTail = BugReport.readLogTail() }
+        // 최근(24h) 랭킹 디코딩 실패가 캡처돼 있으면 함께 첨부 (#56 — #54류 디버깅 사각지대 해소).
+        if let rf = RankingDiagnosticStore.recentForAttach(now: Date()) {
+            sample.rankingResponseJson = rf.maskedJson
+            sample.rankingDecodeError = "path=\(rf.path) status=\(rf.status) err=\(rf.errorDesc.prefix(200))"
+        }
 
         guard RankingAPI.isConfigured else {
             DebugLog.log(" BugReport usage: RankingAPI 미설정 — 진단 데이터 없이 이슈만 작성")

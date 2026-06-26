@@ -31,6 +31,8 @@ interface SampleRequest {
   parsed?: { fiveHourPct?: number | null; sevenDayPct?: number | null; monthlyPct?: number | null };
   rawTopKeys?: string[];
   logTail?: string;        // 디버그 로그 마지막 N줄 (사용자 첨부 동의 시에만)
+  rankingResponseJson?: string; // 랭킹 디코딩 실패 시 캡처한 마스킹 응답 (#56, 클라가 PII 제거)
+  rankingDecodeError?: string;  // 위 캡처 컨텍스트: path/status/DecodingError 요약
 }
 
 // UUID v4 형식만 통과 (위조해도 무가치하지만, GitHub 이슈에 박을 식별자라 형식은 강제).
@@ -80,6 +82,8 @@ Deno.serve(async (req: Request) => {
       ? body.rawTopKeys.slice(0, 64).map((k) => String(k).slice(0, 64))
       : null,
     log_tail: str(body.logTail, 4096),
+    ranking_response: parseJsonCapped(body.rankingResponseJson, 8192),
+    ranking_decode_error: str(body.rankingDecodeError, 512),
   };
   // 클라가 보낸 UUID 가 유효하면 그대로 PK 로 사용 (이슈에 미리 박은 값과 일치 보장).
   // 무효/누락이면 컬럼 키 자체를 빼서 DB default(gen_random_uuid())에 맡긴다.
