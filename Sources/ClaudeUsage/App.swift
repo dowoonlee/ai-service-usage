@@ -581,7 +581,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let pctSize = pctAttr.size()
         let totalW = numSize.width + 1 + pctSize.width
         // 우측 정렬 (차트 라인과 붙음): 영역 우측 끝에서 1pt 안쪽.
-        let baselineX = rect.maxX - 1 - totalW
+        // 단, "100%"(3자리)는 totalW 가 영역 폭(menuBarPctW)을 넘겨 baselineX 가 음수가 되면
+        // 선두 "1"이 캔버스 좌측 밖으로 잘려 "00%"처럼 보인다(#58). rect.minX 로 좌측 클램프해
+        // 3자리도 영역에 꽉 채워 그린다 — 2자리는 totalW 가 작아 클램프가 발동하지 않아 무변경.
+        let baselineX = max(rect.minX, rect.maxX - 1 - totalW)
         // 하단 정렬: descender 여유 1pt.
         let baselineY: CGFloat = 1
         numAttr.draw(at: NSPoint(x: baselineX, y: baselineY))
