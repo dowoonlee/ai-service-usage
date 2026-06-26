@@ -511,7 +511,6 @@ private struct BoardRow: View {
     let deleteWindowSec: Int
     let onLikeTap: () -> Void
     let onDeleteTap: () -> Void
-    @State private var hoveringHeart: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -558,7 +557,10 @@ private struct BoardRow: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // 좋아요 버튼 + count + 호버 popover.
+            // 좋아요 버튼 — 하트+숫자를 하나의 보이지 않는 박스(contentShape)로 묶어 통째로 클릭.
+            // 안내는 hover popover 대신 .help 툴팁으로 띄운다: transient .popover 는 열려 있는 동안
+            // 다음 클릭을 "자기 자신 dismiss" 로 삼켜 버려서 onLikeTap 까지 도달하지 못했다(좋아요가
+            // 잘 안 눌리던 원인). 툴팁은 클릭을 가로채지 않으므로 한 번에 눌린다.
             Button(action: onLikeTap) {
                 HStack(spacing: 3) {
                     Image(systemName: post.likedByMe ? "heart.fill" : "heart")
@@ -568,37 +570,22 @@ private struct BoardRow: View {
                         .foregroundStyle(.secondary)
                         .frame(minWidth: 16, alignment: .leading)
                 }
+                // 작은 하트 위를 더 쉽게 누르도록 세로 여백을 hit area 에 포함.
+                .padding(.vertical, 4)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .disabled(isLikeBusy)
             .opacity(isLikeBusy ? 0.5 : 1.0)
-            .onHover { hoveringHeart = $0 }
-            .popover(isPresented: $hoveringHeart, arrowEdge: .top) {
-                likersPopover
-                    .padding(8)
-            }
+            .help(likeHelpText)
         }
     }
 
-    @ViewBuilder
-    private var likersPopover: some View {
-        // 전면 익명 — 누가 눌렀는지 노출하지 않고 카운트만 표시.
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: "heart.fill")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.pink)
-                Text("좋아요 \(post.likeCount)개")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-            }
-            if post.likeCount == 0 {
-                Text("아직 좋아요가 없습니다.")
-                    .font(.system(size: 11)).foregroundStyle(.tertiary)
-            }
-        }
-        .frame(minWidth: 120)
+    /// 하트 hover 안내 — 기존 popover 문구를 클릭을 가로채지 않는 .help 툴팁으로 옮긴 것.
+    private var likeHelpText: String {
+        if post.likedByMe { return "좋아요 취소 (현재 \(post.likeCount)개)" }
+        if post.likeCount == 0 { return "아직 좋아요가 없습니다 · 눌러서 좋아요" }
+        return "좋아요 \(post.likeCount)개 · 눌러서 좋아요"
     }
 
     private func relativeTime(_ date: Date) -> String {

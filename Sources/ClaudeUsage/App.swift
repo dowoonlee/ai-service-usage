@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CoreImage
 import SwiftUI
 
 @main
@@ -56,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// 시각 결과가 완전히 같음 — 30Hz redraw 비용(NSImage + Core Graphics 합성) 무피해 절감.
     /// petX bucket=100단위(1% ≈ 0.6pt at chartW=60), rollAngle bucket=5°.
     private var lastMenuBarRenderKey: MenuBarRenderKey?
+    // 이로치 sprite 색조 변환용 — CIContext 는 생성 비용이 커서 1회만 만들어 재사용.
+    private let menuBarCIContext = CIContext(options: nil)
     private struct MenuBarRenderKey: Equatable {
         let frameIdx: Int
         let petXBucket: Int       // 0..100
@@ -63,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let pctBucket: Int        // -1 if nil, else 0..100
         let rollBucket: Int       // angle / 5
         let kind: PetKind
+        let variant: Int          // 이로치(shiny) variant — 바뀌면 재합성
         let theme: PetTheme
         let action: PetController.Action
         let historyCount: Int     // history 끝부분이 push되면 변화 감지
@@ -390,6 +394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             pctBucket: feed.pct.map { Int($0) } ?? -1,
             rollBucket: Int(menuBarRollAngle / 5),
             kind: feed.kind,
+            variant: feed.variant,
             theme: feed.theme,
             action: action,
             historyCount: feed.history.count
@@ -399,6 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         button.image = renderMenuBarComposite(
             kind: feed.kind,
+            variant: feed.variant,
             action: action,
             frameIdx: menuBarFrameIdx,
             history: feed.history,
@@ -413,35 +419,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         button.attributedTitle = NSAttributedString()
     }
 
-    /// 메뉴바 위젯이 사용할 (pct, history, kind, theme) 패키지. source 에 따라 분기.
+    /// 메뉴바 위젯이 사용할 (pct, history, kind, variant, theme) 패키지. source 에 따라 분기.
     private struct MenuBarFeed {
         let pct: Double?
         let history: [(Date, Double)]
         let kind: PetKind
+        let variant: Int          // 파티 리더(가장 좌측 펫)의 이로치 variant
         let theme: PetTheme
     }
     private func currentMenuBarFeed() -> MenuBarFeed {
+        // 펫은 항상 해당 source 파티의 리더(party[0] = 가장 좌측)로 — kind/variant 모두 리더 기준.
         switch Settings.shared.menuBarPetSource {
         case .claude:
-            let kind = Settings.shared.petClaudeKind
+            let leader = Settings.shared.petClaudeParty.first
+            let kind = leader?.kind ?? .fox
             let theme = Settings.shared.themeClaudeOverride ?? PetTheme.defaultFor(kind)
             // 현재 5h 창만 — 만료 창이 섞이면 펫이 빈 구간을 가로질러 걷는다.
             let history = ViewModel.claudeFiveHourSeries(Array(vm.claudeHistory.suffix(48)))
-            return MenuBarFeed(pct: vm.claudeCurrent?.fiveHourPct, history: history, kind: kind, theme: theme)
+            return MenuBarFeed(pct: vm.claudeCurrent?.fiveHourPct, history: history,
+                               kind: kind, variant: leader?.variant ?? 0, theme: theme)
         case .cursor:
-            let kind = Settings.shared.petCursorKind
+            let leader = Settings.shared.petCursorParty.first
+            let kind = leader?.kind ?? .wolf
             let theme = Settings.shared.themeCursorOverride ?? PetTheme.defaultFor(kind)
             // 같은 초 중복 폴 제거 — Claude 피드와 동일 (id: \.0 충돌 방지).
             let history = ViewModel.dedupAdjacentByTime(vm.cursorHistory.suffix(48).compactMap { s in
                 Self.cursorPct(s).flatMap { v in v > 0 ? (s.takenAt, v) : nil }
             })
-            return MenuBarFeed(pct: vm.cursorCurrentPct, history: history, kind: kind, theme: theme)
+            return MenuBarFeed(pct: vm.cursorCurrentPct, history: history,
+                               kind: kind, variant: leader?.variant ?? 0, theme: theme)
         case .codex:
-            let kind = Settings.shared.petCodexKind
+            let leader = Settings.shared.petCodexParty.first
+            let kind = leader?.kind ?? .fox
             let theme = Settings.shared.themeCodexOverride ?? PetTheme.defaultFor(kind)
             // 현재 주력 창(Plus/Pro=5h, free=monthly)만 — 만료 창이 섞이면 펫이 빈 구간을 걷는다.
             let history = ViewModel.codexPrimarySeries(Array(vm.codexHistory.suffix(48)))
-            return MenuBarFeed(pct: vm.codexPrimaryPct, history: history, kind: kind, theme: theme)
+            return MenuBarFeed(pct: vm.codexPrimaryPct, history: history,
+                               kind: kind, variant: leader?.variant ?? 0, theme: theme)
         }
     }
 
@@ -478,6 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// y 축은 visible window 의 min/max 정규화 — 윈도우 안 최댓값이 항상 천장.
     private func renderMenuBarComposite(
         kind: PetKind,
+        variant: Int,
         action: PetController.Action,
         frameIdx: Int,
         history: [(Date, Double)],
@@ -507,9 +522,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             outerCtx.translateBy(x: menuBarPctW, y: 0)
             defer { outerCtx.restoreGState() }
             drawChartAndPet(W: W, H: H, plotMinY: plotMinY, plotMaxY: plotMaxY,
-                            history: history, theme: theme, kind: kind, action: action,
-                            frameIdx: frameIdx, petXNorm: petXNorm, facingRight: facingRight,
-                            rollAngle: rollAngle)
+                            history: history, theme: theme, kind: kind, variant: variant,
+                            action: action, frameIdx: frameIdx, petXNorm: petXNorm,
+                            facingRight: facingRight, rollAngle: rollAngle,
+                            pct: pct, threshold: Settings.shared.petAnxietyThreshold)
         }
 
         canvas.isTemplate = false
@@ -566,9 +582,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// 차트 + 펫 부분만 그리는 헬퍼 (origin 은 호출 측이 translate 로 맞춰줌).
     private func drawChartAndPet(
         W: CGFloat, H: CGFloat, plotMinY: CGFloat, plotMaxY: CGFloat,
-        history: [(Date, Double)], theme: PetTheme, kind: PetKind,
+        history: [(Date, Double)], theme: PetTheme, kind: PetKind, variant: Int,
         action: PetController.Action, frameIdx: Int,
-        petXNorm: Double, facingRight: Bool, rollAngle: Double
+        petXNorm: Double, facingRight: Bool, rollAngle: Double,
+        pct: Double?, threshold: Double
     ) {
 
         // 1) gradient backdrop (라인 아래 영역) — 데이터가 있을 때만 색감 입힘.
@@ -598,12 +615,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             fillPath.addLine(to: CGPoint(x: W, y: 0))
             fillPath.closeSubpath()
 
-            let top = nsColor(for: theme, slot: .top).withAlphaComponent(0.18)
-            let bot = nsColor(for: theme, slot: .bottom).withAlphaComponent(0.40)
+            // in-app 차트와 동일한 테마 그라디언트 stop 을 그대로 사용 — 동적 테마는 pct/threshold 가
+            // 반영돼 메뉴바에서도 사용량에 따라 눈·용암·심해 등이 차오른다(맵 테마/배경 싱크).
+            let stops = theme.fillStops(pct: pct, threshold: threshold)
             let cs = CGColorSpaceCreateDeviceRGB()
-            if let grad = CGGradient(colorsSpace: cs,
-                                     colors: [top.cgColor, bot.cgColor] as CFArray,
-                                     locations: [0.0, 1.0]) {
+            let gradColors = stops.map { menuBarCGColor($0.color) } as CFArray
+            let gradLocations = stops.map { CGFloat($0.location) }
+            if let grad = CGGradient(colorsSpace: cs, colors: gradColors, locations: gradLocations) {
                 ctx.saveGState()
                 ctx.addPath(fillPath)
                 ctx.clip()
@@ -621,7 +639,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             let smooth = catmullRomPath(points: linePts)
             ctx.saveGState()
-            ctx.setStrokeColor(nsColor(for: theme, slot: .line).cgColor)
+            ctx.setStrokeColor(menuBarCGColor(theme.lineColor))
             ctx.setLineWidth(1.2)
             ctx.setLineCap(.round)
             ctx.setLineJoin(.round)
@@ -638,7 +656,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         // 3) 펫 — 라인 위 (xNorm → 실제 x 매핑 시 양 끝에서 잘리지 않도록 안쪽으로 inset)
-        if let frame = PetSprite.image(for: kind, action: action, frameIndex: frameIdx) {
+        // variant > 0 이면 이로치(shiny) hue/saturation 을 in-app WalkingCat 과 동일하게 입힌다.
+        if let frame = PetSprite.image(for: kind, action: action, frameIndex: frameIdx)
+            .map({ tintedSprite($0, variant: variant) }) {
             let (cw, ch) = kind.cellSize
             let aspect = CGFloat(cw) / CGFloat(ch)
             let petH = menuBarPetH
@@ -677,49 +697,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    /// PetTheme HSB 값을 NSColor 로 직접 (SwiftUI Color → NSColor 변환 우회).
-    private enum ThemeSlot { case line, top, bottom }
-    private func nsColor(for theme: PetTheme, slot: ThemeSlot) -> NSColor {
-        switch (theme, slot) {
-        case (.grassland, .line):   return NSColor(hue: 0.30, saturation: 0.70, brightness: 0.45, alpha: 1)
-        case (.grassland, .top):    return NSColor(hue: 0.30, saturation: 0.40, brightness: 0.55, alpha: 1)
-        case (.grassland, .bottom): return NSColor(hue: 0.30, saturation: 0.50, brightness: 0.40, alpha: 1)
-        case (.field, .line):       return NSColor(hue: 0.13, saturation: 0.65, brightness: 0.50, alpha: 1)
-        case (.field, .top):        return NSColor(hue: 0.20, saturation: 0.35, brightness: 0.55, alpha: 1)
-        case (.field, .bottom):     return NSColor(hue: 0.13, saturation: 0.45, brightness: 0.45, alpha: 1)
-        case (.wilderness, .line):  return NSColor(hue: 0.07, saturation: 0.65, brightness: 0.45, alpha: 1)
-        case (.wilderness, .top):   return NSColor(hue: 0.10, saturation: 0.30, brightness: 0.50, alpha: 1)
-        case (.wilderness, .bottom):return NSColor(hue: 0.07, saturation: 0.45, brightness: 0.40, alpha: 1)
-        case (.sea, .line):         return NSColor(hue: 0.58, saturation: 0.75, brightness: 0.55, alpha: 1)
-        case (.sea, .top):          return NSColor(hue: 0.58, saturation: 0.40, brightness: 0.60, alpha: 1)
-        case (.sea, .bottom):       return NSColor(hue: 0.60, saturation: 0.55, brightness: 0.40, alpha: 1)
-        // 설산은 메뉴바 미니 차트에선 동적 눈 없이 기본 암석 톤으로 표시.
-        case (.snowMountain, .line):  return NSColor(hue: 0.60, saturation: 0.35, brightness: 0.70, alpha: 1)
-        case (.snowMountain, .top):   return NSColor(hue: 0.60, saturation: 0.12, brightness: 0.62, alpha: 1)
-        case (.snowMountain, .bottom):return NSColor(hue: 0.62, saturation: 0.30, brightness: 0.38, alpha: 1)
-        case (.desert, .line):      return NSColor(hue: 0.08, saturation: 0.70, brightness: 0.55, alpha: 1)
-        case (.desert, .top):       return NSColor(hue: 0.11, saturation: 0.35, brightness: 0.62, alpha: 1)
-        case (.desert, .bottom):    return NSColor(hue: 0.09, saturation: 0.55, brightness: 0.45, alpha: 1)
-        case (.volcano, .line):     return NSColor(hue: 0.04, saturation: 0.90, brightness: 0.65, alpha: 1)
-        case (.volcano, .top):      return NSColor(hue: 0.02, saturation: 0.30, brightness: 0.40, alpha: 1)
-        case (.volcano, .bottom):   return NSColor(hue: 0.03, saturation: 0.80, brightness: 0.55, alpha: 1)
-        case (.space, .line):       return NSColor(hue: 0.72, saturation: 0.70, brightness: 0.70, alpha: 1)
-        case (.space, .top):        return NSColor(hue: 0.66, saturation: 0.45, brightness: 0.40, alpha: 1)
-        case (.space, .bottom):     return NSColor(hue: 0.75, saturation: 0.55, brightness: 0.35, alpha: 1)
-        // 동적 테마들도 메뉴바 미니 차트에선 기본(level 0) 톤으로 표시.
-        case (.aurora, .line):      return NSColor(hue: 0.45, saturation: 0.65, brightness: 0.75, alpha: 1)
-        case (.aurora, .top):       return NSColor(hue: 0.70, saturation: 0.45, brightness: 0.30, alpha: 1)
-        case (.aurora, .bottom):    return NSColor(hue: 0.66, saturation: 0.50, brightness: 0.22, alpha: 1)
-        case (.sakura, .line):      return NSColor(hue: 0.95, saturation: 0.55, brightness: 0.72, alpha: 1)
-        case (.sakura, .top):       return NSColor(hue: 0.95, saturation: 0.22, brightness: 0.62, alpha: 1)
-        case (.sakura, .bottom):    return NSColor(hue: 0.96, saturation: 0.38, brightness: 0.50, alpha: 1)
-        case (.storm, .line):       return NSColor(hue: 0.60, saturation: 0.22, brightness: 0.62, alpha: 1)
-        case (.storm, .top):        return NSColor(hue: 0.62, saturation: 0.15, brightness: 0.42, alpha: 1)
-        case (.storm, .bottom):     return NSColor(hue: 0.62, saturation: 0.12, brightness: 0.30, alpha: 1)
-        case (.toxic, .line):       return NSColor(hue: 0.25, saturation: 0.85, brightness: 0.78, alpha: 1)
-        case (.toxic, .top):        return NSColor(hue: 0.25, saturation: 0.30, brightness: 0.35, alpha: 1)
-        case (.toxic, .bottom):     return NSColor(hue: 0.22, saturation: 0.45, brightness: 0.30, alpha: 1)
-        }
+    /// SwiftUI Color(PetTheme 의 stop/line 색) → device RGB CGColor. opacity 포함.
+    /// 하드코딩 HSB 테이블을 없애고 PetTheme 를 단일 출처로 삼아 메뉴바가 절대 드리프트하지 않도록.
+    private func menuBarCGColor(_ color: Color) -> CGColor {
+        let ns = NSColor(color)
+        return (ns.usingColorSpace(.deviceRGB) ?? ns).cgColor
+    }
+
+    /// 이로치(shiny) variant 색조를 sprite 에 입힌다. in-app `WalkingCat` 의
+    /// `.hueRotation(.degrees(hueDegrees(for:)))` + `.saturation(1.15)` 과 동일한 결과.
+    /// variant == 0 이면 변환 비용 없이 원본을 그대로 돌려준다.
+    private func tintedSprite(_ image: NSImage, variant: Int) -> NSImage {
+        guard variant != 0,
+              let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let cg = bitmap.cgImage else { return image }
+        let angle = Float(WalkingCat.hueDegrees(for: variant) * .pi / 180)
+        let ci = CIImage(cgImage: cg)
+            .applyingFilter("CIHueAdjust", parameters: [kCIInputAngleKey: angle])
+            .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: Float(1.15)])
+        guard let out = menuBarCIContext.createCGImage(ci, from: ci.extent) else { return image }
+        return NSImage(cgImage: out, size: image.size)
     }
 
     /// 점들을 Catmull-Rom 으로 잇는 부드러운 CGPath. tension 0.5 (Centripetal-ish).
