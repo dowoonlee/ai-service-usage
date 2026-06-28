@@ -22,6 +22,10 @@ struct ProfileState: Codable, Sendable {
     /// `card.avatar.kind`에 장착된 RP 코스메틱 이펙트 (`EffectKind.rawValue`). 시상대/보드 펫 렌더용.
     /// 옛 클라이언트 호환 옵셔널 — 미지원 클라는 nil로 디코딩(이펙트 미표시).
     let equippedEffects: [String]?
+    /// [무결성 가드] 클라이언트가 로컬 plist 외부 조작을 자가 탐지했으면 true. 서버는 submit 시
+    /// 이 값이 true면 abuse_flags에 기록(운영자 수동 큐레이션 보조). 옛 클라 호환 옵셔널 — nil/false면
+    /// 정상. casual deterrent라 결정적 치터(클라 패치)는 끌 수 있다.
+    let integrityViolation: Bool?
 
     @MainActor
     static func current(from settings: Settings) -> ProfileState {
@@ -32,7 +36,8 @@ struct ProfileState: Codable, Sendable {
             clearedBadges: Array(settings.clearedBadges),
             completedCollections: Array(settings.completedCollections),
             backup: BackupPayload.current(from: settings),
-            equippedEffects: (settings.equippedEffects[settings.trainerCard.avatar.kind] ?? []).map(\.rawValue)
+            equippedEffects: (settings.equippedEffects[settings.trainerCard.avatar.kind] ?? []).map(\.rawValue),
+            integrityViolation: settings.integrityViolation
         )
     }
 

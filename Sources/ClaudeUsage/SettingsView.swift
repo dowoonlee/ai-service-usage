@@ -581,8 +581,9 @@ private struct RankingSectionView: View {
         state = .registering
         Task { @MainActor in
             do {
-                // 누적값 인정 — register 시 현재 rankingScoreEarnedVP를 initialCoins로 전달
-                // (서버는 점수 의미 무관 opaque 정수). baseline 동일값으로 잡아 다음 delta=0부터 시작.
+                // 신규 등록은 서버 total_coins=0부터 시작(과거 initialCoins 누적 인정 폐기).
+                // baseline = 옵트인 시점 VP 스냅샷 → 이후 submit은 (현재 VP - baseline) 증가분만
+                // 보낸다(zeroBaseline 모드). lastSubmitted=0으로 서버 total과 동기.
                 let currentTotal = settings.rankingScoreEarnedVP
                 let profile = ProfileState.current(from: settings)
                 let resp = try await RankingAPI.shared.register(
@@ -590,7 +591,6 @@ private struct RankingSectionView: View {
                     nickname: nickname,
                     githubLogin: settings.githubLogin,
                     githubUserId: settings.githubUserID,
-                    initialCoins: currentTotal,
                     profileJson: profile
                 )
                 Keychain.saveRankingHmacKey(resp.hmacKey)
@@ -598,7 +598,8 @@ private struct RankingSectionView: View {
                 settings.rankingNickname = resp.nickname
                 settings.rankingRecoveryCode = resp.recoveryCode
                 settings.rankingBaselineCoins = currentTotal
-                settings.rankingLastSubmittedTotal = currentTotal
+                settings.rankingLastSubmittedTotal = 0
+                settings.rankingUsesZeroBaseline = true
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
                 state = .idle
@@ -618,8 +619,14 @@ private struct RankingSectionView: View {
                 settings.rankingDeviceID = resp.deviceId
                 settings.rankingNickname = resp.nickname
                 settings.rankingRecoveryCode = recoveryInput
-                settings.rankingLastSubmittedTotal = resp.totalCoins
+                // 서버가 알려준 계정 모드에 맞춰 baseline을 복원해 over-credit을 막는다.
+                //  · zeroBaseline 계정: 현재 디바이스 VP를 새 baseline으로 잡아 이후 증가분만 제출
+                //    → 서버 total_coins(상대값)와 단위 일치, 직전 구간 중복 적립 없음.
+                //  · 레거시(또는 구버전 서버 nil): 절대 누적 모드 유지(기존 동작).
+                let zeroBaseline = resp.usesZeroBaseline ?? false
+                settings.rankingUsesZeroBaseline = zeroBaseline
                 settings.rankingBaselineCoins = settings.rankingScoreEarnedVP
+                settings.rankingLastSubmittedTotal = resp.totalCoins
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
                 settings.rankingPrivacyAccepted = true
@@ -696,8 +703,14 @@ private struct RankingSectionView: View {
                 Keychain.saveRankingHmacKey(resp.hmacKey)
                 settings.rankingDeviceID = resp.deviceId
                 settings.rankingNickname = resp.nickname
-                settings.rankingLastSubmittedTotal = resp.totalCoins
+                // 서버가 알려준 계정 모드에 맞춰 baseline을 복원해 over-credit을 막는다.
+                //  · zeroBaseline 계정: 현재 디바이스 VP를 새 baseline으로 잡아 이후 증가분만 제출
+                //    → 서버 total_coins(상대값)와 단위 일치, 직전 구간 중복 적립 없음.
+                //  · 레거시(또는 구버전 서버 nil): 절대 누적 모드 유지(기존 동작).
+                let zeroBaseline = resp.usesZeroBaseline ?? false
+                settings.rankingUsesZeroBaseline = zeroBaseline
                 settings.rankingBaselineCoins = settings.rankingScoreEarnedVP
+                settings.rankingLastSubmittedTotal = resp.totalCoins
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
                 settings.rankingPrivacyAccepted = true

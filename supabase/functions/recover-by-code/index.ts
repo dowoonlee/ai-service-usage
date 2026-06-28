@@ -37,7 +37,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, nickname, total_coins, status, profile_json")
+    .select("device_id, nickname, total_coins, status, profile_json, uses_zero_baseline")
     .eq("recovery_code_hash", hash)
     .single();
 
@@ -62,5 +62,7 @@ Deno.serve(async (req: Request) => {
     nickname: user.nickname,
     totalCoins: user.total_coins,
     profileJson: user.profile_json,
+    // 클라가 baseline 계산 모드를 맞춰 over-credit을 막는다. 구버전 클라는 이 필드 무시.
+    usesZeroBaseline: user.uses_zero_baseline ?? false,
   });
 });
