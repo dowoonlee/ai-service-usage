@@ -511,8 +511,8 @@ final class ViewModel: ObservableObject {
 
     /// 랭킹 서버에 누적 VP delta 제출 + 프로필 동기화. fire-and-forget — 실패해도 본 폴링
     /// 루프에 영향 없음. 옵트인 + 등록 + HMAC 키 + Supabase 설정 모두 갖춰진 경우에만 실제 호출.
-    /// delta = `rankingScoreEarnedVP` - `rankingLastSubmittedTotal`. 0 이하면 skip (profile은
-    /// 다음 VP 적립 cycle에 piggy-back되어 동기화).
+    /// delta = `rankingSubmittableTotal` - `rankingLastSubmittedTotal` (둘 다 모드별 동일 단위).
+    /// 0 이하면 skip (profile은 다음 VP 적립 cycle에 piggy-back되어 동기화).
     /// 랭킹 기능 4개 전제(enabled / registered / deviceID / Supabase 설정) 동시 충족 여부.
     /// 3곳에서 같은 가드를 반복하던 것을 1곳으로 모음 — 새 조건 추가 시 누락 위험 제거.
     private var hasRankingPrerequisites: Bool {
@@ -525,7 +525,10 @@ final class ViewModel: ObservableObject {
         let s = Settings.shared
         guard hasRankingPrerequisites,
               let hmacKey = Keychain.loadRankingHmacKey() else { return }
-        let total = s.rankingScoreEarnedVP
+        // 제출 단위 total은 모드별 단일 소스(Settings.rankingSubmittableTotal)에서 — zeroBaseline은
+        // baseline 이후 증가분, 레거시는 절대 VP. lastSubmittedTotal도 같은 단위로 갱신/동기되므로
+        // (재개·recover 포함) delta 계산이 단위 정합.
+        let total = s.rankingSubmittableTotal
         let delta = total - s.rankingLastSubmittedTotal
         guard delta > 0 else { return }
         let profile = ProfileState.current(from: s)

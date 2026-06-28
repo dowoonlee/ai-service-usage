@@ -1,0 +1,13 @@
+-- 계정의 랭킹 점수 누적 모드 플래그.
+--
+-- 배경: initialCoins 폐기(20260626) 이후 등록한 계정은 total_coins가 "옵트인 baseline 이후
+-- 증가분"만 담는 상대값이다. 반면 그 이전 등록한 레거시 계정은 절대 누적값(initialCoins로
+-- 한방 인정받은 값 포함)이다. 두 모드는 단위가 다르다.
+--
+-- recover(새 디바이스 복구) 시 클라이언트가 모드를 알아야 baseline 계산을 맞춰 over-credit을
+-- 막을 수 있다. 서버가 모드를 권위 있게 보관하고 recover 응답에 실어 보낸다.
+--
+--   FALSE = 레거시 절대 누적 모드(기존 행 default). recover 후 클라는 절대 모드 유지.
+--   TRUE  = zeroBaseline 상대 모드(폐기 이후 register). recover 후 클라는 현재 디바이스 VP를
+--           새 baseline으로 잡아 증가분만 제출 → 단위 일치, over-credit 없음.
+ALTER TABLE users ADD COLUMN uses_zero_baseline BOOLEAN NOT NULL DEFAULT FALSE;

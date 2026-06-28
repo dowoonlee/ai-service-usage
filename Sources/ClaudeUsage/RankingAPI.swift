@@ -55,9 +55,8 @@ actor RankingAPI {
         let nickname: String
         let githubLogin: String?
         let githubUserId: Int?
-        /// 옵트인 시점의 `coinsTotalEarned`. 서버는 그대로 total_coins로 저장 (누적값 인정).
-        /// 1M cap (서버측).
-        let initialCoins: Int?
+        // initialCoins 폐기 — 신규 등록은 항상 서버 total_coins=0부터. 과거 누적값 한방 인정이
+        // submit cap을 우회하는 farming 통로였음. 옵트인 이후 사용량만 submitDelta로 누적.
         let profileJson: ProfileState?
     }
     struct RegisterResponse: Decodable {
@@ -299,6 +298,10 @@ actor RankingAPI {
         /// 백업 복원용 — `ProfileState.backup`에 펫 인벤토리·코인 잔액·설정이 들어있음.
         /// 옛 서버 또는 등록 시점에 아직 profileJson을 안 보낸 사용자는 nil.
         let profileJson: ProfileState?
+        /// 계정의 랭킹 점수 모드. true면 zeroBaseline 계정(서버 total_coins = baseline 이후 증가분)
+        /// → 클라가 현재 VP를 새 baseline으로 잡아야 over-credit 안 남. 구버전 서버는 nil → 레거시
+        /// 절대 모드로 처리(안전). 자세한 분기는 SettingsView recover 흐름 참조.
+        let usesZeroBaseline: Bool?
     }
 
     // MARK: - Errors
@@ -342,10 +345,10 @@ actor RankingAPI {
     /// 닉네임 중복 시 `.nicknameTaken` throw — 호출 측이 다른 닉네임으로 재시도.
     func register(deviceId: String, nickname: String,
                   githubLogin: String?, githubUserId: Int?,
-                  initialCoins: Int?, profileJson: ProfileState?) async throws -> RegisterResponse {
+                  profileJson: ProfileState?) async throws -> RegisterResponse {
         let req = RegisterRequest(deviceId: deviceId, nickname: nickname,
                                   githubLogin: githubLogin, githubUserId: githubUserId,
-                                  initialCoins: initialCoins, profileJson: profileJson)
+                                  profileJson: profileJson)
         return try await post(path: "register", body: req)
     }
 

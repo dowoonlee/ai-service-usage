@@ -126,19 +126,26 @@ final class Settings: ObservableObject {
 
     /// 가챠 화폐 잔액. CoinLedger가 사용량 기반으로 적립.
     @Published var coins: Int {
-        didSet { UserDefaults.standard.set(coins, forKey: Keys.coins) }
+        didSet { UserDefaults.standard.set(coins, forKey: Keys.coins); recordIntegrityChecksum() }
     }
     /// 무료 가챠권 잔여 매수. 첫 실행 시 1장 지급.
     @Published var gachaTickets: Int {
-        didSet { UserDefaults.standard.set(gachaTickets, forKey: Keys.gachaTickets) }
+        didSet { UserDefaults.standard.set(gachaTickets, forKey: Keys.gachaTickets); recordIntegrityChecksum() }
     }
     /// RP 프리미엄 가챠권 보유 수 — `[mythic+legendary]` 제한 풀 1뽑용. RP로만 구매(코인/일반티켓과 별개).
     @Published var premiumTickets: Int {
-        didSet { UserDefaults.standard.set(premiumTickets, forKey: Keys.premiumTickets) }
+        didSet { UserDefaults.standard.set(premiumTickets, forKey: Keys.premiumTickets); recordIntegrityChecksum() }
     }
     /// 펫 종별 보유 상태 (count + unlockedVariants).
     @Published var ownedPets: [PetKind: PetOwnership] {
-        didSet { persist(ownedPets, forKey: Keys.ownedPets) }
+        didSet { persist(ownedPets, forKey: Keys.ownedPets); recordIntegrityChecksum() }
+    }
+    /// [무결성 가드 — 탐지 전용] 로컬 plist가 앱 외부에서(`defaults write` 등) 조작된 흔적이
+    /// 감지되면 true. 데이터는 절대 수정하지 않으며, 랭킹 제출 시 서버 abuse_flags로 보고하는
+    /// 데만 쓴다. 한 번 켜지면 영속 — 정상 사용자는 didSet이 항상 체크섬을 갱신하므로 켜지지
+    /// 않는다. 계산은 `IntegrityGuard` 참조.
+    @Published var integrityViolation: Bool {
+        didSet { UserDefaults.standard.set(integrityViolation, forKey: Keys.integrityViolation) }
     }
     /// 펫 종별 누적 사용 시간 (초). `petClaudeKind`/`petCursorKind`로 선택된 종에 polling tick마다
     /// 실시간 누적 — 더블카운트 (양쪽 차트가 같은 종이면 1tick에 2배).
@@ -245,7 +252,7 @@ final class Settings: ObservableObject {
     }
     /// 누적 적립한 코인 총량 (소비 무시). 평균 일일 적립 계산용.
     @Published var coinsTotalEarned: Int {
-        didSet { UserDefaults.standard.set(coinsTotalEarned, forKey: Keys.coinsTotalEarned) }
+        didSet { UserDefaults.standard.set(coinsTotalEarned, forKey: Keys.coinsTotalEarned); recordIntegrityChecksum() }
     }
     /// 첫 적립 시각. 평균 일일 적립의 분모(경과 일수) 계산.
     @Published var firstCreditedAt: Date? {
@@ -459,6 +466,23 @@ final class Settings: ObservableObject {
     @Published var rankingLastSubmittedTotal: Int {
         didSet { UserDefaults.standard.set(rankingLastSubmittedTotal, forKey: Keys.rankingLastSubmittedTotal) }
     }
+    /// [어뷰징 방어] 신규 등록자는 baseline(옵트인 시점 VP) 이후 증가분만 서버에 제출한다.
+    /// 과거 register가 클라이언트 누적값(initialCoins)을 한방에 인정하던 farming 통로를 막은 뒤
+    /// 도입 — 서버는 항상 total_coins=0부터 시작하므로 클라도 0 기준으로 delta를 계산해야 한다.
+    /// 기존(레거시) 등록자는 false로 남아 `rankingScoreEarnedVP` 절대 누적 기준 제출을 유지 →
+    /// 서버 total_coins와의 동기가 깨지지 않아 완전 무영향. true면 ViewModel.submit이 baseline 차감.
+    @Published var rankingUsesZeroBaseline: Bool {
+        didSet { UserDefaults.standard.set(rankingUsesZeroBaseline, forKey: Keys.rankingUsesZeroBaseline) }
+    }
+    /// 현재 "서버 제출 단위"의 누적 total — `rankingLastSubmittedTotal`과 반드시 같은 단위다.
+    /// zeroBaseline 계정은 baseline 이후 증가분(서버 total_coins와 동일 단위), 레거시는 절대 VP.
+    /// submit delta 계산·일시정지 재개·recover 동기화가 모두 이 값을 단일 소스로 써야 단위가
+    /// 어긋나지 않는다(어긋나면 제출이 장기 정지하거나 점수가 누락됨).
+    var rankingSubmittableTotal: Int {
+        rankingUsesZeroBaseline
+            ? max(0, rankingScoreEarnedVP - rankingBaselineCoins)
+            : rankingScoreEarnedVP
+    }
     /// 마지막 성공 제출 시각. 시간 비례 캡 계산(서버측) + UI 표시용.
     @Published var rankingLastSubmittedAt: Date? {
         didSet { UserDefaults.standard.set(rankingLastSubmittedAt, forKey: Keys.rankingLastSubmittedAt) }
@@ -476,7 +500,7 @@ final class Settings: ObservableObject {
     /// 1 VP = 1 cent (= $0.01) 등가. VPLedger가 UsageEvent 받을 때마다 plan price 기반 환산해
     /// 누적. coinsTotalEarned (가챠 코인 누적)과 별도. 보드 제출의 source-of-truth.
     @Published var rankingScoreEarnedVP: Int {
-        didSet { UserDefaults.standard.set(rankingScoreEarnedVP, forKey: Keys.rankingScoreEarnedVP) }
+        didSet { UserDefaults.standard.set(rankingScoreEarnedVP, forKey: Keys.rankingScoreEarnedVP); recordIntegrityChecksum() }
     }
     /// VP 절단 손실 carry — `pureValue × vpFactor`가 소수일 때 누적 보존용.
     @Published var rankingScoreFractionVP: Double {
@@ -574,6 +598,7 @@ final class Settings: ObservableObject {
         self.coins = (d.object(forKey: Keys.coins) as? Int) ?? 0
         self.gachaTickets = (d.object(forKey: Keys.gachaTickets) as? Int) ?? 0
         self.premiumTickets = (d.object(forKey: Keys.premiumTickets) as? Int) ?? 0
+        self.integrityViolation = d.bool(forKey: Keys.integrityViolation)
         let ownedData = d.data(forKey: Keys.ownedPets)
         self.ownedPets = (ownedData.flatMap { try? JSONDecoder().decode([PetKind: PetOwnership].self, from: $0) }) ?? [:]
         let usageData = d.data(forKey: Keys.petUsageSeconds)
@@ -636,6 +661,8 @@ final class Settings: ObservableObject {
         }
         self.rankingBaselineCoins      = (d.object(forKey: Keys.rankingBaselineCoins) as? Int) ?? 0
         self.rankingLastSubmittedTotal = (d.object(forKey: Keys.rankingLastSubmittedTotal) as? Int) ?? 0
+        // 기존 등록 사용자는 키 부재 → false(레거시 절대 누적 모드) → 무영향. 신규 등록 시 true.
+        self.rankingUsesZeroBaseline   = (d.object(forKey: Keys.rankingUsesZeroBaseline) as? Bool) ?? false
         self.rankingLastSubmittedAt    = d.object(forKey: Keys.rankingLastSubmittedAt) as? Date
         self.rankingRegistered         = (d.object(forKey: Keys.rankingRegistered) as? Bool) ?? false
         self.rankingPrivacyAccepted    = (d.object(forKey: Keys.rankingPrivacyAccepted) as? Bool) ?? false
@@ -820,6 +847,49 @@ final class Settings: ObservableObject {
 
         // 도장 마이그레이션은 init 안에서 호출 금지 — `BadgeRegistry.evaluate`가 `Settings.shared`를
         // 재진입해서 lazy init이 깨짐. App 시작 후 `applyGymMigrationIfNeeded()`에서 처리.
+
+        // 무결성 검증은 모든 init 마이그레이션이 끝난 뒤 1회 — migration의 정상 변경을 조작으로
+        // 오탐하지 않도록 마지막에 둔다. 탐지만 하고 데이터는 건드리지 않는다.
+        verifyIntegrity()
+    }
+
+    // MARK: - 무결성 가드 (탐지 전용)
+
+    /// 핵심 로컬 상태(coins·펫·티켓·VP)의 무결성 체크섬을 현재 값 기준으로 재기록. 핵심값 didSet
+    /// 에서 호출돼 앱 내 정상 변경은 항상 최신 체크섬을 유지한다(크래시 false positive 최소화).
+    /// 데이터는 절대 수정하지 않는다. init 중에는 didSet이 안 돌아 호출되지 않으며, init 끝
+    /// `verifyIntegrity()`가 최초 체크섬을 기록한다.
+    func recordIntegrityChecksum() {
+        let key = Keychain.loadOrCreateIntegrityKey()
+        let serialized = ownedPets.keys.map { $0.rawValue }.sorted().joined(separator: ",")
+        guard let cs = IntegrityGuard.checksum(
+            coins: coins, coinsTotalEarned: coinsTotalEarned,
+            gachaTickets: gachaTickets, premiumTickets: premiumTickets,
+            rankingScoreEarnedVP: rankingScoreEarnedVP,
+            ownedPetsSerialized: serialized, keyBase64: key) else { return }
+        UserDefaults.standard.set(cs, forKey: Keys.integrityChecksum)
+    }
+
+    /// 시작 시 1회 — 저장된 체크섬과 현재 값을 비교해 앱 외부 조작을 탐지. 데이터는 수정하지
+    /// 않는다. 최초 실행(체크섬 부재)은 현재 상태를 신뢰하고 기록 → 도입 이전 조작은 소급 불가.
+    /// 탐지되면 `integrityViolation`을 영속 set(랭킹 제출 시 서버 보고). 정상 사용자는 didSet이
+    /// 항상 체크섬을 갱신하므로 켜지지 않는다.
+    func verifyIntegrity() {
+        let key = Keychain.loadOrCreateIntegrityKey()
+        let serialized = ownedPets.keys.map { $0.rawValue }.sorted().joined(separator: ",")
+        guard let current = IntegrityGuard.checksum(
+            coins: coins, coinsTotalEarned: coinsTotalEarned,
+            gachaTickets: gachaTickets, premiumTickets: premiumTickets,
+            rankingScoreEarnedVP: rankingScoreEarnedVP,
+            ownedPetsSerialized: serialized, keyBase64: key) else { return }
+        guard let stored = UserDefaults.standard.string(forKey: Keys.integrityChecksum) else {
+            UserDefaults.standard.set(current, forKey: Keys.integrityChecksum)  // 최초 — 신뢰하고 기록
+            return
+        }
+        if stored != current && !integrityViolation {
+            integrityViolation = true
+            DebugLog.log("IntegrityGuard: 로컬 상태 체크섬 불일치 — 외부 조작 흔적 감지")
+        }
     }
 
     /// 도장 (Gym Badges) 마이그레이션 — Stash·Dependency만 소급, 나머지 6 카테고리는 0부터.
@@ -1005,6 +1075,7 @@ final class Settings: ObservableObject {
         rankingLastSubmittedAt = nil
         rankingRegistered = false
         rankingPrivacyAccepted = false
+        rankingUsesZeroBaseline = false
     }
 
     /// 새 디바이스 복구 직후 서버에서 받은 backup payload를 로컬 상태에 적용.
@@ -1141,6 +1212,9 @@ final class Settings: ObservableObject {
         static let gachaTickets                = "settings.gachaTickets"
         static let premiumTickets              = "settings.premiumTickets"
         static let ownedPets                   = "settings.ownedPets"
+        // 무결성 가드 (탐지 전용)
+        static let integrityChecksum           = "settings.integrityChecksum"
+        static let integrityViolation          = "settings.integrityViolation"
         static let petClaudeVariant            = "settings.petClaudeVariant"
         static let petCursorVariant            = "settings.petCursorVariant"
         static let petClaudeParty              = "settings.petClaudeParty"
@@ -1189,6 +1263,7 @@ final class Settings: ObservableObject {
         static let rankingRecoveryCode         = "settings.rankingRecoveryCode"
         static let rankingBaselineCoins        = "settings.rankingBaselineCoins"
         static let rankingLastSubmittedTotal   = "settings.rankingLastSubmittedTotal"
+        static let rankingUsesZeroBaseline     = "settings.rankingUsesZeroBaseline"
         static let rankingLastSubmittedAt      = "settings.rankingLastSubmittedAt"
         static let rankingRegistered           = "settings.rankingRegistered"
         static let rankingPrivacyAccepted      = "settings.rankingPrivacyAccepted"

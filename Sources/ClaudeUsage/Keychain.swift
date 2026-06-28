@@ -13,6 +13,9 @@ enum Keychain {
     // 랭킹 서버가 register 시 발급한 복구 코드 (XXXX-XXXX-XXXX). 분실 시 GitHub 연동과 함께
     // 계정 복구 수단으로 사용. v0.8.10부터 UserDefaults → Keychain으로 저장소 이동.
     static let rankingRecoveryCodeAccount = "rankingRecoveryCode"
+    // 로컬 상태(coins/펫 등) 무결성 체크섬용 per-install 키. plist 외부(Keychain)에 둬야
+    // `defaults write` 조작으로 올바른 체크섬을 재생성할 수 없다. 최초 1회 생성 후 고정.
+    static let integrityKeyAccount = "integrityKey"
 
     // MARK: - Claude session (legacy API, 인자 없음)
 
@@ -55,6 +58,26 @@ enum Keychain {
     }
     static func loadRecoveryCode() -> String? { loadItem(account: rankingRecoveryCodeAccount) }
     static func clearRecoveryCode() { clearItem(account: rankingRecoveryCodeAccount) }
+
+    // MARK: - 무결성 체크섬 키
+    //
+    // hmac 키와 동일하게 in-memory 캐시 — Settings의 핵심값 didSet마다 접근하므로 ad-hoc 서명
+    // 환경에서 prompt 폭주를 막으려면 process당 1회로 축소해야 한다.
+
+    private static let integrityKeyCache = CachedItem(account: integrityKeyAccount)
+    /// 없으면 base64(32 random bytes)를 생성·저장해 반환. 생성 실패해도 빈 문자열은 반환하지 않음.
+    static func loadOrCreateIntegrityKey() -> String {
+        if let existing = integrityKeyCache.load() { return existing }
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        guard status == errSecSuccess else {
+            // 난수 생성 실패(극히 드묾) — 호출 측이 체크섬을 건너뛰도록 빈 문자열.
+            return ""
+        }
+        let key = Data(bytes).base64EncodedString()
+        integrityKeyCache.save(key)
+        return key
+    }
 
     // MARK: - 내부 공통
 

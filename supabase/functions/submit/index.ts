@@ -42,6 +42,25 @@ function sanitizeVersion(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 && v.length <= 64 ? v : undefined;
 }
 
+// 프로필 위조 sanity. profileJson은 opaque 표시용이고 내용 진실성은 서버가 검증 불가다
+// (클라 자가신고 + 사용량 서버 재계산 불가). 순위/보상은 total_coins(HMAC submit으로만 증가)
+// 로만 산정하므로 프로필 위조의 피해는 "보드에 가짜 카드 노출"로 제한된다. 다만 배열 길이가
+// 절대 상한을 넘는 명백한 오염/blob 폭주는 abuse_flags로 기록한다(저장은 막지 않음 — 표시
+// 데이터라 차단 무의미). 상한은 실제 최대치(컬렉션 11, 뱃지 카테고리×티어)보다 넉넉히 둬
+// false positive를 0으로 만든다.
+const PROFILE_MAX_COLLECTIONS = 30;
+const PROFILE_MAX_BADGES = 80;
+
+function profileArrayOverflow(profile: unknown): { field: string; len: number } | null {
+  if (!profile || typeof profile !== "object") return null;
+  const p = profile as Record<string, unknown>;
+  const cols = Array.isArray(p.completedCollections) ? p.completedCollections.length : 0;
+  if (cols > PROFILE_MAX_COLLECTIONS) return { field: "completedCollections", len: cols };
+  const badges = Array.isArray(p.clearedBadges) ? p.clearedBadges.length : 0;
+  if (badges > PROFILE_MAX_BADGES) return { field: "clearedBadges", len: badges };
+  return null;
+}
+
 // ts 허용 윈도우. 클라이언트 시계가 60분 이상 어긋난 경우만 reject.
 const MAX_CLOCK_SKEW_SEC = 3600;
 
@@ -146,6 +165,35 @@ Deno.serve(async (req: Request) => {
   }
   if (body.profileJson !== undefined) {
     updates.profile_json = body.profileJson;
+    // 명백한 배열 오염만 flag — 내용 진실성(범위 내 거짓)은 검증 불가, 보상 미연동으로 피해 제한.
+    const overflow = profileArrayOverflow(body.profileJson);
+    if (overflow) {
+      await db.from("abuse_flags").insert({
+        device_id: p.deviceId,
+        reason: "profile_array_overflow",
+        details: { field: overflow.field, length: overflow.len },
+      });
+    }
+    // 클라이언트가 로컬 plist 외부 조작을 자가 탐지(integrityViolation)했으면 flag. casual
+    // deterrent — 클라 패치로 끌 수 있으나 defaults write만 한 조작자는 그대로 보고된다.
+    // 매 submit마다 true가 오므로 24h 1회로 dedup(abuse_flags 폭주 방지).
+    const prof = body.profileJson as Record<string, unknown> | null;
+    if (prof && typeof prof === "object" && prof.integrityViolation === true) {
+      const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      const { count } = await db
+        .from("abuse_flags")
+        .select("id", { count: "exact", head: true })
+        .eq("device_id", p.deviceId)
+        .eq("reason", "local_integrity_violation")
+        .gte("flagged_at", since);
+      if ((count ?? 0) === 0) {
+        await db.from("abuse_flags").insert({
+          device_id: p.deviceId,
+          reason: "local_integrity_violation",
+          details: { source: "client_self_report" },
+        });
+      }
+    }
   }
   // 버전 텔레메트리 — accept/reject 무관하게 들어온 값이 유효하면 갱신 (현재 버전 추적이 목적).
   const appVersion = sanitizeVersion(body.appVersion);
