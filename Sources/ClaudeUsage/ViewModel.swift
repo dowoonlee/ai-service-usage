@@ -525,12 +525,10 @@ final class ViewModel: ObservableObject {
         let s = Settings.shared
         guard hasRankingPrerequisites,
               let hmacKey = Keychain.loadRankingHmacKey() else { return }
-        // zeroBaseline 모드(신규 등록자, v0.x~): 서버 total_coins=0부터 시작하므로 baseline(옵트인
-        // 시점 VP) 이후 증가분만 누적해야 서버 total과 동기가 맞는다. 레거시 등록자(false)는 과거처럼
-        // 절대 누적(rankingScoreEarnedVP) 기준 — 그들의 서버 total은 이미 절대값이라 무영향.
-        let total = s.rankingUsesZeroBaseline
-            ? max(0, s.rankingScoreEarnedVP - s.rankingBaselineCoins)
-            : s.rankingScoreEarnedVP
+        // 제출 단위 total은 모드별 단일 소스(Settings.rankingSubmittableTotal)에서 — zeroBaseline은
+        // baseline 이후 증가분, 레거시는 절대 VP. lastSubmittedTotal도 같은 단위로 갱신/동기되므로
+        // (재개·recover 포함) delta 계산이 단위 정합.
+        let total = s.rankingSubmittableTotal
         let delta = total - s.rankingLastSubmittedTotal
         guard delta > 0 else { return }
         let profile = ProfileState.current(from: s)

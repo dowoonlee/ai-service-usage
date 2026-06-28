@@ -474,6 +474,15 @@ final class Settings: ObservableObject {
     @Published var rankingUsesZeroBaseline: Bool {
         didSet { UserDefaults.standard.set(rankingUsesZeroBaseline, forKey: Keys.rankingUsesZeroBaseline) }
     }
+    /// 현재 "서버 제출 단위"의 누적 total — `rankingLastSubmittedTotal`과 반드시 같은 단위다.
+    /// zeroBaseline 계정은 baseline 이후 증가분(서버 total_coins와 동일 단위), 레거시는 절대 VP.
+    /// submit delta 계산·일시정지 재개·recover 동기화가 모두 이 값을 단일 소스로 써야 단위가
+    /// 어긋나지 않는다(어긋나면 제출이 장기 정지하거나 점수가 누락됨).
+    var rankingSubmittableTotal: Int {
+        rankingUsesZeroBaseline
+            ? max(0, rankingScoreEarnedVP - rankingBaselineCoins)
+            : rankingScoreEarnedVP
+    }
     /// 마지막 성공 제출 시각. 시간 비례 캡 계산(서버측) + UI 표시용.
     @Published var rankingLastSubmittedAt: Date? {
         didSet { UserDefaults.standard.set(rankingLastSubmittedAt, forKey: Keys.rankingLastSubmittedAt) }

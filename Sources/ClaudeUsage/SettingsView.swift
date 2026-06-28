@@ -444,7 +444,9 @@ private struct RankingSectionView: View {
             set: { newValue in
                 if newValue {
                     // OFF→ON: 일시 중지 동안 누적된 delta를 rebase. 한 번에 큰 값 제출 회피.
-                    settings.rankingLastSubmittedTotal = settings.rankingScoreEarnedVP
+                    // 제출 단위 단일 소스로 맞춘다 — 절대 VP로 잡으면 zeroBaseline 계정은 delta가
+                    // 음수가 돼 baseline 차액만큼 점수가 누락된다.
+                    settings.rankingLastSubmittedTotal = settings.rankingSubmittableTotal
                 }
                 settings.rankingEnabled = newValue
             }
@@ -619,13 +621,17 @@ private struct RankingSectionView: View {
                 settings.rankingDeviceID = resp.deviceId
                 settings.rankingNickname = resp.nickname
                 settings.rankingRecoveryCode = recoveryInput
-                // 서버가 알려준 계정 모드에 맞춰 baseline을 복원해 over-credit을 막는다.
-                //  · zeroBaseline 계정: 현재 디바이스 VP를 새 baseline으로 잡아 이후 증가분만 제출
-                //    → 서버 total_coins(상대값)와 단위 일치, 직전 구간 중복 적립 없음.
-                //  · 레거시(또는 구버전 서버 nil): 절대 누적 모드 유지(기존 동작).
+                // 서버가 알려준 계정 모드에 맞춰 baseline을 복원해 단위 불일치를 막는다.
+                //  · zeroBaseline 계정: baseline = VP - 서버 totalCoins 로 역산 → 복구 직후
+                //    rankingSubmittableTotal(= VP - baseline) == totalCoins == lastSubmittedTotal
+                //    이 되어 delta=0에서 재개, 이후 증가분만 제출(중복/누락 없음). VP가 totalCoins
+                //    보다 작으면 baseline 음수 → 새 디바이스에서도 서버 누적분 위에 정확히 쌓인다.
+                //  · 레거시(또는 구버전 서버 nil): 절대 누적 모드 유지. baseline 미사용이라 관례상 VP.
                 let zeroBaseline = resp.usesZeroBaseline ?? false
                 settings.rankingUsesZeroBaseline = zeroBaseline
-                settings.rankingBaselineCoins = settings.rankingScoreEarnedVP
+                settings.rankingBaselineCoins = zeroBaseline
+                    ? settings.rankingScoreEarnedVP - resp.totalCoins
+                    : settings.rankingScoreEarnedVP
                 settings.rankingLastSubmittedTotal = resp.totalCoins
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
@@ -703,13 +709,17 @@ private struct RankingSectionView: View {
                 Keychain.saveRankingHmacKey(resp.hmacKey)
                 settings.rankingDeviceID = resp.deviceId
                 settings.rankingNickname = resp.nickname
-                // 서버가 알려준 계정 모드에 맞춰 baseline을 복원해 over-credit을 막는다.
-                //  · zeroBaseline 계정: 현재 디바이스 VP를 새 baseline으로 잡아 이후 증가분만 제출
-                //    → 서버 total_coins(상대값)와 단위 일치, 직전 구간 중복 적립 없음.
-                //  · 레거시(또는 구버전 서버 nil): 절대 누적 모드 유지(기존 동작).
+                // 서버가 알려준 계정 모드에 맞춰 baseline을 복원해 단위 불일치를 막는다.
+                //  · zeroBaseline 계정: baseline = VP - 서버 totalCoins 로 역산 → 복구 직후
+                //    rankingSubmittableTotal(= VP - baseline) == totalCoins == lastSubmittedTotal
+                //    이 되어 delta=0에서 재개, 이후 증가분만 제출(중복/누락 없음). VP가 totalCoins
+                //    보다 작으면 baseline 음수 → 새 디바이스에서도 서버 누적분 위에 정확히 쌓인다.
+                //  · 레거시(또는 구버전 서버 nil): 절대 누적 모드 유지. baseline 미사용이라 관례상 VP.
                 let zeroBaseline = resp.usesZeroBaseline ?? false
                 settings.rankingUsesZeroBaseline = zeroBaseline
-                settings.rankingBaselineCoins = settings.rankingScoreEarnedVP
+                settings.rankingBaselineCoins = zeroBaseline
+                    ? settings.rankingScoreEarnedVP - resp.totalCoins
+                    : settings.rankingScoreEarnedVP
                 settings.rankingLastSubmittedTotal = resp.totalCoins
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
