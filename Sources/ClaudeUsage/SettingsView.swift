@@ -759,6 +759,7 @@ private struct CreditsView: View {
     @ObservedObject var settings = Settings.shared
     @State private var showCoffeeAlert = false
     @State private var coffeeJustGranted = false
+    @State private var creditsExpanded = false
 
     private struct Pack: Identifiable {
         let id = UUID()
@@ -815,36 +816,53 @@ private struct CreditsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("에셋 크레딧")
-                .font(.system(size: 11, weight: .semibold))
-            ForEach(packs) { p in
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) { creditsExpanded.toggle() }
+            } label: {
                 HStack(spacing: 6) {
-                    Text(p.name)
-                        .font(.system(size: 11))
-                    Text("· \(p.author)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(p.license)
+                    Text("에셋 크레딧")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("(\(packs.count))")
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
-                    Button {
-                        if let u = URL(string: p.url) { NSWorkspace.shared.open(u) }
-                    } label: {
-                        Image(systemName: "arrow.up.right.square")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.borderless)
-                    .help(p.url)
+                    Spacer()
+                    Image(systemName: creditsExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
+                .contentShape(Rectangle())
             }
-            Divider().padding(.vertical, 2)
-            Text("자동 업데이트는 Sparkle (MIT 라이선스)을 사용합니다.")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
-            Text("CC-BY / CC-BY-SA 에셋은 출처·저작자 표기 의무를 지킵니다. (Pixel Frog·Intersect 등)")
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
+            .buttonStyle(.plain)
+
+            if creditsExpanded {
+                ForEach(packs) { p in
+                    HStack(spacing: 6) {
+                        Text(p.name)
+                            .font(.system(size: 11))
+                        Text("· \(p.author)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(p.license)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                        Button {
+                            if let u = URL(string: p.url) { NSWorkspace.shared.open(u) }
+                        } label: {
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.borderless)
+                        .help(p.url)
+                    }
+                }
+                Text("자동 업데이트는 Sparkle (MIT 라이선스)을 사용합니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                Text("CC-BY / CC-BY-SA 에셋은 출처·저작자 표기 의무를 지킵니다. (Pixel Frog·Intersect 등)")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
 
             Divider().padding(.vertical, 4)
             // Buy me a coffee — 후원 대신 "마음만 받을게요" 답례로 1회 보상을 드린다.
