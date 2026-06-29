@@ -202,7 +202,7 @@ struct TrainerCardView: View {
         }
         .frame(width: 110, height: 110)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: AppRadius.xl)
                 .fill(.black.opacity(0.22))
         )
     }

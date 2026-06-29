@@ -235,7 +235,7 @@ struct DailyFortuneView: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: AppRadius.md)
                 .fill(AppColors.gold.opacity(0.10))
         )
     }
@@ -272,7 +272,7 @@ struct DailyFortuneView: View {
                     .foregroundStyle(.white)
                     .padding(8)
                     .background(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: AppRadius.lg)
                             .fill(Color.white.opacity(0.12))
                     )
             }

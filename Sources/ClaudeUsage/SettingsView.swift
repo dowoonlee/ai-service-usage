@@ -864,8 +864,8 @@ private struct CreditsView: View {
                 .padding(.vertical, 6)
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity)
-                .background(RoundedRectangle(cornerRadius: 8).fill(AppColors.gold.opacity(0.18)))
-                .overlay(RoundedRectangle(cornerRadius: 8)
+                .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(AppColors.gold.opacity(0.18)))
+                .overlay(RoundedRectangle(cornerRadius: AppRadius.lg)
                     .strokeBorder(AppColors.gold.opacity(0.5), lineWidth: 1))
                 .contentShape(Rectangle())
             }

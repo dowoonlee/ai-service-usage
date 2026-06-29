@@ -17,9 +17,9 @@ struct GymView: View {
             header
             WorldMapView(selected: $selectedRegion)
                 .frame(height: 220)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: AppRadius.lg)
                         .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
                 )
             gymLeaderSection
@@ -87,11 +87,11 @@ struct GymView: View {
                     .padding(.trailing, 10)
                     .padding(.vertical, 6)
                     .background(
-                        SpeechBubble(tailWidth: 8, tailHeight: 6, cornerRadius: 8)
+                        SpeechBubble(tailWidth: 8, tailHeight: 6, cornerRadius: AppRadius.lg)
                             .fill(Color.white)
                     )
                     .overlay(
-                        SpeechBubble(tailWidth: 8, tailHeight: 6, cornerRadius: 8)
+                        SpeechBubble(tailWidth: 8, tailHeight: 6, cornerRadius: AppRadius.lg)
                             .stroke(Color.black.opacity(0.4), lineWidth: 0.8)
                     )
             }
@@ -208,10 +208,10 @@ struct GymView: View {
         let isHovered = (hoveredKey == id.key)
 
         return ZStack {
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: AppRadius.md)
                 .fill(Color(NSColor.controlBackgroundColor).opacity(isHovered ? 0.55 : 0.30))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: AppRadius.md)
                         .stroke(strokeColor.opacity(cleared ? 0.85 : 0.4),
                                 lineWidth: Self.strokeWidth(for: tier))
                 )
