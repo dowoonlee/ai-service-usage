@@ -59,11 +59,11 @@ struct PetEffectShelf: View {
             .foregroundStyle(tint)
             .frame(width: 40, height: 34)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: AppRadius.md)
                     .fill(equipped ? Color.green.opacity(0.18) : Color.secondary.opacity(0.08))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: AppRadius.md)
                     .strokeBorder(equipped ? Color.green.opacity(0.6) : Color.clear, lineWidth: 1)
             )
             .opacity(owned || affordable ? 1.0 : 0.4)

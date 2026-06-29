@@ -88,12 +88,12 @@ struct PartyView: View {
             if canBuy { pendingThemePurchase = theme }
         } label: {
             VStack(spacing: 3) {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: AppRadius.md)
                     // 동적 맵 미리보기 — 적당히 차오른 상태(pct 75, 임계값 30%).
                     .fill(theme.gradient(pct: 75, threshold: 0.30))
                     .frame(height: 38)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: AppRadius.md)
                             .strokeBorder(theme.lineColor.opacity(0.6), lineWidth: 1)
                     )
                     .overlay(alignment: .topTrailing) {
@@ -182,9 +182,9 @@ struct PartyView: View {
             }
         }
         .frame(width: 60, height: 66)
-        .background(RoundedRectangle(cornerRadius: 8)
+        .background(RoundedRectangle(cornerRadius: AppRadius.lg)
             .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.08)))
-        .overlay(RoundedRectangle(cornerRadius: 8)
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.lg)
             .strokeBorder(isSelected ? Color.accentColor : (idx == 0 ? Color.yellow.opacity(0.5) : .clear), lineWidth: 1.2))
         .overlay(alignment: .topTrailing) {
             Button { remove(sel.kind, source: source) } label: {
@@ -204,7 +204,7 @@ struct PartyView: View {
             }
             .foregroundStyle(.secondary)
             .frame(width: 60, height: 66)
-            .background(RoundedRectangle(cornerRadius: 8)
+            .background(RoundedRectangle(cornerRadius: AppRadius.lg)
                 .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3]))
                 .foregroundStyle(.secondary.opacity(0.4)))
             // 배경이 stroke(테두리)뿐이라 빈 내부가 hit-test에서 빠진다 → 사각형 전체를 클릭 범위로.
@@ -224,7 +224,7 @@ struct PartyView: View {
             PetEffectShelf(kind: sel.kind, settings: settings)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
+        .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(Color.secondary.opacity(0.06)))
     }
 
     /// 해금된 이로치(variant) dot 토글. 잠긴 건 미표시.
@@ -271,7 +271,7 @@ struct PartyView: View {
                                         .font(.system(size: 8)).lineLimit(1)
                                 }
                                 .frame(width: 60, height: 56)
-                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+                                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.08)))
                             }.buttonStyle(.plain)
                         }
                     }

@@ -77,7 +77,7 @@ struct GuideView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: AppRadius.md)
                     .fill(isSelected ? Color.accentColor : Color.clear)
             )
             .contentShape(Rectangle())

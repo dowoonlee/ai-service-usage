@@ -107,11 +107,11 @@ struct SajuPillarsGrid: View {
         }
         .frame(width: 34, height: 40)
         .background(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: AppRadius.md)
                 .fill(color.opacity(scheme == .dark ? 0.16 : 0.12))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 6)
+            RoundedRectangle(cornerRadius: AppRadius.md)
                 .stroke(color.opacity(highlighted ? 1.0 : 0.35),
                         lineWidth: highlighted ? 1.5 : 1)
         )

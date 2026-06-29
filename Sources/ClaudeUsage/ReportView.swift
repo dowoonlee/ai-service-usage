@@ -168,7 +168,7 @@ struct ReportView: View {
             settings.trainerCard.avatar = PetSelection(kind: kind, variant: v)
         } label: {
             ZStack {
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: AppRadius.sm)
                     .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.10))
                 if let img = PetSprite.image(for: kind, action: .sit, frameIndex: 0) {
                     Image(nsImage: img)
@@ -182,7 +182,7 @@ struct ReportView: View {
             }
             .frame(width: 36, height: 36)
             .overlay(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: AppRadius.sm)
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
             )
         }
@@ -207,9 +207,9 @@ struct ReportView: View {
                                 startPoint: .top, endPoint: .bottom
                             )
                             .frame(width: 38, height: 28)
-                            .cornerRadius(4)
+                            .cornerRadius(AppRadius.sm)
                             .overlay(
-                                RoundedRectangle(cornerRadius: 4)
+                                RoundedRectangle(cornerRadius: AppRadius.sm)
                                     .stroke(isSelected ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: isSelected ? 2 : 1)
                             )
                             Text(bg.displayName)
@@ -397,7 +397,7 @@ struct ReportView: View {
         } label: {
             VStack(spacing: 2) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: AppRadius.sm)
                         .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.10))
                         .frame(width: 38, height: 38)
                     if let acc = acc {
@@ -422,7 +422,7 @@ struct ReportView: View {
                     }
                 }
                 .overlay(
-                    RoundedRectangle(cornerRadius: 4)
+                    RoundedRectangle(cornerRadius: AppRadius.sm)
                         .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
                 )
                 Text(acc?.displayName ?? "없음")

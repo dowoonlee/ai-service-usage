@@ -889,7 +889,7 @@ private struct InventorySlot: View {
     var body: some View {
         VStack(spacing: 3) {
             ZStack(alignment: .topTrailing) {
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: AppRadius.md)
                     .fill(Color.secondary.opacity(0.1))
                 if let img = PetSprite.image(for: kind, action: .sit, frameIndex: 0) {
                     Image(nsImage: img)
@@ -916,7 +916,7 @@ private struct InventorySlot: View {
             .overlay(
                 // 슬롯 외곽 강조 — NEW 뱃지와 동일한 노란 톤. ownership != nil 조건은 isHighlighted
                 // 트리거 시점에 항상 만족하지만 방어적으로 유지.
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: AppRadius.md)
                     .stroke(isHighlighted ? Color.yellow : Color.clear, lineWidth: 2)
             )
             .contentShape(Rectangle())
@@ -975,12 +975,12 @@ private struct CollectionCompleteBanner: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: AppRadius.xl)
                 .fill(collection.accentColor)
                 .shadow(color: collection.accentColor.opacity(0.6), radius: pulse ? 12 : 4)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: AppRadius.xl)
                 .stroke(.white.opacity(0.3), lineWidth: 1)
         )
         .onTapGesture { onDismiss() }
@@ -1463,9 +1463,9 @@ private struct PetPreviewView: View {
                 .background(Color.gray.opacity(0.10))
         }
         .frame(width: Self.descCardWidth, alignment: .leading)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: AppRadius.lg)
                 .strokeBorder(headerColor.opacity(0.55), lineWidth: 1.2)
         )
     }
@@ -1570,9 +1570,9 @@ private struct PetPreviewView: View {
             .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white))
+            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.white))
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: AppRadius.md)
                     .stroke(Color.black.opacity(0.7), lineWidth: 0.6)
             )
     }

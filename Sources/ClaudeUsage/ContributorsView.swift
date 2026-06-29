@@ -172,11 +172,11 @@ private struct ContributorCardView: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: AppRadius.lg)
                 .fill(Color(NSColor.controlBackgroundColor))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: AppRadius.lg)
                 .stroke(rarityColor.opacity(rank < 3 ? 0.6 : 0.15),
                         lineWidth: rank < 3 ? 1.5 : 0.5)
         )

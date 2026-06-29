@@ -420,7 +420,7 @@ struct WalkingCat: View {
                     let lo = plotFrame.minX + halfBubble
                     let hi = plotFrame.maxX - halfBubble
                     let clampedX = hi > lo ? min(max(r.origin.x, lo), hi) : r.origin.x
-                    bubble("+\(r.amount)", fontSize: 11, weight: .medium, cornerRadius: 6, padH: 6, padV: 2.5)
+                    bubble("+\(r.amount)", fontSize: 11, weight: .medium, cornerRadius: AppRadius.md, padH: 6, padV: 2.5)
                         .fixedSize()
                         .opacity(opacity)
                         .position(x: clampedX, y: r.origin.y + yOffset - 10)
@@ -453,7 +453,7 @@ struct WalkingCat: View {
         _ text: String,
         fontSize: CGFloat = 8,
         weight: Font.Weight = .bold,
-        cornerRadius: CGFloat = 4,
+        cornerRadius: CGFloat = AppRadius.sm,
         padH: CGFloat = 4,
         padV: CGFloat = 1.5
     ) -> some View {

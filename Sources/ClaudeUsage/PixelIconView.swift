@@ -157,7 +157,7 @@ struct GemShape: Shape {
 struct SpeechBubble: Shape {
     var tailWidth: CGFloat = 8
     var tailHeight: CGFloat = 6
-    var cornerRadius: CGFloat = 8
+    var cornerRadius: CGFloat = AppRadius.lg
 
     func path(in rect: CGRect) -> Path {
         var p = Path()

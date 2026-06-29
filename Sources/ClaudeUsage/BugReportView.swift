@@ -229,7 +229,7 @@ struct BugReportView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(8)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: AppRadius.md)
                         .fill(Color.orange.opacity(0.10))
                 )
             }
@@ -273,7 +273,7 @@ struct BugReportView: View {
                         .font(.system(size: 12))
                         .frame(minHeight: 120)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 4)
+                            RoundedRectangle(cornerRadius: AppRadius.sm)
                                 .stroke(Color.secondary.opacity(0.3), lineWidth: 0.5)
                         )
                 }
@@ -300,9 +300,9 @@ struct BugReportView: View {
                         .resizable()
                         .scaledToFill()
                         .frame(width: 70, height: 50)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .clipShape(RoundedRectangle(cornerRadius: AppRadius.sm))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 4)
+                            RoundedRectangle(cornerRadius: AppRadius.sm)
                                 .stroke(Color.secondary.opacity(0.3), lineWidth: 0.5)
                         )
                     VStack(alignment: .leading, spacing: 2) {
@@ -315,7 +315,7 @@ struct BugReportView: View {
                 }
                 .padding(8)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: AppRadius.md)
                         .fill(Color.accentColor.opacity(0.08))
                 )
             }

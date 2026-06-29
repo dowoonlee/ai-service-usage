@@ -255,13 +255,13 @@ struct MainView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(
             VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-                .cornerRadius(10)
+                .cornerRadius(AppRadius.xl)
         )
         .overlay {
             // 실제 날씨 파티클(비/눈/뇌우). clear면 렌더 안 함. 패널 둥근 모서리로 클립.
             if settings.weatherEffectEnabled, vm.weather != .clear {
                 WeatherParticles(condition: vm.weather, intensity: vm.weatherIntensity)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl))
                     .allowsHitTesting(false)
             }
         }
@@ -516,10 +516,10 @@ fileprivate struct CollapsedGauge: View {
             .background(
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 4)
+                        RoundedRectangle(cornerRadius: AppRadius.sm)
                             .fill(.secondary.opacity(0.12))
                         if let p = pct {
-                            RoundedRectangle(cornerRadius: 4)
+                            RoundedRectangle(cornerRadius: AppRadius.sm)
                                 .fill(SectionFormat.continuousColor(p).opacity(0.45))
                                 .frame(width: geo.size.width * min(1, max(0, p) / 100))
                         }
@@ -1191,7 +1191,7 @@ struct PlanBadge: View {
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
             .background(
-                RoundedRectangle(cornerRadius: 4)
+                RoundedRectangle(cornerRadius: AppRadius.sm)
                     .fill(.secondary.opacity(0.15))
             )
     }
