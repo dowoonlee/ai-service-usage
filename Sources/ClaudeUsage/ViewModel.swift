@@ -44,6 +44,12 @@ final class ViewModel: ObservableObject {
     // Shared
     @Published var now: Date = Date()
 
+    // 앱 버전 — 메인 패널 버전 칩용. current는 Info.plist(불변), latest는 appcast fetch 결과(폴링마다 갱신).
+    let currentVersion: String? = Updater.currentVersion
+    @Published var latestVersion: String?
+    /// 설치 버전보다 feed 최신 버전이 높을 때만 true — 칩의 강조/화살표 표시 조건.
+    var updateAvailable: Bool { Updater.isUpdateAvailable(current: currentVersion, latest: latestVersion) }
+
     // 날씨 파티클 — 현재 선택 위치의 실제 날씨. 기본 .clear(파티클 없음).
     @Published var weather: WeatherCondition = .clear
     /// 강수/강설량 기반 강도(0...1). 파티클 밀도를 비례시킴. clear면 의미 없음.
@@ -339,6 +345,7 @@ final class ViewModel: ObservableObject {
                     await self.refreshCursor()
                     await self.refreshCodex()
                     await self.refreshWeather()
+                    await self.refreshLatestVersion()
                     self.accumulatePetUsage()
                     await ContributorBonus.shared.sync()
                     self.updateBackoffAfterCycle()
@@ -437,6 +444,12 @@ final class ViewModel: ObservableObject {
     /// 30분 캐시로 묶어 Open-Meteo를 매 폴링(600s)마다 치지 않는다. 위치 변경/토글 시엔
     /// Combine 구독이 `force: true`로 즉시 호출 → 캐시 무시.
     /// 실패는 조용히 무시(기존 값 유지) — 날씨는 부가 연출이라 에러를 사용자에게 노출하지 않는다.
+    /// appcast 최신 버전을 받아 `latestVersion` 갱신 — 메인 패널 버전 칩이 업데이트 유무를 표시.
+    /// 실패 시 기존 값 유지(조용히 무시). dev 빌드(feed URL 없음)는 항상 nil이라 칩이 평범한 현재 버전만 보임.
+    func refreshLatestVersion() async {
+        if let v = await Updater.fetchLatestVersion() { latestVersion = v }
+    }
+
     func refreshWeather(force: Bool = false) async {
         guard Settings.shared.weatherEffectEnabled else {
             if weather != .clear { weather = .clear }
