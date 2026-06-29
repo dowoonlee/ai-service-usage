@@ -274,6 +274,7 @@ struct MainView: View {
                 Text("Usage")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
+                versionChip
                 Spacer()
                 // 코인 잔액 — 클릭하면 가챠/도감 창 열림
                 Button {
@@ -419,6 +420,34 @@ struct MainView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
+        }
+    }
+
+    /// 'Usage' 옆 버전 칩. 평소엔 현재 버전만 조용히(회색) 표시하고, feed에 더 높은 버전이 있으면
+    /// 강조색 + 위 화살표로 알린다. 어느 상태든 클릭하면 Sparkle 업데이트 확인이 열린다.
+    /// 현재 버전이 nil인 dev(`swift run`) 빌드에서는 칩 자체를 숨긴다.
+    @ViewBuilder
+    private var versionChip: some View {
+        if let v = vm.currentVersion {
+            Button {
+                Updater.shared.checkForUpdates()
+            } label: {
+                HStack(spacing: 2) {
+                    Text("v\(v)")
+                        .font(.system(size: 10))
+                        .monospacedDigit()
+                    if vm.updateAvailable {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 9))
+                    }
+                }
+                .foregroundStyle(vm.updateAvailable ? Color.accentColor : Color.secondary.opacity(0.7))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .help(vm.updateAvailable
+                  ? "\(vm.latestVersion ?? "") 업데이트 가능 — 클릭하여 업데이트"
+                  : "현재 최신 버전 — 클릭하여 업데이트 확인")
         }
     }
 }
