@@ -209,6 +209,8 @@ struct WalkingCat: View {
                 .rotationEffect(.degrees(rollAngle), anchor: .center)
                 .hueRotation(.degrees(Self.hueDegrees(for: variant)))
                 .saturation(variant == 0 ? 1.0 : 1.15)
+                // 무채색 펫(늑대/돌/해골 등)은 hueRotation만으론 색이 안 입으므로 variant 색조를 곱해 보강.
+                .colorMultiply(Self.variantTint(for: variant))
                 .colorMultiply(mood.tint)
                 // 작은 sprite(18pt) 위 hover 감지를 쉽게 하려고 32x32 hit area로 확장.
                 .frame(width: max(w, 32), height: max(h, 32))
@@ -548,6 +550,18 @@ struct WalkingCat: View {
         case 2: return 180  // 정반대 색
         case 3: return 300  // purple-red shift
         default: return 0
+        }
+    }
+
+    /// 이로치 색조 (colorMultiply 보강). hueRotation은 hue 회전이라 무채색 펫(늑대·돌·해골 등)에는
+    /// 색이 입지 않는다 → variant별 옅은 색조를 곱해 무채색도 이로치가 구별되게 한다.
+    /// variant 0 = white(영향 없음). 유채색 펫은 hueRotation이 주도라 이 곱셈의 영향이 작다.
+    static func variantTint(for variant: Int) -> Color {
+        switch variant {
+        case 1: return Color(red: 1.0, green: 1.0, blue: 0.62)
+        case 2: return Color(red: 0.62, green: 0.85, blue: 1.0)
+        case 3: return Color(red: 1.0, green: 0.70, blue: 0.92)
+        default: return .white
         }
     }
 
