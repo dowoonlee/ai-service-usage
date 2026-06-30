@@ -7,13 +7,6 @@ import SwiftUI
 // 둘 다 동작별 strip PNG (frame i → x: i*cellW, y: 0). PetController가
 // (action, frameIndex)를 들고 있고, 여기서 잘린 프레임을 캐시.
 
-/// Mythic 등급 펫의 특수 모션 1개 — 전용 strip suffix + 그 strip의 셀 크기.
-/// 공격 등은 무기 휘두름으로 가로 bbox가 Idle/Run보다 넓어 Action별 cellSize가 필요하다.
-struct SpecialMove {
-    let suffix: String
-    let cell: (w: Int, h: Int)
-}
-
 /// 한 펫 종(kind)의 모든 메타데이터를 한 자리에 모은 레코드.
 /// PetKind 케이스를 추가할 때 `displayName/cellSize/defaultFacingLeft/resourceName`
 /// switch를 따로 늘릴 필요 없이 `PetKind.def` 한 곳만 수정하면 된다.
@@ -36,9 +29,6 @@ struct PetDefinition {
     let idleSuffix: String
     /// 펫이 기본 사용할 테마 (사용자가 override 안 했을 때).
     let defaultTheme: PetTheme
-    /// Mythic 전용 특수 모션 (Action.special1/special2 → strip+cellSize). 일반 펫은 비어 있음.
-    /// initial value를 가진 `let`은 memberwise init에서 빠지므로 `var`로 둬 default 파라미터로 노출.
-    var specialMoves: [PetController.Action: SpecialMove] = [:]
 
     /// (action) → 해당 strip PNG의 basename.
     func resourceName(for action: PetController.Action) -> String {
@@ -46,15 +36,10 @@ struct PetDefinition {
         switch action {
         case .walk:                  suffix = walkSuffix
         case .run:                   suffix = runSuffix
-        case .sit, .scan, .quote:    suffix = idleSuffix
-        case .special1, .special2:   suffix = specialMoves[action]?.suffix ?? idleSuffix
+        case .sit, .scan, .quote,
+             .special1, .special2:   suffix = idleSuffix   // special은 PetKind에서 Mythic 조회로 가로챔
         }
         return "\(prefix)_\(suffix)"
-    }
-
-    /// action별 셀 크기 — 특수 모션이면 전용 cell, 아니면 기본 cellSize.
-    func cell(for action: PetController.Action) -> (w: Int, h: Int) {
-        specialMoves[action]?.cell ?? cellSize
     }
 }
 
@@ -553,27 +538,17 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
             return PetDefinition(prefix: "Warrior", displayName: "전사",
                                  cellSize: (93, 93), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
-                                 defaultTheme: .volcano,
-                                 specialMoves: [
-                                    .special1: SpecialMove(suffix: "Attack1", cell: (120, 93)),
-                                    .special2: SpecialMove(suffix: "Attack2", cell: (118, 93)),
-                                 ])
+                                 defaultTheme: .volcano)
         case .lancer:
             return PetDefinition(prefix: "Lancer", displayName: "창기병",
                                  cellSize: (74, 75), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
-                                 defaultTheme: .storm,
-                                 specialMoves: [
-                                    .special1: SpecialMove(suffix: "Attack", cell: (186, 75)),
-                                 ])
+                                 defaultTheme: .storm)
         case .monk:
             return PetDefinition(prefix: "Monk", displayName: "수도사",
                                  cellSize: (83, 71), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
-                                 defaultTheme: .aurora,
-                                 specialMoves: [
-                                    .special1: SpecialMove(suffix: "Heal", cell: (121, 71)),
-                                 ])
+                                 defaultTheme: .aurora)
         case .archer:
             return PetDefinition(prefix: "Archer", displayName: "궁수",
                                  cellSize: (78, 94), defaultFacingLeft: false,
@@ -589,12 +564,17 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
 
     var displayName: String { def.displayName }
     var cellSize: (w: Int, h: Int) { def.cellSize }
-    /// action별 셀 크기 — 특수 모션은 자기 strip 크기, 그 외엔 기본 cellSize.
-    func cellSize(for action: PetController.Action) -> (w: Int, h: Int) { def.cell(for: action) }
+    /// action별 셀 크기 — mythic 특수 모션은 자기 strip 크기, 그 외엔 기본 cellSize.
+    func cellSize(for action: PetController.Action) -> (w: Int, h: Int) {
+        Mythic.spec(for: self)?.specials[action]?.cell ?? def.cellSize
+    }
     var defaultFacingLeft: Bool { def.defaultFacingLeft }
 
     func resourceName(for action: PetController.Action) -> String {
-        def.resourceName(for: action)
+        if let move = Mythic.spec(for: self)?.specials[action] {
+            return "\(def.prefix)_\(move.suffix)"
+        }
+        return def.resourceName(for: action)
     }
 }
 

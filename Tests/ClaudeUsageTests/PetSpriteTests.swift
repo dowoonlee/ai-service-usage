@@ -18,15 +18,15 @@ final class PetSpriteTests: XCTestCase {
         }
     }
 
-    // Mythic 3종만 specialMoves를 갖고 나머지는 비어 있어야 한다
+    // Mythic 3종만 MythicSpec을 갖고 나머지는 없어야 한다
     // (chooseNextAction의 special 분기가 일반 펫에서 절대 발동하지 않음을 보장).
-    func testOnlyMythicHasSpecialMoves() {
+    func testOnlyMythicHasSpec() {
         let mythic: Set<PetKind> = [.warrior, .lancer, .monk]
         for kind in PetKind.allCases {
             if mythic.contains(kind) {
-                XCTAssertFalse(kind.def.specialMoves.isEmpty, "\(kind.rawValue) should have special moves")
+                XCTAssertNotNil(Mythic.spec(for: kind), "\(kind.rawValue) should have a MythicSpec")
             } else {
-                XCTAssertTrue(kind.def.specialMoves.isEmpty, "\(kind.rawValue) must have no special moves")
+                XCTAssertNil(Mythic.spec(for: kind), "\(kind.rawValue) must not have a MythicSpec")
             }
         }
     }

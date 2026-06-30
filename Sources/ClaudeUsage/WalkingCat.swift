@@ -70,9 +70,9 @@ struct WalkingCat: View {
     var weather: WeatherCondition = .clear
     var displayHeight: CGFloat = 18
 
-    /// 실제 렌더 높이 — Mythic 등급 펫은 1.5배 크게 (sprite + 오라가 함께 커진다).
+    /// 실제 렌더 높이 — Mythic 펫은 spec.sizeScale(기본 1.5)배 크게 (sprite + 오라가 함께 커진다).
     private var renderHeight: CGFloat {
-        PetKind.rarityFor(kind) == .mythic ? displayHeight * 1.5 : displayHeight
+        displayHeight * (Mythic.spec(for: kind)?.sizeScale ?? 1)
     }
     // 차트 한 구간이 전체 y-range 대비 이 비율 이상일 때 AAAH/WHEE 말풍선 발동. 낮을수록 자주.
     var bigDropThreshold: Double = 0.40
@@ -151,7 +151,7 @@ struct WalkingCat: View {
     /// 나눠 그린다. `effects`가 비어도 **Mythic 등급 펫이면 기본 오라**를 위해 렌더한다.
     @ViewBuilder
     private func effectLayer(_ placement: PetEffectOverlay.Placement, descent: Double) -> some View {
-        let isMythic = PetKind.rarityFor(kind) == .mythic
+        let isMythic = Mythic.isMythic(kind)
         if !effects.isEmpty || isMythic, let p = positionFor(xNorm: ctrl.x) {
             let h = renderHeight
             let isMoving = ctrl.action == .walk || ctrl.action == .run
@@ -720,10 +720,11 @@ final class PetController: ObservableObject {
         let scanEnd = restEnd + mood.scanProbability
         // mood와 무관한 5% 확률로 명언 표시. 7초 고정.
         let quoteEnd = scanEnd + 0.05
-        // Mythic 등급만: 명언 구간 다음 ~10% 확률로 전용 특수 모션.
-        // 일반 펫은 specialMoves가 비어 specialEnd == quoteEnd → 영원히 발동 안 함.
-        let specials = Array(petKind.def.specialMoves.keys)
-        let specialEnd = quoteEnd + (specials.isEmpty ? 0 : 0.10)
+        // Mythic 펫만: 명언 구간 다음 spec.specialChance 확률로 전용 특수 모션.
+        // 일반 펫은 spec이 nil이라 specialEnd == quoteEnd → 영원히 발동 안 함.
+        let mythicSpec = Mythic.spec(for: petKind)
+        let specials: [Action] = mythicSpec.map { Array($0.specials.keys) } ?? []
+        let specialEnd = quoteEnd + (specials.isEmpty ? 0 : (mythicSpec?.specialChance ?? 0))
         let prevAction = action
         currentQuote = nil
         if r < restEnd {
@@ -739,7 +740,7 @@ final class PetController: ObservableObject {
         } else if r < specialEnd, let move = specials.randomElement() {
             // 보유한 특수 모션 중 무작위 1개 + 펫별 매칭 대사. 제자리에서 재생(이동 정지).
             action = move
-            currentQuote = Quotes.randomMythicMove(for: petKind, action: move)
+            currentQuote = Mythic.quote(for: petKind, action: move)
             actionUntil = now.addingTimeInterval(2.5)
         } else {
             // walk vs run: mood.runChance에 따라 분기. run은 짧은 burst.

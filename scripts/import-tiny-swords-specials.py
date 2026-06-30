@@ -2,7 +2,8 @@
 """Tiny Swords(Mythic 펫)의 Idle/Run/특수 모션 strip을 재생성한다.
 
 ZieIony/TinySwords 미러(Pixel Frog Tiny Swords, 에셋은 CC0)에서 원본 시트를 받아
-세로 공통·가로 모션별로 트림해 Sources/.../tiny-swords/{unit}/*.png 로 출력한다.
+세로 공통·가로 모션별로 트림해 Sources/.../mythic/{unit}/*.png 로 출력한다.
+(mythic 펫은 일반 펫과 분리된 Resources/mythic/ 디렉토리로 관리한다.)
 
 트림 정책:
 - 세로 상단 Y0 = '모든 모션 프레임' alpha 합집합의 top (무기를 위로 든 프레임까지 포함).
@@ -26,7 +27,7 @@ from PIL import Image
 REPO = "ZieIony/TinySwords"
 BASE = "Assets/Art/Units/Blue%20Units"  # 경로 공백은 %20
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DST = os.path.join(ROOT, "Sources/ClaudeUsage/Resources/tiny-swords")
+DST = os.path.join(ROOT, "Sources/ClaudeUsage/Resources/mythic")
 
 # unit -> (cell, [(outfile, src 상대경로, hgroup)])
 # hgroup: 같은 문자열끼리 가로 bbox 공유. idle/run='ir', 특수 모션은 각자.
