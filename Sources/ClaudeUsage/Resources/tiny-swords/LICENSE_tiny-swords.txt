@@ -3,8 +3,13 @@ Source: https://pixelfrog-assets.itch.io/tiny-swords
 License: CC0 1.0 Universal (Public Domain Dedication)
 
 사용 스프라이트 (Blue Units): Warrior, Lancer, Monk, Archer, Pawn
-  - 각 캐릭터의 Idle / Run 애니메이션 strip만 사용.
-  - Monk의 원본 파일명(Idle.png/Run.png)은 basename 유일성을 위해 Monk_Idle.png/Monk_Run.png로 리네임.
+  - Archer / Pawn: Idle / Run.
+  - Warrior: Idle / Run / Attack1 / Attack2 (Mythic 전용 특수 모션).
+  - Lancer: Idle / Run / Attack (원본 Right_Attack, 측면 찌르기).
+  - Monk: Idle / Run / Heal (Mythic 전용 특수 모션).
+  - 원본 시트(192/320 정사각 셀)에서 캐릭터 bbox로 트림해 가로 strip만 커밋.
+    세로 범위는 한 캐릭터의 전체 모션 합집합으로 통일(발 정렬·크기 일관), 가로는 모션별.
+  - Monk의 원본 파일명(Idle.png/Run.png/Heal.png)은 basename 유일성을 위해 Monk_ 접두사로 리네임.
 
 다운로드 경로(미러): https://github.com/ZieIony/TinySwords
   - 해당 repo의 LICENSE(MIT)는 게임 코드에 적용되며, 위 스프라이트 에셋의 권리는

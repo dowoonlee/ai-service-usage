@@ -7,6 +7,13 @@ import SwiftUI
 // 둘 다 동작별 strip PNG (frame i → x: i*cellW, y: 0). PetController가
 // (action, frameIndex)를 들고 있고, 여기서 잘린 프레임을 캐시.
 
+/// Mythic 등급 펫의 특수 모션 1개 — 전용 strip suffix + 그 strip의 셀 크기.
+/// 공격 등은 무기 휘두름으로 가로 bbox가 Idle/Run보다 넓어 Action별 cellSize가 필요하다.
+struct SpecialMove {
+    let suffix: String
+    let cell: (w: Int, h: Int)
+}
+
 /// 한 펫 종(kind)의 모든 메타데이터를 한 자리에 모은 레코드.
 /// PetKind 케이스를 추가할 때 `displayName/cellSize/defaultFacingLeft/resourceName`
 /// switch를 따로 늘릴 필요 없이 `PetKind.def` 한 곳만 수정하면 된다.
@@ -29,6 +36,9 @@ struct PetDefinition {
     let idleSuffix: String
     /// 펫이 기본 사용할 테마 (사용자가 override 안 했을 때).
     let defaultTheme: PetTheme
+    /// Mythic 전용 특수 모션 (Action.special1/special2 → strip+cellSize). 일반 펫은 비어 있음.
+    /// initial value를 가진 `let`은 memberwise init에서 빠지므로 `var`로 둬 default 파라미터로 노출.
+    var specialMoves: [PetController.Action: SpecialMove] = [:]
 
     /// (action) → 해당 strip PNG의 basename.
     func resourceName(for action: PetController.Action) -> String {
@@ -37,8 +47,14 @@ struct PetDefinition {
         case .walk:                  suffix = walkSuffix
         case .run:                   suffix = runSuffix
         case .sit, .scan, .quote:    suffix = idleSuffix
+        case .special1, .special2:   suffix = specialMoves[action]?.suffix ?? idleSuffix
         }
         return "\(prefix)_\(suffix)"
+    }
+
+    /// action별 셀 크기 — 특수 모션이면 전용 cell, 아니면 기본 cellSize.
+    func cell(for action: PetController.Action) -> (w: Int, h: Int) {
+        specialMoves[action]?.cell ?? cellSize
     }
 }
 
@@ -535,19 +551,29 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
         // cellSize는 그 실측값(예: 전사 97×95). Idle/Run은 같은 bbox로 잘라 cellSize가 일치한다.
         case .warrior:
             return PetDefinition(prefix: "Warrior", displayName: "전사",
-                                 cellSize: (97, 95), defaultFacingLeft: false,
+                                 cellSize: (93, 112), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
-                                 defaultTheme: .volcano)
+                                 defaultTheme: .volcano,
+                                 specialMoves: [
+                                    .special1: SpecialMove(suffix: "Attack1", cell: (120, 112)),
+                                    .special2: SpecialMove(suffix: "Attack2", cell: (118, 112)),
+                                 ])
         case .lancer:
             return PetDefinition(prefix: "Lancer", displayName: "창기병",
-                                 cellSize: (78, 159), defaultFacingLeft: false,
+                                 cellSize: (74, 155), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
-                                 defaultTheme: .storm)
+                                 defaultTheme: .storm,
+                                 specialMoves: [
+                                    .special1: SpecialMove(suffix: "Attack", cell: (186, 155)),
+                                 ])
         case .monk:
             return PetDefinition(prefix: "Monk", displayName: "수도사",
-                                 cellSize: (87, 75), defaultFacingLeft: false,
+                                 cellSize: (83, 71), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
-                                 defaultTheme: .aurora)
+                                 defaultTheme: .aurora,
+                                 specialMoves: [
+                                    .special1: SpecialMove(suffix: "Heal", cell: (121, 71)),
+                                 ])
         case .archer:
             return PetDefinition(prefix: "Archer", displayName: "궁수",
                                  cellSize: (78, 94), defaultFacingLeft: false,
@@ -563,6 +589,8 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
 
     var displayName: String { def.displayName }
     var cellSize: (w: Int, h: Int) { def.cellSize }
+    /// action별 셀 크기 — 특수 모션은 자기 strip 크기, 그 외엔 기본 cellSize.
+    func cellSize(for action: PetController.Action) -> (w: Int, h: Int) { def.cell(for: action) }
     var defaultFacingLeft: Bool { def.defaultFacingLeft }
 
     func resourceName(for action: PetController.Action) -> String {
@@ -606,7 +634,7 @@ enum PetSprite {
             return []
         }
 
-        let (w, h) = kind.cellSize
+        let (w, h) = kind.cellSize(for: action)
         let frameCount = max(1, sheet.width / w)
         var frames: [NSImage] = []
         frames.reserveCapacity(frameCount)
