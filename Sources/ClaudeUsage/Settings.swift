@@ -851,6 +851,15 @@ final class Settings: ObservableObject {
             self.persist(eq, forKey: Keys.equippedEffects)
         }
 
+        // claude 로그인 버그(v0.8.10~v0.13.10 재로그인 불능, #77) 사과 — 기존 사용자에게
+        // sudo pull(프리미엄 가챠권, premiumTickets) 2장 1회 지급. 신규 사용자는 버그 영향이 없어 제외.
+        applyOnceMigration(key: Keys.hasReceivedLoginApologyTickets,
+                           onlyExisting: true,
+                           wasExistingUser: wasExistingUser) {
+            self.premiumTickets += 2
+            d.set(self.premiumTickets, forKey: Keys.premiumTickets)
+        }
+
         // 구매제 도입 전부터 동적 테마를 override 로 쓰고 있었다면 보유로 인정 (뺏지 않음).
         // init 끝(모든 프로퍼티 초기화 후)이라 self 자유 사용. init 중 didSet은 안 도므로 직접 persist.
         var migratedThemes = false
@@ -1319,6 +1328,7 @@ final class Settings: ObservableObject {
         static let hasMigratedCollectionBonuses = "settings.hasMigratedCollectionBonuses"
         static let hasReevaluatedOnCall = "settings.hasReevaluatedOnCall"
         static let hasMigratedEffectSlots = "settings.hasMigratedEffectSlots"
+        static let hasReceivedLoginApologyTickets = "settings.hasReceivedLoginApologyTickets"
         // 트레이너 카드 (Report 탭)
         static let trainerID                   = "settings.trainerID"
         static let trainerCard                 = "settings.trainerCard"
