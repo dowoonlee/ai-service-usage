@@ -91,7 +91,10 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate {
     }
 
     private func checkForSessionKey() {
-        let store = WKWebsiteDataStore.default().httpCookieStore
+        // WebView가 비영구(nonPersistent) 스토어로 로그인하므로 쿠키도 그 스토어에서 조회해야 한다.
+        // default()는 영구 스토어라 nonPersistent 로그인 쿠키가 없어 sessionKey 캡처가 영영 실패했다
+        // (#77 회귀 — 7987c66에서 WebView만 nonPersistent로 바꾸고 조회 스토어를 안 맞춤).
+        let store = webView.configuration.websiteDataStore.httpCookieStore
         store.getAllCookies { [weak self] cookies in
             guard let self else { return }
             if let c = cookies.first(where: { $0.name == "sessionKey" && Self.isClaudeCookieDomain($0.domain) && !$0.value.isEmpty }) {
