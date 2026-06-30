@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 // WalkingCat이 그리는 RP 코스메틱 이펙트 레이어. 펫 스프라이트와 같은 좌표계에서 펫 몸통 중심/발
 // 위치를 받아 파티클·광원을 그린다. 펫 이미지에 의존하지 않는 순수 기하 렌더라 모든 PetKind에
@@ -328,7 +329,10 @@ struct StarShape: Shape {
         for i in 0..<(points * 2) {
             let angle = Double(i) * .pi / Double(points) - .pi / 2
             let rad = i % 2 == 0 ? outer : inner
-            let pt = CGPoint(x: c.x + cos(angle) * rad, y: c.y + sin(angle) * rad)
+            // Foundation.cos/sin으로 명시 qualify — SwiftUI가 끌어오는 simd 오버로드와 모호해지는 것 방지.
+            let ca = CGFloat(Foundation.cos(angle))
+            let sa = CGFloat(Foundation.sin(angle))
+            let pt = CGPoint(x: c.x + ca * rad, y: c.y + sa * rad)
             if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
         }
         p.closeSubpath()
