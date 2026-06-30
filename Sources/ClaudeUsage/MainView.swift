@@ -404,7 +404,6 @@ struct MainView: View {
                     Button("지금 새로고침") {
                         Task { await vm.refreshClaude(); await vm.refreshCursor(); await vm.refreshCodex() }
                     }
-                    Button("업데이트 확인...") { Updater.shared.checkForUpdates() }
                     Button("설정...") { onSettings() }
                     Button("기여자 보기...") { onContributors() }
                     Button("버그 리포트...") { onBugReport() }
@@ -423,8 +422,10 @@ struct MainView: View {
         }
     }
 
-    /// 'Usage' 옆 버전 칩. 평소엔 현재 버전만 조용히(회색) 표시하고, feed에 더 높은 버전이 있으면
-    /// 강조색 + 위 화살표로 알린다. 어느 상태든 클릭하면 Sparkle 업데이트 확인이 열린다.
+    /// 'Usage' 옆 버전 칩 — (...) 메뉴의 "업데이트 확인"을 대체하는 단일 진입점.
+    /// 평소엔 현재 버전을 회색 텍스트로 표시하고, feed에 더 높은 버전이 있으면 주황 캡슐 +
+    /// 위 화살표 + 최신 버전으로 강하게 강조해 업데이트 필요를 한눈에 알린다.
+    /// 어느 상태든 클릭하면 Sparkle 업데이트 확인이 열린다.
     /// 현재 버전이 nil인 dev(`swift run`) 빌드에서는 칩 자체를 숨긴다.
     @ViewBuilder
     private var versionChip: some View {
@@ -432,22 +433,34 @@ struct MainView: View {
             Button {
                 Updater.shared.checkForUpdates()
             } label: {
-                HStack(spacing: 2) {
-                    Text("v\(v)")
-                        .font(.system(size: 10))
-                        .monospacedDigit()
+                Group {
                     if vm.updateAvailable {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 9))
+                        // 업데이트 필요 — 주황 캡슐로 확실히 시선을 끈다.
+                        HStack(spacing: 2) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("v\(vm.latestVersion ?? v)")
+                                .font(.system(size: 9, weight: .bold))
+                                .monospacedDigit()
+                        }
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Capsule().fill(Color.orange))
+                    } else {
+                        // 최신 — 현재 버전을 조용히 표시.
+                        Text("v\(v)")
+                            .font(.system(size: 10))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .foregroundStyle(vm.updateAvailable ? Color.accentColor : Color.secondary.opacity(0.7))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .help(vm.updateAvailable
                   ? "\(vm.latestVersion ?? "") 업데이트 가능 — 클릭하여 업데이트"
-                  : "현재 최신 버전 — 클릭하여 업데이트 확인")
+                  : "현재 최신 버전 v\(v) — 클릭하여 업데이트 확인")
         }
     }
 }
