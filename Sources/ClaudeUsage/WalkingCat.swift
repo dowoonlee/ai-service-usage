@@ -169,7 +169,8 @@ struct WalkingCat: View {
                 isMoving: isMoving,
                 mythicBase: isMythic,
                 mythicJumpY: jumpY,
-                mythicRoll: roll
+                mythicRoll: roll,
+                mythicAuraStyle: Mythic.spec(for: kind)?.aura ?? .crimsonGold
             )
         }
     }
@@ -637,13 +638,24 @@ final class PetController: ObservableObject {
     func startFleeFromMouse() {
         guard !isFleeing else { return }
         isFleeing = true
-        // 더 넓게 달릴 수 있는 쪽으로 도망. (마우스는 펫 위에 있으니 위치 자체가 회피 방향 hint)
+        let now = Date()
+        // Mythic: 도망 대신 그 자리서 무기 들고 도발 (특수 모션 + taunt 대사). 물러서지 않는다.
+        // action이 special이라 tick의 walk/run 이동 블록을 타지 않아 제자리에 멈춘다.
+        if let move = Mythic.spec(for: petKind)?.specials.keys.randomElement() {
+            action = move
+            currentQuote = nil
+            currentReaction = Mythic.taunt(for: petKind)
+            actionUntil = now.addingTimeInterval(2.5)
+            frameIndex = 0
+            frameAccumulator = 0
+            return
+        }
+        // 일반 펫: 더 넓게 달릴 수 있는 쪽으로 도망. (마우스 위치가 회피 방향 hint)
         direction = self.x < 0.5 ? 1 : -1
         facingRight = direction > 0
         action = .run
         currentQuote = nil
         currentReaction = Quotes.randomReaction()
-        let now = Date()
         actionUntil = now.addingTimeInterval(3.0)
         frameIndex = 0
         frameAccumulator = 0
@@ -724,7 +736,10 @@ final class PetController: ObservableObject {
         // 일반 펫은 spec이 nil이라 specialEnd == quoteEnd → 영원히 발동 안 함.
         let mythicSpec = Mythic.spec(for: petKind)
         let specials: [Action] = mythicSpec.map { Array($0.specials.keys) } ?? []
-        let specialEnd = quoteEnd + (specials.isEmpty ? 0 : (mythicSpec?.specialChance ?? 0))
+        // 고사용(고불안) 구간에선 mythic이 특수 모션을 더 자주 발동 + 스트레스 대사 (한계 분투 연출).
+        let stressed = mood.anxiety > 0.7
+        let specialEnd = quoteEnd
+            + (specials.isEmpty ? 0 : (mythicSpec?.specialChance ?? 0) * (stressed ? 2.5 : 1))
         let prevAction = action
         currentQuote = nil
         if r < restEnd {
@@ -740,7 +755,9 @@ final class PetController: ObservableObject {
         } else if r < specialEnd, let move = specials.randomElement() {
             // 보유한 특수 모션 중 무작위 1개 + 펫별 매칭 대사. 제자리에서 재생(이동 정지).
             action = move
-            currentQuote = Mythic.quote(for: petKind, action: move)
+            currentQuote = stressed
+                ? (mythicSpec?.stressQuotes.randomElement() ?? Mythic.quote(for: petKind, action: move))
+                : Mythic.quote(for: petKind, action: move)
             actionUntil = now.addingTimeInterval(2.5)
         } else {
             // walk vs run: mood.runChance에 따라 분기. run은 짧은 burst.
@@ -776,6 +793,7 @@ struct PetMood {
     // 표현
     var jitter: Double = 0                 // 매 프레임 위치 떨림 amplitude(pt)
     var tint: Color = .white               // .colorMultiply 용. white = 변화 없음
+    var anxiety: Double = 0                 // 사용량이 임계 초과한 정도 0~1 (mythic 고부하 반응 등)
     // 행동 분포
     var restProbability: Double = 0.30
     var scanProbability: Double = 0.10
@@ -818,6 +836,7 @@ struct PetMood {
             runSpeedMultiplier: 2.2,
             jitter: jit,
             tint: tint,
+            anxiety: anxiety,
             restProbability: restProb,
             scanProbability: scanProb,
             runChance: runChance,

@@ -23,6 +23,8 @@ struct PetEffectOverlay: View {
     var mythicJumpY: CGFloat = 0
     /// 펫 구르기(내려가는 큰 낙폭)와 동기화 — 오라 회전 각도. sprite의 rollAngle과 동일.
     var mythicRoll: Double = 0
+    /// mythic 펫별 오라 스타일(색). WalkingCat이 `Mythic.spec(for:)?.aura`를 주입.
+    var mythicAuraStyle: MythicAura = .crimsonGold
 
     var body: some View {
         ZStack {
@@ -80,8 +82,7 @@ struct PetEffectOverlay: View {
     /// Mythic 등급 전용 기본 오라 — 진홍·금 angular 광선이 회전 + 진홍 radial glow 맥동.
     /// sudo pull 가챠 연출(`GachaView.premiumAura`)과 같은 톤이라 "Mythic = 진홍/금" 정체성을 공유한다.
     private var mythicAura: some View {
-        let mythic = Rarity.mythic.color
-        let gold = Color(red: 1.0, green: 0.82, blue: 0.35)
+        let (mythic, gold) = Self.auraColors(mythicAuraStyle)
         return TimelineView(.animation) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let spin = (t * 20).truncatingRemainder(dividingBy: 360)
@@ -106,6 +107,16 @@ struct PetEffectOverlay: View {
             .rotationEffect(.degrees(mythicRoll))
             // 펫 점프(jump)와 동기화 — 위로 같은 만큼 offset.
             .position(x: center.x, y: center.y - mythicJumpY)
+        }
+    }
+
+    /// MythicAura 스타일 → (주색, 보조색). 펫별 시그니처 오라 색.
+    static func auraColors(_ style: MythicAura) -> (Color, Color) {
+        switch style {
+        case .crimsonGold:    return (Rarity.mythic.color, Color(red: 1.0, green: 0.82, blue: 0.35))
+        case .volcanicFire:   return (Color(red: 0.95, green: 0.30, blue: 0.08), Color(red: 1.0, green: 0.78, blue: 0.30))
+        case .stormLightning: return (Color(red: 0.40, green: 0.62, blue: 1.0),  Color(red: 0.85, green: 0.92, blue: 1.0))
+        case .holyLight:      return (Color(red: 1.0, green: 0.90, blue: 0.55),  Color(red: 0.55, green: 1.0, blue: 0.85))
         }
     }
 
