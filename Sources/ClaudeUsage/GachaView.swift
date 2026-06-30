@@ -185,18 +185,17 @@ struct GachaView: View {
                         .font(.title3.weight(.bold))
                         .monospacedDigit()
                 }
-                // 프리미엄 가챠권은 보유 시에만 노출 (평소 0이라 헤더 공간 절약). RP 가격은 버튼에 표시됨.
-                if settings.premiumTickets > 0 {
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 14))
-                            .foregroundStyle(Rarity.mythic.color)
-                        Text("\(settings.premiumTickets)")
-                            .font(.title3.weight(.bold))
-                            .monospacedDigit()
-                    }
-                    .help("프리미엄 가챠권 — RP로 구매, Mythic·Legendary 전용 풀")
+                // 프리미엄 가챠권(sudo pull). 상점 헤더에선 코인/RP/일반 가챠권처럼 항상 노출 (0이어도)
+                // — 사용자가 자기 잔액을 늘 확인할 수 있도록.
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Rarity.mythic.color)
+                    Text("\(settings.premiumTickets)")
+                        .font(.title3.weight(.bold))
+                        .monospacedDigit()
                 }
+                .help("프리미엄 가챠권 — RP로 구매, Mythic·Legendary 전용 풀 (sudo pull)")
             }
             .fixedSize()
             Spacer(minLength: 8)
