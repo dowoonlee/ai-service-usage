@@ -551,20 +551,20 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
         // cellSize는 그 실측값(예: 전사 97×95). Idle/Run은 같은 bbox로 잘라 cellSize가 일치한다.
         case .warrior:
             return PetDefinition(prefix: "Warrior", displayName: "전사",
-                                 cellSize: (93, 112), defaultFacingLeft: false,
+                                 cellSize: (93, 93), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .volcano,
                                  specialMoves: [
-                                    .special1: SpecialMove(suffix: "Attack1", cell: (120, 112)),
-                                    .special2: SpecialMove(suffix: "Attack2", cell: (118, 112)),
+                                    .special1: SpecialMove(suffix: "Attack1", cell: (120, 93)),
+                                    .special2: SpecialMove(suffix: "Attack2", cell: (118, 93)),
                                  ])
         case .lancer:
             return PetDefinition(prefix: "Lancer", displayName: "창기병",
-                                 cellSize: (74, 155), defaultFacingLeft: false,
+                                 cellSize: (74, 75), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .storm,
                                  specialMoves: [
-                                    .special1: SpecialMove(suffix: "Attack", cell: (186, 155)),
+                                    .special1: SpecialMove(suffix: "Attack", cell: (186, 75)),
                                  ])
         case .monk:
             return PetDefinition(prefix: "Monk", displayName: "수도사",
