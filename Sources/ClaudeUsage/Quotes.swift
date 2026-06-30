@@ -126,6 +126,28 @@ enum Quotes {
         perPet[kind]?.randomElement() ?? "..."
     }
 
+    /// Mythic 등급 펫의 특수 모션(`Action.special1/special2`)에 매칭되는 펫별 전용 대사.
+    /// 키는 Action.rawValue("special1"/"special2") — `@MainActor` 격리를 피하려 String으로 둔다.
+    /// 모션 발동 시 `PetController.chooseNextAction`이 `randomMythicMove`로 뽑아 말풍선에 띄운다.
+    /// 톤은 일반 대사보다 공격적/외침에 가깝게 (모션과 합 맞춤).
+    static let mythicMoves: [PetKind: [String: [String]]] = [
+        .warrior: [
+            "special1": ["이 버그, 한 칼에!", "merge conflict, 베어주마!", "리뷰 거부, 칼로 행사!"],
+            "special2": ["레거시 코드, 처단한다!", "deprecated 베기!", "테스트 깬 놈 게 섰거라!"],
+        ],
+        .lancer: [
+            "special1": ["버그를 꿰뚫는다!", "null 포인터, 관통!", "창으로 핫픽스 찌르기!"],
+        ],
+        .monk: [
+            "special1": ["서버야, 쾌차하거라.", "기도하니 CI 초록불!", "힐: rm -rf node_modules."],
+        ],
+    ]
+
+    /// 특수 모션 대사 한 줄. 해당 펫/모션 풀이 없으면 종 전용 일반 대사로 폴백.
+    static func randomMythicMove(for kind: PetKind, action: PetController.Action) -> String {
+        mythicMoves[kind]?[action.rawValue]?.randomElement() ?? random(for: kind)
+    }
+
     /// 날씨별 공통 대사 — 종(kind) 무관. 현재 위치가 비/눈/뇌우일 때 `.quote` 동작에서
     /// 일정 확률로 종 전용 대사 대신 노출된다 (clear면 사용 안 함).
     /// 톤은 perPet과 동일하게 dev/CS 밈 + 귀여움. ~20자 이하 권장(말풍선 크기).

@@ -178,7 +178,7 @@ struct WalkingCat: View {
     private func sprite(descent: Double) -> some View {
         if let pos = positionFor(xNorm: ctrl.x),
            let nsImg = PetSprite.image(for: kind, action: ctrl.action, frameIndex: ctrl.frameIndex) {
-            let (cw, ch) = kind.cellSize
+            let (cw, ch) = kind.cellSize(for: ctrl.action)
             let aspect = Double(cw) / Double(ch)
             let w = renderHeight * aspect
             let h = renderHeight
@@ -245,10 +245,11 @@ struct WalkingCat: View {
                     .allowsHitTesting(false)
             }
 
-            // quote 동작 중이면 명언 말풍선 표시 (7초 고정).
+            // quote 또는 Mythic 특수 모션 중이면 대사 말풍선 표시 (quote 7초 / 특수 2.5초).
             // 위치 결정: 기본은 펫 머리 위, plot 좌/우 경계에서는 안쪽으로 시프트,
             // 머리 위가 plot 윗면을 넘으면 펫 아래로 뒤집음.
-            if ctrl.action == .quote, let quote = ctrl.currentQuote {
+            if let quote = ctrl.currentQuote,
+               ctrl.action == .quote || ctrl.action == .special1 || ctrl.action == .special2 {
                 let bw = bubbleSize.width
                 let bh = bubbleSize.height
                 let petX = pos.x + jx
@@ -575,7 +576,9 @@ struct CoinPopParticle: Identifiable {
 
 @MainActor
 final class PetController: ObservableObject {
-    enum Action: String { case walk, run, sit, scan, quote }
+    // special1/special2 = Mythic 등급 전용 특수 모션. 펫이 `PetDefinition.specialMoves`에
+    // 정의한 케이스만 실제로 사용된다 (일반 펫은 specialMoves가 비어 영원히 발동 안 함).
+    enum Action: String { case walk, run, sit, scan, quote, special1, special2 }
 
     @Published private(set) var x: Double = 0.5             // 0..1 정규화 위치
     @Published private(set) var facingRight: Bool = true
@@ -659,6 +662,7 @@ final class PetController: ObservableObject {
         case .sit:  fps = 3
         case .scan: fps = 4
         case .quote: fps = 3
+        case .special1, .special2: fps = 8   // 검 휘두름/힐 등 — 또렷하게 보이도록 약간 빠르게
         }
         let frameDuration = 1.0 / max(1, fps)
         frameAccumulator += dt
@@ -716,6 +720,10 @@ final class PetController: ObservableObject {
         let scanEnd = restEnd + mood.scanProbability
         // mood와 무관한 5% 확률로 명언 표시. 7초 고정.
         let quoteEnd = scanEnd + 0.05
+        // Mythic 등급만: 명언 구간 다음 ~10% 확률로 전용 특수 모션.
+        // 일반 펫은 specialMoves가 비어 specialEnd == quoteEnd → 영원히 발동 안 함.
+        let specials = Array(petKind.def.specialMoves.keys)
+        let specialEnd = quoteEnd + (specials.isEmpty ? 0 : 0.10)
         let prevAction = action
         currentQuote = nil
         if r < restEnd {
@@ -728,6 +736,11 @@ final class PetController: ObservableObject {
             action = .quote
             currentQuote = quoteForContext()
             actionUntil = now.addingTimeInterval(7.0)
+        } else if r < specialEnd, let move = specials.randomElement() {
+            // 보유한 특수 모션 중 무작위 1개 + 펫별 매칭 대사. 제자리에서 재생(이동 정지).
+            action = move
+            currentQuote = Quotes.randomMythicMove(for: petKind, action: move)
+            actionUntil = now.addingTimeInterval(2.5)
         } else {
             // walk vs run: mood.runChance에 따라 분기. run은 짧은 burst.
             if Double.random(in: 0...1) < mood.runChance {
