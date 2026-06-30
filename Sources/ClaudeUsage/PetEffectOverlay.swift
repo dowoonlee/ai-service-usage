@@ -32,14 +32,19 @@ struct PetEffectOverlay: View {
             case .backdrop:
                 // Mythic 기본 오라 — 구매 효과보다 뒤(맨 아래)에 깔린다.
                 if mythicBase { mythicAura }
-                // 무지개 트레일은 펫 뒤로 흐르므로 backdrop. 광원(glow/aura)과 공존 가능.
+                // 무지개/별가루 트레일은 펫 뒤로 흐르므로 backdrop. 광원(glow/aura)과 공존 가능.
                 if effects.contains(.rainbow) { rainbow }
+                if effects.contains(.stardust) { stardust }
                 // aura는 강화 glow를 포함하므로 glow와 중복으로 그리지 않는다.
                 if effects.contains(.aura) { auraGlow }
                 else if effects.contains(.glow) { glow }
             case .particles:
                 if effects.contains(.trail) || effects.contains(.aura) { trail }
+                if effects.contains(.flame) { flame }
                 if effects.contains(.footsteps) || effects.contains(.aura) { footsteps }
+                if effects.contains(.heart) { heartParticles }
+                if effects.contains(.star) { starParticles }
+                if effects.contains(.petal) { petalParticles }
             }
         }
         .allowsHitTesting(false)
@@ -213,5 +218,120 @@ struct PetEffectOverlay: View {
                 }
             }
         }
+    }
+
+    // MARK: - 신규 코스메틱 (파티클: 떠오르는 입자 / 궤적: 뒤로 흐름)
+
+    /// 펫 주변에서 위로 떠오르며 사라지는 하트.
+    private var heartParticles: some View { riser(HeartShape(), color: .pink, count: 4) }
+    /// 별.
+    private var starParticles: some View { riser(StarShape(), color: .yellow, count: 4) }
+    /// 꽃잎 (좌우로 더 크게 흔들리며).
+    private var petalParticles: some View {
+        riser(Ellipse(), color: Color(red: 1, green: 0.72, blue: 0.85), count: 5, sway: 0.5)
+    }
+
+    /// 떠오르는 입자 공통 — 모양/색/개수/흔들림만 바꿔 재사용. 이동과 무관하게 항상 은은히.
+    private func riser<S: Shape>(_ shape: S, color: Color, count: Int, sway: Double = 0.3) -> some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            ZStack {
+                ForEach(0..<count, id: \.self) { i in
+                    let phase = (t * 0.6 + Double(i) / Double(count)).truncatingRemainder(dividingBy: 1.0)
+                    let dx = sin((phase * 2 + Double(i)) * .pi) * petHeight * sway
+                    let dy = -CGFloat(phase) * petHeight * 1.3
+                    let sz = petHeight * 0.22
+                    shape
+                        .fill(color)
+                        .frame(width: sz, height: sz)
+                        .opacity((1 - phase) * 0.85)
+                        .position(x: center.x + dx, y: footY - petHeight * 0.2 + dy)
+                }
+            }
+        }
+    }
+
+    /// 별가루 궤적 — 이동 시 뒤로 흐르는 반짝이 점.
+    private var stardust: some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let dir: CGFloat = facingRight ? -1 : 1
+            ZStack {
+                if isMoving {
+                    ForEach(0..<7, id: \.self) { i in
+                        let phase = (t * 1.4 + Double(i) / 7).truncatingRemainder(dividingBy: 1.0)
+                        let dx = dir * CGFloat(phase) * petHeight * 1.5
+                        let dy = sin((phase + Double(i)) * 5) * petHeight * 0.25
+                        let r = CGFloat(1 - phase) * 1.6 + 0.6
+                        Circle()
+                            .fill(Color(red: 1, green: 0.95, blue: 0.6))
+                            .frame(width: r * 2, height: r * 2)
+                            .opacity((1 - phase) * 0.9)
+                            .position(x: center.x + dx, y: center.y + dy)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 불꽃 궤적 — 이동 시 뒤로 흐르는 주황 잔상 (식어가며 빨강으로).
+    private var flame: some View {
+        TimelineView(.animation) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let dir: CGFloat = facingRight ? -1 : 1
+            ZStack {
+                if isMoving {
+                    ForEach(0..<6, id: \.self) { i in
+                        let phase = (t * 1.5 + Double(i) / 6).truncatingRemainder(dividingBy: 1.0)
+                        let dx = dir * CGFloat(phase) * petHeight * 1.3
+                        let r = CGFloat(1 - phase) * 3.2 + 1
+                        let col = Color(red: 1, green: 0.55 - 0.35 * phase, blue: 0.1)
+                        Circle()
+                            .fill(col)
+                            .frame(width: r * 2, height: r * 2)
+                            .opacity((1 - phase) * 0.6)
+                            .blur(radius: 1)
+                            .position(x: center.x + dx, y: center.y - CGFloat(phase) * petHeight * 0.2)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 떠오르는 입자용 하트 모양.
+struct HeartShape: Shape {
+    func path(in r: CGRect) -> Path {
+        let w = r.width, h = r.height
+        var p = Path()
+        p.move(to: CGPoint(x: w * 0.5, y: h * 0.32))
+        p.addCurve(to: CGPoint(x: 0, y: h * 0.28),
+                   control1: CGPoint(x: w * 0.5, y: h * 0.06), control2: CGPoint(x: 0, y: 0))
+        p.addCurve(to: CGPoint(x: w * 0.5, y: h),
+                   control1: CGPoint(x: 0, y: h * 0.58), control2: CGPoint(x: w * 0.5, y: h * 0.78))
+        p.addCurve(to: CGPoint(x: w, y: h * 0.28),
+                   control1: CGPoint(x: w * 0.5, y: h * 0.78), control2: CGPoint(x: w, y: h * 0.58))
+        p.addCurve(to: CGPoint(x: w * 0.5, y: h * 0.32),
+                   control1: CGPoint(x: w, y: 0), control2: CGPoint(x: w * 0.5, y: h * 0.06))
+        return p
+    }
+}
+
+/// 떠오르는 입자용 별 모양 (5각).
+struct StarShape: Shape {
+    var points: Int = 5
+    func path(in r: CGRect) -> Path {
+        var p = Path()
+        let c = CGPoint(x: r.midX, y: r.midY)
+        let outer = min(r.width, r.height) / 2
+        let inner = outer * 0.42
+        for i in 0..<(points * 2) {
+            let angle = Double(i) * .pi / Double(points) - .pi / 2
+            let rad = i % 2 == 0 ? outer : inner
+            let pt = CGPoint(x: c.x + cos(angle) * rad, y: c.y + sin(angle) * rad)
+            if i == 0 { p.move(to: pt) } else { p.addLine(to: pt) }
+        }
+        p.closeSubpath()
+        return p
     }
 }
