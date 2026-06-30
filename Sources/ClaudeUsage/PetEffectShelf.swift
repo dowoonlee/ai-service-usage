@@ -26,7 +26,11 @@ struct PetEffectShelf: View {
                     }
                     .foregroundStyle(.secondary)
                     .frame(width: 50, alignment: .leading)
-                    ForEach(EffectKind.allCases.filter { $0.category == cat }) { chip($0) }
+                    // 카테고리 내 저가→고가 정렬. 동가는 allCases(선언) 순서 유지(offset tiebreak).
+                    ForEach(EffectKind.allCases.enumerated()
+                        .filter { $0.element.category == cat }
+                        .sorted { ($0.element.price, $0.offset) < ($1.element.price, $1.offset) }
+                        .map(\.element)) { chip($0) }
                     Spacer(minLength: 4)
                     // 타입당 1슬롯 — 현재 이 카테고리에 장착된 것(없으면 비어 있음).
                     Text(equippedName(cat).map { "장착: \($0)" } ?? "비어 있음")
