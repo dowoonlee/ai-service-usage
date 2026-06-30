@@ -30,4 +30,12 @@ final class PetSpriteTests: XCTestCase {
             }
         }
     }
+
+    // mythic 3종은 호버 도발·고부하 스트레스 대사 풀을 갖춰야 한다 (빈 풀이면 폴백되지만 의도상 채움).
+    func testMythicHasTauntsAndStress() {
+        for kind in [PetKind.warrior, .lancer, .monk] {
+            XCTAssertFalse(Mythic.spec(for: kind)?.taunts.isEmpty ?? true, "\(kind.rawValue) taunts")
+            XCTAssertFalse(Mythic.spec(for: kind)?.stressQuotes.isEmpty ?? true, "\(kind.rawValue) stressQuotes")
+        }
+    }
 }
