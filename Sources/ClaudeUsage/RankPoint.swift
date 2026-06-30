@@ -13,6 +13,13 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
     case trail       // 잔상
     case aura        // 풀 오라 (프리미엄)
     case rainbow     // Nyan Cat 무지개 트레일 (프리미엄)
+    // 신규 — 파티클류 (발밑/주변 입자)
+    case heart       // 하트
+    case star        // 별
+    case petal       // 꽃잎
+    // 신규 — 궤적류 (이동 시 뒤로 흐름)
+    case stardust    // 별가루
+    case flame       // 불꽃
 
     var id: String { rawValue }
 
@@ -23,11 +30,16 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .trail:     return "잔상"
         case .aura:      return "오라"
         case .rainbow:   return "무지개"
+        case .heart:     return "하트"
+        case .star:      return "별"
+        case .petal:     return "꽃잎"
+        case .stardust:  return "별가루"
+        case .flame:     return "불꽃"
         }
     }
 
-    /// 구매 가격 (RP). 카탈로그 총합 5000 = 1등 월수입(2000)의 2.5개월치.
-    /// rainbow가 최상급(2000, 1등 한 달치). cf. docs/DESIGN_RP_ECONOMY.md. 배포 후 텔레메트리로 튜닝.
+    /// 구매 가격 (RP). 카탈로그 총합 7600 (기존 5000 + 신규 파티클 3×400 + 궤적 2×700).
+    /// rainbow가 최상급(2000, 1등 한 달치). 펫 단위 귀속이라 "한 펫에 다 사는" 비용일 뿐. 배포 후 튜닝.
     var price: Int {
         switch self {
         case .footsteps: return 300
@@ -35,6 +47,8 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .trail:     return 600
         case .aura:      return 1500
         case .rainbow:   return 2000
+        case .heart, .star, .petal: return 400
+        case .stardust, .flame:     return 700
         }
     }
 
@@ -46,6 +60,44 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .trail:     return "wind"
         case .aura:      return "sparkles"
         case .rainbow:   return "rainbow"
+        case .heart:     return "heart.fill"
+        case .star:      return "star.fill"
+        case .petal:     return "leaf.fill"
+        case .stardust:  return "wand.and.stars"
+        case .flame:     return "flame.fill"
+        }
+    }
+
+    /// 코스메틱 타입 — 장착은 타입당 1개(배타). 상점도 타입별로 묶어 보여준다.
+    var category: EffectCategory {
+        switch self {
+        case .glow, .aura:                          return .light
+        case .trail, .rainbow, .stardust, .flame:   return .trail
+        case .footsteps, .heart, .star, .petal:     return .particle
+        }
+    }
+}
+
+/// 코스메틱 타입(카테고리). 한 펫은 타입당 최대 1개를 장착한다.
+enum EffectCategory: String, CaseIterable, Identifiable {
+    case light       // 광원 (펫 뒤 glow/aura)
+    case trail       // 궤적 (이동 시 뒤로 흐름)
+    case particle    // 파티클 (발밑/주변 입자)
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .light:    return "광원"
+        case .trail:    return "궤적"
+        case .particle: return "파티클"
+        }
+    }
+    /// 카테고리 헤더 아이콘 (SF Symbol).
+    var iconName: String {
+        switch self {
+        case .light:    return "sun.max.fill"
+        case .trail:    return "wind"
+        case .particle: return "sparkles"
         }
     }
 }
@@ -100,12 +152,22 @@ final class RankPointLedger {
         var owned = s.petEffects
         owned[kind, default: []].insert(effect)
         s.petEffects = owned
-        // 구매 즉시 장착 — 사면 바로 보이도록.
-        var equipped = s.equippedEffects
-        equipped[kind, default: []].insert(effect)
-        s.equippedEffects = equipped
+        // 구매 즉시 장착 — 사면 바로 보이도록 (타입당 1슬롯: 같은 category 교체).
+        equip(effect, for: kind)
         DebugLog.log("RankPointLedger: 이펙트 구매+장착 \(kind.rawValue) ← \(effect.rawValue)")
         return true
+    }
+
+    /// 이펙트 장착 — 같은 category의 기존 장착을 해제하고(타입당 1슬롯) 이 이펙트를 장착.
+    /// 보유 여부는 호출 측이 보장한다. 끄기는 `toggleEquip`이 처리.
+    func equip(_ effect: EffectKind, for kind: PetKind) {
+        let s = Settings.shared
+        var equipped = s.equippedEffects
+        var set = equipped[kind] ?? []
+        set = set.filter { $0.category != effect.category }
+        set.insert(effect)
+        equipped[kind] = set
+        s.equippedEffects = equipped
     }
 
     /// RP 프리미엄 가챠권 1장 가격. 랭킹 월 1등 수입(2000 RP) 대비 ~0.75개월치 — "신중한 한 방".
@@ -126,13 +188,14 @@ final class RankPointLedger {
     func toggleEquip(_ effect: EffectKind, for kind: PetKind) {
         let s = Settings.shared
         guard s.petEffects[kind]?.contains(effect) == true else { return }
-        var equipped = s.equippedEffects
-        if equipped[kind]?.contains(effect) == true {
+        if s.equippedEffects[kind]?.contains(effect) == true {
+            var equipped = s.equippedEffects
             equipped[kind]?.remove(effect)
+            s.equippedEffects = equipped
+            DebugLog.log("RankPointLedger: 장착 해제 \(kind.rawValue) \(effect.rawValue)")
         } else {
-            equipped[kind, default: []].insert(effect)
+            equip(effect, for: kind)   // 같은 category 배타 (타입당 1슬롯)
+            DebugLog.log("RankPointLedger: 장착 \(kind.rawValue) ← \(effect.rawValue) (\(effect.category.rawValue))")
         }
-        s.equippedEffects = equipped
-        DebugLog.log("RankPointLedger: 장착 토글 \(kind.rawValue) \(effect.rawValue) → \(equipped[kind]?.contains(effect) == true ? "on" : "off")")
     }
 }

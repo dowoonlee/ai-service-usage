@@ -14,8 +14,26 @@ struct PetEffectShelf: View {
     @State private var pendingEffect: EffectKind? = nil
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach(EffectKind.allCases) { chip($0) }
+        // 카테고리 섹션 — 아이콘+이름 헤더 + 현재 슬롯 상태(타입당 1개) + 칩들.
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(EffectCategory.allCases) { cat in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Image(systemName: cat.iconName)
+                            .font(.system(size: 9))
+                        Text(cat.displayName)
+                            .font(.system(size: 9, weight: .semibold))
+                        Spacer()
+                        // 타입당 1슬롯 — 현재 이 카테고리에 장착된 것(없으면 비어 있음).
+                        Text(equippedName(cat).map { "장착: \($0)" } ?? "비어 있음")
+                            .font(.system(size: 8))
+                    }
+                    .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(EffectKind.allCases.filter { $0.category == cat }) { chip($0) }
+                    }
+                }
+            }
         }
         .alert("이펙트 구매", isPresented: Binding(
             get: { pendingEffect != nil },
@@ -29,6 +47,11 @@ struct PetEffectShelf: View {
         } message: { effect in
             Text("\(PetMetaStore.shared.displayName(for: kind))에게 ‘\(effect.displayName)’ 이펙트를 ✦\(effect.price)에 적용할까요?\n보유 RP: \(settings.rp)")
         }
+    }
+
+    /// 해당 카테고리에 현재 장착된 이펙트 이름 (타입당 1슬롯이라 0~1개).
+    private func equippedName(_ cat: EffectCategory) -> String? {
+        (settings.equippedEffects[kind] ?? []).first { $0.category == cat }?.displayName
     }
 
     private func chip(_ effect: EffectKind) -> some View {

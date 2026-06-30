@@ -834,6 +834,23 @@ final class Settings: ObservableObject {
             d.set(self.coinsTotalEarned, forKey: Keys.coinsTotalEarned)
         }
 
+        // 코스메틱 장착 슬롯(타입당 1개) 도입 마이그레이션 — 기존 자유 조합에서 category당
+        // price 최고 1개만 장착 유지(보유 petEffects는 그대로). init 중 didSet 미동작 → 직접 persist.
+        applyOnceMigration(key: Keys.hasMigratedEffectSlots,
+                           onlyExisting: false,
+                           wasExistingUser: wasExistingUser) {
+            var eq = self.equippedEffects
+            for (kind, set) in eq {
+                var best: [EffectCategory: EffectKind] = [:]
+                for e in set where best[e.category].map({ e.price > $0.price }) ?? true {
+                    best[e.category] = e
+                }
+                eq[kind] = Set(best.values)
+            }
+            self.equippedEffects = eq
+            self.persist(eq, forKey: Keys.equippedEffects)
+        }
+
         // 구매제 도입 전부터 동적 테마를 override 로 쓰고 있었다면 보유로 인정 (뺏지 않음).
         // init 끝(모든 프로퍼티 초기화 후)이라 self 자유 사용. init 중 didSet은 안 도므로 직접 persist.
         var migratedThemes = false
@@ -1301,6 +1318,7 @@ final class Settings: ObservableObject {
         static let pendingCollectionHighlights = "settings.pendingCollectionHighlights"
         static let hasMigratedCollectionBonuses = "settings.hasMigratedCollectionBonuses"
         static let hasReevaluatedOnCall = "settings.hasReevaluatedOnCall"
+        static let hasMigratedEffectSlots = "settings.hasMigratedEffectSlots"
         // 트레이너 카드 (Report 탭)
         static let trainerID                   = "settings.trainerID"
         static let trainerCard                 = "settings.trainerCard"
