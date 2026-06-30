@@ -107,14 +107,16 @@ struct GachaView: View {
     }
 
     private var shopTab: some View {
-        VStack(spacing: 16) {
-            header
-            Divider()
-            resultArea
-            Divider()
-            inventorySection
+        ScrollView {
+            VStack(spacing: 16) {
+                header
+                Divider()
+                resultArea
+                Divider()
+                inventorySection
+            }
+            .padding(20)
         }
-        .padding(20)
         .alert("pull ×10", isPresented: $confirmingMultiPull) {
             Button("진행") { pull10() }
             Button("취소", role: .cancel) {}
@@ -1408,7 +1410,9 @@ private struct PetPreviewView: View {
                     .offset(x: descX)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 미리보기 영역 고정 높이 — 말풍선(offset -94)·이름/게이지(+50)가 ZStack frame 밖으로 삐져
+        // 헤더/도감과 겹치지 않도록 충분히 확보(maxHeight .infinity는 ScrollView와 충돌해 제거).
+        .frame(maxWidth: .infinity, minHeight: 230)
         // 칩 바는 미리보기 영역 밖(아래 독립 행) — 펫 슬라이드(slideX)·variant와 분리되어 잘리지 않는다.
         // 공용 PetEffectShelf 재활용. hover 프리뷰는 previewEffect로 받아 미리보기 펫에 임시 반영.
         PetEffectShelf(kind: kind, settings: settings, onPreview: { previewEffect = $0 })
