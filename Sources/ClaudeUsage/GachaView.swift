@@ -198,6 +198,18 @@ struct GachaView: View {
                         .monospacedDigit()
                 }
                 .help("프리미엄 가챠권 — RP로 구매, Mythic·Legendary 전용 풀 (sudo pull)")
+                // 이로치 조각 — 만렙 펫 오버플로우로만 적립. 보유 시에만 노출(엔드게임 재화).
+                if settings.shinyShards > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "hexagon.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(.pink)
+                        Text("\(settings.shinyShards)")
+                            .font(.title3.weight(.bold))
+                            .monospacedDigit()
+                    }
+                    .help("이로치 조각 — 만렙 펫의 오버플로우로 적립, Prestige(홀로 이로치) 해금(\(PetOwnership.prestigeCost)조각)에 사용")
+                }
             }
             .fixedSize()
             Spacer(minLength: 8)
@@ -974,6 +986,14 @@ private struct InventorySlot: View {
                               ? variantDot(i) : Color.secondary.opacity(0.2))
                         .frame(width: 5, height: 5)
                 }
+                // Prestige(홀로) 보유 시 무지개 도트 추가.
+                if ownership?.unlockedVariants.contains(PetOwnership.prestigeVariant) == true {
+                    Circle()
+                        .fill(AngularGradient(
+                            gradient: Gradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .red]),
+                            center: .center))
+                        .frame(width: 5, height: 5)
+                }
             }
         }
     }
@@ -1333,6 +1353,8 @@ private struct PetPreviewView: View {
     @State private var selectedVariant: Int
     /// hover 중인 칩의 이펙트 — 구매/장착 전 미리보기 펫에 임시 적용. nil이면 없음. (PetEffectShelf가 콜백으로 갱신.)
     @State private var previewEffect: EffectKind? = nil
+    /// Prestige 해금 확인 alert.
+    @State private var showPrestigeConfirm = false
 
     init(kind: PetKind, variant: Int, settings: Settings) {
         self.kind = kind
@@ -1404,8 +1426,12 @@ private struct PetPreviewView: View {
                                 .aspectRatio(contentMode: .fit)
                                 .frame(height: 84)
                                 .scaleEffect(x: flip ? -1 : 1, y: 1)
-                                .hueRotation(.degrees(WalkingCat.hueDegrees(for: selectedVariant)))
+                                .hueRotation(.degrees(selectedVariant == PetOwnership.prestigeVariant
+                                    ? WalkingCat.prestigeHueDegrees(at: t) : WalkingCat.hueDegrees(for: selectedVariant)))
                                 .saturation(selectedVariant > 0 ? 1.15 : 1.0)
+                                // Prestige는 무채색 펫에도 색이 입도록 순환 색조 곱셈(비-Prestige는 .white=무영향).
+                                .colorMultiply(selectedVariant == PetOwnership.prestigeVariant
+                                    ? WalkingCat.prestigeTint(at: t) : .white)
                             PetEffectOverlay(effects: fx, placement: .particles,
                                              center: CGPoint(x: 55, y: 55), footY: 95,
                                              petHeight: 70, facingRight: movingRight, isMoving: true)
@@ -1424,7 +1450,10 @@ private struct PetPreviewView: View {
                     VStack(spacing: 4) {
                         Text(PetMetaStore.shared.displayName(for: kind))
                             .font(.title3.weight(.medium))
-                        if selectedVariant > 0 {
+                        if selectedVariant == PetOwnership.prestigeVariant {
+                            Text("✦ Prestige ✦")
+                                .font(.caption.weight(.semibold))
+                        } else if selectedVariant > 0 {
                             Text(String(repeating: "✨", count: selectedVariant))
                                 .font(.caption)
                         } else {
@@ -1434,6 +1463,7 @@ private struct PetPreviewView: View {
                         }
                         variantSelector
                         usageProgressView()
+                        prestigePurchaseView()
                     }
                     .offset(y: 50)
                 }
@@ -1453,6 +1483,16 @@ private struct PetPreviewView: View {
         PetEffectShelf(kind: kind, settings: settings, onPreview: { previewEffect = $0 })
             .padding(.top, 4)
             .padding(.bottom, 6)
+        }
+        .alert("Prestige 해금", isPresented: $showPrestigeConfirm) {
+            Button("이로치 조각 \(PetOwnership.prestigeCost)로 해금") {
+                if ShardLedger.shared.purchasePrestige(kind) {
+                    selectedVariant = PetOwnership.prestigeVariant
+                }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("\(PetMetaStore.shared.displayName(for: kind))에게 홀로(무지개) 이로치를 부여합니다.\n비용: 이로치 조각 \(PetOwnership.prestigeCost) · 보유: \(settings.shinyShards)")
         }
         .onAppear { enteredAt = Date() }
     }
@@ -1559,6 +1599,19 @@ private struct PetPreviewView: View {
                           ? (i == 0 ? "기본" : "이로치 \(i)")
                           : "잠김 — 가챠 중복 또는 사용 시간으로 해금")
             }
+            // Prestige 도트 — 보유 시에만. 무지개 링(정적)으로 홀로 티어 표시.
+            if unlocked.contains(PetOwnership.prestigeVariant) {
+                let isSelected = selectedVariant == PetOwnership.prestigeVariant
+                Circle()
+                    .fill(AngularGradient(
+                        gradient: Gradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .red]),
+                        center: .center))
+                    .frame(width: 12, height: 12)
+                    .overlay(Circle().strokeBorder(isSelected ? Color.primary : Color.clear, lineWidth: 1.5))
+                    .contentShape(Circle())
+                    .onTapGesture { selectedVariant = PetOwnership.prestigeVariant }
+                    .help("Prestige — 홀로 이로치")
+            }
         }
         .padding(.top, 2)
     }
@@ -1597,6 +1650,36 @@ private struct PetPreviewView: View {
                     .foregroundStyle(.secondary)
             }
             .padding(.top, 2)
+        }
+    }
+
+    /// 만렙(variant 3) + Prestige 미보유일 때만 노출되는 홀로 이로치 해금 버튼. 이로치 조각으로만 구매.
+    @ViewBuilder
+    private func prestigePurchaseView() -> some View {
+        let owned = settings.ownedPets[kind]
+        let maxed = owned?.unlockedVariants.contains(3) == true
+        let hasPrestige = owned?.unlockedVariants.contains(PetOwnership.prestigeVariant) == true
+        if maxed && !hasPrestige {
+            let cost = PetOwnership.prestigeCost
+            let affordable = settings.shinyShards >= cost
+            Button {
+                showPrestigeConfirm = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "hexagon.fill").font(.system(size: 9))
+                    Text("Prestige 해금 · \(cost)")
+                        .font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(affordable ? .pink : .secondary)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+            .disabled(!affordable)
+            .help(affordable
+                  ? "이로치 조각 \(cost)로 홀로(무지개) 이로치 해금"
+                  : "이로치 조각 부족 (보유 \(settings.shinyShards) / \(cost))")
+            .padding(.top, 3)
         }
     }
 

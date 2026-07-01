@@ -196,6 +196,11 @@ final class Settings: ObservableObject {
     @Published var rp: Int {
         didSet { UserDefaults.standard.set(rp, forKey: Keys.rp) }
     }
+    /// 이로치 조각 잔액. 만렙(variant 3) 펫의 오버플로우로만 적립, Prestige(홀로 이로치) 해금에만 소비.
+    /// `ShardLedger` 경유로만 변경 (CoinLedger/RankPointLedger와 동일 규약).
+    @Published var shinyShards: Int {
+        didSet { UserDefaults.standard.set(shinyShards, forKey: Keys.shinyShards) }
+    }
     /// 누적 적립 RP (소비 무시). 통계용.
     @Published var rpTotalEarned: Int {
         didSet { UserDefaults.standard.set(rpTotalEarned, forKey: Keys.rpTotalEarned) }
@@ -669,6 +674,7 @@ final class Settings: ObservableObject {
         self.petUsageSeconds = (usageData.flatMap { try? JSONDecoder().decode([PetKind: TimeInterval].self, from: $0) }) ?? [:]
         self.rp = (d.object(forKey: Keys.rp) as? Int) ?? 0
         self.rpTotalEarned = (d.object(forKey: Keys.rpTotalEarned) as? Int) ?? 0
+        self.shinyShards = (d.object(forKey: Keys.shinyShards) as? Int) ?? 0
         let effectsData = d.data(forKey: Keys.petEffects)
         self.petEffects = (effectsData.flatMap { try? JSONDecoder().decode([PetKind: Set<EffectKind>].self, from: $0) }) ?? [:]
         let equippedData = d.data(forKey: Keys.equippedEffects)
@@ -948,6 +954,20 @@ final class Settings: ObservableObject {
             d.set(claudePresetID.uuidString, forKey: Keys.claudePresetID)
             d.set(cursorPresetID.uuidString, forKey: Keys.cursorPresetID)
             d.set(codexPresetID.uuidString, forKey: Keys.codexPresetID)
+        }
+
+        // 이로치 조각 도입 1회 시드 — 기존 펫의 '현재 오버플로우'를 이미 지급됨으로 표시해 과거분
+        // 소급 지급을 막는다(조각은 도입 이후 오버플로우부터 적립). 신규 펫은 오버플로우 0이라 no-op.
+        applyOnceMigration(key: Keys.hasSeededShardOverflow, onlyExisting: false,
+                           wasExistingUser: wasExistingUser) {
+            var owned = self.ownedPets
+            for kind in Array(owned.keys) {
+                guard var ship = owned[kind] else { continue }
+                ship.seedCreditedShardUnits(usageSeconds: self.petUsageSeconds[kind] ?? 0)
+                owned[kind] = ship
+            }
+            self.ownedPets = owned
+            self.persist(owned, forKey: Keys.ownedPets)
         }
 
         // 도장 마이그레이션은 init 안에서 호출 금지 — `BadgeRegistry.evaluate`가 `Settings.shared`를
@@ -1409,6 +1429,8 @@ final class Settings: ObservableObject {
         static let petUsageSeconds             = "settings.petUsageSeconds"
         static let pendingHighlights           = "settings.pendingHighlights"
         static let rp                          = "settings.rp"
+        static let shinyShards                 = "settings.shinyShards"
+        static let hasSeededShardOverflow      = "settings.hasSeededShardOverflow"
         static let rpTotalEarned               = "settings.rpTotalEarned"
         static let petEffects                  = "settings.petEffects"
         static let equippedEffects             = "settings.equippedEffects"

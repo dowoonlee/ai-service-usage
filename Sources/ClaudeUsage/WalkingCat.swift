@@ -207,10 +207,14 @@ struct WalkingCat: View {
                     anchor: .center
                 )
                 .rotationEffect(.degrees(rollAngle), anchor: .center)
-                .hueRotation(.degrees(Self.hueDegrees(for: variant)))
+                // Prestige(variant 4)는 시간 기반 무지개 순환(hue+색조 둘 다). now는 sprite 프레임
+                // 재렌더 캐이던스로 갱신돼 rollAngle/jumpY와 같은 방식으로 애니된다.
+                .hueRotation(.degrees(variant == PetOwnership.prestigeVariant
+                    ? Self.prestigeHueDegrees(at: now) : Self.hueDegrees(for: variant)))
                 .saturation(variant == 0 ? 1.0 : 1.15)
-                // 무채색 펫(늑대/돌/해골 등)은 hueRotation만으론 색이 안 입으므로 variant 색조를 곱해 보강.
-                .colorMultiply(Self.variantTint(for: variant))
+                // 무채색 펫(늑대/돌/해골 등)은 hueRotation만으론 색이 안 입으므로 색조를 곱해 보강.
+                .colorMultiply(variant == PetOwnership.prestigeVariant
+                    ? Self.prestigeTint(at: now) : Self.variantTint(for: variant))
                 .colorMultiply(mood.tint)
                 // 작은 sprite(18pt) 위 hover 감지를 쉽게 하려고 32x32 hit area로 확장.
                 .frame(width: max(w, 32), height: max(h, 32))
@@ -566,14 +570,27 @@ struct WalkingCat: View {
     }
 
     /// variant(이로치) 표시용 점 색. 인벤토리·미리보기·파티에서 같은 색을 쓰도록 단일 정의.
-    /// 0(기본)=gray, 1=yellow, 2=cyan, 3=pink.
+    /// 0(기본)=gray, 1=yellow, 2=cyan, 3=pink, 4(Prestige)=보라(정적 대표색; 도트는 UI에서 무지개 링).
     static func variantDotColor(_ variant: Int) -> Color {
         switch variant {
         case 1: return .yellow
         case 2: return .cyan
         case 3: return .pink
+        case PetOwnership.prestigeVariant: return .purple
         default: return .gray
         }
+    }
+
+    // MARK: - Prestige(홀로) 애니 색
+
+    /// Prestige hue 각도 — 시간 기반 순환(6초/바퀴). 유채색 펫 무지개 회전용.
+    static func prestigeHueDegrees(at t: TimeInterval) -> Double {
+        (t * 60).truncatingRemainder(dividingBy: 360)
+    }
+    /// Prestige colorMultiply 색조 — 무채색 펫에도 색이 입도록 시간 기반 순환(밝게 유지).
+    static func prestigeTint(at t: TimeInterval) -> Color {
+        let h = (t * 0.16).truncatingRemainder(dividingBy: 1.0)
+        return Color(hue: h, saturation: 0.5, brightness: 1.0)
     }
 }
 
