@@ -171,16 +171,23 @@ struct ReportView: View {
                 RoundedRectangle(cornerRadius: AppRadius.sm)
                     .fill(isSelected ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.10))
                 if let img = PetSprite.image(for: kind, action: .sit, frameIndex: 0) {
+                    let isRainbow = v == PetOwnership.prestigeVariant
                     Image(nsImage: img)
                         .resizable()
                         .interpolation(.none)
                         .aspectRatio(contentMode: .fit)
                         .padding(2)
-                        .hueRotation(.degrees(WalkingCat.hueDegrees(for: v)))
+                        .hueRotation(.degrees(isRainbow ? 0 : WalkingCat.hueDegrees(for: v)))
+                        .colorMultiply(isRainbow ? WalkingCat.prestigeTint(at: 0) : .white)
                         .saturation(v > 0 ? 1.15 : 1.0)
                 }
             }
             .frame(width: 36, height: 36)
+            .overlay(alignment: .topTrailing) {
+                if v == PetOwnership.prestigeVariant {
+                    Text("🌈").font(.system(size: 9))
+                }
+            }
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.sm)
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
