@@ -9,13 +9,19 @@ struct PetOwnership: Codable, Hashable {
     var count: Int
     var unlockedVariants: Set<Int>
     var creditedShardUnits: Int = 0
+    /// Prestige 누적 실패 시도 수(천장 카운터). 성공 시 0으로 리셋.
+    var prestigeAttempts: Int = 0
 
-    /// Prestige(홀로 애니) variant 인덱스. 이로치 조각으로만 해금.
+    /// Prestige(홀로 애니) variant 인덱스. 이로치 조각으로 해금 시도해서 얻는다.
     static let prestigeVariant = 4
     /// 만렙(variant 3) 초과 오버플로우 1유닛당 지급하는 이로치 조각 수.
     static let shardsPerOverflowUnit = 3
-    /// Prestige 해금 가격(이로치 조각).
-    static let prestigeCost = 40
+    /// Prestige 해금 시도 1회 비용(이로치 조각).
+    static let prestigeAttemptCost = 33
+    /// Prestige 시도 성공 확률.
+    static let prestigeSuccessChance = 0.15
+    /// Prestige 천장 — 이 회차(누적 실패 +1) 시도는 확정 성공.
+    static let prestigePityCeiling = 10
     /// 자동 해금 최고 임계(= variant 3 유닛). 이 위로가 오버플로우.
     static var overflowStartUnits: Double { variantUnitThresholds.last?.0 ?? 8.0 }
 
@@ -86,12 +92,13 @@ struct PetOwnership: Codable, Hashable {
 extension PetOwnership {
     // creditedShardUnits는 신규 필드 — 구버전 저장 데이터엔 없으므로 decodeIfPresent로 기본 0 처리.
     // (동기화된 encode는 컴파일러 합성 사용. init(from:)을 extension에 둬 memberwise init도 유지.)
-    private enum CodingKeys: String, CodingKey { case count, unlockedVariants, creditedShardUnits }
+    private enum CodingKeys: String, CodingKey { case count, unlockedVariants, creditedShardUnits, prestigeAttempts }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         count = try c.decode(Int.self, forKey: .count)
         unlockedVariants = try c.decode(Set<Int>.self, forKey: .unlockedVariants)
         creditedShardUnits = try c.decodeIfPresent(Int.self, forKey: .creditedShardUnits) ?? 0
+        prestigeAttempts = try c.decodeIfPresent(Int.self, forKey: .prestigeAttempts) ?? 0
     }
 }
 
