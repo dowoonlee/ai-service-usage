@@ -15,6 +15,8 @@ import {
   DISPLAY_WINDOW_HOURS,
   POST_COOLDOWN_SEC,
   DELETE_POST_WINDOW_SEC,
+  COMMENT_MAX_LEN,
+  DELETE_COMMENT_WINDOW_SEC,
 } from "../_shared/board_policy.ts";
 
 const POST_LIMIT = 100;
@@ -71,8 +73,8 @@ Deno.serve(async (req: Request) => {
     return errorResponse(400, "invalid_device_id");
   }
   // Postgres UUID 컬럼은 소문자로 정규화 저장되는데 클라(Swift UUID)는 대문자를 보낸다.
-  // isMine/likedByMe를 JS 문자열 `===`로 비교하므로 양쪽을 소문자로 맞추지 않으면
-  // 항상 false가 되어 재진입 시 하트/‘나’ 배지가 사라진다(leaderboard/index.ts:52 선례).
+  // isMine/likedByMe를 JS 문자열 `===`로 비교하므로 양쪽을 소문자로 맞추지 않으면 항상 false가
+  // 되어 재진입 시 하트/'나' 배지가 사라진다(leaderboard/index.ts:52 선례).
   const deviceIdLower = deviceId ? deviceId.toLowerCase() : null;
 
   const db = getDb();
@@ -113,6 +115,47 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // 2.5) 댓글 + 댓글 좋아요 일괄 조회 (in절). 글당 inline으로 응답에 포함(소규모 커뮤니티 가정).
+  type CommentRow = {
+    id: number; post_id: number; device_id: string; content: string; created_at: string;
+  };
+  const commentsByPost = new Map<number, CommentRow[]>();
+  const commentLikesByComment = new Map<number, string[]>();  // comment_id → device_ids
+  let commentRows: CommentRow[] = [];
+  if (postIds.length > 0) {
+    const { data: comments, error: cErr } = await db
+      .from("board_post_comments")
+      .select("id, post_id, device_id, content, created_at")
+      .in("post_id", postIds)
+      .order("created_at", { ascending: true });
+    if (cErr) {
+      console.error("comments fetch failed", cErr);
+      return errorResponse(500, "fetch_failed");
+    }
+    commentRows = (comments ?? []) as CommentRow[];
+    for (const row of commentRows) {
+      const arr = commentsByPost.get(row.post_id) ?? [];
+      arr.push(row);
+      commentsByPost.set(row.post_id, arr);
+    }
+    const commentIds = commentRows.map((c) => c.id);
+    if (commentIds.length > 0) {
+      const { data: cLikes, error: clErr } = await db
+        .from("board_post_comment_likes")
+        .select("comment_id, device_id")
+        .in("comment_id", commentIds);
+      if (clErr) {
+        console.error("comment likes fetch failed", clErr);
+        return errorResponse(500, "fetch_failed");
+      }
+      for (const row of (cLikes ?? []) as { comment_id: number; device_id: string }[]) {
+        const arr = commentLikesByComment.get(row.comment_id) ?? [];
+        arr.push(row.device_id);
+        commentLikesByComment.set(row.comment_id, arr);
+      }
+    }
+  }
+
   // 3) 응답 조립 — 윈도우 단위 익명:
   //    같은 device_id가 표시 윈도우(DISPLAY_WINDOW_HOURS) 안에 여러 글을 썼으면
   //    모두 같은 닉네임으로 묶임. 시드는 그 device_id의 "가장 오래된 글의 id" —
@@ -130,10 +173,28 @@ Deno.serve(async (req: Request) => {
       seedByDevice.set(p.device_id, p.id);
     }
   }
+  // 댓글 작성자 닉네임 시드 — 본인 글이 있으면 글과 동일 닉을 승계, 글이 없으면 본인 첫(최소 id)
+  // 댓글 id를 시드로. commentRows는 created_at asc라 "없을 때만 set"이 최소 id를 준다.
+  const commentSeedByDevice = new Map(seedByDevice);
+  for (const c of commentRows) {
+    if (!commentSeedByDevice.has(c.device_id)) commentSeedByDevice.set(c.device_id, c.id);
+  }
 
   const entries = (posts ?? []).map((p) => {
     const likes = likesByPost.get(p.id) ?? [];
     const seed = seedByDevice.get(p.device_id) ?? p.id;
+    const comments = (commentsByPost.get(p.id) ?? []).map((c) => {
+      const cLikes = commentLikesByComment.get(c.id) ?? [];
+      return {
+        id: c.id,
+        nickname: memeNickname(commentSeedByDevice.get(c.device_id) ?? c.id),
+        content: c.content,
+        createdAt: c.created_at,
+        isMine: deviceIdLower !== null && c.device_id.toLowerCase() === deviceIdLower,
+        likeCount: cLikes.length,
+        likedByMe: deviceIdLower !== null && cLikes.some((d) => d.toLowerCase() === deviceIdLower),
+      };
+    });
     return {
       id: p.id,
       nickname: memeNickname(seed),
@@ -143,6 +204,7 @@ Deno.serve(async (req: Request) => {
       likeCount: likes.length,
       likedByMe: deviceIdLower !== null && likes.some((l) => l.device_id.toLowerCase() === deviceIdLower),
       likers: [] as { nickname: string; createdAt: string }[],
+      comments,
     };
   });
 
@@ -175,5 +237,7 @@ Deno.serve(async (req: Request) => {
     displayWindowHours: DISPLAY_WINDOW_HOURS,
     postCooldownSec: POST_COOLDOWN_SEC,
     deletePostWindowSec: DELETE_POST_WINDOW_SEC,
+    commentMaxLen: COMMENT_MAX_LEN,
+    deleteCommentWindowSec: DELETE_COMMENT_WINDOW_SEC,
   });
 });

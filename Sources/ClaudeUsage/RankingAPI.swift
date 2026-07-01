@@ -198,6 +198,17 @@ actor RankingAPI {
         let createdAt: Date
     }
 
+    /// 게시글 댓글 (flat, 대댓글 없음). 좋아요는 게시글과 동일 방식.
+    struct BoardComment: Decodable, Identifiable, Sendable, Hashable {
+        let id: Int
+        let nickname: String
+        let content: String
+        let createdAt: Date
+        let isMine: Bool
+        let likeCount: Int
+        let likedByMe: Bool
+    }
+
     struct BoardPost: Decodable, Identifiable, Sendable {
         let id: Int
         let nickname: String
@@ -208,6 +219,31 @@ actor RankingAPI {
         let likedByMe: Bool
         /// 호버 popover에서 누른 사람 표시. 시간순(오래된 것 → 최근).
         let likers: [BoardLiker]
+        /// 이 글의 댓글 (시간순). 구버전 서버는 미반환 → 디코딩 기본 빈 배열.
+        let comments: [BoardComment]
+
+        enum CodingKeys: String, CodingKey {
+            case id, nickname, content, createdAt, isMine, likeCount, likedByMe, likers, comments
+        }
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(Int.self, forKey: .id)
+            nickname = try c.decode(String.self, forKey: .nickname)
+            content = try c.decode(String.self, forKey: .content)
+            createdAt = try c.decode(Date.self, forKey: .createdAt)
+            isMine = try c.decode(Bool.self, forKey: .isMine)
+            likeCount = try c.decode(Int.self, forKey: .likeCount)
+            likedByMe = try c.decode(Bool.self, forKey: .likedByMe)
+            likers = try c.decodeIfPresent([BoardLiker].self, forKey: .likers) ?? []
+            comments = try c.decodeIfPresent([BoardComment].self, forKey: .comments) ?? []
+        }
+        /// optimistic 업데이트용 수동 생성자.
+        init(id: Int, nickname: String, content: String, createdAt: Date, isMine: Bool,
+             likeCount: Int, likedByMe: Bool, likers: [BoardLiker], comments: [BoardComment]) {
+            self.id = id; self.nickname = nickname; self.content = content
+            self.createdAt = createdAt; self.isMine = isMine; self.likeCount = likeCount
+            self.likedByMe = likedByMe; self.likers = likers; self.comments = comments
+        }
     }
 
     struct BoardResponse: Decodable, Sendable {
@@ -223,6 +259,10 @@ actor RankingAPI {
         /// 본인 글 작성 후 삭제 가능한 윈도우(초). BoardRow 삭제 버튼 노출 여부 판정.
         /// nil이면 BoardView fallback(60s).
         let deletePostWindowSec: Int?
+        /// 댓글 최대 길이. nil이면 BoardView fallback(200).
+        let commentMaxLen: Int?
+        /// 본인 댓글 삭제 윈도우(초). nil이면 BoardView fallback(60s).
+        let deleteCommentWindowSec: Int?
     }
 
     struct PostBoardPayload: Encodable {
@@ -264,6 +304,44 @@ actor RankingAPI {
         let signature: String
     }
     struct DeletePostResponse: Decodable {
+        let deleted: Bool
+    }
+
+    // MARK: 댓글 payload/request/response
+    struct CommentPayload: Encodable {
+        let deviceId: String
+        let postId: Int
+        let content: String
+        let ts: Int64
+    }
+    struct CommentRequest: Encodable {
+        let payload: CommentPayload
+        let signature: String
+    }
+    struct CommentResponse: Decodable {
+        let accepted: Bool
+        let commentId: Int?
+        let createdAt: Date?
+    }
+    struct CommentLikePayload: Encodable {
+        let deviceId: String
+        let commentId: Int
+        let ts: Int64
+    }
+    struct CommentLikeRequest: Encodable {
+        let payload: CommentLikePayload
+        let signature: String
+    }
+    struct DeleteCommentPayload: Encodable {
+        let deviceId: String
+        let commentId: Int
+        let ts: Int64
+    }
+    struct DeleteCommentRequest: Encodable {
+        let payload: DeleteCommentPayload
+        let signature: String
+    }
+    struct DeleteCommentResponse: Decodable {
         let deleted: Bool
     }
 
@@ -526,6 +604,36 @@ actor RankingAPI {
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let req = DeletePostRequest(payload: payload, signature: sig)
         return try await post(path: "delete-post", body: req)
+    }
+
+    /// 댓글 작성. content는 trim 전 그대로 전송 — 서버가 trim + 검증. rate limit 위반 시 429.
+    func submitComment(deviceId: String, postId: Int, content: String,
+                       hmacKeyBase64: String) async throws -> CommentResponse {
+        let payload = CommentPayload(deviceId: deviceId, postId: postId, content: content,
+                                     ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let req = CommentRequest(payload: payload, signature: sig)
+        return try await post(path: "comment", body: req)
+    }
+
+    /// 댓글 좋아요 toggle. 응답의 (liked, count)로 UI 동기화.
+    func likeComment(deviceId: String, commentId: Int,
+                     hmacKeyBase64: String) async throws -> LikeResponse {
+        let payload = CommentLikePayload(deviceId: deviceId, commentId: commentId,
+                                         ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let req = CommentLikeRequest(payload: payload, signature: sig)
+        return try await post(path: "comment-like", body: req)
+    }
+
+    /// 본인 댓글 60초 이내 삭제. 윈도우 만료/타인 댓글이면 서버 403.
+    func deleteComment(deviceId: String, commentId: Int,
+                       hmacKeyBase64: String) async throws -> DeleteCommentResponse {
+        let payload = DeleteCommentPayload(deviceId: deviceId, commentId: commentId,
+                                           ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let req = DeleteCommentRequest(payload: payload, signature: sig)
+        return try await post(path: "delete-comment", body: req)
     }
 
     /// 계정 영구 삭제. 서버측 row + submissions 로그 모두 제거.
