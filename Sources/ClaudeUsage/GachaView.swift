@@ -811,27 +811,50 @@ struct GachaView: View {
 
     // MARK: - Collections (셋 보너스 업적)
 
+    /// 도감 섹션 접기/펼치기 토글 (SettingsView.CreditsView 패턴). id = Rarity.rawValue 또는 "collections".
+    private func toggleInventoryCollapsed(_ id: String) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            if settings.gachaInventoryCollapsed.contains(id) {
+                settings.gachaInventoryCollapsed.remove(id)
+            } else {
+                settings.gachaInventoryCollapsed.insert(id)
+            }
+        }
+    }
+
     /// 펫 컬렉션(셋 보너스) 뱃지 그리드 11개. 완성된 그룹은 accentColor + ✓,
     /// 미완성은 회색 + 진행도(`5/8`). 코드네임/농담/보너스는 호버 시 `.help` tooltip으로 노출
     /// — 뱃지 자체는 작고 균일한 사이즈(56px)로 깔끔하게 통일.
     private func collectionsAchievementSection() -> some View {
         let totalCompleted = settings.completedCollections.count
         let totalCollections = PetCollection.allCases.count
+        let collapsed = settings.gachaInventoryCollapsed.contains("collections")
         return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "trophy.fill")
-                    .foregroundStyle(.yellow)
-                Text("업적")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Text("\(totalCompleted)/\(totalCollections)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            Button {
+                toggleInventoryCollapsed("collections")
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "trophy.fill")
+                        .foregroundStyle(.yellow)
+                    Text("업적")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Text("\(totalCompleted)/\(totalCollections)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 10)], spacing: 12) {
-                ForEach(PetCollection.allCases, id: \.self) { c in
-                    CollectionBadge(collection: c, settings: settings)
+            .buttonStyle(.plain)
+            if !collapsed {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 10)], spacing: 12) {
+                    ForEach(PetCollection.allCases, id: \.self) { c in
+                        CollectionBadge(collection: c, settings: settings)
+                    }
                 }
             }
         }
@@ -840,40 +863,52 @@ struct GachaView: View {
     private func raritySection(_ rarity: Rarity) -> some View {
         let kinds = Gacha.pool[rarity] ?? []
         let ownedCount = kinds.filter { settings.ownedPets[$0] != nil }.count
+        let collapsed = settings.gachaInventoryCollapsed.contains(rarity.rawValue)
         return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(rarity.color)
-                    .frame(width: 8, height: 8)
-                Text(rarity.displayName)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(rarity.color)
-                Spacer()
-                Text("\(ownedCount)/\(kinds.count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+            Button {
+                toggleInventoryCollapsed(rarity.rawValue)
+            } label: {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(rarity.color)
+                        .frame(width: 8, height: 8)
+                    Text(rarity.displayName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(rarity.color)
+                    Spacer()
+                    Text("\(ownedCount)/\(kinds.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(Rectangle())
             }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 10)], spacing: 12) {
-                ForEach(kinds) { kind in
-                    InventorySlot(
-                        kind: kind,
-                        ownership: settings.ownedPets[kind],
-                        isHighlighted: settings.pendingHighlights.contains(kind),
-                        onTap: {
-                            guard let o = settings.ownedPets[kind] else { return }
-                            let activeVariant = settings.petClaudeKind == kind
-                                ? settings.petClaudeVariant
-                                : (settings.petCursorKind == kind ? settings.petCursorVariant : 0)
-                            let v = o.unlockedVariants.contains(activeVariant)
-                                ? activeVariant
-                                : (o.unlockedVariants.sorted().first ?? 0)
-                            // 직접 클릭 → 강조 해제. 영속화는 settings 안에서 처리.
-                            settings.acknowledgeHighlight(kind)
-                            phase = .preview(kind, v)
-                            errorMessage = nil
-                        }
-                    )
+            .buttonStyle(.plain)
+            if !collapsed {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 10)], spacing: 12) {
+                    ForEach(kinds) { kind in
+                        InventorySlot(
+                            kind: kind,
+                            ownership: settings.ownedPets[kind],
+                            isHighlighted: settings.pendingHighlights.contains(kind),
+                            onTap: {
+                                guard let o = settings.ownedPets[kind] else { return }
+                                let activeVariant = settings.petClaudeKind == kind
+                                    ? settings.petClaudeVariant
+                                    : (settings.petCursorKind == kind ? settings.petCursorVariant : 0)
+                                let v = o.unlockedVariants.contains(activeVariant)
+                                    ? activeVariant
+                                    : (o.unlockedVariants.sorted().first ?? 0)
+                                // 직접 클릭 → 강조 해제. 영속화는 settings 안에서 처리.
+                                settings.acknowledgeHighlight(kind)
+                                phase = .preview(kind, v)
+                                errorMessage = nil
+                            }
+                        )
+                    }
                 }
             }
         }

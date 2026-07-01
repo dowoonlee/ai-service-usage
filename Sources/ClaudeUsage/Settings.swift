@@ -103,6 +103,11 @@ final class Settings: ObservableObject {
     func isThemeUnlocked(_ t: PetTheme) -> Bool {
         t.isFree || ownedThemes.contains(t.rawValue)
     }
+    /// 도감(GachaView 상점 탭)에서 접힌 섹션. Rarity.rawValue("mythic"…) + "collections".
+    /// 빈 Set = 전부 펼침(기본, 현행 동작 보존).
+    @Published var gachaInventoryCollapsed: Set<String> {
+        didSet { persist(gachaInventoryCollapsed, forKey: Keys.gachaInventoryCollapsed) }
+    }
     @Published private(set) var launchAtLogin: Bool
 
     /// 차트 한 구간의 |dy|가 전체 y-range 대비 이 비율 이상이면 펫이 AAAH/WHEE 말풍선을 띄움.
@@ -735,6 +740,8 @@ final class Settings: ObservableObject {
         self.ownedTitles = (titlesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         let themesData = d.data(forKey: Keys.ownedThemes)
         self.ownedThemes = (themesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let invCollapsedData = d.data(forKey: Keys.gachaInventoryCollapsed)
+        self.gachaInventoryCollapsed = (invCollapsedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.showGitHubLoginInCard = (d.object(forKey: Keys.showGitHubLoginInCard) as? Bool) ?? false
 
         // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
@@ -1335,6 +1342,7 @@ final class Settings: ObservableObject {
         static let ownedAccessories            = "settings.ownedAccessories"
         static let ownedTitles                 = "settings.ownedTitles"
         static let ownedThemes                 = "settings.ownedThemes"
+        static let gachaInventoryCollapsed     = "settings.gachaInventoryCollapsed"
         static let showGitHubLoginInCard       = "settings.showGitHubLoginInCard"
         static let hasMigratedContributorBonusUpgrade = "settings.hasMigratedContributorBonusUpgrade"
     }
