@@ -208,7 +208,7 @@ struct GachaView: View {
                             .font(.title3.weight(.bold))
                             .monospacedDigit()
                     }
-                    .help("이로치 조각 — 만렙 펫의 오버플로우로 적립, Prestige(홀로 이로치) 해금 시도(\(PetOwnership.prestigeAttemptCost)조각/회, 성공 \(Int(PetOwnership.prestigeSuccessChance * 100))%, \(PetOwnership.prestigePityCeiling)회 천장)에 사용")
+                    .help("이로치 조각 — 만렙 펫의 오버플로우로 적립, 오색 이로치 해금 시도(\(PetOwnership.prestigeAttemptCost)조각/회, 성공 \(Int(PetOwnership.prestigeSuccessChance * 100))%, \(PetOwnership.prestigePityCeiling)회 천장)에 사용")
                 }
             }
             .fixedSize()
@@ -1453,7 +1453,7 @@ private struct PetPreviewView: View {
                         Text(PetMetaStore.shared.displayName(for: kind))
                             .font(.title3.weight(.medium))
                         if selectedVariant == PetOwnership.prestigeVariant {
-                            Text("✦ Prestige ✦")
+                            Text("✦ 오색 이로치 ✦")
                                 .font(.caption.weight(.semibold))
                         } else if selectedVariant > 0 {
                             Text(String(repeating: "✨", count: selectedVariant))
@@ -1486,12 +1486,12 @@ private struct PetPreviewView: View {
             .padding(.top, 4)
             .padding(.bottom, 6)
         }
-        .alert("Prestige 해금 시도", isPresented: $showPrestigeConfirm) {
+        .alert("오색 이로치 해금 시도", isPresented: $showPrestigeConfirm) {
             Button("\(PetOwnership.prestigeAttemptCost)조각으로 시도") {
                 switch ShardLedger.shared.attemptPrestige(kind) {
                 case .success:
                     selectedVariant = PetOwnership.prestigeVariant
-                    prestigeResultMessage = "🌈 Prestige 이로치 해금 성공!"
+                    prestigeResultMessage = "🌈 오색 이로치 해금 성공!"
                 case .failure(let pity):
                     let left = PetOwnership.prestigePityCeiling - pity
                     prestigeResultMessage = left <= 1
@@ -1504,11 +1504,11 @@ private struct PetPreviewView: View {
             Button("취소", role: .cancel) {}
         } message: {
             let pity = settings.ownedPets[kind]?.prestigeAttempts ?? 0
-            Text("\(PetMetaStore.shared.displayName(for: kind))에게 홀로(무지개) 이로치를 시도합니다.\n"
+            Text("\(PetMetaStore.shared.displayName(for: kind))에게 오색(무지개) 이로치를 시도합니다.\n"
                  + "비용 \(PetOwnership.prestigeAttemptCost)조각 · 성공 \(Int(PetOwnership.prestigeSuccessChance * 100))% · \(PetOwnership.prestigePityCeiling)회 천장(현재 \(pity)/\(PetOwnership.prestigePityCeiling))\n"
                  + "보유 조각: \(settings.shinyShards)")
         }
-        .alert("Prestige 시도 결과", isPresented: Binding(
+        .alert("오색 이로치 시도 결과", isPresented: Binding(
             get: { prestigeResultMessage != nil },
             set: { if !$0 { prestigeResultMessage = nil } }
         )) {
@@ -1632,7 +1632,7 @@ private struct PetPreviewView: View {
                     .overlay(Circle().strokeBorder(isSelected ? Color.primary : Color.clear, lineWidth: 1.5))
                     .contentShape(Circle())
                     .onTapGesture { selectedVariant = PetOwnership.prestigeVariant }
-                    .help("Prestige — 홀로 이로치")
+                    .help("오색 이로치 — 무지개 홀로")
             }
         }
         .padding(.top, 2)
@@ -1675,7 +1675,8 @@ private struct PetPreviewView: View {
         }
     }
 
-    /// 만렙(variant 3) + Prestige 미보유일 때만 노출되는 홀로 이로치 해금 시도 버튼(가챠식).
+    /// 만렙(variant 3) + 오색 이로치 미보유일 때만 노출되는 해금 시도 버튼(가챠식).
+    /// 버튼 배경이 천장 진행도(pity)만큼 좌→우로 차오른다.
     @ViewBuilder
     private func prestigePurchaseView() -> some View {
         let owned = settings.ownedPets[kind]
@@ -1686,12 +1687,14 @@ private struct PetPreviewView: View {
             let affordable = settings.shinyShards >= cost
             let pity = owned?.prestigeAttempts ?? 0
             let atPity = pity + 1 >= PetOwnership.prestigePityCeiling   // 이번 시도가 천장(확정)
+            // 천장 진행도 0…1 — pity 9면 다음 시도가 확정이라 가득 참.
+            let fill = min(1.0, Double(pity) / Double(max(1, PetOwnership.prestigePityCeiling - 1)))
             Button {
                 showPrestigeConfirm = true
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "hexagon.fill").font(.system(size: 9))
-                    Text("Prestige 시도 · \(cost)")
+                    Text("오색 이로치 · \(cost)")
                         .font(.caption.weight(.semibold))
                     Text("(\(pity)/\(PetOwnership.prestigePityCeiling))")
                         .font(.caption2.monospacedDigit())
@@ -1699,12 +1702,21 @@ private struct PetPreviewView: View {
                 }
                 .foregroundStyle(affordable ? (atPity ? .orange : .pink) : .secondary)
                 .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                .background(
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Color.secondary.opacity(0.12)
+                            (atPity ? Color.orange : Color.pink).opacity(0.28)
+                                .frame(width: geo.size.width * fill)
+                        }
+                    }
+                    .clipShape(Capsule())
+                )
             }
             .buttonStyle(.plain)
             .disabled(!affordable)
             .help(affordable
-                  ? "조각 \(cost)로 홀로 이로치 해금 시도 (성공 \(Int(PetOwnership.prestigeSuccessChance * 100))%\(atPity ? " · 이번 시도 확정!" : " · \(PetOwnership.prestigePityCeiling)회 천장"))"
+                  ? "조각 \(cost)로 오색 이로치 해금 시도 (성공 \(Int(PetOwnership.prestigeSuccessChance * 100))%\(atPity ? " · 이번 시도 확정!" : " · \(PetOwnership.prestigePityCeiling)회 천장"))"
                   : "이로치 조각 부족 (보유 \(settings.shinyShards) / \(cost))")
             .padding(.top, 3)
         }
