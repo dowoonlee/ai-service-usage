@@ -12,8 +12,8 @@ enum Gacha {
     nonisolated static let pool: [Rarity: [PetKind]] = [
         // 최상위 — 일반 가챠 미등장(weight 0), RP 프리미엄 가챠권 제한 풀 전용.
         // Tiny Swords 엘리트 기사단 (Pixel Frog, CC0).
-        .mythic:    [.warrior, .lancer, .monk],
-        .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale, .archer, .pawn],
+        .mythic:    [.warrior, .lancer, .monk, .archer, .pawn],
+        .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale],
         .epic:      [.maskDude, .ghost, .plant, .skull,
                      .ogre, .bigDemon, .kingHuman, .clownCaptain, .wizardM, .knightF],
         .rare:      [.mushroom, .slime, .trunk, .radish, .rock1, .rock2, .rock3, .chameleon, .rino,

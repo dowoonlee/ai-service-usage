@@ -550,13 +550,15 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .aurora)
         case .archer:
+            // mythic 승격 — 특수 모션(Archer_Shoot) 포함 재트림. cellH=90 (idle 발 기준).
             return PetDefinition(prefix: "Archer", displayName: "궁수",
-                                 cellSize: (78, 94), defaultFacingLeft: false,
+                                 cellSize: (74, 90), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .field)
         case .pawn:
+            // mythic 승격 — 특수 모션(Pawn_Hammer/Pickaxe) 포함 재트림(투구 기준). cellH=69.
             return PetDefinition(prefix: "Pawn", displayName: "일꾼",
-                                 cellSize: (70, 81), defaultFacingLeft: false,
+                                 cellSize: (66, 69), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         }

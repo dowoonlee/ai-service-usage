@@ -23,6 +23,8 @@ enum MythicAura {
     case volcanicFire     // 전사 — 화산 불꽃 (적·금)
     case stormLightning   // 창기병 — 폭풍 번개 (청·백)
     case holyLight        // 수도사 — 성스러운 빛 (금·청록)
+    case emeraldWind      // 궁수 — 숲/바람 (초록·연둣빛)
+    case earthenGold      // 일꾼 — 대지/황금 (흙갈색·금)
 }
 
 /// mythic 펫 1마리의 특별 정의.
@@ -48,7 +50,7 @@ struct MythicSpec {
 
 enum Mythic {
     /// mythic 펫별 정의. 여기에 등록된 펫만 특수 모션·1.5배 크기·오라가 적용된다.
-    /// (가챠 등급 풀 `Gacha.pool[.mythic]`과 동일 3종으로 유지한다.)
+    /// (가챠 등급 풀 `Gacha.pool[.mythic]`과 동일 종으로 유지한다.)
     static let specs: [PetKind: MythicSpec] = [
         .warrior: MythicSpec(
             specials: [
@@ -74,12 +76,30 @@ enum Mythic {
             aura: .holyLight,
             taunts: ["폭력은 답이 아닙니다.", "마음을 비우시지요.", "거기까지만 하시길."],
             stressQuotes: ["서버에 평안을...", "과부하엔 명상이 약.", "곧 회복될 겁니다."]),
+        .archer: MythicSpec(
+            specials: [.special1: SpecialMove(suffix: "Shoot", cell: (87, 90))],
+            moveQuotes: [.special1: ["버그를 조준한다... 명중!", "원샷 원킬, 핫픽스!", "저 이슈, 화살 한 방이면 끝."]],
+            aura: .emeraldWind,
+            taunts: ["이 거리에선 못 피한다.", "가만히 서 있어 줘서 고맙군.", "조준 끝났다."],
+            stressQuotes: ["연사 모드, 간다!", "화살 아끼지 않는다!", "전탄 발사!"]),
+        .pawn: MythicSpec(
+            specials: [
+                .special1: SpecialMove(suffix: "Hammer", cell: (84, 69)),
+                .special2: SpecialMove(suffix: "Pickaxe", cell: (101, 69)),
+            ],
+            moveQuotes: [
+                .special1: ["뚝딱뚝딱, 빌드 복구!", "망치로 레거시 수리!", "인프라는 내가 짓는다."],
+                .special2: ["곡괭이질로 캐시 채굴!", "여기 금맥(로그) 있다!", "파다 보면 원인 나온다."],
+            ],
+            aura: .earthenGold,
+            taunts: ["일하는 사람 건들지 마쇼.", "삽 맛 볼래?", "바쁘니까 저리 비켜요."],
+            stressQuotes: ["야근 각이다, 가자!", "이 정도 노가다쯤이야!", "손이 열 개라도 모자라!"]),
     ]
 
     static func spec(for kind: PetKind) -> MythicSpec? { specs[kind] }
 
     /// mythic 펫 여부 — 특수 모션·1.5배·오라 적용 기준. (등급 enum과 별개의 '행동' 기준이지만
-    /// 현재 가챠 풀과 동일 3종으로 유지된다.)
+    /// 현재 가챠 풀과 동일 종으로 유지된다.)
     static func isMythic(_ kind: PetKind) -> Bool { specs[kind] != nil }
 
     /// 특수 모션 대사 한 줄. 해당 펫/모션 풀이 없으면 종 전용 일반 대사로 폴백.

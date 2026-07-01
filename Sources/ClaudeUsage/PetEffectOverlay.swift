@@ -123,6 +123,8 @@ struct PetEffectOverlay: View {
         case .volcanicFire:   return (Color(red: 0.95, green: 0.30, blue: 0.08), Color(red: 1.0, green: 0.78, blue: 0.30))
         case .stormLightning: return (Color(red: 0.40, green: 0.62, blue: 1.0),  Color(red: 0.85, green: 0.92, blue: 1.0))
         case .holyLight:      return (Color(red: 1.0, green: 0.90, blue: 0.55),  Color(red: 0.55, green: 1.0, blue: 0.85))
+        case .emeraldWind:    return (Color(red: 0.20, green: 0.80, blue: 0.45),  Color(red: 0.75, green: 1.0, blue: 0.55))
+        case .earthenGold:    return (Color(red: 0.62, green: 0.45, blue: 0.22),  Color(red: 1.0, green: 0.82, blue: 0.38))
         }
     }
 

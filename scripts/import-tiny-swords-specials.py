@@ -48,6 +48,17 @@ UNITS = {
         ("Monk_Run", "Monk/Run.png", "ir"),
         ("Monk_Heal", "Monk/Heal.png", "a1"),
     ]),
+    "Archer": (192, [
+        ("Archer_Idle", "Archer/Archer_Idle.png", "ir"),
+        ("Archer_Run", "Archer/Archer_Run.png", "ir"),
+        ("Archer_Shoot", "Archer/Archer_Shoot.png", "a1"),  # 활 쏘기
+    ]),
+    "Pawn": (192, [
+        ("Pawn_Idle", "Pawn/Pawn_Idle.png", "ir"),
+        ("Pawn_Run", "Pawn/Pawn_Run.png", "ir"),
+        ("Pawn_Hammer", "Pawn/Pawn_Interact Hammer.png", "a1"),   # 망치질(건설)
+        ("Pawn_Pickaxe", "Pawn/Pawn_Interact Pickaxe.png", "a2"), # 곡괭이질(채굴)
+    ], "helmet"),  # 망치/곡괭이가 머리 위로 솟아 본체가 작아지지 않게 본체(투구) 기준
 }
 
 
