@@ -305,6 +305,7 @@ struct MainView: View {
                                 .foregroundStyle(.primary)
                         }
                     }
+                    .fixedSize()   // 통화 아이템이 늘어(프리미엄권 등) 좁아져도 숫자가 세로로 줄바꿈되지 않게
                 }
                 .buttonStyle(.borderless)
                 .help("코인 잔액 — 클릭하여 가챠 열기")
@@ -321,6 +322,7 @@ struct MainView: View {
                             .monospacedDigit()
                             .foregroundStyle(.primary)
                     }
+                    .fixedSize()
                 }
                 .buttonStyle(.borderless)
                 .help("RP — 클릭하여 랭킹 열기")
