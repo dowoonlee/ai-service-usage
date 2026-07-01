@@ -60,6 +60,15 @@ struct PetSelection: Codable, Hashable {
     var variant: Int  // 0 = 기본, 1/2/3 = shiny tier
 }
 
+/// 재사용 가능한 명명된 파티 프리셋. 최대 `Settings.maxPartySize` 마리(종 유니크). `members[0]` = 리더.
+/// 각 데이터소스(claude/cursor/codex)는 프리셋을 하나씩 "할당"해 참조한다 — 같은 프리셋을
+/// 여러 소스에 할당하면 편집이 양쪽에 함께 반영된다(단일 소스 오브 트루스).
+struct PartyPreset: Codable, Hashable, Identifiable {
+    var id: UUID
+    var name: String
+    var members: [PetSelection]
+}
+
 /// 가챠 등급. common = 가장 흔함 → legendary → mythic = 가장 희귀(최상위).
 /// mythic은 일반 코인 가챠에 등장하지 않고(weight 0), RP 프리미엄 가챠권으로만 뽑힌다.
 enum Rarity: String, Codable, CaseIterable, Hashable {

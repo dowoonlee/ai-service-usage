@@ -58,17 +58,36 @@ final class Settings: ObservableObject {
     /// 한 차트 파티 최대 마리 수.
     static let maxPartySize = 3
 
-    /// Claude/Cursor 차트 산책 파티 (최대 `maxPartySize`, PetKind 유니크). [0] = 리더.
-    /// 멀티 산책 + 코스메틱의 source of truth. 레거시 단수 참조(`petClaudeKind` 등)는 아래 computed가
-    /// 리더를 미러해 무변경으로 동작. cf. docs/DESIGN_PET_PARTY.md
-    @Published var petClaudeParty: [PetSelection] {
-        didSet { persist(petClaudeParty, forKey: Keys.petClaudeParty) }
+    /// 재사용 파티 프리셋 라이브러리 + 소스별 할당. cf. docs/DESIGN_PET_PARTY.md
+    /// 멀티 산책 + 코스메틱의 source of truth. 아래 `petClaudeParty` 등은 "할당된 프리셋의 members"를
+    /// 미러하는 computed라 기존 소비자(MainView/ViewModel/App)와 레거시 단수 참조(`petClaudeKind`)는
+    /// 무변경으로 동작한다.
+    @Published var partyPresets: [PartyPreset] {
+        didSet { persist(partyPresets, forKey: Keys.partyPresets) }
     }
-    @Published var petCursorParty: [PetSelection] {
-        didSet { persist(petCursorParty, forKey: Keys.petCursorParty) }
+    /// 각 데이터소스에 할당된 프리셋 id.
+    @Published var claudePresetID: UUID {
+        didSet { UserDefaults.standard.set(claudePresetID.uuidString, forKey: Keys.claudePresetID) }
     }
-    @Published var petCodexParty: [PetSelection] {
-        didSet { persist(petCodexParty, forKey: Keys.petCodexParty) }
+    @Published var cursorPresetID: UUID {
+        didSet { UserDefaults.standard.set(cursorPresetID.uuidString, forKey: Keys.cursorPresetID) }
+    }
+    @Published var codexPresetID: UUID {
+        didSet { UserDefaults.standard.set(codexPresetID.uuidString, forKey: Keys.codexPresetID) }
+    }
+
+    /// 소스에 할당된 프리셋의 members 미러 (get/set). set은 할당 프리셋을 편집 → 공유 시 함께 반영.
+    var petClaudeParty: [PetSelection] {
+        get { preset(for: claudePresetID)?.members ?? [] }
+        set { setPresetMembers(claudePresetID, newValue) }
+    }
+    var petCursorParty: [PetSelection] {
+        get { preset(for: cursorPresetID)?.members ?? [] }
+        set { setPresetMembers(cursorPresetID, newValue) }
+    }
+    var petCodexParty: [PetSelection] {
+        get { preset(for: codexPresetID)?.members ?? [] }
+        set { setPresetMembers(codexPresetID, newValue) }
     }
 
     /// 리더(party[0]) 미러 — 레거시 단수 참조 호환. set은 리더 kind 교체로 라우팅.
@@ -568,20 +587,48 @@ final class Settings: ObservableObject {
         self.petClaudeEnabled = (d.object(forKey: Keys.petClaudeEnabled) as? Bool) ?? true
         self.petCursorEnabled = (d.object(forKey: Keys.petCursorEnabled) as? Bool) ?? true
         self.petCodexEnabled = (d.object(forKey: Keys.petCodexEnabled) as? Bool) ?? true
-        // 파티 로드 — 저장된 party 우선. 없으면 레거시 단수(petClaudeKind/Variant)에서 1마리로 마이그레이션.
-        // (petClaudeKind/Variant는 이제 party 리더 미러 computed라 여기서 직접 할당하지 않는다.)
-        let claudePartyData = d.data(forKey: Keys.petClaudeParty)
-        self.petClaudeParty = (claudePartyData.flatMap { try? JSONDecoder().decode([PetSelection].self, from: $0) })
-            ?? [PetSelection(kind: d.string(forKey: Keys.petClaudeKind).flatMap { PetKind(rawValue: $0) } ?? .fox,
-                             variant: (d.object(forKey: Keys.petClaudeVariant) as? Int) ?? 0)]
-        let cursorPartyData = d.data(forKey: Keys.petCursorParty)
-        self.petCursorParty = (cursorPartyData.flatMap { try? JSONDecoder().decode([PetSelection].self, from: $0) })
-            ?? [PetSelection(kind: d.string(forKey: Keys.petCursorKind).flatMap { PetKind(rawValue: $0) } ?? .wolf,
-                             variant: (d.object(forKey: Keys.petCursorVariant) as? Int) ?? 0)]
-        // Codex는 레거시 단수 키가 없으므로(신규 소스) party 저장값 또는 기본 1마리(.fox).
-        let codexPartyData = d.data(forKey: Keys.petCodexParty)
-        self.petCodexParty = (codexPartyData.flatMap { try? JSONDecoder().decode([PetSelection].self, from: $0) })
-            ?? [PetSelection(kind: .fox, variant: 0)]
+        // 파티 프리셋 로드 — 저장된 프리셋 라이브러리 + 소스별 할당 id.
+        // 없으면(프리셋 도입 전 빌드에서 업데이트) 레거시 per-source 파티(또는 단수 kind)에서 마이그레이션.
+        let presetsData = d.data(forKey: Keys.partyPresets)
+        var loadedPresets = presetsData.flatMap { try? JSONDecoder().decode([PartyPreset].self, from: $0) } ?? []
+        var claudePID = d.string(forKey: Keys.claudePresetID).flatMap { UUID(uuidString: $0) }
+        var cursorPID = d.string(forKey: Keys.cursorPresetID).flatMap { UUID(uuidString: $0) }
+        var codexPID  = d.string(forKey: Keys.codexPresetID).flatMap { UUID(uuidString: $0) }
+        let assignmentsValid = [claudePID, cursorPID, codexPID].allSatisfy { id in
+            id != nil && loadedPresets.contains { $0.id == id }
+        }
+        if loadedPresets.isEmpty || !assignmentsValid {
+            // 레거시 per-source 파티(또는 단수 petClaudeKind/Variant)에서 파티 구성 복원.
+            func legacyParty(_ key: String, fallback: [PetSelection]) -> [PetSelection] {
+                (d.data(forKey: key).flatMap { try? JSONDecoder().decode([PetSelection].self, from: $0) }) ?? fallback
+            }
+            let claudeMembers = legacyParty(Keys.petClaudeParty, fallback:
+                [PetSelection(kind: d.string(forKey: Keys.petClaudeKind).flatMap { PetKind(rawValue: $0) } ?? .fox,
+                              variant: (d.object(forKey: Keys.petClaudeVariant) as? Int) ?? 0)])
+            let cursorMembers = legacyParty(Keys.petCursorParty, fallback:
+                [PetSelection(kind: d.string(forKey: Keys.petCursorKind).flatMap { PetKind(rawValue: $0) } ?? .wolf,
+                              variant: (d.object(forKey: Keys.petCursorVariant) as? Int) ?? 0)])
+            let codexMembers = legacyParty(Keys.petCodexParty, fallback: [PetSelection(kind: .fox, variant: 0)])
+            // 동일 구성은 하나의 프리셋으로 dedup (기본 상태의 3중복 방지).
+            var built: [PartyPreset] = []
+            func idFor(_ members: [PetSelection]) -> UUID {
+                if let e = built.first(where: { $0.members == members }) { return e.id }
+                let p = PartyPreset(id: UUID(), name: "파티 \(built.count + 1)", members: members)
+                built.append(p)
+                return p.id
+            }
+            claudePID = idFor(claudeMembers)
+            cursorPID = idFor(cursorMembers)
+            codexPID  = idFor(codexMembers)
+            loadedPresets = built
+        }
+        self.partyPresets = loadedPresets
+        self.claudePresetID = claudePID!
+        self.cursorPresetID = cursorPID!
+        self.codexPresetID = codexPID!
+        // 마이그레이션으로 새로 만들었으면 영속이 필요(didSet은 init 중 미동작). 모든 저장 프로퍼티가
+        // 초기화된 뒤 init 끝에서 persist한다(여기선 self 메서드 호출 불가).
+        let needsPresetPersist = (presetsData == nil)
         self.themeClaudeOverride = d.string(forKey: Keys.themeClaudeOverride).flatMap { PetTheme(rawValue: $0) }
         self.themeCursorOverride = d.string(forKey: Keys.themeCursorOverride).flatMap { PetTheme(rawValue: $0) }
         self.themeCodexOverride = d.string(forKey: Keys.themeCodexOverride).flatMap { PetTheme(rawValue: $0) }
@@ -765,15 +812,19 @@ final class Settings: ObservableObject {
                 }
             }
             // 완전 신규(legacy 펫 설정도 없던) 사용자 — 빈 인벤토리 방지 위해 기본 여우 1마리를 지급하고
-            // 양쪽 차트 리더로 세운다. (legacy 마이그레이션으로 펫이 이미 들어왔으면 건드리지 않음.)
+            // 단일 "기본" 프리셋(여우)을 세 소스에 모두 할당. (legacy 마이그레이션으로 펫이 이미 들어왔으면
+            // 건드리지 않음.) init 중이라 didSet 미동작 → 직접 persist.
             if owned.isEmpty {
                 owned[.fox] = .initial()
-                let foxParty = [PetSelection(kind: .fox, variant: 0)]
-                self.petClaudeParty = foxParty
-                self.petCursorParty = foxParty
-                // didSet은 init 중 트리거되지 않으므로 직접 persist.
-                persist(self.petClaudeParty, forKey: Keys.petClaudeParty)
-                persist(self.petCursorParty, forKey: Keys.petCursorParty)
+                let base = PartyPreset(id: UUID(), name: "기본", members: [PetSelection(kind: .fox, variant: 0)])
+                self.partyPresets = [base]
+                self.claudePresetID = base.id
+                self.cursorPresetID = base.id
+                self.codexPresetID = base.id
+                persist(self.partyPresets, forKey: Keys.partyPresets)
+                d.set(base.id.uuidString, forKey: Keys.claudePresetID)
+                d.set(base.id.uuidString, forKey: Keys.cursorPresetID)
+                d.set(base.id.uuidString, forKey: Keys.codexPresetID)
             }
             self.ownedPets = owned
             self.gachaTickets = 3
@@ -870,6 +921,15 @@ final class Settings: ObservableObject {
             }
         }
         if migratedThemes { persist(ownedThemes, forKey: Keys.ownedThemes) }
+
+        // 레거시 파티 → 프리셋 마이그레이션 결과 영속 (위에서 self 메서드 호출 불가라 여기로 지연).
+        // 브랜드-신규 사용자는 가챠 마이그레이션 블록에서 이미 persist했으므로 값만 재확인 저장(무해).
+        if needsPresetPersist {
+            persist(partyPresets, forKey: Keys.partyPresets)
+            d.set(claudePresetID.uuidString, forKey: Keys.claudePresetID)
+            d.set(cursorPresetID.uuidString, forKey: Keys.cursorPresetID)
+            d.set(codexPresetID.uuidString, forKey: Keys.codexPresetID)
+        }
 
         // 도장 마이그레이션은 init 안에서 호출 금지 — `BadgeRegistry.evaluate`가 `Settings.shared`를
         // 재진입해서 lazy init이 깨짐. App 시작 후 `applyGymMigrationIfNeeded()`에서 처리.
@@ -1035,36 +1095,94 @@ final class Settings: ObservableObject {
         setParty(p, for: source)
     }
 
-    /// 파티에 펫 추가. 종 유니크 + 최대 `maxPartySize` — 이미 있거나 꽉 차면 무시.
-    func addToParty(source: PetChartSource, _ sel: PetSelection) {
-        var p = party(for: source)
-        guard p.count < Self.maxPartySize, !p.contains(where: { $0.kind == sel.kind }) else { return }
-        p.append(sel)
-        setParty(p, for: source)
+    // 아래 source 기반 편집 helper는 "그 소스에 할당된 프리셋"을 편집한다(프리셋 기반 helper로 위임).
+    func addToParty(source: PetChartSource, _ sel: PetSelection) { addToPreset(presetID(for: source), sel) }
+    func removeFromParty(source: PetChartSource, kind: PetKind) { removeFromPreset(presetID(for: source), kind: kind) }
+    func movePartyMember(source: PetChartSource, from: Int, to: Int) { movePresetMember(presetID(for: source), from: from, to: to) }
+    func setPartyVariant(source: PetChartSource, kind: PetKind, variant: Int) { setPresetVariant(presetID(for: source), kind: kind, variant: variant) }
+
+    // MARK: - 파티 프리셋 (라이브러리 + 할당)
+
+    func preset(for id: UUID) -> PartyPreset? { partyPresets.first { $0.id == id } }
+
+    /// 프리셋의 members 교체. (petClaudeParty 등 computed setter의 백엔드.)
+    func setPresetMembers(_ id: UUID, _ members: [PetSelection]) {
+        guard let i = partyPresets.firstIndex(where: { $0.id == id }) else { return }
+        partyPresets[i].members = members
     }
 
-    /// 파티에서 종 제거.
-    func removeFromParty(source: PetChartSource, kind: PetKind) {
-        var p = party(for: source)
-        p.removeAll { $0.kind == kind }
-        setParty(p, for: source)
+    func presetID(for source: PetChartSource) -> UUID {
+        switch source {
+        case .claude: return claudePresetID
+        case .cursor: return cursorPresetID
+        case .codex:  return codexPresetID
+        }
     }
 
-    /// 파티 멤버 순서 이동 (from → to). [0]이 리더라 순서가 메뉴바/wellness 대표를 결정.
-    func movePartyMember(source: PetChartSource, from: Int, to: Int) {
-        var p = party(for: source)
-        guard p.indices.contains(from), to >= 0, to < p.count, from != to else { return }
-        let item = p.remove(at: from)
-        p.insert(item, at: to)
-        setParty(p, for: source)
+    /// 소스에 프리셋 할당. 존재하는 프리셋만 허용.
+    func assignPreset(_ id: UUID, to source: PetChartSource) {
+        guard partyPresets.contains(where: { $0.id == id }) else { return }
+        switch source {
+        case .claude: claudePresetID = id
+        case .cursor: cursorPresetID = id
+        case .codex:  codexPresetID = id
+        }
     }
 
-    /// 특정 차트 파티의 variant 토글 (슬롯 이로치 선택용).
-    func setPartyVariant(source: PetChartSource, kind: PetKind, variant: Int) {
-        var p = party(for: source)
-        guard let i = p.firstIndex(where: { $0.kind == kind }) else { return }
-        p[i].variant = variant
-        setParty(p, for: source)
+    /// 두 소스의 프리셋 할당을 맞바꾼다 (cursor↔codex 빠른 교체용).
+    func swapPresetAssignment(_ a: PetChartSource, _ b: PetChartSource) {
+        let ia = presetID(for: a), ib = presetID(for: b)
+        assignPreset(ib, to: a)
+        assignPreset(ia, to: b)
+    }
+
+    /// 새 프리셋 추가 후 id 반환.
+    @discardableResult
+    func addPreset(name: String, members: [PetSelection] = []) -> UUID {
+        let p = PartyPreset(id: UUID(), name: name, members: members)
+        partyPresets.append(p)
+        return p.id
+    }
+
+    func renamePreset(_ id: UUID, to name: String) {
+        guard let i = partyPresets.firstIndex(where: { $0.id == id }) else { return }
+        partyPresets[i].name = name
+    }
+
+    /// 프리셋 삭제. 어떤 소스에 할당돼 있거나 마지막 1개면 거부(소스가 빈 파티로 orphan 되는 것 방지).
+    func canDeletePreset(_ id: UUID) -> Bool {
+        partyPresets.count > 1
+            && claudePresetID != id && cursorPresetID != id && codexPresetID != id
+    }
+    func deletePreset(_ id: UUID) {
+        guard canDeletePreset(id) else { return }
+        partyPresets.removeAll { $0.id == id }
+    }
+
+    // 프리셋 members 편집 — 종 유니크 + 최대 `maxPartySize`. `members[0]` = 리더.
+    func addToPreset(_ id: UUID, _ sel: PetSelection) {
+        guard let i = partyPresets.firstIndex(where: { $0.id == id }) else { return }
+        var m = partyPresets[i].members
+        guard m.count < Self.maxPartySize, !m.contains(where: { $0.kind == sel.kind }) else { return }
+        m.append(sel)
+        partyPresets[i].members = m
+    }
+    func removeFromPreset(_ id: UUID, kind: PetKind) {
+        guard let i = partyPresets.firstIndex(where: { $0.id == id }) else { return }
+        partyPresets[i].members.removeAll { $0.kind == kind }
+    }
+    func movePresetMember(_ id: UUID, from: Int, to: Int) {
+        guard let i = partyPresets.firstIndex(where: { $0.id == id }) else { return }
+        var m = partyPresets[i].members
+        guard m.indices.contains(from), to >= 0, to < m.count, from != to else { return }
+        let item = m.remove(at: from)
+        m.insert(item, at: to)
+        partyPresets[i].members = m
+    }
+    func setPresetVariant(_ id: UUID, kind: PetKind, variant: Int) {
+        guard let i = partyPresets.firstIndex(where: { $0.id == id }) else { return }
+        guard let j = partyPresets[i].members.firstIndex(where: { $0.kind == kind }) else { return }
+        partyPresets[i].members[j].variant = variant
     }
 
     /// GitHub 연결 해제 — 토큰 폐기 + identity 클리어. creditedPRNumbers는 의도적으로 유지
@@ -1243,9 +1361,15 @@ final class Settings: ObservableObject {
         static let integrityViolation          = "settings.integrityViolation"
         static let petClaudeVariant            = "settings.petClaudeVariant"
         static let petCursorVariant            = "settings.petCursorVariant"
+        // 레거시 per-source 파티 (프리셋 도입 전) — 마이그레이션 읽기용으로만 유지.
         static let petClaudeParty              = "settings.petClaudeParty"
         static let petCursorParty              = "settings.petCursorParty"
         static let petCodexParty               = "settings.petCodexParty"
+        // 파티 프리셋 (라이브러리 + 소스별 할당).
+        static let partyPresets                = "settings.partyPresets"
+        static let claudePresetID              = "settings.claudePresetID"
+        static let cursorPresetID              = "settings.cursorPresetID"
+        static let codexPresetID               = "settings.codexPresetID"
         static let lastClaudeFiveHourReset     = "settings.lastClaudeFiveHourReset"
         static let lastClaudeSevenDayReset     = "settings.lastClaudeSevenDayReset"
         static let lastCursorEventCredited     = "settings.lastCursorEventCredited"

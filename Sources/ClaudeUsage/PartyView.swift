@@ -1,31 +1,33 @@
 import SwiftUI
 
-// 펫 종합 관리 페이지 (가챠 "파티" 탭). 멀티 산책 편성 + 코스메틱 관리 + 기존 펫 설정 통합.
+// 펫 종합 관리 페이지 (가챠 "파티" 탭). 재사용 파티 프리셋 편집 + 소스 할당 + 코스메틱 + 기존 설정 통합.
 // cf. docs/DESIGN_PET_PARTY.md
 //
 // 구성:
-//   - Claude/Cursor 파티 섹션: 표시 토글 + 테마 + 슬롯(최대 3, 서로 다른 종) + 선택 슬롯 이펙트/이로치
-//   - 공통: 펫 반응 강도 + 메뉴바 펫
+//   - 프리셋 라이브러리: 이름·멤버(최대 3, 서로 다른 종) 편집 + 슬롯 이펙트/이로치
+//   - 소스 할당: Claude/Cursor/Codex 각각에 프리셋 할당 + 표시 토글 + 테마 + Cursor↔Codex 스왑
+//   - 맵 상점 / 공통(펫 반응 강도, 메뉴바 펫)
 @MainActor
 struct PartyView: View {
     @ObservedObject var settings = Settings.shared
-    /// 이펙트/이로치 관리 대상으로 펼친 슬롯의 종. nil = 미선택.
-    @State private var selected: PetKind? = nil
-    /// 펫 추가 시트 대상 source (nil=닫힘).
-    @State private var addingSource: PetChartSource? = nil
+
+    /// 이펙트/이로치 관리용으로 펼친 슬롯 (프리셋+종). nil = 미선택.
+    @State private var selectedSlot: SelectedSlot? = nil
+    /// 펫 추가 시트 대상 프리셋 (nil=닫힘).
+    @State private var addingPreset: UUID? = nil
     /// 추가 시트 펫 정렬 기준.
     @State private var sortOrder: PetSortOrder = .dex
     /// 맵 상점 구매 확인 alert 대상. nil = 닫힘.
     @State private var pendingThemePurchase: PetTheme? = nil
 
+    struct SelectedSlot: Equatable { let presetID: UUID; let kind: PetKind }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                partySection(source: .claude)
+                presetsSection
                 Divider()
-                partySection(source: .cursor)
-                Divider()
-                partySection(source: .codex)
+                assignmentSection
                 Divider()
                 mapShopSection
                 Divider()
@@ -34,10 +36,10 @@ struct PartyView: View {
             .padding(16)
         }
         .sheet(isPresented: Binding(
-            get: { addingSource != nil },
-            set: { if !$0 { addingSource = nil } }
+            get: { addingPreset != nil },
+            set: { if !$0 { addingPreset = nil } }
         )) {
-            if let source = addingSource { addSheet(source: source) }
+            if let id = addingPreset { addSheet(presetID: id) }
         }
         .alert(
             pendingThemePurchase.map { "\($0.displayName) 맵 구매" } ?? "",
@@ -53,6 +55,211 @@ struct PartyView: View {
             Button("취소", role: .cancel) {}
         } message: { theme in
             Text("'\(theme.displayName)' 맵을 구매하시겠습니까?\n현재 잔액: \(settings.coins.formatted()) coin → 구매 후 \((settings.coins - theme.price).formatted()) coin")
+        }
+    }
+
+    // MARK: - 프리셋 라이브러리
+
+    private var presetsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("파티 프리셋")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Button {
+                    let id = settings.addPreset(name: "파티 \(settings.partyPresets.count + 1)")
+                    addingPreset = id
+                } label: {
+                    Label("프리셋 추가", systemImage: "plus")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+            }
+            Text("프리셋을 만들어 각 차트에 할당하세요. 같은 프리셋을 여러 차트에 할당하면 편집이 함께 반영됩니다.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+
+            if settings.ownedPets.isEmpty {
+                Text("아직 보유한 펫이 없습니다. 가챠를 돌려 펫을 모으세요.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            } else {
+                ForEach(settings.partyPresets) { preset in
+                    presetCard(preset)
+                }
+            }
+        }
+    }
+
+    private func presetCard(_ preset: PartyPreset) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                TextField("이름", text: nameBinding(preset.id))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(maxWidth: 160)
+                // 어떤 차트에 할당됐는지 배지.
+                ForEach(assignedSources(preset.id)) { src in
+                    Text(src.displayName)
+                        .font(.system(size: 8, weight: .semibold))
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                        .foregroundStyle(.tint)
+                }
+                Spacer()
+                Button { settings.deletePreset(preset.id) } label: {
+                    Image(systemName: "trash").font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(!settings.canDeletePreset(preset.id))
+                .opacity(settings.canDeletePreset(preset.id) ? 1 : 0.3)
+                .help(settings.canDeletePreset(preset.id) ? "프리셋 삭제" : "차트에 할당 중이거나 마지막 프리셋이라 삭제할 수 없습니다")
+            }
+            HStack(spacing: 8) {
+                ForEach(Array(preset.members.enumerated()), id: \.element.kind) { idx, sel in
+                    slotView(sel: sel, idx: idx, preset: preset)
+                }
+                if preset.members.count < Settings.maxPartySize {
+                    addButton(presetID: preset.id)
+                }
+            }
+            // 선택 슬롯이 이 프리셋 멤버면 이펙트/이로치 패널.
+            if let slot = selectedSlot, slot.presetID == preset.id,
+               let sel = preset.members.first(where: { $0.kind == slot.kind }) {
+                effectPanel(sel: sel, presetID: preset.id)
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(Color.secondary.opacity(0.06)))
+    }
+
+    /// 프리셋 슬롯 — 펫 썸네일 + 이름 + 제거/이동 버튼. 클릭 시 이펙트 패널 토글.
+    private func slotView(sel: PetSelection, idx: Int, preset: PartyPreset) -> some View {
+        let isSelected = selectedSlot == SelectedSlot(presetID: preset.id, kind: sel.kind)
+        let count = preset.members.count
+        return VStack(spacing: 2) {
+            thumbnail(sel, height: 30)
+            Text(PetMetaStore.shared.displayName(for: sel.kind))
+                .font(.system(size: 8)).lineLimit(1)
+            // 순서 이동(◀▶) — 리더(idx 0)는 메뉴바/wellness 대표.
+            HStack(spacing: 6) {
+                Button { settings.movePresetMember(preset.id, from: idx, to: idx - 1) } label: {
+                    Image(systemName: "chevron.left").font(.system(size: 8))
+                }.buttonStyle(.plain).disabled(idx == 0).opacity(idx == 0 ? 0.25 : 1)
+                Button { settings.movePresetMember(preset.id, from: idx, to: idx + 1) } label: {
+                    Image(systemName: "chevron.right").font(.system(size: 8))
+                }.buttonStyle(.plain).disabled(idx == count - 1).opacity(idx == count - 1 ? 0.25 : 1)
+            }
+        }
+        .frame(width: 60, height: 66)
+        .background(RoundedRectangle(cornerRadius: AppRadius.lg)
+            .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.lg)
+            .strokeBorder(isSelected ? Color.accentColor : (idx == 0 ? Color.yellow.opacity(0.5) : .clear), lineWidth: 1.2))
+        .overlay(alignment: .topTrailing) {
+            Button { remove(sel.kind, presetID: preset.id) } label: {
+                Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundStyle(.secondary)
+            }.buttonStyle(.plain).offset(x: 4, y: -4)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            let slot = SelectedSlot(presetID: preset.id, kind: sel.kind)
+            selectedSlot = isSelected ? nil : slot
+        }
+        .help(idx == 0 ? "리더 (메뉴바·wellness 대표)" : "")
+    }
+
+    private func addButton(presetID: UUID) -> some View {
+        Button { addingPreset = presetID } label: {
+            VStack(spacing: 3) {
+                Image(systemName: "plus").font(.system(size: 16))
+                Text("추가").font(.system(size: 8))
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: 60, height: 66)
+            .background(RoundedRectangle(cornerRadius: AppRadius.lg)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3]))
+                .foregroundStyle(.secondary.opacity(0.4)))
+            // 배경이 stroke(테두리)뿐이라 빈 내부가 hit-test에서 빠진다 → 사각형 전체를 클릭 범위로.
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)
+    }
+
+    /// 선택 슬롯의 이펙트(PetEffectShelf 공용) + 해금 이로치 토글.
+    private func effectPanel(sel: PetSelection, presetID: UUID) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("\(PetMetaStore.shared.displayName(for: sel.kind)) 코스메틱")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                variantToggle(sel: sel, presetID: presetID)
+            }
+            PetEffectShelf(kind: sel.kind, settings: settings)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(Color.secondary.opacity(0.06)))
+    }
+
+    /// 해금된 이로치(variant) dot 토글. 잠긴 건 미표시.
+    private func variantToggle(sel: PetSelection, presetID: UUID) -> some View {
+        let unlocked = settings.ownedPets[sel.kind]?.unlockedVariants ?? [0]
+        return HStack(spacing: 5) {
+            ForEach([0, 1, 2, 3].filter { unlocked.contains($0) }, id: \.self) { v in
+                Circle()
+                    .fill(variantColor(v))
+                    .frame(width: 11, height: 11)
+                    .overlay(Circle().strokeBorder(sel.variant == v ? Color.primary : .clear, lineWidth: 1.5))
+                    .onTapGesture { settings.setPresetVariant(presetID, kind: sel.kind, variant: v) }
+            }
+        }
+    }
+
+    // MARK: - 소스 할당
+
+    private var assignmentSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("차트 할당")
+                .font(.system(size: 12, weight: .semibold))
+            assignmentRow(source: .claude)
+            assignmentRow(source: .cursor)
+            // Cursor↔Codex 빠른 스왑.
+            HStack {
+                Spacer()
+                Button { settings.swapPresetAssignment(.cursor, .codex) } label: {
+                    Label("Cursor ↔ Codex 스왑", systemImage: "arrow.up.arrow.down")
+                        .font(.system(size: 10))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tint)
+            }
+            assignmentRow(source: .codex)
+        }
+    }
+
+    private func assignmentRow(source: PetChartSource) -> some View {
+        let enabledBinding: Binding<Bool> = {
+            switch source {
+            case .claude: return $settings.petClaudeEnabled
+            case .cursor: return $settings.petCursorEnabled
+            case .codex:  return $settings.petCodexEnabled
+            }
+        }()
+        return HStack(spacing: 8) {
+            Toggle("", isOn: enabledBinding)
+                .toggleStyle(.switch)
+                .labelsHidden()
+            Text(source.displayName)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 56, alignment: .leading)
+            Picker("", selection: presetBinding(source)) {
+                ForEach(settings.partyPresets) { p in
+                    Text(p.name).tag(p.id)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 130)
+            Spacer()
+            themePicker(source: source)
         }
     }
 
@@ -121,134 +328,15 @@ struct PartyView: View {
         .opacity(owned || canBuy ? 1.0 : 0.5)
     }
 
-    // MARK: - 파티 섹션
-
-    @ViewBuilder
-    private func partySection(source: PetChartSource) -> some View {
-        let party = settings.party(for: source)
-        let enabledBinding: Binding<Bool> = {
-            switch source {
-            case .claude: return $settings.petClaudeEnabled
-            case .cursor: return $settings.petCursorEnabled
-            case .codex:  return $settings.petCodexEnabled
-            }
-        }()
-
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Toggle("\(source.displayName) 차트에 펫 표시", isOn: enabledBinding)
-                    .font(.system(size: 12, weight: .semibold))
-                    .toggleStyle(.switch)
-                Spacer()
-                themePicker(source: source)
-            }
-
-            if settings.ownedPets.isEmpty {
-                Text("아직 보유한 펫이 없습니다. 가챠를 돌려 펫을 모으세요.")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-            } else {
-                HStack(spacing: 8) {
-                    ForEach(Array(party.enumerated()), id: \.element.kind) { idx, sel in
-                        slotView(sel: sel, idx: idx, source: source)
-                    }
-                    if party.count < Settings.maxPartySize {
-                        addButton(source: source)
-                    }
-                }
-                // 선택된 슬롯이 이 파티 멤버면 이펙트/이로치 패널.
-                if let kind = selected, let sel = party.first(where: { $0.kind == kind }) {
-                    effectPanel(sel: sel, source: source)
-                }
-            }
-        }
-    }
-
-    /// 파티 슬롯 — 펫 썸네일 + 이름 + 제거/이동 버튼. 클릭 시 이펙트 패널 토글.
-    private func slotView(sel: PetSelection, idx: Int, source: PetChartSource) -> some View {
-        let isSelected = selected == sel.kind
-        let party = settings.party(for: source)
-        return VStack(spacing: 2) {
-            thumbnail(sel, height: 30)
-            Text(PetMetaStore.shared.displayName(for: sel.kind))
-                .font(.system(size: 8)).lineLimit(1)
-            // 순서 이동(◀▶) — 리더(idx 0)는 메뉴바/wellness 대표.
-            HStack(spacing: 6) {
-                Button { settings.movePartyMember(source: source, from: idx, to: idx - 1) } label: {
-                    Image(systemName: "chevron.left").font(.system(size: 8))
-                }.buttonStyle(.plain).disabled(idx == 0).opacity(idx == 0 ? 0.25 : 1)
-                Button { settings.movePartyMember(source: source, from: idx, to: idx + 1) } label: {
-                    Image(systemName: "chevron.right").font(.system(size: 8))
-                }.buttonStyle(.plain).disabled(idx == party.count - 1).opacity(idx == party.count - 1 ? 0.25 : 1)
-            }
-        }
-        .frame(width: 60, height: 66)
-        .background(RoundedRectangle(cornerRadius: AppRadius.lg)
-            .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.08)))
-        .overlay(RoundedRectangle(cornerRadius: AppRadius.lg)
-            .strokeBorder(isSelected ? Color.accentColor : (idx == 0 ? Color.yellow.opacity(0.5) : .clear), lineWidth: 1.2))
-        .overlay(alignment: .topTrailing) {
-            Button { remove(sel.kind, source: source) } label: {
-                Image(systemName: "xmark.circle.fill").font(.system(size: 11)).foregroundStyle(.secondary)
-            }.buttonStyle(.plain).offset(x: 4, y: -4)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { selected = isSelected ? nil : sel.kind }
-        .help(idx == 0 ? "리더 (메뉴바·wellness 대표)" : "")
-    }
-
-    private func addButton(source: PetChartSource) -> some View {
-        Button { addingSource = source } label: {
-            VStack(spacing: 3) {
-                Image(systemName: "plus").font(.system(size: 16))
-                Text("추가").font(.system(size: 8))
-            }
-            .foregroundStyle(.secondary)
-            .frame(width: 60, height: 66)
-            .background(RoundedRectangle(cornerRadius: AppRadius.lg)
-                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3]))
-                .foregroundStyle(.secondary.opacity(0.4)))
-            // 배경이 stroke(테두리)뿐이라 빈 내부가 hit-test에서 빠진다 → 사각형 전체를 클릭 범위로.
-            .contentShape(Rectangle())
-        }.buttonStyle(.plain)
-    }
-
-    /// 선택 슬롯의 이펙트(PetEffectShelf 공용) + 해금 이로치 토글.
-    private func effectPanel(sel: PetSelection, source: PetChartSource) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("\(PetMetaStore.shared.displayName(for: sel.kind)) 코스메틱")
-                    .font(.system(size: 11, weight: .medium))
-                Spacer()
-                variantToggle(sel: sel, source: source)
-            }
-            PetEffectShelf(kind: sel.kind, settings: settings)
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(Color.secondary.opacity(0.06)))
-    }
-
-    /// 해금된 이로치(variant) dot 토글. 잠긴 건 미표시.
-    private func variantToggle(sel: PetSelection, source: PetChartSource) -> some View {
-        let unlocked = settings.ownedPets[sel.kind]?.unlockedVariants ?? [0]
-        return HStack(spacing: 5) {
-            ForEach([0, 1, 2, 3].filter { unlocked.contains($0) }, id: \.self) { v in
-                Circle()
-                    .fill(variantColor(v))
-                    .frame(width: 11, height: 11)
-                    .overlay(Circle().strokeBorder(sel.variant == v ? Color.primary : .clear, lineWidth: 1.5))
-                    .onTapGesture { settings.setPartyVariant(source: source, kind: sel.kind, variant: v) }
-            }
-        }
-    }
-
     // MARK: - 추가 시트
 
-    private func addSheet(source: PetChartSource) -> some View {
-        let party = settings.party(for: source)
-        let partyKinds = Set(party.map { $0.kind })
+    private func addSheet(presetID: UUID) -> some View {
+        let members = settings.preset(for: presetID)?.members ?? []
+        let partyKinds = Set(members.map { $0.kind })
         let available = sortedAvailable(Array(settings.ownedPets.keys).filter { !partyKinds.contains($0) })
+        let presetName = settings.preset(for: presetID)?.name ?? "파티"
         return VStack(spacing: 10) {
-            Text("\(source.displayName) 파티에 추가").font(.headline)
+            Text("\(presetName)에 추가").font(.headline)
             Picker("정렬", selection: $sortOrder) {
                 ForEach(PetSortOrder.allCases) { Text($0.displayName).tag($0) }
             }
@@ -262,8 +350,8 @@ struct PartyView: View {
                     LazyVGrid(columns: Array(repeating: GridItem(.fixed(64), spacing: 8), count: 4), spacing: 8) {
                         ForEach(available, id: \.self) { kind in
                             Button {
-                                settings.addToParty(source: source, PetSelection(kind: kind, variant: 0))
-                                addingSource = nil
+                                settings.addToPreset(presetID, PetSelection(kind: kind, variant: 0))
+                                addingPreset = nil
                             } label: {
                                 VStack(spacing: 2) {
                                     thumbnail(PetSelection(kind: kind, variant: 0), height: 30)
@@ -278,7 +366,7 @@ struct PartyView: View {
                     .padding(4)
                 }
             }
-            Button("닫기") { addingSource = nil }
+            Button("닫기") { addingPreset = nil }
         }
         .frame(width: 380, height: 420)
         .padding(16)
@@ -308,6 +396,27 @@ struct PartyView: View {
 
     // MARK: - 헬퍼
 
+    /// 프리셋 이름 편집 바인딩.
+    private func nameBinding(_ id: UUID) -> Binding<String> {
+        Binding(
+            get: { settings.preset(for: id)?.name ?? "" },
+            set: { settings.renamePreset(id, to: $0) }
+        )
+    }
+
+    /// 소스 → 할당 프리셋 id 바인딩 (Picker용).
+    private func presetBinding(_ source: PetChartSource) -> Binding<UUID> {
+        Binding(
+            get: { settings.presetID(for: source) },
+            set: { settings.assignPreset($0, to: source) }
+        )
+    }
+
+    /// 이 프리셋이 할당된 소스 목록 (배지 표시용).
+    private func assignedSources(_ id: UUID) -> [PetChartSource] {
+        PetChartSource.allCases.filter { settings.presetID(for: $0) == id }
+    }
+
     @ViewBuilder
     private func thumbnail(_ sel: PetSelection, height: CGFloat) -> some View {
         if let img = PetSprite.frames(for: sel.kind, action: .walk).first
@@ -322,9 +431,9 @@ struct PartyView: View {
         }
     }
 
-    private func remove(_ kind: PetKind, source: PetChartSource) {
-        if selected == kind { selected = nil }
-        settings.removeFromParty(source: source, kind: kind)
+    private func remove(_ kind: PetKind, presetID: UUID) {
+        if selectedSlot == SelectedSlot(presetID: presetID, kind: kind) { selectedSlot = nil }
+        settings.removeFromPreset(presetID, kind: kind)
     }
 
     /// 추가 시트 펫 목록을 `sortOrder` 기준으로 정렬.
@@ -373,7 +482,7 @@ struct PartyView: View {
             }
         }
         .labelsHidden()
-        .frame(width: 130)
+        .frame(width: 120)
     }
 
     // WalkingCat.variantDotColor 단일 정의에 위임 — 인벤토리와 같은 색으로 통일.
