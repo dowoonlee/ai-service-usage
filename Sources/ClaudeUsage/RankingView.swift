@@ -380,13 +380,17 @@ private struct LeaderboardRowView: View {
     private var avatarIcon: some View {
         if let kind = avatarKind {
             let image = PetSprite.image(for: kind, action: .walk, frameIndex: 0)
+            let isRainbow = avatarVariant == PetOwnership.prestigeVariant
             ZStack {
                 if let nsImage = image {
                     Image(nsImage: nsImage)
                         .interpolation(.none)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .hueRotation(.degrees(WalkingCat.hueDegrees(for: avatarVariant)))
+                        // 리스트라 애니는 생략 — 정적 홀로 틴트 + 🌈 표식으로 레인보우 레어를 알림.
+                        .hueRotation(.degrees(isRainbow ? 0 : WalkingCat.hueDegrees(for: avatarVariant)))
+                        .colorMultiply(isRainbow ? WalkingCat.prestigeTint(at: 0) : .white)
+                        .saturation(avatarVariant > 0 ? 1.15 : 1.0)
                         .scaleEffect(x: kind.defaultFacingLeft ? -1 : 1, y: 1)
                 } else {
                     Image(systemName: "questionmark.square.dashed")
@@ -394,6 +398,13 @@ private struct LeaderboardRowView: View {
                 }
             }
             .frame(width: 28, height: 28)
+            .overlay(alignment: .topTrailing) {
+                if isRainbow {
+                    Text("🌈").font(.system(size: 10))
+                        .help("레인보우 레어 보유")
+                        .offset(x: 3, y: -3)
+                }
+            }
         } else {
             Color.clear.frame(width: 28, height: 28)
         }

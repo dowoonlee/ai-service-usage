@@ -250,12 +250,17 @@ struct TrainerCardView: View {
     @ViewBuilder
     private func avatarImage(action: PetController.Action, frameIndex: Int) -> some View {
         if let img = PetSprite.image(for: card.avatar.kind, action: action, frameIndex: frameIndex) {
+            let v = card.avatar.variant
+            let isRainbow = v == PetOwnership.prestigeVariant
+            // 레인보우 레어 아바타 — 무지개 순환. now는 walk 프레임 애니(TimelineView) 캐이던스로 갱신.
+            let now = Date().timeIntervalSinceReferenceDate
             Image(nsImage: img)
                 .resizable()
                 .interpolation(.none)
                 .aspectRatio(contentMode: .fit)
-                .hueRotation(.degrees(WalkingCat.hueDegrees(for: card.avatar.variant)))
-                .saturation(card.avatar.variant > 0 ? 1.15 : 1.0)
+                .hueRotation(.degrees(isRainbow ? WalkingCat.prestigeHueDegrees(at: now) : WalkingCat.hueDegrees(for: v)))
+                .saturation(v > 0 ? 1.15 : 1.0)
+                .colorMultiply(isRainbow ? WalkingCat.prestigeTint(at: now) : .white)
         }
     }
 
