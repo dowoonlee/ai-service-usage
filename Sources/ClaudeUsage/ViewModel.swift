@@ -492,21 +492,26 @@ final class ViewModel: ObservableObject {
         var owned = s.ownedPets
         var usageChanged = false
         var ownedChanged = false
+        var shardsEarned = 0
 
         func creditOne(_ kind: PetKind) {
             usage[kind, default: 0] += credited
             usageChanged = true
             guard var o = owned[kind] else { return }
             let total = usage[kind, default: 0]
+            var mutated = false
             // registerUsage는 variant unlock 시에만 o를 mutate하고 그 외엔 불변(nil 반환).
-            // nil이면 owned[kind]는 기존 값과 동일하므로 대입 자체를 생략한다.
             if let v = o.registerUsage(totalSeconds: total) {
                 DebugLog.log("Pet usage unlock: \(kind.rawValue) variant \(v) @ \(Int(total / 86400))d")
                 // 도감 강조 — 사용자가 직접 슬롯 클릭해 확인하기 전까지 NEW 뱃지 유지.
                 s.pendingHighlights.insert(kind)
-                owned[kind] = o
-                ownedChanged = true
+                mutated = true
             }
+            // 만렙(variant 3) 펫의 사용시간 오버플로우 → 이로치 조각. 유닛 경계 넘을 때만 값이 바뀜.
+            let shards = o.claimOverflowShards(usageSeconds: total)
+            if shards > 0 { shardsEarned += shards; mutated = true }
+            // o가 실제로 바뀐 경우에만 대입(매 폴링 write 방지).
+            if mutated { owned[kind] = o; ownedChanged = true }
         }
 
         // 파티 멤버 전원의 종에 적립. "서로 다른 종만" 제약이라 한 파티 내 중복 없음.
@@ -520,6 +525,7 @@ final class ViewModel: ObservableObject {
         // variant unlock(4d/8d/12d 임계, 극히 드묾) 시에만 바뀌므로 대부분 폴링에서 write가 사라진다.
         if usageChanged { s.petUsageSeconds = usage }
         if ownedChanged { s.ownedPets = owned }
+        if shardsEarned > 0 { ShardLedger.shared.credit(shardsEarned) }
     }
 
     /// 랭킹 서버에 누적 VP delta 제출 + 프로필 동기화. fire-and-forget — 실패해도 본 폴링

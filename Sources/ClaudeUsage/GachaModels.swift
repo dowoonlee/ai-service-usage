@@ -3,14 +3,43 @@ import SwiftUI
 
 /// 한 펫 종에 대한 보유 상태.
 /// - count: 가챠로 누적 뽑힌 횟수 (중복 포함)
-/// - unlockedVariants: 보유한 색상 변종 (이로치). 0 = 기본, 1/2/3 = shiny tier
+/// - unlockedVariants: 보유한 색상 변종 (이로치). 0 = 기본, 1/2/3 = shiny tier, 4 = Prestige(홀로 애니)
+/// - creditedShardUnits: variant 3(8유닛) 초과 오버플로우 중 이미 이로치 조각으로 지급한 정수 유닛(중복지급 방지)
 struct PetOwnership: Codable, Hashable {
     var count: Int
     var unlockedVariants: Set<Int>
+    var creditedShardUnits: Int = 0
+
+    /// Prestige(홀로 애니) variant 인덱스. 이로치 조각으로만 해금.
+    static let prestigeVariant = 4
+    /// 만렙(variant 3) 초과 오버플로우 1유닛당 지급하는 이로치 조각 수.
+    static let shardsPerOverflowUnit = 3
+    /// Prestige 해금 가격(이로치 조각).
+    static let prestigeCost = 40
+    /// 자동 해금 최고 임계(= variant 3 유닛). 이 위로가 오버플로우.
+    static var overflowStartUnits: Double { variantUnitThresholds.last?.0 ?? 8.0 }
 
     /// 첫 뽑기 시 호출. count = 1, variant 0 unlock.
     static func initial() -> PetOwnership {
         PetOwnership(count: 1, unlockedVariants: [0])
+    }
+
+    /// 만렙(variant 3) 초과 진행분에서 이번에 새로 지급할 이로치 조각 수를 반환하고
+    /// `creditedShardUnits`를 갱신(정수 유닛 단위, 중복지급 방지). variant 3 미해금이면 0.
+    mutating func claimOverflowShards(usageSeconds: TimeInterval) -> Int {
+        guard unlockedVariants.contains(3) else { return 0 }
+        let overflow = Self.progressUnits(count: count, usageSeconds: usageSeconds) - Self.overflowStartUnits
+        let totalUnits = overflow > 0 ? Int(overflow.rounded(.down)) : 0
+        let newUnits = totalUnits - creditedShardUnits
+        guard newUnits > 0 else { return 0 }
+        creditedShardUnits = totalUnits
+        return newUnits * Self.shardsPerOverflowUnit
+    }
+
+    /// 마이그레이션 시드 — 현재 오버플로우 유닛을 '이미 지급됨'으로 세팅(과거분 소급 지급 방지).
+    mutating func seedCreditedShardUnits(usageSeconds: TimeInterval) {
+        let overflow = Self.progressUnits(count: count, usageSeconds: usageSeconds) - Self.overflowStartUnits
+        creditedShardUnits = overflow > 0 ? Int(overflow.rounded(.down)) : 0
     }
 
     /// 한 번 더 뽑힌 결과를 반영. count++, 합산 진행도(가챠 중복 + 사용 시간) 임계 도달 시 variant unlock.
@@ -51,6 +80,18 @@ struct PetOwnership: Codable, Hashable {
     /// 합산 progress unit 계산. UI 게이지·해금 평가가 같은 식을 쓰도록 한 곳에 둠.
     static func progressUnits(count: Int, usageSeconds: TimeInterval) -> Double {
         Double(count) * pullUnit + usageSeconds * secondUnit
+    }
+}
+
+extension PetOwnership {
+    // creditedShardUnits는 신규 필드 — 구버전 저장 데이터엔 없으므로 decodeIfPresent로 기본 0 처리.
+    // (동기화된 encode는 컴파일러 합성 사용. init(from:)을 extension에 둬 memberwise init도 유지.)
+    private enum CodingKeys: String, CodingKey { case count, unlockedVariants, creditedShardUnits }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        count = try c.decode(Int.self, forKey: .count)
+        unlockedVariants = try c.decode(Set<Int>.self, forKey: .unlockedVariants)
+        creditedShardUnits = try c.decodeIfPresent(Int.self, forKey: .creditedShardUnits) ?? 0
     }
 }
 

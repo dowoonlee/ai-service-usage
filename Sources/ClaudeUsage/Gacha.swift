@@ -187,6 +187,7 @@ enum Gacha {
         var owned = s.ownedPets
         var newVariant: Int? = nil
         var triggerHighlight = false
+        var shardsEarned = 0
         if owned[pull.kind] == nil {
             owned[pull.kind] = .initial()
             triggerHighlight = true   // 신규 펫
@@ -194,10 +195,13 @@ enum Gacha {
             var existing = owned[pull.kind]!
             let usageSec = s.petUsageSeconds[pull.kind] ?? 0
             newVariant = existing.registerPull(usageSeconds: usageSec)
+            // 만렙(variant 3) 펫 중복 → 오버플로우가 이로치 조각으로.
+            shardsEarned = existing.claimOverflowShards(usageSeconds: usageSec)
             owned[pull.kind] = existing
             if newVariant != nil { triggerHighlight = true }   // 합산 진행도 임계 도달로 variant 해금
         }
         s.ownedPets = owned
+        if shardsEarned > 0 { ShardLedger.shared.credit(shardsEarned) }
         // 도감에서 직접 클릭해 확인하기 전까지 노란 강조 표시 유지.
         if triggerHighlight { s.pendingHighlights.insert(pull.kind) }
         // 첫 가챠 결과를 양쪽 차트의 활성 펫으로 자동 할당.
