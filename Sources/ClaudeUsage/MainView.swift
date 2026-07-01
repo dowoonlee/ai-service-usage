@@ -286,24 +286,8 @@ struct MainView: View {
                             .font(.system(size: 11, weight: .medium))
                             .monospacedDigit()
                             .foregroundStyle(.primary)
-                        if settings.gachaTickets > 0 {
-                            Image(systemName: "ticket.fill")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.blue)
-                            Text("\(settings.gachaTickets)")
-                                .font(.system(size: 11, weight: .medium))
-                                .monospacedDigit()
-                                .foregroundStyle(.primary)
-                        }
-                        if settings.premiumTickets > 0 {
-                            Image(systemName: "sparkles")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Rarity.mythic.color)
-                            Text("\(settings.premiumTickets)")
-                                .font(.system(size: 11, weight: .medium))
-                                .monospacedDigit()
-                                .foregroundStyle(.primary)
-                        }
+                        // 티켓(일반·프리미엄 가챠권)은 메인 패널에 표시하지 않는다 — 상점(GachaView) 헤더에서만.
+                        // (통화 항목이 늘면 좁은 패널에서 숫자가 세로로 줄바꿈돼 깨졌음.)
                     }
                 }
                 .buttonStyle(.borderless)
