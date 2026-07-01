@@ -70,6 +70,10 @@ Deno.serve(async (req: Request) => {
   if (deviceId && !isValidUUID(deviceId)) {
     return errorResponse(400, "invalid_device_id");
   }
+  // Postgres UUID 컬럼은 소문자로 정규화 저장되는데 클라(Swift UUID)는 대문자를 보낸다.
+  // isMine/likedByMe를 JS 문자열 `===`로 비교하므로 양쪽을 소문자로 맞추지 않으면
+  // 항상 false가 되어 재진입 시 하트/‘나’ 배지가 사라진다(leaderboard/index.ts:52 선례).
+  const deviceIdLower = deviceId ? deviceId.toLowerCase() : null;
 
   const db = getDb();
 
@@ -135,9 +139,9 @@ Deno.serve(async (req: Request) => {
       nickname: memeNickname(seed),
       content: p.content,
       createdAt: p.created_at,
-      isMine: deviceId !== null && p.device_id === deviceId,
+      isMine: deviceIdLower !== null && p.device_id.toLowerCase() === deviceIdLower,
       likeCount: likes.length,
-      likedByMe: deviceId !== null && likes.some((l) => l.device_id === deviceId),
+      likedByMe: deviceIdLower !== null && likes.some((l) => l.device_id.toLowerCase() === deviceIdLower),
       likers: [] as { nickname: string; createdAt: string }[],
     };
   });
