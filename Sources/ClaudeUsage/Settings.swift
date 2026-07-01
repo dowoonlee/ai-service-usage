@@ -1136,13 +1136,6 @@ final class Settings: ObservableObject {
         }
     }
 
-    /// 두 소스의 프리셋 할당을 맞바꾼다 (cursor↔codex 빠른 교체용).
-    func swapPresetAssignment(_ a: PetChartSource, _ b: PetChartSource) {
-        let ia = presetID(for: a), ib = presetID(for: b)
-        assignPreset(ib, to: a)
-        assignPreset(ia, to: b)
-    }
-
     /// 새 프리셋 추가 후 id 반환.
     @discardableResult
     func addPreset(name: String, members: [PetSelection] = []) -> UUID {

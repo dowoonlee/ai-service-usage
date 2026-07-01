@@ -5,7 +5,7 @@ import SwiftUI
 //
 // 구성:
 //   - 프리셋 라이브러리: 이름·멤버(최대 3, 서로 다른 종) 편집 + 슬롯 이펙트/이로치
-//   - 소스 할당: Claude/Cursor/Codex 각각에 프리셋 할당 + 표시 토글 + 테마 + Cursor↔Codex 스왑
+//   - 소스 할당: Claude/Cursor/Codex 각각에 프리셋 할당 + 표시 토글 + 테마 (드롭다운으로 자유 배정)
 //   - 맵 상점 / 공통(펫 반응 강도, 메뉴바 펫)
 @MainActor
 struct PartyView: View {
@@ -222,16 +222,6 @@ struct PartyView: View {
                 .font(.system(size: 12, weight: .semibold))
             assignmentRow(source: .claude)
             assignmentRow(source: .cursor)
-            // Cursor↔Codex 빠른 스왑.
-            HStack {
-                Spacer()
-                Button { settings.swapPresetAssignment(.cursor, .codex) } label: {
-                    Label("Cursor ↔ Codex 스왑", systemImage: "arrow.up.arrow.down")
-                        .font(.system(size: 10))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.tint)
-            }
             assignmentRow(source: .codex)
         }
     }
