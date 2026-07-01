@@ -76,6 +76,17 @@ final class Settings: ObservableObject {
         didSet { UserDefaults.standard.set(codexPresetID.uuidString, forKey: Keys.codexPresetID) }
     }
 
+    /// 무료로 만들 수 있는 파티 프리셋 기본 개수. 이 이상은 코인으로 슬롯을 사서 늘린다.
+    static let basePartyPresetLimit = 3
+    /// 코인으로 구매한 추가 프리셋 슬롯 수 (영속). 삭제해도 슬롯은 유지된다.
+    @Published var purchasedPartyPresetSlots: Int {
+        didSet { UserDefaults.standard.set(purchasedPartyPresetSlots, forKey: Keys.purchasedPartyPresetSlots) }
+    }
+    /// 현재 만들 수 있는 프리셋 최대 개수 (기본 + 구매 슬롯).
+    var maxPartyPresets: Int { Self.basePartyPresetLimit + purchasedPartyPresetSlots }
+    /// 다음 슬롯 구매 비용 — 2000부터 구매할 때마다 +1000.
+    var nextPartyPresetSlotCost: Int { 2000 + 1000 * purchasedPartyPresetSlots }
+
     /// 소스에 할당된 프리셋의 members 미러 (get/set). set은 할당 프리셋을 편집 → 공유 시 함께 반영.
     var petClaudeParty: [PetSelection] {
         get { preset(for: claudePresetID)?.members ?? [] }
@@ -631,6 +642,7 @@ final class Settings: ObservableObject {
         self.claudePresetID = claudePID!
         self.cursorPresetID = cursorPID!
         self.codexPresetID = codexPID!
+        self.purchasedPartyPresetSlots = d.integer(forKey: Keys.purchasedPartyPresetSlots)
         // 마이그레이션으로 새로 만들었으면 영속이 필요(didSet은 init 중 미동작). 모든 저장 프로퍼티가
         // 초기화된 뒤 init 끝에서 persist한다(여기선 self 메서드 호출 불가).
         let needsPresetPersist = (presetsData == nil)
@@ -1370,6 +1382,7 @@ final class Settings: ObservableObject {
         static let claudePresetID              = "settings.claudePresetID"
         static let cursorPresetID              = "settings.cursorPresetID"
         static let codexPresetID               = "settings.codexPresetID"
+        static let purchasedPartyPresetSlots   = "settings.purchasedPartyPresetSlots"
         static let lastClaudeFiveHourReset     = "settings.lastClaudeFiveHourReset"
         static let lastClaudeSevenDayReset     = "settings.lastClaudeSevenDayReset"
         static let lastCursorEventCredited     = "settings.lastCursorEventCredited"

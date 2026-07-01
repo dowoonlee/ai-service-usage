@@ -19,6 +19,8 @@ struct PartyView: View {
     @State private var sortOrder: PetSortOrder = .dex
     /// 맵 상점 구매 확인 alert 대상. nil = 닫힘.
     @State private var pendingThemePurchase: PetTheme? = nil
+    /// 파티 프리셋 슬롯 구매 확인 alert.
+    @State private var pendingSlotPurchase = false
 
     struct SelectedSlot: Equatable { let presetID: UUID; let kind: PetKind }
 
@@ -56,27 +58,51 @@ struct PartyView: View {
         } message: { theme in
             Text("'\(theme.displayName)' 맵을 구매하시겠습니까?\n현재 잔액: \(settings.coins.formatted()) coin → 구매 후 \((settings.coins - theme.price).formatted()) coin")
         }
+        .alert("파티 프리셋 슬롯 구매", isPresented: $pendingSlotPurchase) {
+            Button("\(settings.nextPartyPresetSlotCost.formatted()) coin 으로 구매") {
+                // 구매 성공 시 슬롯이 늘어나므로 곧바로 프리셋 하나를 추가한다.
+                if CoinLedger.shared.purchasePartyPresetSlot() {
+                    let id = settings.addPreset(name: "파티 \(settings.partyPresets.count + 1)")
+                    addingPreset = id
+                }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("프리셋 슬롯을 하나 추가합니다 (프리셋 \(settings.maxPartyPresets)개 → \(settings.maxPartyPresets + 1)개).\n비용: \(settings.nextPartyPresetSlotCost.formatted()) coin · 현재 잔액: \(settings.coins.formatted()) coin")
+        }
     }
 
     // MARK: - 프리셋 라이브러리
 
     private var presetsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        // 한도 초과 시 "추가"는 코인으로 슬롯을 사서 늘리는 구매 동작이 된다.
+        let atCap = settings.partyPresets.count >= settings.maxPartyPresets
+        let slotCost = settings.nextPartyPresetSlotCost
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
                 Text("파티 프리셋")
                     .font(.system(size: 12, weight: .semibold))
+                Text("\(settings.partyPresets.count)/\(settings.maxPartyPresets)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(.secondary)
                 Spacer()
                 Button {
-                    let id = settings.addPreset(name: "파티 \(settings.partyPresets.count + 1)")
-                    addingPreset = id
+                    if atCap {
+                        pendingSlotPurchase = true
+                    } else {
+                        let id = settings.addPreset(name: "파티 \(settings.partyPresets.count + 1)")
+                        addingPreset = id
+                    }
                 } label: {
-                    Label("프리셋 추가", systemImage: "plus")
+                    Label(atCap ? "슬롯 추가 · \(slotCost) coin" : "프리셋 추가",
+                          systemImage: atCap ? "cart.badge.plus" : "plus")
                         .font(.system(size: 11))
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.tint)
+                .disabled(atCap && settings.coins < slotCost)
             }
-            Text("프리셋을 만들어 각 차트에 할당하세요. 같은 프리셋을 여러 차트에 할당하면 편집이 함께 반영됩니다.")
+            Text("기본 \(Settings.basePartyPresetLimit)개까지 무료. 이후엔 슬롯을 코인으로 사서 늘립니다(2000부터 구매당 +1000). 같은 프리셋을 여러 차트에 할당하면 편집이 함께 반영됩니다.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
 
             if settings.ownedPets.isEmpty {

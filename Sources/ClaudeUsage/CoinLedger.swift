@@ -229,6 +229,18 @@ final class CoinLedger: UsageConsumer {
         return true
     }
 
+    /// 파티 프리셋 슬롯 1개 구매. 비용은 `nextPartyPresetSlotCost`(2000부터 구매당 +1000).
+    /// 성공 시 코인 차감 + 구매 슬롯 카운터 증가 → `maxPartyPresets`가 1 늘어난다.
+    func purchasePartyPresetSlot() -> Bool {
+        let s = Settings.shared
+        let cost = s.nextPartyPresetSlotCost
+        guard s.coins >= cost else { return false }
+        s.coins -= cost
+        s.purchasedPartyPresetSlots += 1
+        DebugLog.log("CoinLedger: 파티 프리셋 슬롯 구매 -\(cost) coin (slots=\(s.purchasedPartyPresetSlots), total=\(s.coins))")
+        return true
+    }
+
     // MARK: - 내부 helpers
 
     private enum CoinSource { case claude, cursor, codex }
