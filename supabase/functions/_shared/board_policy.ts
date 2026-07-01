@@ -8,3 +8,8 @@
 export const DISPLAY_WINDOW_HOURS = 24;
 export const POST_COOLDOWN_SEC = 600;
 export const DELETE_POST_WINDOW_SEC = 60;
+
+// 댓글 정책 — comment, delete-comment 함수 + board 응답이 공유.
+export const COMMENT_MAX_LEN = 200;
+export const COMMENT_COOLDOWN_SEC = 30;      // 글(600s)보다 짧게 — 대화 흐름 허용, 스팸만 차단
+export const DELETE_COMMENT_WINDOW_SEC = 60;

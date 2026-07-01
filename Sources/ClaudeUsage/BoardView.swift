@@ -30,6 +30,20 @@ struct BoardView: View {
     /// 삭제 in-flight 중인 postId 모음.
     @State private var deletingPostIds: Set<Int> = []
 
+    // MARK: 댓글
+    /// 댓글 입력창이 열린 글(하나씩). nil = 모두 닫힘.
+    @State private var composingPost: Int? = nil
+    /// 글별 댓글 입력 임시 텍스트.
+    @State private var commentDrafts: [Int: String] = [:]
+    /// 댓글 전송 in-flight 중인 postId.
+    @State private var postingCommentIds: Set<Int> = []
+    /// 댓글 좋아요/삭제 in-flight 중인 commentId.
+    @State private var likingCommentIds: Set<Int> = []
+    @State private var deletingCommentIds: Set<Int> = []
+    /// 서버 정책 — 댓글 최대 길이 / 삭제 윈도우(초). 서버 값 도착 시 갱신.
+    @State private var commentMaxLen: Int = 200
+    @State private var deleteCommentWindowSec: TimeInterval = 60
+
     /// 1초 tick — "본인 글 + 1분 이내" 판정의 now. 게시판 윈도우 active 동안만 도는 가벼운 timer.
     /// 60초 지나면 자연스럽게 삭제 버튼이 BoardRow에서 사라짐.
     @State private var nowTick: Date = Date()
@@ -233,19 +247,28 @@ struct BoardView: View {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     ForEach(posts) { post in
-                        BoardRow(
-                            post: post,
-                            isLikeBusy: likingPostIds.contains(post.id),
-                            isMyOwnPost: post.isMine,
-                            isDeleteBusy: deletingPostIds.contains(post.id),
-                            isDeletable: post.isMine
-                                && !deletingPostIds.contains(post.id)
-                                && nowTick.timeIntervalSince(post.createdAt) < deleteWindowSec,
-                            deleteRemainingSec: Int(deleteWindowSec - nowTick.timeIntervalSince(post.createdAt)),
-                            deleteWindowSec: Int(deleteWindowSec),
-                            onLikeTap: { toggleLike(postId: post.id) },
-                            onDeleteTap: { deletePost(postId: post.id) }
-                        )
+                        VStack(alignment: .leading, spacing: 0) {
+                            BoardRow(
+                                post: post,
+                                isLikeBusy: likingPostIds.contains(post.id),
+                                isMyOwnPost: post.isMine,
+                                isDeleteBusy: deletingPostIds.contains(post.id),
+                                isDeletable: post.isMine
+                                    && !deletingPostIds.contains(post.id)
+                                    && nowTick.timeIntervalSince(post.createdAt) < deleteWindowSec,
+                                deleteRemainingSec: Int(deleteWindowSec - nowTick.timeIntervalSince(post.createdAt)),
+                                deleteWindowSec: Int(deleteWindowSec),
+                                commentCount: post.comments.count,
+                                isComposing: composingPost == post.id,
+                                canComment: settings.rankingRegistered,
+                                onLikeTap: { toggleLike(postId: post.id) },
+                                onDeleteTap: { deletePost(postId: post.id) },
+                                onCommentToggle: {
+                                    composingPost = (composingPost == post.id) ? nil : post.id
+                                }
+                            )
+                            commentThread(post: post)
+                        }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         Divider()
@@ -308,6 +331,12 @@ struct BoardView: View {
                 }
                 if let s = resp.deletePostWindowSec, s > 0 {
                     deleteWindowSec = TimeInterval(s)
+                }
+                if let n = resp.commentMaxLen, n > 0 {
+                    commentMaxLen = n
+                }
+                if let s = resp.deleteCommentWindowSec, s > 0 {
+                    deleteCommentWindowSec = TimeInterval(s)
                 }
                 applyServerCooldown(resp.cooldownRemainingSec)
                 // 윈도우 active 동안에는 새 글이 와도 사용자가 즉시 본 셈 — 메인 패널 배지를 0 유지.
@@ -423,7 +452,8 @@ struct BoardView: View {
                 isMine: p.isMine,
                 likeCount: p.likeCount + (p.likedByMe ? -1 : 1),
                 likedByMe: !p.likedByMe,
-                likers: p.likers // 정확한 likers는 다음 fetch에서. count만 임시 반영.
+                likers: p.likers, // 정확한 likers는 다음 fetch에서. count만 임시 반영.
+                comments: p.comments
             )
             posts[idx] = optimistic
         }
@@ -453,7 +483,8 @@ struct BoardView: View {
                         isMine: p.isMine,
                         likeCount: resp.count,
                         likedByMe: resp.liked,
-                        likers: p.likers
+                        likers: p.likers,
+                        comments: p.comments
                     )
                 }
             } catch {
@@ -492,6 +523,236 @@ struct BoardView: View {
         }
     }
 
+    // MARK: - 댓글 액션
+
+    /// posts 안 특정 글의 comments 배열을 in-place 변형 후 BoardPost 재구성(불변 struct).
+    private func mutatePostComments(_ postId: Int, _ transform: (inout [RankingAPI.BoardComment]) -> Void) {
+        guard let idx = posts.firstIndex(where: { $0.id == postId }) else { return }
+        let p = posts[idx]
+        var comments = p.comments
+        transform(&comments)
+        posts[idx] = RankingAPI.BoardPost(
+            id: p.id, nickname: p.nickname, content: p.content, createdAt: p.createdAt,
+            isMine: p.isMine, likeCount: p.likeCount, likedByMe: p.likedByMe,
+            likers: p.likers, comments: comments)
+    }
+
+    private func commentDraftBinding(_ postId: Int) -> Binding<String> {
+        Binding(
+            get: { commentDrafts[postId] ?? "" },
+            set: { commentDrafts[postId] = String($0.prefix(commentMaxLen)) }
+        )
+    }
+
+    /// 댓글 작성. 서버가 익명 닉네임/ id를 결정하므로 optimistic 추가 없이 성공 후 refresh.
+    private func submitComment(postId: Int) {
+        guard settings.rankingRegistered else {
+            error = "댓글은 랭킹 등록 후 가능합니다."
+            return
+        }
+        let content = (commentDrafts[postId] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty, !postingCommentIds.contains(postId) else { return }
+        let key = Keychain.loadRankingHmacKey() ?? ""
+        guard !key.isEmpty, !settings.rankingDeviceID.isEmpty else { return }
+        postingCommentIds.insert(postId)
+        error = nil
+        Task { @MainActor in
+            defer { postingCommentIds.remove(postId) }
+            do {
+                _ = try await RankingAPI.shared.submitComment(
+                    deviceId: settings.rankingDeviceID, postId: postId,
+                    content: content, hmacKeyBase64: key)
+                commentDrafts[postId] = ""
+                composingPost = nil
+                refresh()
+            } catch let RankingAPI.RankingError.rateLimited(retryAfterSec: s) {
+                error = "댓글은 \(formatCooldown(s)) 후 다시 달 수 있습니다."
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func toggleCommentLike(commentId: Int, postId: Int) {
+        guard settings.rankingRegistered else {
+            error = "좋아요는 랭킹 등록 후 가능합니다."
+            return
+        }
+        guard !likingCommentIds.contains(commentId) else { return }
+        let key = Keychain.loadRankingHmacKey() ?? ""
+        guard !key.isEmpty, !settings.rankingDeviceID.isEmpty else { return }
+        likingCommentIds.insert(commentId)
+
+        // Optimistic 반전.
+        mutatePostComments(postId) { comments in
+            if let i = comments.firstIndex(where: { $0.id == commentId }) {
+                let c = comments[i]
+                comments[i] = RankingAPI.BoardComment(
+                    id: c.id, nickname: c.nickname, content: c.content, createdAt: c.createdAt,
+                    isMine: c.isMine, likeCount: c.likeCount + (c.likedByMe ? -1 : 1),
+                    likedByMe: !c.likedByMe)
+            }
+        }
+
+        Task { @MainActor in
+            defer {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1))
+                    likingCommentIds.remove(commentId)
+                }
+            }
+            do {
+                let resp = try await RankingAPI.shared.likeComment(
+                    deviceId: settings.rankingDeviceID, commentId: commentId, hmacKeyBase64: key)
+                mutatePostComments(postId) { comments in
+                    if let i = comments.firstIndex(where: { $0.id == commentId }) {
+                        let c = comments[i]
+                        comments[i] = RankingAPI.BoardComment(
+                            id: c.id, nickname: c.nickname, content: c.content, createdAt: c.createdAt,
+                            isMine: c.isMine, likeCount: resp.count, likedByMe: resp.liked)
+                    }
+                }
+            } catch {
+                refresh()
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func deleteComment(commentId: Int, postId: Int) {
+        guard !deletingCommentIds.contains(commentId) else { return }
+        let key = Keychain.loadRankingHmacKey() ?? ""
+        guard !key.isEmpty, !settings.rankingDeviceID.isEmpty else { return }
+        deletingCommentIds.insert(commentId)
+
+        // Optimistic remove — 실패 시 refresh로 복구.
+        let snapshot = posts
+        mutatePostComments(postId) { comments in
+            comments.removeAll { $0.id == commentId }
+        }
+        Task { @MainActor in
+            defer { deletingCommentIds.remove(commentId) }
+            do {
+                _ = try await RankingAPI.shared.deleteComment(
+                    deviceId: settings.rankingDeviceID, commentId: commentId, hmacKeyBase64: key)
+            } catch {
+                posts = snapshot
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    // MARK: - 댓글 스레드 (들여쓰기 + 음영)
+
+    @ViewBuilder
+    private func commentThread(post: RankingAPI.BoardPost) -> some View {
+        if !post.comments.isEmpty || composingPost == post.id {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(post.comments) { c in
+                    commentRow(c, postId: post.id)
+                }
+                if composingPost == post.id, settings.rankingRegistered {
+                    commentComposeRow(postId: post.id)
+                }
+            }
+            // 들여쓰기 — 글보다 안쪽으로 밀어 대댓글임을 시각화.
+            .padding(.leading, 24)
+            .padding(.top, 2)
+        }
+    }
+
+    private func commentRow(_ c: RankingAPI.BoardComment, postId: Int) -> some View {
+        let deletable = c.isMine
+            && !deletingCommentIds.contains(c.id)
+            && nowTick.timeIntervalSince(c.createdAt) < deleteCommentWindowSec
+        return HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(c.nickname)
+                        .font(.system(size: 11, weight: c.isMine ? .semibold : .medium))
+                        .foregroundStyle(c.isMine ? Color.accentColor : .primary)
+                        .lineLimit(1)
+                    Text(relativeTime(c.createdAt))
+                        .font(.system(size: 9)).foregroundStyle(.secondary)
+                    if c.isMine {
+                        Text("나")
+                            .font(.system(size: 8, weight: .semibold))
+                            .padding(.horizontal, 3).padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.15))
+                            .foregroundStyle(Color.accentColor)
+                            .cornerRadius(3)
+                    }
+                    if deletable {
+                        Button { deleteComment(commentId: c.id, postId: postId) } label: {
+                            Image(systemName: "trash").font(.system(size: 8))
+                                .foregroundStyle(.red.opacity(0.8))
+                        }
+                        .buttonStyle(.borderless)
+                        .help("작성 \(BoardRow.secondsLabel(Int(deleteCommentWindowSec))) 이내에 한해 삭제 가능")
+                    }
+                }
+                Text(c.content)
+                    .font(.system(size: 12))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button { toggleCommentLike(commentId: c.id, postId: postId) } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: c.likedByMe ? "heart.fill" : "heart")
+                        .font(.system(size: 10))
+                        .foregroundStyle(c.likedByMe ? Color.pink : Color.secondary)
+                    Text("\(c.likeCount)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(minWidth: 12, alignment: .leading)
+                }
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .disabled(likingCommentIds.contains(c.id))
+            .opacity(likingCommentIds.contains(c.id) ? 0.5 : 1.0)
+        }
+        .padding(8)
+        // 음영 — 글 본문과 배경을 달리해 댓글 영역을 구분.
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.08)))
+    }
+
+    private func commentComposeRow(postId: Int) -> some View {
+        let posting = postingCommentIds.contains(postId)
+        let trimmed = (commentDrafts[postId] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return HStack(spacing: 6) {
+            TextField("댓글 달기…", text: commentDraftBinding(postId), axis: .vertical)
+                .textFieldStyle(.roundedBorder)
+                .lineLimit(1...3)
+                .font(.system(size: 12))
+                .disabled(posting)
+            Button {
+                submitComment(postId: postId)
+            } label: {
+                if posting {
+                    ProgressView().controlSize(.small).frame(width: 40)
+                } else {
+                    Text("등록").frame(width: 40)
+                }
+            }
+            .controlSize(.small)
+            .keyboardShortcut(.return, modifiers: [.command])
+            .disabled(posting || trimmed.isEmpty)
+        }
+        .padding(.top, 2)
+    }
+
+    /// BoardRow 상대시각과 동일 규칙 (BoardView 스코프에서도 필요).
+    private func relativeTime(_ date: Date) -> String {
+        let diff = Int(Date().timeIntervalSince(date))
+        if diff < 60 { return "방금" }
+        if diff < 3600 { return "\(diff / 60)분 전" }
+        if diff < 86400 { return "\(diff / 3600)시간 전" }
+        return "\(diff / 86400)일 전"
+    }
+
     /// 환경설정 → 랭킹 섹션을 띄우는 진입점. 윈도우 닫지 않음 — 작성 끝나면 돌아오기 편하게.
     private func openRankingSettings() {
         NotificationCenter.default.post(name: .openRankingSettings, object: nil)
@@ -509,8 +770,12 @@ private struct BoardRow: View {
     let deleteRemainingSec: Int
     /// 서버 정책(_shared/board_policy.ts)에서 내려온 삭제 윈도우 길이(초). help 문구 동적 생성용.
     let deleteWindowSec: Int
+    let commentCount: Int
+    let isComposing: Bool
+    let canComment: Bool
     let onLikeTap: () -> Void
     let onDeleteTap: () -> Void
+    let onCommentToggle: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -578,6 +843,25 @@ private struct BoardRow: View {
             .disabled(isLikeBusy)
             .opacity(isLikeBusy ? 0.5 : 1.0)
             .help(likeHelpText)
+
+            // 댓글 토글 — 말풍선 + 개수. 클릭 시 입력창 펼침/접힘.
+            if canComment || commentCount > 0 {
+                Button(action: onCommentToggle) {
+                    HStack(spacing: 3) {
+                        Image(systemName: isComposing ? "bubble.left.fill" : "bubble.left")
+                            .foregroundStyle(isComposing ? Color.accentColor : Color.secondary)
+                        Text("\(commentCount)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 12, alignment: .leading)
+                    }
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canComment)
+                .help(canComment ? "댓글 달기 / 접기" : "댓글은 랭킹 등록 후 가능")
+            }
         }
     }
 
