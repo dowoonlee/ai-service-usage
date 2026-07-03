@@ -604,6 +604,12 @@ private struct PodiumStep: View {
                         .monospacedDigit()
                 }
                 .foregroundStyle(rewardColor)
+                if let rp = podiumMonthlyRp(rank) {
+                    Text("✦ +\(rp) RP")
+                        .font(.system(size: 10, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.cyan)
+                }
             } else {
                 Text("기록 없음").font(.system(size: 12)).foregroundStyle(.secondary)
             }
@@ -650,6 +656,14 @@ private struct PodiumStep: View {
 /// 등수별 메달 이모지. 1/2/3 외에는 트로피.
 private func podiumMedal(_ rank: Int) -> String {
     switch rank { case 1: return "🥇"; case 2: return "🥈"; case 3: return "🥉"; default: return "🏆" }
+}
+
+/// 월간 Top3 RP 보상 — **표시 전용** 상수. 실제 지급은 서버 원장
+/// (`finalize_monthly_rp_if_needed`, supabase/migrations/20260619000000_rp_rewards.sql)이
+/// 하며, 이 계단식 금액(1000/600/400)과 반드시 동기 유지할 것. 서버 응답
+/// (`previousMonth.entries`)에 RP 필드가 없어 클라이언트 상수로 둔다.
+private func podiumMonthlyRp(_ rank: Int) -> Int? {
+    switch rank { case 1: return 1000; case 2: return 600; case 3: return 400; default: return nil }
 }
 
 /// 등수별 강조 색 — 금/은/동.
