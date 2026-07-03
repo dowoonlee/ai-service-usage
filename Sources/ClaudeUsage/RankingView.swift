@@ -604,6 +604,12 @@ private struct PodiumStep: View {
                         .monospacedDigit()
                 }
                 .foregroundStyle(rewardColor)
+                if let rp = entry.rewardRp {
+                    Text("✦ +\(rp) RP")
+                        .font(.system(size: 10, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.cyan)
+                }
             } else {
                 Text("기록 없음").font(.system(size: 12)).foregroundStyle(.secondary)
             }
