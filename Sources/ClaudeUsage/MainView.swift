@@ -881,23 +881,15 @@ struct CursorSection: View {
         // 이전엔 (periodStart, 0) 을 prepend 했지만,
         // 첫 이벤트까지 라인이 y=0 평지가 되어 area가 텅 비어 보이는 문제 발생.
         // 차트 x-도메인은 첫 이벤트 ~ vm.now 로 자연스럽게 잡히게 함.
-        let events = vm.cursorEvents.sorted { $0.timestamp < $1.timestamp }
-        var points: [(Date, Double)] = []
-        var running: Double = 0
-        var lastTs: Date? = nil
-        for e in events {
-            // 동일/더 이른 timestamp 이벤트는 0-width segment를 만들어 차트가 갭처럼 렌더 →
-            // 1ms씩 밀어서 strict ascending 보장.
-            var ts = e.timestamp
-            if let prev = lastTs, ts <= prev {
-                ts = prev.addingTimeInterval(0.001)
-            }
-            running += e.chargedCents
-            points.append((ts, running / 100.0))
-            lastTs = ts
-        }
-        let nowTotal = (vm.cursorCurrent?.totalCents ?? running) / 100.0
-        points.append((vm.now, max(running / 100.0, nowTotal)))
+        //
+        // 누적 시계열 본체는 ViewModel이 cursorEvents 변경 시에만 재계산해 캐시
+        // (sort + 누적 + 다운샘플 — `ViewModel.cumulativeSeries`). 여기서는 현재 시각
+        // 점만 덧붙인다. vm.now가 1초마다 갱신돼 이 함수가 매초 불리므로, 전체 재구성을
+        // 렌더 hot path에서 제거한 것.
+        var points = vm.cursorCumulativeSeries
+        let lastTotal = points.last?.1 ?? 0
+        let nowTotal = (vm.cursorCurrent?.totalCents).map { $0 / 100.0 } ?? lastTotal
+        points.append((vm.now, max(lastTotal, nowTotal)))
         return points
     }
 

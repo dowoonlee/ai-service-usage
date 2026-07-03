@@ -27,7 +27,12 @@ final class ViewModel: ObservableObject {
     // Cursor
     @Published var cursorCurrent: CursorSnapshot?
     @Published var cursorHistory: [CursorSnapshot] = []
-    @Published var cursorEvents: [CursorEvent] = []          // 현재 billing 기간 이벤트 (시간순)
+    @Published var cursorEvents: [CursorEvent] = [] {        // 현재 billing 기간 이벤트 (시간순)
+        didSet { cursorCumulativeSeries = Self.cumulativeSeries(events: cursorEvents) }
+    }
+    /// Ultra 누적 차트용 시계열 (달러 단위, 다운샘플 완료). cursorEvents 변경 시에만 재계산 —
+    /// 이전엔 MainView가 매 렌더(1s now tick 포함)마다 전체 sort + 누적 재구성을 했다.
+    @Published private(set) var cursorCumulativeSeries: [(Date, Double)] = []
     @Published var cursorLoading: Bool = false
     @Published var cursorError: String?
     @Published var cursorLastSuccess: Date?
@@ -208,7 +213,7 @@ final class ViewModel: ObservableObject {
         let loaded = await Task.detached(priority: .userInitiated) {
             let claude = SnapshotStore.claude.loadRecent()
             let cursor = SnapshotStore.cursor.loadRecent()
-            let events = SnapshotStore.cursorEvents.loadRecent(limit: 20000)
+            let events = SnapshotStore.cursorEvents.loadRecent(limit: ViewModel.cursorEventsMemoryCap)
                 .sorted { $0.timestamp < $1.timestamp }
             let codex = SnapshotStore.codex.loadRecent()
             return (claude, cursor, events, codex)
@@ -1114,13 +1119,68 @@ final class ViewModel: ObservableObject {
                 // fetchEvents는 서버 응답 순서(최신순)라 new 자체가 역순일 수 있음 → new만 정렬한 뒤
                 // 이미 시간순인 cursorEvents와 O(n+m) merge. 폴링마다 full sort(O(n log n)) 대체 (issue #19-3).
                 let sortedNew = new.sorted { $0.timestamp < $1.timestamp }
-                cursorEvents = Self.mergeSortedByTimestamp(cursorEvents, sortedNew)
+                var merged = Self.mergeSortedByTimestamp(cursorEvents, sortedNew)
+                // 인메모리 상한 — 시작 시 loadRecent 상한과 동일. 청구 기간 내내 상한 없이 자라던
+                // 것을 막는다. head(오래된 쪽)부터 버려도 누적 차트의 현재 총액은 now-point가
+                // cursorCurrent.totalCents로 보정하므로 재시작 직후와 동일한 표시가 된다.
+                if merged.count > Self.cursorEventsMemoryCap {
+                    merged.removeFirst(merged.count - Self.cursorEventsMemoryCap)
+                }
+                cursorEvents = merged
                 UsageEventProducer.ingestCursorEvents(new)
                 BadgeRegistry.evaluate()
             }
         } catch {
             DebugLog.log(" fetchEvents failed: \(error.localizedDescription)")
         }
+    }
+
+    /// 인메모리 cursorEvents 상한 — 시작 시 loadRecent limit과 런타임 merge 후 트림이 공유.
+    /// 헤비 Ultra 사용 월에도 매초 렌더 파이프라인이 다루는 배열 크기를 고정한다.
+    nonisolated static let cursorEventsMemoryCap = 20000
+
+    /// Ultra 누적 차트 시계열 — 이벤트를 시간순 누적합(달러)으로 변환한 뒤 다운샘플.
+    /// 동일/역행 timestamp는 1ms씩 밀어 strict ascending 보장 (0-width segment가 차트에서
+    /// 갭처럼 렌더되는 문제 — 기존 MainView.buildCumulativePoints의 관례를 그대로 옮김).
+    /// cursorEvents didSet에서만 호출되므로 폴링당 최대 2회 (트림 + merge) — 렌더 hot path 밖.
+    nonisolated static func cumulativeSeries(events: [CursorEvent], maxPoints: Int = cursorChartMaxPoints) -> [(Date, Double)] {
+        let sorted = events.sorted { $0.timestamp < $1.timestamp }
+        var points: [(Date, Double)] = []
+        points.reserveCapacity(sorted.count)
+        var running: Double = 0
+        var lastTs: Date? = nil
+        for e in sorted {
+            var ts = e.timestamp
+            if let prev = lastTs, ts <= prev {
+                ts = prev.addingTimeInterval(0.001)
+            }
+            running += e.chargedCents
+            points.append((ts, running / 100.0))
+            lastTs = ts
+        }
+        return downsampleKeepingLast(points, maxPoints: maxPoints)
+    }
+
+    /// 차트에 넘기는 최대 점 수. 패널 폭(~260pt) 대비 충분한 해상도이면서 Swift Charts가
+    /// 매초 재레이아웃해도 부담 없는 수준. AreaMark+LineMark 2마크/점이므로 실제 마크 ≤ 2×이 값.
+    nonisolated static let cursorChartMaxPoints = 240
+
+    /// 다운샘플 — n ≤ maxPoints면 그대로, 아니면 그룹당 **마지막** 점만 남긴다 (최종 점 항상 포함).
+    /// 누적(단조증가) 시계열에서 그룹 마지막을 남기면 각 구간 종점과 최종 총액이 정확히 보존된다.
+    nonisolated static func downsampleKeepingLast(_ points: [(Date, Double)], maxPoints: Int) -> [(Date, Double)] {
+        guard maxPoints > 0, points.count > maxPoints else { return points }
+        let group = Int((Double(points.count) / Double(maxPoints)).rounded(.up))
+        var out: [(Date, Double)] = []
+        out.reserveCapacity(maxPoints + 1)
+        var i = group - 1
+        while i < points.count {
+            out.append(points[i])
+            i += group
+        }
+        if out.last!.0 != points[points.count - 1].0 {
+            out.append(points[points.count - 1])
+        }
+        return out
     }
 
     /// 시간순 정렬된 두 배열을 O(n+m) 2-pointer로 병합 (issue #19-3).
