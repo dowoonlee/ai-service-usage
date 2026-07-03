@@ -158,6 +158,16 @@ Deno.serve(async (req: Request) => {
     const filtered = prevWinners.filter((w) => w.period === latestPeriod);
     // 요청자가 이 시상대의 우승자면 그 rank — 클라이언트가 "내 칸 한마디 등록" 여부 판정에 사용.
     const myWinner = deviceId ? filtered.find((w) => w.device_id === deviceId) : undefined;
+    // 시상대 표기용 월간 RP 보상 — 같은 period의 rp_rewards 금액을 device_id로 매핑.
+    // monthly_winners / rp_rewards 모두 DB 저장값(소문자 UUID)이라 케이스 불일치 없음.
+    // RP 정산 전 period(기능 도입 이전 등)는 row가 없어 rewardRp: null.
+    const { data: prevRp } = await db
+      .from("rp_rewards")
+      .select("device_id, rp_amount")
+      .eq("period_type", "monthly")
+      .eq("period", latestPeriod)
+      .in("device_id", filtered.map((w) => w.device_id));
+    const rpByDevice = new Map((prevRp ?? []).map((r) => [r.device_id, r.rp_amount]));
     previousMonth = {
       period: latestPeriod,
       myRank: myWinner ? myWinner.rank : null,
@@ -168,6 +178,7 @@ Deno.serve(async (req: Request) => {
         githubLogin: null,
         profileJson: stripBackup(w.profile_json_snapshot),
         rewardCoins: w.reward_coins,
+        rewardRp: rpByDevice.get(w.device_id) ?? null,
         message: w.podium_message ?? null,
       })),
     };

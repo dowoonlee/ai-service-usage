@@ -132,6 +132,8 @@ actor RankingAPI {
         let githubLogin: String?
         let profileJson: ProfileState?
         let rewardCoins: Int
+        /// 월간 순위 RP 보상 (rp_rewards 원장 금액). RP 정산 전 period/구버전 서버는 nil.
+        let rewardRp: Int?
         /// 우승자가 등록한 시상대 한마디. 미등록/구버전 서버는 nil.
         let message: String?
         var id: Int { rank }
