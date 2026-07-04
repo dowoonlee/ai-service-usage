@@ -22,6 +22,9 @@ CREATE TABLE guilds (
     leader_device_id UUID NOT NULL,              -- FK 없음 (헤더 노트 참조)
     floor_theme      SMALLINT NOT NULL DEFAULT 0, -- P2b: 바닥재 (길드장만 변경)
     wall_theme       SMALLINT NOT NULL DEFAULT 0, -- P2b: 벽지
+    -- 가구 재배치 (길드장) — 바닥 가구 세트의 포지션 순열. layout[포지션 i] = 가구 세트 id.
+    -- 포지션(장소 이름·벽 장식·office_slot 의미)은 고정, 가구만 이동. 검증은 guild-manage.
+    office_layout    SMALLINT[] NOT NULL DEFAULT '{0,1,2,3,4,5,6,7,8,9,10,11}',
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT guild_name_length CHECK (CHAR_LENGTH(name) BETWEEN 2 AND 24)
 );

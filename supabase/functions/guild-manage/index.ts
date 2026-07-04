@@ -1,23 +1,30 @@
 // POST /guild-manage
-// 길드장 전용 액션 묶음: kick(추방) / rotate_code(초대 코드 재발급) / disband(해체).
-// 1함수 1액션 관례의 의도적 예외 — 함수 수 억제 (docs/plans/guild.md §3).
+// 길드장 전용 액션 묶음: kick(추방) / rotate_code(초대 코드 재발급) / disband(해체)
+// / set_layout(가구 재배치). 1함수 1액션 관례의 의도적 예외 — 함수 수 억제 (docs/plans/guild.md §3).
 //
-// payload(서명 대상, flat): { action, deviceId, targetDeviceId, ts }
-//   - targetDeviceId는 kick에서만 의미. rotate_code/disband는 빈 문자열("")로 보내
-//     canonical 직렬화 형태를 액션과 무관하게 고정한다 (Swift 클라이언트 단순화).
+// payload(서명 대상, flat): { action, deviceId, [layout,] targetDeviceId, ts }
+//   - targetDeviceId는 kick에서만 의미. 나머지는 빈 문자열("").
+//   - layout은 set_layout에서만 존재 — 클라이언트가 키 자체를 생략하므로 canonical 재현도
+//     같은 조건으로 생략해야 서명이 일치한다.
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
-import { generateInviteCode, JOIN_COOLDOWN_SEC } from "../_shared/guild_policy.ts";
+import {
+  generateInviteCode,
+  JOIN_COOLDOWN_SEC,
+  OFFICE_SLOT_COUNT,
+} from "../_shared/guild_policy.ts";
 
-type ManageAction = "kick" | "rotate_code" | "disband";
+type ManageAction = "kick" | "rotate_code" | "disband" | "set_layout";
 
 interface ManagePayload {
   action: ManageAction;
   deviceId: string;
   targetDeviceId: string; // kick 외에는 ""
+  // set_layout 전용 — "3,1,0,…" (포지션 순서대로 가구 세트 id, 0..11 순열).
+  layout?: string;
   ts: number;
 }
 interface ManageRequest {
@@ -41,12 +48,28 @@ Deno.serve(async (req: Request) => {
   const p = body.payload;
   if (!p || typeof p !== "object") return errorResponse(400, "missing_payload");
   if (!isValidUUID(p.deviceId)) return errorResponse(400, "invalid_device_id");
-  if (p.action !== "kick" && p.action !== "rotate_code" && p.action !== "disband") {
+  if (
+    p.action !== "kick" && p.action !== "rotate_code" && p.action !== "disband" &&
+    p.action !== "set_layout"
+  ) {
     return errorResponse(400, "invalid_action");
   }
   if (typeof p.targetDeviceId !== "string") return errorResponse(400, "invalid_target");
   if (p.action === "kick" && !isValidUUID(p.targetDeviceId)) {
     return errorResponse(400, "invalid_target");
+  }
+  // set_layout: 0..OFFICE_SLOT_COUNT-1 순열 검증.
+  let layoutInts: number[] | null = null;
+  if (p.action === "set_layout") {
+    if (typeof p.layout !== "string") return errorResponse(400, "invalid_layout");
+    layoutInts = p.layout.split(",").map((s) => Number(s.trim()));
+    if (
+      layoutInts.length !== OFFICE_SLOT_COUNT ||
+      layoutInts.some((n) => !Number.isInteger(n)) ||
+      [...layoutInts].sort((a, b) => a - b).some((n, i) => n !== i)
+    ) {
+      return errorResponse(400, "invalid_layout");
+    }
   }
   if (typeof body.signature !== "string" || body.signature.length !== 64) {
     return errorResponse(400, "invalid_signature");
@@ -69,11 +92,15 @@ Deno.serve(async (req: Request) => {
   if (!user) return errorResponse(404, "device_not_registered");
   if (user.status === "banned") return errorResponse(403, "banned");
 
-  const ok = await verifyHmac(
-    { action: p.action, deviceId: p.deviceId, targetDeviceId: p.targetDeviceId, ts: p.ts },
-    body.signature,
-    user.hmac_key_b64,
-  );
+  // layout 키는 클라이언트가 set_layout일 때만 직렬화 — canonical 재현도 동일 조건.
+  const verifyObj: Record<string, unknown> = {
+    action: p.action,
+    deviceId: p.deviceId,
+    targetDeviceId: p.targetDeviceId,
+    ts: p.ts,
+  };
+  if (typeof p.layout === "string") verifyObj.layout = p.layout;
+  const ok = await verifyHmac(verifyObj, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
   // 길드장 검증 — 내 길드 조회 후 leader 일치 확인.
@@ -147,6 +174,19 @@ Deno.serve(async (req: Request) => {
         return errorResponse(500, "disband_failed");
       }
       return jsonResponse({ ok: true });
+    }
+
+    case "set_layout": {
+      // 가구 재배치 — 포지션(장소·office_slot 의미)은 고정, 바닥 가구 세트 순열만 교체.
+      const { error: updErr } = await db
+        .from("guilds")
+        .update({ office_layout: layoutInts })
+        .eq("id", guild.id);
+      if (updErr) {
+        console.error("guild set_layout failed", updErr);
+        return errorResponse(500, "layout_failed");
+      }
+      return jsonResponse({ ok: true, officeLayout: layoutInts });
     }
   }
 });
