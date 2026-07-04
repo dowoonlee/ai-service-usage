@@ -67,12 +67,14 @@ final class OfficeSimulation: ObservableObject {
         timer?.invalidate()
     }
 
-    /// 멤버 목록 → 배치된(officeSlot != nil) 펫 상태 구성. 같은 구성이면 재구성하지 않아
-    /// 5분 새로고침마다 펫이 순간이동하는 것을 막는다.
-    func configure(members: [RankingAPI.GuildMember]) {
+    /// 멤버 목록 + 가구 배치 → 배치된(officeSlot != nil) 펫 상태 구성. 같은 구성이면
+    /// 재구성하지 않아 5분 새로고침마다 펫이 순간이동하는 것을 막는다.
+    /// layout이 바뀌면(가구 재배치) 산책 범위가 달라지므로 재구성 대상.
+    func configure(members: [RankingAPI.GuildMember], layout: [Int]) {
         let key = members.map {
             "\($0.nickname):\($0.officeSlot ?? -1):\($0.isTopContributor):\($0.monthlyVP > 0)"
         }.sorted().joined(separator: ",")
+            + "|layout:" + layout.map(String.init).joined(separator: ",")
         guard key != configuredKey else { return }
         configuredKey = key
 
@@ -95,7 +97,7 @@ final class OfficeSimulation: ObservableObject {
             )
         }
         wanderRanges = Dictionary(uniqueKeysWithValues:
-            pets.map { ($0.spot.id, OfficeLayout.wanderRange(for: $0.spot)) })
+            pets.map { ($0.spot.id, OfficeLayout.wanderRange(for: $0.spot, layout: layout)) })
         greetCooldown = [:]
 
         startTimerIfNeeded()

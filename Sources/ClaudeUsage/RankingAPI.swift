@@ -391,6 +391,7 @@ actor RankingAPI {
         case kick
         case rotateCode = "rotate_code"
         case disband
+        case setLayout = "set_layout"
     }
 
     struct GuildCreatePayload: Encodable {
@@ -437,11 +438,13 @@ actor RankingAPI {
     }
 
     /// targetDeviceId는 kick 외에는 "" — canonical 직렬화 형태를 액션과 무관하게 고정
-    /// (서버 verify 객체와 정확히 일치해야 서명 통과).
+    /// (서버 verify 객체와 정확히 일치해야 서명 통과). layout은 set_layout에서만 존재 —
+    /// nil이면 키 자체가 직렬화에서 빠지고, 서버도 같은 조건으로 canonical을 재현한다.
     struct GuildManagePayload: Encodable {
         let action: String
         let deviceId: String
         let targetDeviceId: String
+        let layout: String?
         let ts: Int64
     }
     struct GuildManageRequest: Encodable {
@@ -452,6 +455,8 @@ actor RankingAPI {
         let ok: Bool
         /// rotate_code 응답에만 — 새 초대 코드.
         let inviteCode: String?
+        /// set_layout 응답에만 — 반영된 가구 배치 순열.
+        let officeLayout: [Int]?
     }
 
     /// slot: 0..11 = 스팟 점유, -1 = 비우기 (HMAC canonical 단순화를 위해 null 대신 -1).
@@ -501,6 +506,9 @@ actor RankingAPI {
         let isLeader: Bool
         let floorTheme: Int
         let wallTheme: Int
+        /// 가구 배치 순열 (layout[포지션] = 가구 세트 id). 구버전 서버 nil → 기본 배치.
+        /// 렌더 전 `OfficeLayout.sanitizedLayout`으로 검증.
+        let officeLayout: [Int]?
         let createdAt: Date
         let score: Int
         let rank: Int?
@@ -851,11 +859,14 @@ actor RankingAPI {
                               body: GuildLeaveRequest(payload: payload, signature: sig))
     }
 
-    /// 길드장 액션 (kick / 코드 재발급 / 해체). kick 외에는 targetDeviceId 생략.
+    /// 길드장 액션 (kick / 코드 재발급 / 해체 / 가구 재배치). kick 외에는 targetDeviceId 생략,
+    /// layout은 setLayout에서만 (포지션 순서대로 가구 세트 id 순열).
     func manageGuild(deviceId: String, action: GuildManageAction, targetDeviceId: String? = nil,
+                     layout: [Int]? = nil,
                      hmacKeyBase64: String) async throws -> GuildManageResponse {
         let payload = GuildManagePayload(action: action.rawValue, deviceId: deviceId,
                                          targetDeviceId: targetDeviceId ?? "",
+                                         layout: layout.map { $0.map(String.init).joined(separator: ",") },
                                          ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         return try await post(path: "guild-manage",

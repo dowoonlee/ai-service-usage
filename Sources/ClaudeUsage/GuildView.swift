@@ -35,6 +35,8 @@ struct GuildView: View {
     @State private var copiedCode: Bool = false
     /// 사무실 배치 모드 — 빈 스팟 하이라이트, 클릭으로 내 자리 선택.
     @State private var placementMode: Bool = false
+    /// 가구 재배치 모드 (길드장) — 포지션 두 개를 클릭해 가구 세트 스왑.
+    @State private var rearrangeMode: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -299,17 +301,26 @@ struct GuildView: View {
         .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.purple.opacity(0.07)))
     }
 
-    /// 사무실 씬 + 배치 컨트롤. 자리 선택은 서버 왕복 후 refresh로 재정합 —
-    /// 선점 충돌(slot_taken)은 error 라인으로 안내 + 최신 상태 재로드.
+    /// 사무실 씬 + 배치/재배치 컨트롤. 자리 선택·가구 재배치 모두 서버 왕복 후 refresh로
+    /// 재정합 — 선점 충돌(slot_taken)은 error 라인으로 안내 + 최신 상태 재로드.
     private func officeSection(_ info: RankingAPI.GuildInfoResponse) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            GuildOfficeView(info: info, placementMode: $placementMode) { slot in
-                placementMode = false
-                performSetSlot(slot)
-            }
+            GuildOfficeView(
+                info: info,
+                placementMode: $placementMode,
+                rearrangeMode: $rearrangeMode,
+                onSelectSlot: { slot in
+                    placementMode = false
+                    performSetSlot(slot)
+                },
+                onSetLayout: { newLayout in
+                    performSetLayout(newLayout)
+                }
+            )
             HStack(spacing: 8) {
                 let mySlot = info.members.first(where: \.isMe)?.officeSlot
                 Button(placementMode ? "배치 취소" : (mySlot == nil ? "내 자리 배치" : "내 자리 이동")) {
+                    rearrangeMode = false
                     placementMode.toggle()
                 }
                 .font(.system(size: 11))
@@ -319,8 +330,19 @@ struct GuildView: View {
                         .font(.system(size: 11))
                         .disabled(actionBusy)
                 }
+                if info.guild.isLeader {
+                    Button(rearrangeMode ? "재배치 종료" : "가구 재배치") {
+                        placementMode = false
+                        rearrangeMode.toggle()
+                    }
+                    .font(.system(size: 11))
+                    .disabled(actionBusy)
+                }
                 if placementMode {
                     Text("빈 자리를 클릭해 앉을 곳을 고르세요")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                } else if rearrangeMode {
+                    Text("가구 두 개를 차례로 클릭하면 자리가 바뀝니다")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -543,6 +565,16 @@ struct GuildView: View {
                 deviceId: settings.rankingDeviceID, action: .kick, targetDeviceId: targetDeviceId,
                 hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
             DebugLog.log("Guild: 추방 [\(target.nickname)]")
+        }
+    }
+
+    /// 가구 재배치 (길드장) — 스왑된 순열을 서버에 반영. refresh가 최신 배치로 재정합.
+    private func performSetLayout(_ layout: [Int]) {
+        runAction {
+            _ = try await RankingAPI.shared.manageGuild(
+                deviceId: settings.rankingDeviceID, action: .setLayout, layout: layout,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            DebugLog.log("Guild: 가구 재배치 → [\(layout.map(String.init).joined(separator: ",")) ]")
         }
     }
 
