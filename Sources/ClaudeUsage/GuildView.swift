@@ -33,6 +33,8 @@ struct GuildView: View {
     @State private var confirmingDisbandFinal: Bool = false
     @State private var kickTarget: RankingAPI.GuildMember?
     @State private var copiedCode: Bool = false
+    /// 사무실 배치 모드 — 빈 스팟 하이라이트, 클릭으로 내 자리 선택.
+    @State private var placementMode: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -266,7 +268,7 @@ struct GuildView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 scoreBanner(info.guild)
-                officePlaceholder
+                officeSection(info)
                 Divider()
                 membersSection(info)
                 Divider()
@@ -297,24 +299,33 @@ struct GuildView: View {
         .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.purple.opacity(0.07)))
     }
 
-    /// 사무실 씬 자리 — 후속 PR(GuildOfficeView)에서 채워진다. 스팟 데이터는 이미 수신 중.
-    private var officePlaceholder: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "building.2.fill").font(.system(size: 20)).foregroundStyle(.secondary)
-            Text("길드 사무실 — 곧 열립니다 🏗️")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
+    /// 사무실 씬 + 배치 컨트롤. 자리 선택은 서버 왕복 후 refresh로 재정합 —
+    /// 선점 충돌(slot_taken)은 error 라인으로 안내 + 최신 상태 재로드.
+    private func officeSection(_ info: RankingAPI.GuildInfoResponse) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            GuildOfficeView(info: info, placementMode: $placementMode) { slot in
+                placementMode = false
+                performSetSlot(slot)
+            }
+            HStack(spacing: 8) {
+                let mySlot = info.members.first(where: \.isMe)?.officeSlot
+                Button(placementMode ? "배치 취소" : (mySlot == nil ? "내 자리 배치" : "내 자리 이동")) {
+                    placementMode.toggle()
+                }
+                .font(.system(size: 11))
+                .disabled(actionBusy)
+                if mySlot != nil && !placementMode {
+                    Button("자리 비우기") { performSetSlot(-1) }
+                        .font(.system(size: 11))
+                        .disabled(actionBusy)
+                }
+                if placementMode {
+                    Text("빈 자리를 클릭해 앉을 곳을 고르세요")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 88)
-        .background(
-            RoundedRectangle(cornerRadius: AppRadius.md)
-                .fill(Color.gray.opacity(0.06))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.md)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4]))
-                        .foregroundStyle(Color.gray.opacity(0.3))
-                )
-        )
     }
 
     private func membersSection(_ info: RankingAPI.GuildInfoResponse) -> some View {
@@ -535,6 +546,16 @@ struct GuildView: View {
         }
     }
 
+    /// 사무실 스팟 선택(0..11)/비우기(-1). slot_taken(409)은 runAction의 error 경로로 안내.
+    private func performSetSlot(_ slot: Int) {
+        runAction {
+            _ = try await RankingAPI.shared.setOfficeSlot(
+                deviceId: settings.rankingDeviceID, slot: slot,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            DebugLog.log("Guild: 사무실 자리 \(slot == -1 ? "비움" : "→ \(OfficeLayout.spotName(slot) ?? "\(slot)")")")
+        }
+    }
+
     private func performRotateCode() {
         runAction {
             let resp = try await RankingAPI.shared.manageGuild(
@@ -621,8 +642,13 @@ private struct GuildMemberRow: View {
                             .background(Capsule().fill(Color.accentColor.opacity(0.2)))
                     }
                 }
-                if let gh = member.githubLogin {
-                    Text("@\(gh)").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 4) {
+                    if let spotName = OfficeLayout.spotName(member.officeSlot) {
+                        Text("📍\(spotName)").font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                    if let gh = member.githubLogin {
+                        Text("@\(gh)").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

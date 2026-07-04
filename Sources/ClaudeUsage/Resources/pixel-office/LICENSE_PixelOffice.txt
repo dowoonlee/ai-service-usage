@@ -1,0 +1,19 @@
+Pixel Office Asset Pack — by 2dPig
+https://2dpig.itch.io/pixel-office
+
+License: Creative Commons Zero (CC0 / Public Domain Dedication)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Quoted from the asset page:
+"This is released under the Creative Commons Public Domain Dedication License
+ (aka CC0 or CC Zero). No attribution is required but it is greatly appreciated."
+
+Files in this directory (furniture sprites, wall_0.png, floor_0.png) were
+obtained via the open-source project pixel-agents (MIT), which bundles this
+CC0 asset pack: https://github.com/pixel-agents-hq/pixel-agents
+
+Note: wall_0.png / floor_0.png provenance (2dPig original vs. pixel-agents
+authored, MIT) is not fully disambiguated — both licenses permit redistribution.
+See docs/research/office-assets.md for details.
+
+Attribution is not required by the license, but we thank 2dPig for the art.
