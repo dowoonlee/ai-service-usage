@@ -155,6 +155,10 @@ Deno.serve(async (req: Request) => {
       memberCount: scoreRow ? scoreRow.member_count : members.length,
     },
     members,
-    furniture: furnitureRows ?? [],
+    // 클라이언트 모델(GuildFurnitureItem)과 동일한 camelCase로 매핑 — DB row 그대로 내보내지 않는다.
+    furniture: (furnitureRows ?? []).map((f) => ({
+      slotId: f.slot_id,
+      itemKind: f.item_kind,
+    })),
   });
 });
