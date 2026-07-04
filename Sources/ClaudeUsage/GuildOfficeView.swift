@@ -351,7 +351,8 @@ private struct OfficePetView: View {
                 width: 460,
                 medals: nil,
                 animatedAvatar: true,
-                equippedEffects: Set((profile.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) })
+                equippedEffects: Set((profile.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) }),
+                guildName: profile.guildName
             )
             .padding(8)
         } else {
@@ -382,7 +383,8 @@ enum GuildOfficeDemo {
             let profile = ProfileState(
                 card: card, trainerID: "DEMO", stats: TrainerStats.compute(from: Settings.shared),
                 clearedBadges: [], completedCollections: [], backup: nil,
-                equippedEffects: effects, integrityViolation: false)
+                equippedEffects: effects, integrityViolation: false,
+                guildName: "데드락클럽")
             return RankingAPI.GuildMember(
                 nickname: nick, monthlyVP: vp, isTopContributor: top, officeSlot: slot,
                 isLeader: me, isMe: me, joinedAt: Date(), githubLogin: nil,

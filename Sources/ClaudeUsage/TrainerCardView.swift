@@ -47,6 +47,9 @@ struct TrainerCardView: View {
     var avatarFrame: Int? = nil
     /// 펫에 장착된 RP 코스메틱 이펙트 — avatar 뒤·앞에 광원/무지개/파티클로 렌더 (PNG·GIF·preview 공통).
     var equippedEffects: Set<EffectKind> = []
+    /// 소속 길드명 태그 (P2a) — 이름 행 아래 캡슐. nil/빈 문자열이면 미표시.
+    /// 원격 사용자는 profileJson.guildName(본인 submit 시 포함)에서 옴 — 표시용 캐시라 최신성은 느슨.
+    var guildName: String? = nil
 
     /// avatar walk 애니메이션 속도 (preview·GIF 공통). GIF delay = 1/avatarFPS.
     static let avatarFPS: Double = 8
@@ -154,7 +157,7 @@ struct TrainerCardView: View {
                     )
                     .shadow(color: card.frame.color.opacity(0.6), radius: 5)
             )
-            // 이름 + ID 한 줄.
+            // 이름 + (길드 태그) + ID 한 줄.
             HStack(alignment: .lastTextBaseline) {
                 Text(trainerName.uppercased())
                     .font(.system(size: 22, weight: .black, design: .monospaced))
@@ -162,6 +165,17 @@ struct TrainerCardView: View {
                     .shadow(color: .black.opacity(0.5), radius: 1, x: 0, y: 1)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if let guildName, !guildName.isEmpty {
+                    Text("⚔ \(guildName)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(Color.teal.opacity(0.45))
+                                .overlay(Capsule().stroke(Color.teal.opacity(0.7), lineWidth: 0.5))
+                        )
+                }
                 Spacer()
                 Text("ID #\(trainerID)")
                     .font(.system(size: 12, weight: .medium, design: .monospaced))

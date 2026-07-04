@@ -105,6 +105,19 @@ final class NotificationManager {
              body: "\(rank)등 — +\(coins) 코인이 적립되었습니다!")
     }
 
+    /// 길드 월간 시상대 RP 보상 알림 — RP claim 성공 시 1회 (dedup은 claimedRpRewards가 담당).
+    func guildRpRewardEarned(period: String, guildRank: Int, rp: Int) {
+        let medal: String
+        switch guildRank {
+        case 1: medal = "🥇"
+        case 2: medal = "🥈"
+        case 3: medal = "🥉"
+        default: medal = "🏆"
+        }
+        send(title: "\(medal) \(period) 길드 시상대",
+             body: "우리 길드 \(guildRank)등 — +\(rp) RP가 적립되었습니다!")
+    }
+
     /// 기여자 보너스 적립 알림 — `ContributorBonus.sync()`에서 새 PR 발견 시 1회 호출.
     func contributorBonus(prCount: Int, totalRP: Int, prList: String) {
         let title = "기여자 보너스 +\(totalRP) RP"

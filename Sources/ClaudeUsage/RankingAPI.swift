@@ -167,6 +167,9 @@ actor RankingAPI {
         let signature: String
         /// "coins"(기본) | "rp" — 서명 페이로드 밖 라우팅 필드 (서버가 어느 원장에서 수령할지 결정).
         let rewardType: String?
+        /// rp 원장 내 트랙 — "monthly" | "weekly" | "guild-monthly" (P2a). 같은 (period, rank)에
+        /// 개인·길드 보상이 공존할 수 있어 서버가 정확한 row를 고르도록 전달. 서명 밖 평문.
+        let periodType: String?
     }
     struct ClaimRewardResponse: Decodable {
         let alreadyClaimed: Bool
@@ -540,11 +543,31 @@ actor RankingAPI {
         let memberCount: Int
         let rank: Int
     }
+    /// 직전 달 길드 시상대 (P2a) — guild_monthly_winners 동결 스냅샷.
+    struct GuildPreviousMonthEntry: Decodable, Identifiable, Sendable {
+        let rank: Int
+        let name: String
+        let score: Int
+        let memberCount: Int
+        /// 정산 시점 길드장 — 시상대 아바타용 스냅샷.
+        let leaderNickname: String?
+        let leaderProfileJson: ProfileState?
+        var id: Int { rank }
+    }
+    struct GuildPreviousMonth: Decodable, Sendable {
+        let period: String                  // "YYYY-MM"
+        /// 내 길드가 시상대에 있으면 그 rank — 하이라이트용.
+        let myGuildRank: Int?
+        let entries: [GuildPreviousMonthEntry]
+    }
+
     struct GuildLeaderboardResponse: Decodable, Sendable {
         let entries: [GuildLeaderboardEntry]
         let myGuild: MyGuildSummary?
         let total: Int
         let periodResetAt: Date?
+        /// 직전 달 길드 시상대 — P1 서버/정산 전 period는 nil.
+        let previousMonth: GuildPreviousMonth?
     }
 
     // MARK: - Errors
@@ -683,13 +706,15 @@ actor RankingAPI {
     /// 이미 claim된 경우 서버가 `alreadyClaimed=true`로 idempotent 응답 — 클라이언트는 무시 가능.
     func claimReward(deviceId: String, period: String, rank: Int,
                      rewardType: String = "coins",
+                     periodType: String? = nil,
                      hmacKeyBase64: String) async throws -> ClaimRewardResponse {
-        // 서명 페이로드는 {deviceId, period, rank, ts}로 불변 — rewardType은 서명에 넣지 않는다
-        // (서버 verifyHmac과 일치 + 기존 coins claim 호환). rewardType은 request 레벨 라우팅 필드.
+        // 서명 페이로드는 {deviceId, period, rank, ts}로 불변 — rewardType/periodType은 서명에
+        // 넣지 않는다 (서버 verifyHmac과 일치 + 기존 coins claim 호환). request 레벨 라우팅 필드.
         let payload = ClaimRewardPayload(deviceId: deviceId, period: period, rank: rank,
                                          ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signClaim(payload: payload, keyBase64: hmacKeyBase64)
-        let req = ClaimRewardRequest(payload: payload, signature: sig, rewardType: rewardType)
+        let req = ClaimRewardRequest(payload: payload, signature: sig,
+                                     rewardType: rewardType, periodType: periodType)
         return try await post(path: "claim-reward", body: req)
     }
 

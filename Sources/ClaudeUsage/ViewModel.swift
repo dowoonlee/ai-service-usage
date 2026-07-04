@@ -631,11 +631,20 @@ final class ViewModel: ObservableObject {
                         period: rp.period,
                         rank: rp.rank,
                         rewardType: "rp",
+                        // 같은 (period, rank)에 개인·길드 트랙 row가 공존할 수 있어 서버가
+                        // 정확한 원장 row를 고르도록 전달 (P2a).
+                        periodType: rp.periodType,
                         hmacKeyBase64: hmacKey
                     )
                     if !claimResp.alreadyClaimed {
                         RankPointLedger.shared.creditReward(rp.rp, reason: "rank.\(rp.dedupKey)")
                         DebugLog.log("RP reward: \(rp.dedupKey) +\(rp.rp) RP")
+                        // 길드 시상대(Top3)는 이벤트성이라 알림으로 축하 — 개인 순위 정산
+                        // (월간/주간 전원 지급)은 소액·상시라 기존대로 조용히 적립.
+                        if rp.periodType == "guild-monthly" {
+                            NotificationManager.shared.guildRpRewardEarned(
+                                period: rp.period, guildRank: rp.rank, rp: rp.rp)
+                        }
                     }
                     s.claimedRpRewards.insert(rp.dedupKey)
                 } catch {
