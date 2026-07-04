@@ -462,9 +462,13 @@ actor RankingAPI {
         let officeLayout: [Int]?
     }
 
-    /// slot: 0..11 = 스팟 점유, -1 = 비우기 (HMAC canonical 단순화를 위해 null 대신 -1).
+    /// 사무실 액션 payload — 액션 무관 고정 형태 {action, deviceId, item, slot, ts}.
+    /// set_spot: slot 0..11/-1(비우기), item "". place_decor: slot 0..9, item=kind.
+    /// remove_decor: slot 0..9, item "". set_theme: item "floor"|"wall", slot=테마 index.
     struct GuildOfficePayload: Encodable {
+        let action: String
         let deviceId: String
+        let item: String
         let slot: Int
         let ts: Int64
     }
@@ -521,6 +525,8 @@ actor RankingAPI {
     struct GuildFurnitureItem: Decodable, Sendable {
         let slotId: Int
         let itemKind: String
+        /// 기부자 명판 — 탈퇴(FK SET NULL)·구버전 서버는 nil.
+        let donorNickname: String?
     }
     struct GuildInfoResponse: Decodable, Sendable {
         let guild: GuildInfo
@@ -898,14 +904,42 @@ actor RankingAPI {
                               body: GuildManageRequest(payload: payload, signature: sig))
     }
 
-    /// 사무실 스팟 선택/이동(0..11)·비우기(-1). 선점 충돌 시 `.guildConflict("slot_taken")`.
-    func setOfficeSlot(deviceId: String, slot: Int,
-                       hmacKeyBase64: String) async throws -> GuildOfficeResponse {
-        let payload = GuildOfficePayload(deviceId: deviceId, slot: slot,
-                                         ts: Int64(Date().timeIntervalSince1970))
+    /// guild-office 공통 호출 — 액션별 래퍼가 아래에.
+    private func officeAction(deviceId: String, action: String, item: String, slot: Int,
+                              hmacKeyBase64: String) async throws -> GuildOfficeResponse {
+        let payload = GuildOfficePayload(action: action, deviceId: deviceId, item: item,
+                                         slot: slot, ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         return try await post(path: "guild-office",
                               body: GuildOfficeRequest(payload: payload, signature: sig))
+    }
+
+    /// 사무실 스팟 선택/이동(0..11)·비우기(-1). 선점 충돌 시 `.guildConflict("slot_taken")`.
+    func setOfficeSlot(deviceId: String, slot: Int,
+                       hmacKeyBase64: String) async throws -> GuildOfficeResponse {
+        try await officeAction(deviceId: deviceId, action: "set_spot", item: "", slot: slot,
+                               hmacKeyBase64: hmacKeyBase64)
+    }
+
+    /// 데코 배치/교체 구매 (P2b, 멤버 누구나 — 기부 모델). 코인 차감은 호출 측이 성공 후 수행.
+    func placeDecor(deviceId: String, slot: Int, itemKind: String,
+                    hmacKeyBase64: String) async throws -> GuildOfficeResponse {
+        try await officeAction(deviceId: deviceId, action: "place_decor", item: itemKind,
+                               slot: slot, hmacKeyBase64: hmacKeyBase64)
+    }
+
+    /// 데코 제거 (기부자 본인 또는 길드장 — 아니면 `.guildConflict("not_leader")`).
+    func removeDecor(deviceId: String, slot: Int,
+                     hmacKeyBase64: String) async throws -> GuildOfficeResponse {
+        try await officeAction(deviceId: deviceId, action: "remove_decor", item: "", slot: slot,
+                               hmacKeyBase64: hmacKeyBase64)
+    }
+
+    /// 인테리어 테마 변경 (길드장 전용). kind = "floor"(0..8) | "wall"(0..3).
+    func setOfficeTheme(deviceId: String, kind: String, themeIndex: Int,
+                        hmacKeyBase64: String) async throws -> GuildOfficeResponse {
+        try await officeAction(deviceId: deviceId, action: "set_theme", item: kind,
+                               slot: themeIndex, hmacKeyBase64: hmacKeyBase64)
     }
 
     /// 내 길드 상세. 무길드면 `.guildConflict("not_in_guild")` throw — 호출 측이 온보딩 분기.

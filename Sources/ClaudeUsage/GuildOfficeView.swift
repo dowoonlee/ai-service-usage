@@ -9,21 +9,29 @@ import SwiftUI
 ///
 /// 배치 모드: 빈 스팟이 하이라이트되고 클릭 → `onSelectSlot`. 점유 스팟은 클릭 불가.
 /// 재배치 모드(길드장): 포지션을 두 번 클릭해 가구 세트를 스왑 → `onSetLayout`(새 순열).
+/// 꾸미기 모드(P2b): 데코 슬롯 표시 — 빈 슬롯 클릭 → 카탈로그 구매, 찬 슬롯 → 교체/제거.
 struct GuildOfficeView: View {
     let info: RankingAPI.GuildInfoResponse
     @Binding var placementMode: Bool
     @Binding var rearrangeMode: Bool
+    @Binding var decorateMode: Bool
     let onSelectSlot: (Int) -> Void
     let onSetLayout: ([Int]) -> Void
+    /// 데코 구매 (slot, item) — 호출 측이 코인 검증·서버 반영.
+    let onPlaceDecor: (Int, OfficeLayout.DecorItem) -> Void
+    let onRemoveDecor: (Int) -> Void
 
     @StateObject private var sim = OfficeSimulation()
     @State private var popoverPetID: String?
     /// 재배치 모드에서 첫 번째로 고른 포지션 — 두 번째 클릭과 스왑.
     @State private var rearrangeSource: Int?
+    /// 꾸미기 모드에서 카탈로그 popover가 열린 데코 슬롯.
+    @State private var decorPopoverSlot: Int?
 
     private var scene: CGSize { OfficeLayout.sceneSize }
     /// 길드 가구 배치 — 서버 순열(검증 실패 시 기본 배치 폴백).
     private var layout: [Int] { OfficeLayout.sanitizedLayout(info.guild.officeLayout) }
+    private var placedDecor: [RankingAPI.GuildFurnitureItem] { info.furniture }
 
     var body: some View {
         GeometryReader { geo in
@@ -31,12 +39,16 @@ struct GuildOfficeView: View {
             ZStack(alignment: .topLeading) {
                 background(scale: scale)
                 furnitureLayer(scale: scale)
-                if !rearrangeMode {
+                decorLayer(scale: scale)
+                if !rearrangeMode && !decorateMode {
                     spotMarkerLayer(scale: scale)
                 }
                 petLayer(scale: scale)
                 if rearrangeMode {
                     rearrangeLayer(scale: scale)
+                }
+                if decorateMode {
+                    decorateLayer(scale: scale)
                 }
             }
             .frame(width: geo.size.width, height: scene.height * scale)
@@ -47,28 +59,35 @@ struct GuildOfficeView: View {
             RoundedRectangle(cornerRadius: AppRadius.md)
                 .strokeBorder(Color.gray.opacity(0.25), lineWidth: 1)
         )
-        .onAppear { sim.configure(members: info.members, layout: layout) }
+        .onAppear { reconfigureSim() }
         .onDisappear { sim.stop() }
-        .onChange(of: membersKey) { _ in sim.configure(members: info.members, layout: layout) }
+        .onChange(of: membersKey) { _ in reconfigureSim() }
         .onChange(of: rearrangeMode) { _ in rearrangeSource = nil }
+        .onChange(of: decorateMode) { _ in decorPopoverSlot = nil }
     }
 
-    /// 멤버·가구 배치 변경 감지 키 — 순서 무관.
+    private func reconfigureSim() {
+        sim.configure(members: info.members, layout: layout,
+                      decor: placedDecor.map { (slotId: $0.slotId, kind: $0.itemKind) })
+    }
+
+    /// 멤버·가구 배치·데코 변경 감지 키 — 순서 무관.
     private var membersKey: String {
         info.members.map { "\($0.nickname):\($0.officeSlot ?? -1):\($0.isTopContributor):\($0.monthlyVP > 0)" }
             .sorted().joined(separator: ",")
             + "|layout:" + layout.map(String.init).joined(separator: ",")
+            + "|decor:" + placedDecor.map { "\($0.slotId):\($0.itemKind)" }.sorted().joined(separator: ",")
     }
 
     private var occupiedSlots: Set<Int> {
         Set(info.members.compactMap(\.officeSlot))
     }
 
-    // MARK: - 배경
+    // MARK: - 배경 (floorTheme + wall 틴트 — P2b 인테리어 테마)
 
     @ViewBuilder
     private func background(scale: CGFloat) -> some View {
-        if let bg = OfficeLayout.backgroundImage {
+        if let bg = OfficeLayout.backgroundImage(floorTheme: info.guild.floorTheme) {
             Image(nsImage: bg)
                 .interpolation(.none)
                 .resizable()
@@ -81,6 +100,74 @@ struct GuildOfficeView: View {
                 Color(red: 0.65, green: 0.63, blue: 0.60)
             }
         }
+        // 벽지 틴트 — 벽 밴드 위 반투명 오버레이 (0 = 기본, 오버레이 없음).
+        if info.guild.wallTheme > 0, info.guild.wallTheme < OfficeLayout.wallTints.count {
+            OfficeLayout.wallTints[info.guild.wallTheme]
+                .opacity(0.18)
+                .frame(width: scene.width * scale, height: OfficeLayout.wallBottom * scale)
+                .allowsHitTesting(false)
+        }
+    }
+
+    // MARK: - 데코 (배치된 기부 아이템 — 항상 표시, 호버 시 기부자 명판)
+
+    @ViewBuilder
+    private func decorLayer(scale: CGFloat) -> some View {
+        ForEach(placedDecor, id: \.slotId) { placed in
+            if let slot = OfficeLayout.decorSlot(id: placed.slotId),
+               let item = OfficeLayout.decorItem(kind: placed.itemKind) {
+                itemView(imageName: item.imageName, drawKind: nil, size: item.size,
+                         anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                    .help(placed.donorNickname.map { "\(item.name) — \($0) 기부" } ?? item.name)
+            }
+        }
+    }
+
+    /// 꾸미기 모드 오버레이 — 빈 슬롯은 점선 + 클릭 구매, 찬 슬롯은 교체/제거.
+    @ViewBuilder
+    private func decorateLayer(scale: CGFloat) -> some View {
+        ForEach(OfficeLayout.decorSlots) { slot in
+            let placed = placedDecor.first { $0.slotId == slot.id }
+            decorSlotMarker(slot, placed: placed, scale: scale)
+        }
+    }
+
+    private func decorSlotMarker(_ slot: OfficeLayout.DecorSlot,
+                                 placed: RankingAPI.GuildFurnitureItem?,
+                                 scale: CGFloat) -> some View {
+        let tint: Color = slot.category == .wall ? .pink : .orange
+        return RoundedRectangle(cornerRadius: 3)
+            .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [3]))
+            .foregroundStyle(tint)
+            .background(RoundedRectangle(cornerRadius: 3).fill(tint.opacity(placed == nil ? 0.15 : 0.05)))
+            .frame(width: 20 * scale, height: 18 * scale)
+            .overlay(alignment: .bottom) {
+                Text(placed == nil ? "+" : "↺")
+                    .font(.system(size: max(8, 5 * scale), weight: .bold))
+                    .foregroundStyle(tint)
+            }
+            .position(x: slot.anchorX * scale, y: (slot.baselineY - 9) * scale)
+            .contentShape(Rectangle())
+            .onTapGesture { decorPopoverSlot = slot.id }
+            .popover(isPresented: Binding(
+                get: { decorPopoverSlot == slot.id },
+                set: { if !$0 { decorPopoverSlot = nil } }
+            ), arrowEdge: .bottom) {
+                DecorCatalogSheet(
+                    slot: slot,
+                    placed: placed,
+                    canRemove: placed != nil &&
+                        (info.guild.isLeader || placed?.donorNickname == Settings.shared.rankingNickname),
+                    onBuy: { item in
+                        decorPopoverSlot = nil
+                        onPlaceDecor(slot.id, item)
+                    },
+                    onRemove: {
+                        decorPopoverSlot = nil
+                        onRemoveDecor(slot.id)
+                    }
+                )
+            }
     }
 
     // MARK: - 가구
@@ -369,6 +456,82 @@ private struct OfficePetView: View {
     }
 }
 
+// MARK: - 데코 카탈로그 시트 (꾸미기 모드 popover)
+
+/// 데코 슬롯 클릭 시 카탈로그 — 카테고리별 아이템 목록 + 가격 + 잔액. 기부 모델이라
+/// 구매 즉시 배치(교체 구매는 기존 아이템 소멸 — 기획 §2). 제거는 기부자/길드장만.
+@MainActor
+private struct DecorCatalogSheet: View {
+    let slot: OfficeLayout.DecorSlot
+    let placed: RankingAPI.GuildFurnitureItem?
+    let canRemove: Bool
+    let onBuy: (OfficeLayout.DecorItem) -> Void
+    let onRemove: () -> Void
+    @ObservedObject var settings = Settings.shared
+
+    private var items: [OfficeLayout.DecorItem] {
+        OfficeLayout.decorCatalog.filter { $0.category == slot.category }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(slot.category == .wall ? "벽 장식" : "바닥 소품")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("🪙 \(settings.coins)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(AppColors.gold)
+            }
+            if let placed, let current = OfficeLayout.decorItem(kind: placed.itemKind) {
+                HStack(spacing: 6) {
+                    Text("현재: \(current.name)")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    if let donor = placed.donorNickname {
+                        Text("· \(donor) 기부").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if canRemove {
+                        Button("제거", role: .destructive) { onRemove() }
+                            .font(.system(size: 10)).controlSize(.small)
+                    }
+                }
+                Divider()
+            }
+            ForEach(items) { item in
+                let affordable = settings.coins >= item.price
+                Button {
+                    onBuy(item)
+                } label: {
+                    HStack(spacing: 8) {
+                        if let img = OfficeLayout.officeImage(item.imageName) {
+                            Image(nsImage: img)
+                                .interpolation(.none)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 20, height: 20)
+                        }
+                        Text(item.name).font(.system(size: 11))
+                        Spacer()
+                        Text("🪙 \(item.price)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(affordable ? AppColors.gold : .secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!affordable)
+                .opacity(affordable ? 1 : 0.5)
+            }
+            Text("구매한 장식은 길드에 기부됩니다 (교체 시 기존 장식 소멸)")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(width: 230)
+    }
+}
+
 // MARK: - DEBUG 데모 (`AIUSAGE_OFFICE_DEMO=1 swift run`)
 
 #if DEBUG
@@ -422,10 +585,12 @@ enum GuildOfficeDemo {
     private struct DemoWrapper: View {
         let members: [RankingAPI.GuildMember]
         @State private var placement = false
-        // 캡처 자동화 편의 — `AIUSAGE_OFFICE_DEMO=rearrange`면 재배치 모드로 시작,
-        // `=swapped`면 스왑된 배치로 시작 (클릭 자동화 없이 두 상태를 스크린샷 검증).
+        // 캡처 자동화 편의 — `AIUSAGE_OFFICE_DEMO=rearrange`면 재배치 모드,
+        // `=swapped`면 스왑 배치, `=decor`면 꾸미기 모드 + 데코/테마 프리필로 시작.
         @State private var rearrange =
             ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "rearrange"
+        @State private var decorate =
+            ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "decor"
         /// 재배치를 로컬에서 즉시 반영 — 서버 없이 스왑 동작 확인.
         @State private var layout: [Int] = {
             if ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "swapped" {
@@ -436,13 +601,28 @@ enum GuildOfficeDemo {
             }
             return OfficeLayout.defaultLayout
         }()
+        /// 데코 구매/제거를 로컬에서 즉시 반영 — 서버 없이 기부 흐름 확인.
+        @State private var furniture: [RankingAPI.GuildFurnitureItem] = {
+            guard ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "decor" else { return [] }
+            return [
+                RankingAPI.GuildFurnitureItem(slotId: 0, itemKind: "SMALL_PAINTING", donorNickname: "kimcoder"),
+                RankingAPI.GuildFurnitureItem(slotId: 3, itemKind: "HANGING_PLANT", donorNickname: "vibewolf"),
+                RankingAPI.GuildFurnitureItem(slotId: 6, itemKind: "CACTUS", donorNickname: "dowoon"),
+                RankingAPI.GuildFurnitureItem(slotId: 8, itemKind: "COFFEE_TABLE", donorNickname: "nightowl"),
+            ]
+        }()
+
+        private var isDecorDemo: Bool {
+            ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "decor"
+        }
 
         private var info: RankingAPI.GuildInfoResponse {
             let guild = RankingAPI.GuildInfo(
                 id: "demo", name: "데드락클럽", inviteCode: "AB3F9K2M", isLeader: true,
-                floorTheme: 0, wallTheme: 0, officeLayout: layout, createdAt: Date(),
+                floorTheme: isDecorDemo ? 4 : 0, wallTheme: isDecorDemo ? 1 : 0,
+                officeLayout: layout, createdAt: Date(),
                 score: 8420, rank: 3, memberCount: members.count)
-            return RankingAPI.GuildInfoResponse(guild: guild, members: members, furniture: [])
+            return RankingAPI.GuildInfoResponse(guild: guild, members: members, furniture: furniture)
         }
 
         var body: some View {
@@ -451,16 +631,30 @@ enum GuildOfficeDemo {
                     info: info,
                     placementMode: $placement,
                     rearrangeMode: $rearrange,
+                    decorateMode: $decorate,
                     onSelectSlot: { slot in print("OFFICE_DEMO_SELECT slot=\(slot)") },
                     onSetLayout: { newLayout in
                         layout = newLayout
                         print("OFFICE_DEMO_LAYOUT=\(newLayout.map(String.init).joined(separator: ","))")
+                        fflush(stdout)
+                    },
+                    onPlaceDecor: { slot, item in
+                        furniture.removeAll { $0.slotId == slot }
+                        furniture.append(RankingAPI.GuildFurnitureItem(
+                            slotId: slot, itemKind: item.kind, donorNickname: "dowoon"))
+                        print("OFFICE_DEMO_DECOR place slot=\(slot) kind=\(item.kind)")
+                        fflush(stdout)
+                    },
+                    onRemoveDecor: { slot in
+                        furniture.removeAll { $0.slotId == slot }
+                        print("OFFICE_DEMO_DECOR remove slot=\(slot)")
                         fflush(stdout)
                     }
                 )
                 HStack {
                     Toggle("배치 모드", isOn: $placement).font(.system(size: 11))
                     Toggle("가구 재배치", isOn: $rearrange).font(.system(size: 11))
+                    Toggle("꾸미기", isOn: $decorate).font(.system(size: 11))
                 }
             }
             .padding(12)

@@ -244,6 +244,14 @@ final class CoinLedger: UsageConsumer {
     /// 길드 생성권 가격 — 10연차(2,700)·파티 슬롯 첫 구매(2,000)보다 약간 높은 "결단" 가격.
     static let guildPermitCost = 3_000
 
+    /// 길드 데코/테마 기부 지출 (P2b) — 서버 반영 성공 응답 **후** 차감 (생성권 원칙: 실패 시
+    /// 보존). 호출 측이 사전 잔액 검증을 하므로 여기선 음수만 방어.
+    func spendGuildDecor(_ cost: Int, item: String) {
+        let s = Settings.shared
+        s.coins = max(0, s.coins - cost)
+        DebugLog.log("CoinLedger: 길드 기부 [\(item)] -\(cost) coin (total=\(s.coins))")
+    }
+
     /// 길드 생성권 구매 (소모품). 소모는 GuildView가 서버 guild-create 성공 응답 후 직접 차감 —
     /// 서버 실패 시 생성권이 보존되도록 (가챠 roll/commit 분리와 동일한 사용자 우선 원칙).
     func purchaseGuildPermit() -> Bool {

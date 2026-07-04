@@ -170,6 +170,105 @@ enum OfficeLayout {
     static let pcSize = CGSize(width: 16, height: 32)
     static func pcBaselineY(deskBaselineY: CGFloat) -> CGFloat { deskBaselineY - 13 }
 
+    // MARK: - 데코 슬롯 + 카탈로그 (P2b 꾸미기 — 기부 모델, 기획 §2)
+
+    enum DecorCategory: String { case wall, floor }
+
+    /// 데코 슬롯 10개 — 벽 0..4(붙박이 장식 사이 빈 벽), 바닥 5..9(가구 포지션 사이 통로).
+    /// id는 서버 guild_furniture.slot_id와 1:1 (서버 DECOR_SLOT_COUNT와 쌍).
+    struct DecorSlot: Identifiable {
+        let id: Int
+        let category: DecorCategory
+        let anchorX: CGFloat
+        let baselineY: CGFloat
+        let lane: Int?          // 바닥 슬롯의 레인 — 배치된 아이템의 blocking 적용용
+    }
+
+    static let decorSlots: [DecorSlot] = [
+        DecorSlot(id: 0, category: .wall, anchorX: 70,  baselineY: 52, lane: nil),
+        DecorSlot(id: 1, category: .wall, anchorX: 140, baselineY: 52, lane: nil),
+        DecorSlot(id: 2, category: .wall, anchorX: 175, baselineY: 52, lane: nil),
+        DecorSlot(id: 3, category: .wall, anchorX: 210, baselineY: 52, lane: nil),
+        DecorSlot(id: 4, category: .wall, anchorX: 268, baselineY: 52, lane: nil),
+        // 바닥 — 기본 배치 기준 가구 footprint 사이 여백. 재배치로 겹칠 수 있으나 데코는
+        // 소품이라 시각적 겹침만 생기고 로직은 안전 (blocking은 구간 union).
+        DecorSlot(id: 5, category: .floor, anchorX: 80,  baselineY: lanes[1], lane: 1),
+        DecorSlot(id: 6, category: .floor, anchorX: 155, baselineY: lanes[1], lane: 1),
+        DecorSlot(id: 7, category: .floor, anchorX: 80,  baselineY: lanes[2], lane: 2),
+        DecorSlot(id: 8, category: .floor, anchorX: 210, baselineY: lanes[2], lane: 2),
+        DecorSlot(id: 9, category: .floor, anchorX: 140, baselineY: lanes[0], lane: 0),
+    ]
+
+    static func decorSlot(id: Int) -> DecorSlot? {
+        decorSlots.first { $0.id == id }
+    }
+
+    /// 구매 가능 데코 카탈로그 — kind = 서버 item_kind = 리소스 basename.
+    /// 가격은 기획 §2 (소품 300 / 중형 500 / 대형 1,000).
+    struct DecorItem: Identifiable {
+        let kind: String
+        let name: String
+        let category: DecorCategory
+        let price: Int
+        let size: CGSize
+        let blockingWidth: CGFloat   // 바닥만 의미 (기획: 바닥 데코는 충돌 모델을 따름)
+        var id: String { kind }
+        var imageName: String { kind }
+    }
+
+    static let decorCatalog: [DecorItem] = [
+        // 벽
+        DecorItem(kind: "SMALL_PAINTING", name: "작은 그림 A", category: .wall, price: 300,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 0),
+        DecorItem(kind: "SMALL_PAINTING_2", name: "작은 그림 B", category: .wall, price: 300,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 0),
+        DecorItem(kind: "LARGE_PAINTING", name: "큰 그림", category: .wall, price: 1000,
+                  size: CGSize(width: 32, height: 32), blockingWidth: 0),
+        DecorItem(kind: "HANGING_PLANT", name: "행잉 플랜트", category: .wall, price: 500,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 0),
+        // 바닥
+        DecorItem(kind: "PLANT", name: "화분 A", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 10),
+        DecorItem(kind: "PLANT_2", name: "화분 B", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 10),
+        DecorItem(kind: "CACTUS", name: "선인장", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 10),
+        DecorItem(kind: "POT", name: "도자기 화분", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 16), blockingWidth: 10),
+        DecorItem(kind: "BIN", name: "휴지통", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 16), blockingWidth: 10),
+        DecorItem(kind: "COFFEE_TABLE", name: "커피 테이블", category: .floor, price: 500,
+                  size: CGSize(width: 32, height: 32), blockingWidth: 24),
+    ]
+
+    static func decorItem(kind: String) -> DecorItem? {
+        decorCatalog.first { $0.kind == kind }
+    }
+
+    /// 배치된 데코의 바닥 blocking 구간 — 시뮬레이션 산책 범위 계산에 합류 (기획 §2).
+    static func decorBlockedIntervals(
+        placed: [(slotId: Int, kind: String)]
+    ) -> [(lane: Int, range: ClosedRange<CGFloat>)] {
+        placed.compactMap { entry in
+            guard let slot = decorSlot(id: entry.slotId), let lane = slot.lane,
+                  let item = decorItem(kind: entry.kind), item.blockingWidth > 0 else { return nil }
+            let half = item.blockingWidth / 2
+            return (lane, (slot.anchorX - half)...(slot.anchorX + half))
+        }
+    }
+
+    // MARK: - 인테리어 테마 (P2b — 길드장 전용, 가격은 기획 §2 테마 2,000)
+
+    static let floorThemeCount = 9         // 2dPig floor_0..floor_8 (서버 FLOOR_THEME_MAX와 쌍)
+    static let themePrice = 2_000
+    /// 벽지 틴트 변형 — 0=기본, 이후는 벽 밴드 위 컬러 오버레이 (서버 WALL_THEME_MAX와 쌍).
+    static let wallTints: [Color] = [
+        .clear,
+        Color(red: 0.95, green: 0.75, blue: 0.45),   // 웜톤
+        Color(red: 0.45, green: 0.65, blue: 0.95),   // 쿨톤
+        Color(red: 0.55, green: 0.85, blue: 0.55),   // 그린
+    ]
+
     // MARK: - 충돌 / 산책 범위 (layout 의존)
 
     /// 해당 레인의 blocked x-interval 목록 (excludingPosition의 가구 제외).
@@ -185,12 +284,17 @@ enum OfficeLayout {
     }
 
     /// 포지션의 펫 산책 가능 범위 — anchor ± wanderRadius를 씬 여백과 이웃 가구(자기 포지션
-    /// 가구 제외) 경계로 클램프. 막히면 방향 반전이 아니라 애초에 목표를 이 범위에서만 뽑는다.
-    static func wanderRange(for spot: Spot, layout: [Int]) -> ClosedRange<CGFloat> {
+    /// 가구 제외)·바닥 데코 경계로 클램프. 막히면 방향 반전이 아니라 애초에 목표를 이
+    /// 범위에서만 뽑는다. extraBlocked = 배치된 데코의 (lane, 구간) — `decorBlockedIntervals`.
+    static func wanderRange(for spot: Spot, layout: [Int],
+                            extraBlocked: [(lane: Int, range: ClosedRange<CGFloat>)] = []
+    ) -> ClosedRange<CGFloat> {
         var lo = max(edgeMargin, spot.anchorX - wanderRadius)
         var hi = min(sceneSize.width - edgeMargin, spot.anchorX + wanderRadius)
-        for interval in blockedIntervals(lane: spot.lane, layout: layout,
-                                         excludingPosition: spot.id) {
+        var intervals = blockedIntervals(lane: spot.lane, layout: layout,
+                                         excludingPosition: spot.id)
+        intervals += extraBlocked.filter { $0.lane == spot.lane }.map(\.range)
+        for interval in intervals {
             if interval.upperBound <= spot.anchorX {
                 lo = max(lo, interval.upperBound + 2)
             } else if interval.lowerBound >= spot.anchorX {
@@ -203,11 +307,27 @@ enum OfficeLayout {
 
     // MARK: - 배경 (벽+바닥 타일 프리렌더)
 
-    /// 벽/바닥 타일을 논리 크기 ×2로 1회 합성해 캐시 — 매 틱 타일 draw 반복을 피한다.
-    /// (2dPig CC0 wall_0/floor_0. 리소스 로드는 PetSprite와 동일한 번들 경로.)
+    /// 기본 배경 — floorTheme 0. (기존 호출부 호환용 별칭.)
     @MainActor
-    static let backgroundImage: NSImage? = {
-        guard let wall = officeImage("wall_0"), let floor = officeImage("floor_0") else { return nil }
+    static var backgroundImage: NSImage? { backgroundImage(floorTheme: 0) }
+
+    @MainActor
+    private static var backgroundCache: [Int: NSImage] = [:]
+
+    /// 벽/바닥 타일을 논리 크기 ×2로 합성해 테마별 1회 캐시 — 매 틱 타일 draw 반복을 피한다.
+    /// (2dPig CC0 wall_0/floor_0..8. 리소스 로드는 PetSprite와 동일한 번들 경로.)
+    @MainActor
+    static func backgroundImage(floorTheme: Int) -> NSImage? {
+        let theme = (0..<floorThemeCount).contains(floorTheme) ? floorTheme : 0
+        if let cached = backgroundCache[theme] { return cached }
+        guard let img = renderBackground(floorName: "floor_\(theme)") else { return nil }
+        backgroundCache[theme] = img
+        return img
+    }
+
+    @MainActor
+    private static func renderBackground(floorName: String) -> NSImage? {
+        guard let wall = officeImage("wall_0"), let floor = officeImage(floorName) else { return nil }
         let scale: CGFloat = 2
         let size = CGSize(width: sceneSize.width * scale, height: sceneSize.height * scale)
         let img = NSImage(size: size)
@@ -236,7 +356,7 @@ enum OfficeLayout {
         }
         img.unlockFocus()
         return img
-    }()
+    }
 
     /// pixel-office 리소스 로더 — PetSprite와 동일한 번들 fallback.
     @MainActor

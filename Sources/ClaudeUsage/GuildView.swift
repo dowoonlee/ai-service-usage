@@ -36,6 +36,8 @@ struct GuildView: View {
     @State private var placementMode: Bool = false
     /// 가구 재배치 모드 (길드장) — 포지션 두 개를 클릭해 가구 세트 스왑.
     @State private var rearrangeMode: Bool = false
+    /// 꾸미기 모드 (P2b, 멤버 누구나) — 데코 슬롯에 장식 기부/제거. 테마는 길드장만.
+    @State private var decorateMode: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -308,18 +310,26 @@ struct GuildView: View {
                 info: info,
                 placementMode: $placementMode,
                 rearrangeMode: $rearrangeMode,
+                decorateMode: $decorateMode,
                 onSelectSlot: { slot in
                     placementMode = false
                     performSetSlot(slot)
                 },
                 onSetLayout: { newLayout in
                     performSetLayout(newLayout)
+                },
+                onPlaceDecor: { slot, item in
+                    performPlaceDecor(slot: slot, item: item)
+                },
+                onRemoveDecor: { slot in
+                    performRemoveDecor(slot: slot)
                 }
             )
             HStack(spacing: 8) {
                 let mySlot = info.members.first(where: \.isMe)?.officeSlot
                 Button(placementMode ? "배치 취소" : (mySlot == nil ? "내 자리 배치" : "내 자리 이동")) {
                     rearrangeMode = false
+                    decorateMode = false
                     placementMode.toggle()
                 }
                 .font(.system(size: 11))
@@ -332,20 +342,82 @@ struct GuildView: View {
                 if info.guild.isLeader {
                     Button(rearrangeMode ? "재배치 종료" : "가구 재배치") {
                         placementMode = false
+                        decorateMode = false
                         rearrangeMode.toggle()
                     }
                     .font(.system(size: 11))
                     .disabled(actionBusy)
                 }
+                Button(decorateMode ? "꾸미기 종료" : "꾸미기") {
+                    placementMode = false
+                    rearrangeMode = false
+                    decorateMode.toggle()
+                }
+                .font(.system(size: 11))
+                .disabled(actionBusy)
                 if placementMode {
                     Text("빈 자리를 클릭해 앉을 곳을 고르세요")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 } else if rearrangeMode {
                     Text("가구 두 개를 차례로 클릭하면 자리가 바뀝니다")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
+                } else if decorateMode {
+                    Text("점선 자리를 클릭해 장식을 기부하세요")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 Spacer()
             }
+            // 인테리어 테마 (길드장 전용, 꾸미기 모드) — 바닥재 9종 + 벽지 틴트 4종, 회당 2,000코인.
+            if decorateMode && info.guild.isLeader {
+                themePickerRow(info)
+            }
+        }
+    }
+
+    /// 바닥재/벽지 스와치 — 클릭 시 확인 없이 즉시 구매·적용 (테마 미리보기가 스와치 자체).
+    private func themePickerRow(_ info: RankingAPI.GuildInfoResponse) -> some View {
+        HStack(spacing: 8) {
+            Text("테마 (회당 🪙\(OfficeLayout.themePrice))")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            ForEach(0..<OfficeLayout.floorThemeCount, id: \.self) { i in
+                Button {
+                    performSetTheme(kind: "floor", index: i, current: info.guild.floorTheme)
+                } label: {
+                    Group {
+                        if let img = OfficeLayout.officeImage("floor_\(i)") {
+                            Image(nsImage: img).interpolation(.none).resizable()
+                        } else {
+                            Color.gray
+                        }
+                    }
+                    .frame(width: 16, height: 16)
+                    .overlay(Rectangle().stroke(
+                        info.guild.floorTheme == i ? Color.accentColor : Color.gray.opacity(0.4),
+                        lineWidth: info.guild.floorTheme == i ? 2 : 0.5))
+                }
+                .buttonStyle(.plain)
+                .disabled(actionBusy || info.guild.floorTheme == i
+                          || settings.coins < OfficeLayout.themePrice)
+                .help("바닥재 \(i + 1)")
+            }
+            Divider().frame(height: 14)
+            ForEach(0..<OfficeLayout.wallTints.count, id: \.self) { i in
+                Button {
+                    performSetTheme(kind: "wall", index: i, current: info.guild.wallTheme)
+                } label: {
+                    Circle()
+                        .fill(i == 0 ? Color(NSColor.windowBackgroundColor) : OfficeLayout.wallTints[i])
+                        .frame(width: 14, height: 14)
+                        .overlay(Circle().stroke(
+                            info.guild.wallTheme == i ? Color.accentColor : Color.gray.opacity(0.4),
+                            lineWidth: info.guild.wallTheme == i ? 2 : 0.5))
+                }
+                .buttonStyle(.plain)
+                .disabled(actionBusy || info.guild.wallTheme == i
+                          || settings.coins < OfficeLayout.themePrice)
+                .help(i == 0 ? "기본 벽지" : "벽지 틴트 \(i)")
+            }
+            Spacer()
         }
     }
 
@@ -655,6 +727,44 @@ struct GuildView: View {
                 deviceId: settings.rankingDeviceID, action: .setLayout, layout: layout,
                 hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
             DebugLog.log("Guild: 가구 재배치 → [\(layout.map(String.init).joined(separator: ",")) ]")
+        }
+    }
+
+    /// 데코 기부 구매 (P2b) — 코인 선검증 → 서버 place_decor → 성공 후 차감 (생성권 원칙).
+    private func performPlaceDecor(slot: Int, item: OfficeLayout.DecorItem) {
+        guard settings.coins >= item.price else {
+            error = "코인이 부족합니다 (\(item.price) 필요)."
+            return
+        }
+        runAction {
+            _ = try await RankingAPI.shared.placeDecor(
+                deviceId: settings.rankingDeviceID, slot: slot, itemKind: item.kind,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            CoinLedger.shared.spendGuildDecor(item.price, item: item.name)
+        }
+    }
+
+    private func performRemoveDecor(slot: Int) {
+        runAction {
+            _ = try await RankingAPI.shared.removeDecor(
+                deviceId: settings.rankingDeviceID, slot: slot,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            DebugLog.log("Guild: 데코 제거 slot=\(slot)")
+        }
+    }
+
+    /// 인테리어 테마 구매·적용 (길드장, 회당 2,000코인). 현재 값과 같으면 무시.
+    private func performSetTheme(kind: String, index: Int, current: Int) {
+        guard index != current else { return }
+        guard settings.coins >= OfficeLayout.themePrice else {
+            error = "코인이 부족합니다 (\(OfficeLayout.themePrice) 필요)."
+            return
+        }
+        runAction {
+            _ = try await RankingAPI.shared.setOfficeTheme(
+                deviceId: settings.rankingDeviceID, kind: kind, themeIndex: index,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            CoinLedger.shared.spendGuildDecor(OfficeLayout.themePrice, item: "테마(\(kind) \(index))")
         }
     }
 
