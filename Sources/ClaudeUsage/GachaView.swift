@@ -30,11 +30,11 @@ struct GachaView: View {
     @State private var confirmingPremiumPull: Bool = false
     /// 진행 중인 가챠가 프리미엄(sudo pull)인지 — egg/revealing 연출을 진홍·금 테마로 차별화.
     @State private var pullIsPremium: Bool = false
-    /// 상점/도장/레포트/랭킹 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
+    /// 상점/도장/레포트/랭킹/길드 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
     @State private var selectedTab: Tab = .shop
 
     enum Tab: String, CaseIterable, Identifiable {
-        case shop, party, gym, report, ranking
+        case shop, party, gym, report, ranking, guild
         var id: String { rawValue }
         var displayName: String {
             switch self {
@@ -43,6 +43,7 @@ struct GachaView: View {
             case .gym:     return "도장"
             case .report:  return "레포트"
             case .ranking: return "랭킹"
+            case .guild:   return "길드"
             }
         }
     }
@@ -93,6 +94,7 @@ struct GachaView: View {
                 case .gym:     GymView().transition(.opacity)
                 case .report:  ReportView().transition(.opacity)
                 case .ranking: RankingView().transition(.opacity)
+                case .guild:   GuildView().transition(.opacity)
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: selectedTab)

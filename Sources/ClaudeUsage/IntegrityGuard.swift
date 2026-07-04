@@ -16,15 +16,20 @@ import CryptoKit
 enum IntegrityGuard {
     /// 보호 대상 핵심 값을 canonical 문자열로 직렬화 후 HMAC-SHA256 hex. 키가 비었거나 base64
     /// 디코딩 실패면 nil(호출 측은 체크섬 단계를 건너뛴다).
+    /// canonical 포맷 버전 — 필드 추가 시 +1 하고 Settings.verifyIntegrity의 버전 마이그레이션이
+    /// 구 포맷 체크섬을 비교 없이 재기록하게 한다 (v2: guildPermits 추가).
+    static let formatVersion = 2
+
     static func checksum(coins: Int,
                          coinsTotalEarned: Int,
                          gachaTickets: Int,
                          premiumTickets: Int,
+                         guildPermits: Int,
                          rankingScoreEarnedVP: Int,
                          ownedPetsSerialized: String,
                          keyBase64: String) -> String? {
         guard !keyBase64.isEmpty, let keyData = Data(base64Encoded: keyBase64) else { return nil }
-        let canonical = "\(coins)|\(coinsTotalEarned)|\(gachaTickets)|\(premiumTickets)|\(rankingScoreEarnedVP)|\(ownedPetsSerialized)"
+        let canonical = "\(coins)|\(coinsTotalEarned)|\(gachaTickets)|\(premiumTickets)|\(guildPermits)|\(rankingScoreEarnedVP)|\(ownedPetsSerialized)"
         let mac = HMAC<SHA256>.authenticationCode(for: Data(canonical.utf8),
                                                   using: SymmetricKey(data: keyData))
         return mac.map { String(format: "%02x", $0) }.joined()

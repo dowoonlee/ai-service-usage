@@ -241,6 +241,20 @@ final class CoinLedger: UsageConsumer {
         return true
     }
 
+    /// 길드 생성권 가격 — 10연차(2,700)·파티 슬롯 첫 구매(2,000)보다 약간 높은 "결단" 가격.
+    static let guildPermitCost = 3_000
+
+    /// 길드 생성권 구매 (소모품). 소모는 GuildView가 서버 guild-create 성공 응답 후 직접 차감 —
+    /// 서버 실패 시 생성권이 보존되도록 (가챠 roll/commit 분리와 동일한 사용자 우선 원칙).
+    func purchaseGuildPermit() -> Bool {
+        let s = Settings.shared
+        guard s.coins >= Self.guildPermitCost else { return false }
+        s.coins -= Self.guildPermitCost
+        s.guildPermits += 1
+        DebugLog.log("CoinLedger: 길드 생성권 구매 -\(Self.guildPermitCost) coin (permits=\(s.guildPermits), total=\(s.coins))")
+        return true
+    }
+
     // MARK: - 내부 helpers
 
     private enum CoinSource { case claude, cursor, codex }
