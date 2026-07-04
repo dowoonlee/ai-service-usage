@@ -224,7 +224,7 @@ guild_join_cooldowns (device_id, until)   -- 탈퇴/추방 시 7일 기록
 **에셋** — 신규 필요 항목이자 이 기능의 주요 리스크:
 
 - 필요: 사무실 배경(벽/바닥) + 가구 12종 내외 (책상·모니터·커피머신·소파·서버랙·화이트보드·책장·창문 등). 픽셀 톤은 기존 팩(16~32px)과 맞출 것.
-- 조달: **P0 리서치 완료 → `docs/research/office-assets.md`**. 1안 = `2dPig Pixel Office Asset Pack`(CC0, 16px, GitHub 미러 검증 완료)로 요청 12종 중 9종 커버, 공백 3종(서버랙·창문·스탠딩데스크)은 코드 드로잉 또는 Kenney CC0 보완. 실물 시각 검증(기존 팩과의 화풍 조화) 전까지는 **코드 드로잉(단색 도형 + SF Symbol) fallback 유지** — 씬 좌표 체계만 맞으면 교체 비용 낮음.
+- 조달: **P0 리서치 + 검증 완료 → `docs/research/office-assets.md`**. 1안 확정 = `2dPig Pixel Office Asset Pack`(CC0 원문 확인, 16px, GitHub 미러 검증 완료) — 요청 12종 중 9종 커버, 실물 목업으로 기존 펫 팩과의 화풍 조화 검증 통과. 공백 3종(서버랙·창문·스탠딩데스크)만 코드 드로잉. PC는 ON 애니 3프레임이 있어 "작업 중" 모션에 바로 사용.
 - SwiftPM 리소스 flatten 제약(전 리소스 basename 유니크) 그대로 적용.
 
 **동기화**:

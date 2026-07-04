@@ -161,6 +161,39 @@
 
 ---
 
+## 검증 결과 (2026-07-04, 개인망에서 수행 — 잔여 확인 사항 해소)
+
+조사 시점의 "후속 확인 필요" 항목들을 사내망 밖에서 직접 검증했다.
+
+### 1. 2dPig 라이선스 1차 확인 — ✅ CC0 확정
+
+itch.io 원본 페이지(https://2dpig.itch.io/pixel-office)에서 원문 직접 확인:
+
+> "This is released under the **Creative Commons Public Domain Dedication License** (aka CC0 or CC Zero), and can be read here: https://creativecommons.org/publicdomain/zero/1.0/"
+> "No attribution is required but it is greatly appreciated 😊"
+
+### 2. 실물 시각 검증 — ✅ 통과 (1안 확정)
+
+GitHub 미러에서 DESK/PC/SOFA/COFFEE/WHITEBOARD/DOUBLE_BOOKSHELF + wall/floor 실물 PNG를 추출해, 기존 펫(wild-animals Fox 32px, 0x72 Doc 16px)과 벽+바닥 위 합성 목업으로 육안 비교:
+
+- **외곽선·팔레트 조화 양호** — 2dPig도 진한 외곽선 + 차분한 채도라 기존 팩들과 자연스럽게 섞임.
+- 우려했던 "정면 뷰 가구 + 사이드뷰 펫" 원근 이질감은 실제로는 미미 — 가구는 배경 소품으로 읽히고 펫이 전경에서 걷는 구도가 성립.
+- 크기 관계는 렌더 스케일로 조정 가능 (가구 16px 모듈, DESK 48×32 / PC 16×32 / SOFA 32×16 / wall 64×128 / floor 16×16). PC는 ON 애니메이션 3프레임 제공 — "작업 중" 모션 연출에 바로 사용 가능. 각 폴더에 manifest.json(크기·footprint) 포함.
+
+→ **fallback 전면 발동 불필요 확정.** 코드 드로잉은 공백 소품에만 적용.
+
+### 3. 공백 3종 재확인 — 서버랙·창문·스탠딩데스크는 코드 드로잉 확정
+
+- 미러의 `walls/`는 변형 1종(wall_0)뿐 — 창문 타일 없음. `floors/`는 9종.
+- 0x72 `16x16 Industrial Tileset` 내용 확인(itch 페이지): CC0는 맞으나 플랫포머용 파이프·사다리·스파이크 위주로 **서버랙 없음** → 후보 탈락.
+- 결론: 서버랙(수직 사각형 + 점등 LED)·창문(창틀)·스탠딩데스크(TABLE 변형)는 P1에서 코드 드로잉.
+
+### 유의 사항 (크레딧 작성 시)
+
+미러 리포(`pixel-agents-hq/pixel-agents`, MIT)의 `floors/`·`walls/`가 2dPig 원본인지 리포 자체 제작인지 미확정 — 어느 쪽이든 재배포는 가능(CC0 또는 MIT)하나, `LICENSE_*.txt` 크레딧 파일 작성 시 출처를 구분해 표기할 것. 확실한 방법은 원본 `PixelOffice.zip`(49KB)을 직접 받아 대조하는 것.
+
+---
+
 ## 참고 자료 (미확인이지만 후속 가치 있는 URL)
 
 - https://github.com/pixel-agents-hq/pixel-agents — 2dPig 에셋 번들 소스(furniture/floors/walls 전체 구조 직접 탐색 권장)
