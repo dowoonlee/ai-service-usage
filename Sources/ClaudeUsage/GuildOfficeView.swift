@@ -236,7 +236,8 @@ struct GuildOfficeView: View {
     @ViewBuilder
     private func petLayer(scale: CGFloat) -> some View {
         // 레인(=baseline) 순서로 그려 앞레인이 뒤레인을 가린다.
-        ForEach(sim.pets.sorted { $0.spot.lane < $1.spot.lane }) { pet in
+        // 현재 바닥선 y 순서로 그려 앞(아래)의 펫이 뒤를 가린다 — 레인 간 이동(커피 방문) 중에도 자연스럽게.
+        ForEach(sim.pets.sorted { $0.y < $1.y }) { pet in
             OfficePetView(
                 pet: pet,
                 scale: scale,
@@ -263,14 +264,17 @@ private struct OfficePetView: View {
 
     var body: some View {
         // 펫 바닥선을 가구보다 4논리px 앞(아래)에 — 책상 "위"에 올라간 것처럼 보이는 겹침 방지.
-        let laneY = OfficeLayout.lanes[pet.spot.lane] + 4
+        // y는 시뮬레이션 상태 — 커피 방문(레인 간 이동) 중에는 자기 레인을 벗어난다.
+        let laneY = pet.y + 4
         let isMythicPet = Mythic.isMythic(pet.kind)
         let height = OfficeLayout.petHeight * (isMythicPet ? 1.5 : 1.0) * scale
         let centerX = pet.x * scale
         let centerY = (laneY * scale) - height / 2
 
         TimelineView(.animation(minimumInterval: 1.0 / 8)) { ctx in
-            let frames = PetSprite.frames(for: pet.kind, action: pet.isWalking ? .walk : .sit)
+            // 액션은 FSM이 결정 (walk/sit/scan/special) — 프레임 없는 액션은 sit으로 폴백.
+            let preferred = PetSprite.frames(for: pet.kind, action: pet.displayAction)
+            let frames = preferred.isEmpty ? PetSprite.frames(for: pet.kind, action: .sit) : preferred
             let frameIdx = frames.isEmpty ? 0 : Int(ctx.date.timeIntervalSinceReferenceDate * 8) % frames.count
             ZStack {
                 // Mythic 오라 + 구매 이펙트 backdrop — 스프라이트 뒤.
@@ -400,6 +404,10 @@ enum GuildOfficeDemo {
             member("newbie", slot: 10, kind: .pawn, vp: 120, top: false),
             member("미배치멤버", slot: nil, kind: .fox, vp: 50, top: false),
         ]
+        // `=visit`이면 확률 이벤트(커피 방문·Mythic 특수 모션)를 가속 — 스크린샷 검증용.
+        if ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "visit" {
+            OfficeSimulation.debugAccelerate = true
+        }
         let w = NSWindow(contentViewController: NSHostingController(rootView: DemoWrapper(members: members)))
         w.title = "길드 사무실 데모"
         w.setFrameTopLeftPoint(NSPoint(x: 80, y: (NSScreen.main?.frame.height ?? 900) - 60))
