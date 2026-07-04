@@ -135,10 +135,10 @@ Deno.serve(async (req: Request) => {
     };
   });
 
-  // P2b 데코 — P1에서는 항상 빈 배열이지만 응답 형태를 미리 고정.
+  // P2b 데코 — 기부자 명판용 닉네임 embed (purchased_by FK → users. 탈퇴 시 SET NULL → null).
   const { data: furnitureRows } = await db
     .from("guild_furniture")
-    .select("slot_id, item_kind, purchased_at")
+    .select("slot_id, item_kind, purchased_at, users(nickname)")
     .eq("guild_id", guild.id);
 
   return jsonResponse({
@@ -161,6 +161,7 @@ Deno.serve(async (req: Request) => {
     furniture: (furnitureRows ?? []).map((f) => ({
       slotId: f.slot_id,
       itemKind: f.item_kind,
+      donorNickname: (f.users as unknown as { nickname: string } | null)?.nickname ?? null,
     })),
   });
 });
