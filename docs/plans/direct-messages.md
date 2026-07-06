@@ -4,8 +4,8 @@
 패턴" 위에, 트레이너 간 1:1 **종단간 암호화(E2EE) 쪽지**를 얹는다. 나아가 쪽지 전용 창을
 **통합 인박스**로 삼아 **길드 초대까지 한 화면에서** 처리한다.
 
-> 상태: 설계 확정(구현 대기). 본 문서가 구현 SSOT. 초대 백엔드(`guild_invites`·`guild-invite`)는
-> 이미 구현됨(feat/guild-invites) — 재사용하고 클라 표면만 인박스로 편입.
+> 상태: **P1~P3 구현·로컬 실서버 검증 완료(배포 대기)**. 본 문서가 구현 SSOT.
+> 초대 백엔드(`guild_invites`·`guild-invite`)는 재사용, 클라 표면만 인박스로 편입.
 
 ---
 
@@ -235,11 +235,13 @@ dm_settings
 
 ## 13. 단계 (phasing)
 
-- **P1 — DM 코어**: `user_keys`/`direct_messages`, key-publish/fetch, dm-send/inbox/thread/read,
-  `DMCrypto`(HPKE Auth·Keychain·TOFU), 전용 창(인박스/스레드/작성). 서버·클라 E2E.
-- **P2 — 초대 편입**: 받은 초대를 통합 인박스 카드로, 길드 탭 받은-초대 섹션 제거·이동.
-- **P3 — 개방+차단·설정**: dm-block/unblock, dm-settings(allow_from), 레이트리밋, 지문.
-- **P4 — 후순위**: 신고, 키 백업(옵션 B, 경고 동반), one-time prekey/forward secrecy 강화.
+- **P1 — DM 코어** ✅: `user_keys`/`direct_messages`, key-publish/fetch, dm-send/inbox/thread/read,
+  `DMCrypto`(HPKE Auth·Keychain·TOFU), 전용 창(인박스/스레드/작성). 로컬 실서버 왕복 검증.
+- **P2 — 초대 편입** ✅: 받은 초대를 통합 인박스 카드로, 길드 탭 받은-초대 섹션 제거·이동.
+- **P3 — 개방+차단·설정** ✅: dm-settings(get/set/block/unblock 단일 함수), allow_from,
+  레이트리밋(P1 dm-send), 안전 지문. 차단/정책 enforcement 로컬 검증.
+- **P4 — 후순위**: 신고, dm-delete(양측 tombstone), 키 백업(옵션 B, 경고 동반),
+  one-time prekey/forward secrecy 강화.
 
 배포: P1~P3를 한 릴리스로 묶어(초대 편입 포함) 서버 배포(마이그레이션+함수) → 클라 태그.
 
