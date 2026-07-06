@@ -16,6 +16,8 @@ enum Keychain {
     // 로컬 상태(coins/펫 등) 무결성 체크섬용 per-install 키. plist 외부(Keychain)에 둬야
     // `defaults write` 조작으로 올바른 체크섬을 재생성할 수 없다. 최초 1회 생성 후 고정.
     static let integrityKeyAccount = "integrityKey"
+    // E2EE 쪽지 신원 개인키 (X25519 raw 32B, base64). 기기 전용 — 백업 없음(옵션 A).
+    static let dmIdentityKeyAccount = "dmIdentityKey"
 
     // MARK: - Claude session (legacy API, 인자 없음)
 
@@ -63,6 +65,13 @@ enum Keychain {
     //
     // hmac 키와 동일하게 in-memory 캐시 — Settings의 핵심값 didSet마다 접근하므로 ad-hoc 서명
     // 환경에서 prompt 폭주를 막으려면 process당 1회로 축소해야 한다.
+
+    // MARK: - 쪽지 신원 개인키 (E2EE)
+
+    private static let dmIdentityKeyCache = CachedItem(account: dmIdentityKeyAccount)
+    static func saveDMIdentityKey(_ value: String) { dmIdentityKeyCache.save(value) }
+    static func loadDMIdentityKey() -> String? { dmIdentityKeyCache.load() }
+    static func clearDMIdentityKey() { dmIdentityKeyCache.clear() }
 
     private static let integrityKeyCache = CachedItem(account: integrityKeyAccount)
     /// 없으면 base64(32 random bytes)를 생성·저장해 반환. 생성 실패해도 빈 문자열은 반환하지 않음.
