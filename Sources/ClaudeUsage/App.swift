@@ -141,6 +141,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.environment["AIUSAGE_GUIDE_DEMO"] != nil {
             GuideWindowController.shared.present()
         }
+        // 길드 사무실 씬 미리보기 — `AIUSAGE_OFFICE_DEMO=1 swift run`. 서버 없이 mock 멤버로
+        // 배치/애니메이션/충돌 범위를 확인한다.
+        if ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] != nil {
+            GuildOfficeDemo.present()
+        }
 #endif
     }
 

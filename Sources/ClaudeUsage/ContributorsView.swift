@@ -222,7 +222,8 @@ private struct ContributorCardView: View {
                     width: 440,
                     medals: entry.medals,
                     animatedAvatar: true,
-                    equippedEffects: Set((profile.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) })
+                    equippedEffects: Set((profile.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) }),
+                    guildName: profile.guildName
                 )
                 .padding(8)
             } else {

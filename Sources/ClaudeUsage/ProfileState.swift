@@ -26,6 +26,10 @@ struct ProfileState: Codable, Sendable {
     /// 이 값이 true면 abuse_flags에 기록(운영자 수동 큐레이션 보조). 옛 클라 호환 옵셔널 — nil/false면
     /// 정상. casual deterrent라 결정적 치터(클라 패치)는 끌 수 있다.
     let integrityViolation: Bool?
+    /// 소속 길드명 (P2a) — 트레이너 카드 태그 표시용 캐시. 본인 submit 시점의 `Settings.guildName`
+    /// 스냅샷이라 최신성은 느슨 (탈퇴 직후엔 다음 submit까지 남을 수 있음 — 표시 전용이라 수용).
+    /// 옛 클라 호환 옵셔널.
+    let guildName: String?
 
     @MainActor
     static func current(from settings: Settings) -> ProfileState {
@@ -37,7 +41,8 @@ struct ProfileState: Codable, Sendable {
             completedCollections: Array(settings.completedCollections),
             backup: BackupPayload.current(from: settings),
             equippedEffects: (settings.equippedEffects[settings.trainerCard.avatar.kind] ?? []).map(\.rawValue),
-            integrityViolation: settings.integrityViolation
+            integrityViolation: settings.integrityViolation,
+            guildName: settings.guildName.isEmpty ? nil : settings.guildName
         )
     }
 

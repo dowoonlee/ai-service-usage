@@ -171,6 +171,11 @@ final class Settings: ObservableObject {
     @Published var premiumTickets: Int {
         didSet { UserDefaults.standard.set(premiumTickets, forKey: Keys.premiumTickets); recordIntegrityChecksum() }
     }
+    /// 길드 생성권 보유 수 — 코인 구매 소모품 (`CoinLedger.purchaseGuildPermit`). 서버
+    /// guild-create 성공 응답 후 GuildView가 1 차감. 해체 후 재창설에도 새 생성권 필요.
+    @Published var guildPermits: Int {
+        didSet { UserDefaults.standard.set(guildPermits, forKey: Keys.guildPermits); recordIntegrityChecksum() }
+    }
     /// 펫 종별 보유 상태 (count + unlockedVariants).
     @Published var ownedPets: [PetKind: PetOwnership] {
         didSet { persist(ownedPets, forKey: Keys.ownedPets); recordIntegrityChecksum() }
@@ -536,6 +541,17 @@ final class Settings: ObservableObject {
     @Published var rankingPrivacyAccepted: Bool {
         didSet { UserDefaults.standard.set(rankingPrivacyAccepted, forKey: Keys.rankingPrivacyAccepted) }
     }
+    /// 내 길드 표시 캐시 — 서버(guild-info)가 SSOT, 여기는 탭 첫 로드 전 표시·트레이너 카드
+    /// 태그(P2a)용. 빈 문자열 = 무길드. guild-info 응답마다 동기화.
+    @Published var guildID: String {
+        didSet { UserDefaults.standard.set(guildID, forKey: Keys.guildID) }
+    }
+    @Published var guildName: String {
+        didSet { UserDefaults.standard.set(guildName, forKey: Keys.guildName) }
+    }
+    @Published var isGuildLeader: Bool {
+        didSet { UserDefaults.standard.set(isGuildLeader, forKey: Keys.isGuildLeader) }
+    }
     /// 랭킹 점수 (Vibe Points) — Claude/Cursor 사용량을 "USD 가치"로 환산한 누적값.
     /// 1 VP = 1 cent (= $0.01) 등가. VPLedger가 UsageEvent 받을 때마다 plan price 기반 환산해
     /// 누적. coinsTotalEarned (가챠 코인 누적)과 별도. 보드 제출의 source-of-truth.
@@ -667,6 +683,7 @@ final class Settings: ObservableObject {
         self.coins = (d.object(forKey: Keys.coins) as? Int) ?? 0
         self.gachaTickets = (d.object(forKey: Keys.gachaTickets) as? Int) ?? 0
         self.premiumTickets = (d.object(forKey: Keys.premiumTickets) as? Int) ?? 0
+        self.guildPermits = (d.object(forKey: Keys.guildPermits) as? Int) ?? 0
         self.integrityViolation = d.bool(forKey: Keys.integrityViolation)
         let ownedData = d.data(forKey: Keys.ownedPets)
         self.ownedPets = (ownedData.flatMap { try? JSONDecoder().decode([PetKind: PetOwnership].self, from: $0) }) ?? [:]
@@ -736,6 +753,9 @@ final class Settings: ObservableObject {
         self.rankingLastSubmittedAt    = d.object(forKey: Keys.rankingLastSubmittedAt) as? Date
         self.rankingRegistered         = (d.object(forKey: Keys.rankingRegistered) as? Bool) ?? false
         self.rankingPrivacyAccepted    = (d.object(forKey: Keys.rankingPrivacyAccepted) as? Bool) ?? false
+        self.guildID                   = d.string(forKey: Keys.guildID) ?? ""
+        self.guildName                 = d.string(forKey: Keys.guildName) ?? ""
+        self.isGuildLeader             = (d.object(forKey: Keys.isGuildLeader) as? Bool) ?? false
         self.rankingScoreEarnedVP      = (d.object(forKey: Keys.rankingScoreEarnedVP) as? Int) ?? 0
         self.rankingScoreFractionVP    = (d.object(forKey: Keys.rankingScoreFractionVP) as? Double) ?? 0
         let claimedData = d.data(forKey: Keys.claimedPodiumPeriods)
@@ -990,9 +1010,11 @@ final class Settings: ObservableObject {
         guard let cs = IntegrityGuard.checksum(
             coins: coins, coinsTotalEarned: coinsTotalEarned,
             gachaTickets: gachaTickets, premiumTickets: premiumTickets,
+            guildPermits: guildPermits,
             rankingScoreEarnedVP: rankingScoreEarnedVP,
             ownedPetsSerialized: serialized, keyBase64: key) else { return }
         UserDefaults.standard.set(cs, forKey: Keys.integrityChecksum)
+        UserDefaults.standard.set(IntegrityGuard.formatVersion, forKey: Keys.integrityChecksumVersion)
     }
 
     /// 시작 시 1회 — 저장된 체크섬과 현재 값을 비교해 앱 외부 조작을 탐지. 데이터는 수정하지
@@ -1005,10 +1027,19 @@ final class Settings: ObservableObject {
         guard let current = IntegrityGuard.checksum(
             coins: coins, coinsTotalEarned: coinsTotalEarned,
             gachaTickets: gachaTickets, premiumTickets: premiumTickets,
+            guildPermits: guildPermits,
             rankingScoreEarnedVP: rankingScoreEarnedVP,
             ownedPetsSerialized: serialized, keyBase64: key) else { return }
         guard let stored = UserDefaults.standard.string(forKey: Keys.integrityChecksum) else {
-            UserDefaults.standard.set(current, forKey: Keys.integrityChecksum)  // 최초 — 신뢰하고 기록
+            recordIntegrityChecksum()  // 최초 — 신뢰하고 기록
+            return
+        }
+        // 포맷 버전 마이그레이션 — 구 포맷(v1: guildPermits 없음) 체크섬과는 비교 불가.
+        // 업그레이드 직후 1회에 한해 현재 상태를 신뢰하고 새 포맷으로 재기록한다
+        // (가드 도입 시점의 "소급 불가"와 동일한 트레이드오프 — 오탐 전면 발생보다 낫다).
+        let storedVersion = UserDefaults.standard.integer(forKey: Keys.integrityChecksumVersion)
+        if storedVersion < IntegrityGuard.formatVersion {
+            recordIntegrityChecksum()
             return
         }
         if stored != current && !integrityViolation {
@@ -1252,6 +1283,11 @@ final class Settings: ObservableObject {
         rankingRegistered = false
         rankingPrivacyAccepted = false
         rankingUsesZeroBaseline = false
+        // 길드 멤버십은 서버 CASCADE로 함께 사라짐 — 표시 캐시도 클리어.
+        // guildPermits(생성권)는 로컬 구매 재화라 유지.
+        guildID = ""
+        guildName = ""
+        isGuildLeader = false
     }
 
     /// 새 디바이스 복구 직후 서버에서 받은 backup payload를 로컬 상태에 적용.
@@ -1387,6 +1423,11 @@ final class Settings: ObservableObject {
         static let coins                       = "settings.coins"
         static let gachaTickets                = "settings.gachaTickets"
         static let premiumTickets              = "settings.premiumTickets"
+        static let guildPermits                = "settings.guildPermits"
+        static let guildID                     = "settings.guildID"
+        static let guildName                   = "settings.guildName"
+        static let isGuildLeader               = "settings.isGuildLeader"
+        static let integrityChecksumVersion    = "settings.integrityChecksumVersion"
         static let ownedPets                   = "settings.ownedPets"
         // 무결성 가드 (탐지 전용)
         static let integrityChecksum           = "settings.integrityChecksum"

@@ -167,6 +167,9 @@ actor RankingAPI {
         let signature: String
         /// "coins"(기본) | "rp" — 서명 페이로드 밖 라우팅 필드 (서버가 어느 원장에서 수령할지 결정).
         let rewardType: String?
+        /// rp 원장 내 트랙 — "monthly" | "weekly" | "guild-monthly" (P2a). 같은 (period, rank)에
+        /// 개인·길드 보상이 공존할 수 있어 서버가 정확한 row를 고르도록 전달. 서명 밖 평문.
+        let periodType: String?
     }
     struct ClaimRewardResponse: Decodable {
         let alreadyClaimed: Bool
@@ -384,6 +387,197 @@ actor RankingAPI {
         let usesZeroBaseline: Bool?
     }
 
+    // MARK: - Guild models
+
+    /// guild-manage 액션. rawValue가 서버 payload의 `action` 필드 (snake_case).
+    enum GuildManageAction: String {
+        case kick
+        case rotateCode = "rotate_code"
+        case disband
+        case setFurniture = "set_furniture"
+    }
+
+    struct GuildCreatePayload: Encodable {
+        let deviceId: String
+        let name: String
+        let ts: Int64
+    }
+    struct GuildCreateRequest: Encodable {
+        let payload: GuildCreatePayload
+        let signature: String
+    }
+    struct GuildCreateResponse: Decodable, Sendable {
+        let guildId: String
+        let name: String
+        let inviteCode: String
+    }
+
+    struct GuildJoinPayload: Encodable {
+        let deviceId: String
+        let inviteCode: String
+        let ts: Int64
+    }
+    struct GuildJoinRequest: Encodable {
+        let payload: GuildJoinPayload
+        let signature: String
+    }
+    struct GuildJoinResponse: Decodable, Sendable {
+        let guildId: String
+        let name: String
+        let memberCount: Int
+    }
+
+    struct GuildLeavePayload: Encodable {
+        let deviceId: String
+        let ts: Int64
+    }
+    struct GuildLeaveRequest: Encodable {
+        let payload: GuildLeavePayload
+        let signature: String
+    }
+    struct GuildLeaveResponse: Decodable, Sendable {
+        let ok: Bool
+        let cooldownUntil: Date?
+    }
+
+    /// targetDeviceId는 kick 외에는 "" — canonical 직렬화 형태를 액션과 무관하게 고정
+    /// (서버 verify 객체와 정확히 일치해야 서명 통과). layout은 set_furniture에서만 존재
+    /// ("setId:x:lane;…" 가구 좌표 직렬화) — nil이면 키 자체가 직렬화에서 빠지고, 서버도
+    /// 같은 조건으로 canonical을 재현한다.
+    struct GuildManagePayload: Encodable {
+        let action: String
+        let deviceId: String
+        let targetDeviceId: String
+        let layout: String?
+        let ts: Int64
+    }
+    struct GuildManageRequest: Encodable {
+        let payload: GuildManagePayload
+        let signature: String
+    }
+    struct GuildManageResponse: Decodable, Sendable {
+        let ok: Bool
+        /// rotate_code 응답에만 — 새 초대 코드.
+        let inviteCode: String?
+        /// set_furniture 응답에만 — 반영된 가구 배치 직렬화.
+        let officeFurniture: String?
+    }
+
+    /// 사무실 액션 payload — 액션 무관 고정 형태 {action, deviceId, item, slot, ts}.
+    /// place_decor: slot 0..9, item=kind. remove_decor: slot 0..9, item "".
+    /// set_theme: item "floor"|"wall", slot=테마 index.
+    /// (set_spot은 자동 배치 전환으로 클라이언트에서 폐기 — 서버 액션은 하위 호환용으로 잔존.)
+    struct GuildOfficePayload: Encodable {
+        let action: String
+        let deviceId: String
+        let item: String
+        let slot: Int
+        let ts: Int64
+    }
+    struct GuildOfficeRequest: Encodable {
+        let payload: GuildOfficePayload
+        let signature: String
+    }
+    struct GuildOfficeResponse: Decodable, Sendable {
+        let ok: Bool
+        let slot: Int?
+    }
+
+    struct GuildInfoPayload: Encodable {
+        let deviceId: String
+        let ts: Int64
+    }
+    struct GuildInfoRequest: Encodable {
+        let payload: GuildInfoPayload
+        let signature: String
+    }
+
+    struct GuildMember: Decodable, Identifiable, Sendable {
+        let nickname: String
+        let monthlyVP: Int
+        /// 이번 달 길드 점수(상위 5명 합산)에 반영 중인 멤버 — 리스트 ★ 표시.
+        let isTopContributor: Bool
+        let officeSlot: Int?
+        let isLeader: Bool
+        let isMe: Bool
+        let joinedAt: Date
+        let githubLogin: String?
+        let profileJson: ProfileState?
+        /// 길드장 요청 응답에만 포함 — kick 타겟팅용. 일반 멤버에게는 서버가 내려주지 않는다.
+        let deviceId: String?
+        var id: String { nickname }
+    }
+    struct GuildInfo: Decodable, Sendable {
+        let id: String
+        let name: String
+        /// 멤버 전원 공개 (공유용). 재발급은 길드장만.
+        let inviteCode: String
+        let isLeader: Bool
+        let floorTheme: Int
+        let wallTheme: Int
+        /// 가구 자유 배치 직렬화("setId:x:lane;…"). 빈 문자열/nil → 기본 배치.
+        /// 렌더 전 `OfficeLayout.sanitizedPlacements`로 검증.
+        let officeFurniture: String?
+        let createdAt: Date
+        let score: Int
+        let rank: Int?
+        let memberCount: Int
+    }
+    /// P2b 데코 — P1 서버는 항상 빈 배열이지만 응답 형태를 미리 고정.
+    struct GuildFurnitureItem: Decodable, Sendable {
+        let slotId: Int
+        let itemKind: String
+        /// 기부자 명판 — 탈퇴(FK SET NULL)·구버전 서버는 nil.
+        let donorNickname: String?
+    }
+    struct GuildInfoResponse: Decodable, Sendable {
+        let guild: GuildInfo
+        let members: [GuildMember]
+        let furniture: [GuildFurnitureItem]
+    }
+
+    struct GuildLeaderboardEntry: Decodable, Identifiable, Sendable {
+        let rank: Int
+        let guildId: String
+        let name: String
+        let score: Int
+        let memberCount: Int
+        var id: String { guildId }
+    }
+    struct MyGuildSummary: Decodable, Sendable {
+        let guildId: String
+        let name: String
+        let score: Int
+        let memberCount: Int
+        let rank: Int
+    }
+    /// 직전 달 길드 시상대 (P2a) — guild_monthly_winners 동결 스냅샷.
+    struct GuildPreviousMonthEntry: Decodable, Identifiable, Sendable {
+        let rank: Int
+        let name: String
+        let score: Int
+        let memberCount: Int
+        /// 정산 시점 길드장 — 시상대 아바타용 스냅샷.
+        let leaderNickname: String?
+        let leaderProfileJson: ProfileState?
+        var id: Int { rank }
+    }
+    struct GuildPreviousMonth: Decodable, Sendable {
+        let period: String                  // "YYYY-MM"
+        /// 내 길드가 시상대에 있으면 그 rank — 하이라이트용.
+        let myGuildRank: Int?
+        let entries: [GuildPreviousMonthEntry]
+    }
+
+    struct GuildLeaderboardResponse: Decodable, Sendable {
+        let entries: [GuildLeaderboardEntry]
+        let myGuild: MyGuildSummary?
+        let total: Int
+        let periodResetAt: Date?
+        /// 직전 달 길드 시상대 — P1 서버/정산 전 period는 nil.
+        let previousMonth: GuildPreviousMonth?
+    }
+
     // MARK: - Errors
 
     enum RankingError: LocalizedError {
@@ -395,6 +589,11 @@ actor RankingAPI {
         case privacyNotAccepted
         /// 게시판 cooldown 위반 (10분 / post). retryAfterSec은 서버가 응답 body에 포함.
         case rateLimited(retryAfterSec: Int)
+        /// 길드 관련 서버 거부 — 서버 error 코드 그대로 (already_in_guild / name_taken /
+        /// slot_taken / not_in_guild / invalid_code / not_leader / …). 호출 측이 코드로 분기.
+        case guildConflict(String)
+        /// 길드 재가입 쿨다운 (탈퇴/추방 후 7일). until은 서버가 body에 포함.
+        case guildCooldown(until: Date?)
         case http(Int, String?)
         case decoding(String)
         case network(String)
@@ -411,6 +610,27 @@ actor RankingAPI {
                 let m = s / 60, r = s % 60
                 if m > 0 { return "다음 글 작성까지 \(m)분 \(r)초 남았습니다." }
                 return "다음 글 작성까지 \(r)초 남았습니다."
+            case .guildConflict(let code):
+                switch code {
+                case "already_in_guild":    return "이미 길드에 소속되어 있습니다."
+                case "name_taken":          return "이미 사용 중인 길드 이름입니다."
+                case "invalid_guild_name":  return "길드 이름 형식이 올바르지 않습니다 (2~24자)."
+                case "slot_taken":          return "방금 다른 멤버가 그 자리에 앉았습니다."
+                case "not_in_guild":        return "길드에 소속되어 있지 않습니다."
+                case "invalid_code":        return "초대 코드가 올바르지 않습니다."
+                case "not_leader":          return "길드장만 할 수 있는 작업입니다."
+                case "target_not_in_guild": return "대상이 이미 길드에 없습니다."
+                case "cannot_kick_self":    return "자기 자신은 추방할 수 없습니다."
+                default:                    return "길드 요청이 거부되었습니다 (\(code))."
+                }
+            case .guildCooldown(let until):
+                if let until {
+                    let days = max(0, Int(ceil(until.timeIntervalSinceNow / 86_400)))
+                    if days >= 1 { return "탈퇴/추방 후 재가입 쿨다운 중입니다 — 약 \(days)일 남음." }
+                    let hours = max(1, Int(ceil(until.timeIntervalSinceNow / 3_600)))
+                    return "탈퇴/추방 후 재가입 쿨다운 중입니다 — 약 \(hours)시간 남음."
+                }
+                return "탈퇴/추방 후 재가입 쿨다운 중입니다."
             case .http(let code, let msg):
                 return "서버 오류 \(code)\(msg.map { ": \($0)" } ?? "")"
             case .decoding(let s):     return "응답 디코딩 오류(랭킹): \(s)"
@@ -494,13 +714,15 @@ actor RankingAPI {
     /// 이미 claim된 경우 서버가 `alreadyClaimed=true`로 idempotent 응답 — 클라이언트는 무시 가능.
     func claimReward(deviceId: String, period: String, rank: Int,
                      rewardType: String = "coins",
+                     periodType: String? = nil,
                      hmacKeyBase64: String) async throws -> ClaimRewardResponse {
-        // 서명 페이로드는 {deviceId, period, rank, ts}로 불변 — rewardType은 서명에 넣지 않는다
-        // (서버 verifyHmac과 일치 + 기존 coins claim 호환). rewardType은 request 레벨 라우팅 필드.
+        // 서명 페이로드는 {deviceId, period, rank, ts}로 불변 — rewardType/periodType은 서명에
+        // 넣지 않는다 (서버 verifyHmac과 일치 + 기존 coins claim 호환). request 레벨 라우팅 필드.
         let payload = ClaimRewardPayload(deviceId: deviceId, period: period, rank: rank,
                                          ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signClaim(payload: payload, keyBase64: hmacKeyBase64)
-        let req = ClaimRewardRequest(payload: payload, signature: sig, rewardType: rewardType)
+        let req = ClaimRewardRequest(payload: payload, signature: sig,
+                                     rewardType: rewardType, periodType: periodType)
         return try await post(path: "claim-reward", body: req)
     }
 
@@ -636,6 +858,101 @@ actor RankingAPI {
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let req = DeleteCommentRequest(payload: payload, signature: sig)
         return try await post(path: "delete-comment", body: req)
+    }
+
+    // MARK: - Guild
+
+    /// 길드 창설. 생성권 차감은 호출 측(GuildView)이 성공 응답 후 수행.
+    /// 이름 충돌 `.guildConflict("name_taken")`, 쿨다운 `.guildCooldown` throw.
+    func createGuild(deviceId: String, name: String,
+                     hmacKeyBase64: String) async throws -> GuildCreateResponse {
+        let payload = GuildCreatePayload(deviceId: deviceId, name: name,
+                                         ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-create",
+                              body: GuildCreateRequest(payload: payload, signature: sig))
+    }
+
+    /// 초대 코드로 가입. 잘못된 코드 `.guildConflict("invalid_code")`, 쿨다운 `.guildCooldown`.
+    func joinGuild(deviceId: String, inviteCode: String,
+                   hmacKeyBase64: String) async throws -> GuildJoinResponse {
+        let payload = GuildJoinPayload(deviceId: deviceId, inviteCode: inviteCode,
+                                       ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-join",
+                              body: GuildJoinRequest(payload: payload, signature: sig))
+    }
+
+    /// 탈퇴. 길드장이면 서버 트리거가 최고참 승계, 마지막 멤버면 길드 자동 해체.
+    func leaveGuild(deviceId: String, hmacKeyBase64: String) async throws -> GuildLeaveResponse {
+        let payload = GuildLeavePayload(deviceId: deviceId,
+                                        ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-leave",
+                              body: GuildLeaveRequest(payload: payload, signature: sig))
+    }
+
+    /// 길드장 액션 (kick / 코드 재발급 / 해체 / 가구 재배치). kick 외에는 targetDeviceId 생략,
+    /// furniture는 setFurniture에서만 (`OfficeLayout.serializePlacements` 산출 문자열).
+    func manageGuild(deviceId: String, action: GuildManageAction, targetDeviceId: String? = nil,
+                     furniture: String? = nil,
+                     hmacKeyBase64: String) async throws -> GuildManageResponse {
+        let payload = GuildManagePayload(action: action.rawValue, deviceId: deviceId,
+                                         targetDeviceId: targetDeviceId ?? "",
+                                         layout: furniture,
+                                         ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-manage",
+                              body: GuildManageRequest(payload: payload, signature: sig))
+    }
+
+    /// guild-office 공통 호출 — 액션별 래퍼가 아래에.
+    private func officeAction(deviceId: String, action: String, item: String, slot: Int,
+                              hmacKeyBase64: String) async throws -> GuildOfficeResponse {
+        let payload = GuildOfficePayload(action: action, deviceId: deviceId, item: item,
+                                         slot: slot, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-office",
+                              body: GuildOfficeRequest(payload: payload, signature: sig))
+    }
+
+    /// 데코 배치/교체 구매 (P2b, 멤버 누구나 — 기부 모델). 코인 차감은 호출 측이 성공 후 수행.
+    func placeDecor(deviceId: String, slot: Int, itemKind: String,
+                    hmacKeyBase64: String) async throws -> GuildOfficeResponse {
+        try await officeAction(deviceId: deviceId, action: "place_decor", item: itemKind,
+                               slot: slot, hmacKeyBase64: hmacKeyBase64)
+    }
+
+    /// 데코 제거 (기부자 본인 또는 길드장 — 아니면 `.guildConflict("not_leader")`).
+    func removeDecor(deviceId: String, slot: Int,
+                     hmacKeyBase64: String) async throws -> GuildOfficeResponse {
+        try await officeAction(deviceId: deviceId, action: "remove_decor", item: "", slot: slot,
+                               hmacKeyBase64: hmacKeyBase64)
+    }
+
+    /// 인테리어 테마 변경 (길드장 전용). kind = "floor"(0..8) | "wall"(0..3).
+    func setOfficeTheme(deviceId: String, kind: String, themeIndex: Int,
+                        hmacKeyBase64: String) async throws -> GuildOfficeResponse {
+        try await officeAction(deviceId: deviceId, action: "set_theme", item: kind,
+                               slot: themeIndex, hmacKeyBase64: hmacKeyBase64)
+    }
+
+    /// 내 길드 상세. 무길드면 `.guildConflict("not_in_guild")` throw — 호출 측이 온보딩 분기.
+    func fetchGuildInfo(deviceId: String, hmacKeyBase64: String) async throws -> GuildInfoResponse {
+        let payload = GuildInfoPayload(deviceId: deviceId,
+                                       ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-info",
+                              body: GuildInfoRequest(payload: payload, signature: sig))
+    }
+
+    /// 길드 월간 랭킹 — 미등록/미가입도 조회 가능 (온보딩 "구경" 리스트).
+    func fetchGuildLeaderboard(deviceId: String?) async throws -> GuildLeaderboardResponse {
+        var items: [URLQueryItem] = []
+        if let deviceId, !deviceId.isEmpty {
+            items.append(URLQueryItem(name: "deviceId", value: deviceId))
+        }
+        return try await get(path: "guild-leaderboard", queryItems: items.isEmpty ? nil : items)
     }
 
     /// 계정 영구 삭제. 서버측 row + submissions 로그 모두 제거.
@@ -786,9 +1103,38 @@ actor RankingAPI {
     /// 응답 statusline + body 만 검증. 본문 디코드가 없는 endpoint(`executeVoid`)와
     /// 공유하기 위해 추출. 404는 호출 측이 body 메시지로 분기 매핑하므로 여기선
     /// generic `.http(404, body)`만 throw — 사용자에게 정확한 메시지 노출.
+    /// 길드 endpoint의 에러 body — `{ "error": "...", "until": "ISO" }`. 전역 상태코드 매핑
+    /// (409→nicknameTaken, 403→banned)이 길드 의미와 충돌해서 body 코드로 먼저 분기한다.
+    private struct ServerErrorBody: Decodable {
+        let error: String?
+        let until: String?
+    }
+
+    /// body의 error 코드가 길드 도메인이면 전역 매핑보다 우선 처리.
+    private static let guildErrorCodes: Set<String> = [
+        "already_in_guild", "name_taken", "invalid_guild_name", "slot_taken",
+        "not_in_guild", "invalid_code", "not_leader", "target_not_in_guild",
+        "cannot_kick_self", "guild_not_found",
+    ]
+
     private func validateHTTPStatus(data: Data, response: URLResponse) throws {
         let http = response as? HTTPURLResponse
         let code = http?.statusCode ?? 0
+        guard !(200..<300).contains(code) else { return }
+
+        // 길드 도메인 에러 — 전역 상태코드 매핑보다 먼저 (409/403의 의미가 endpoint마다 다름).
+        if let body = try? JSONDecoder().decode(ServerErrorBody.self, from: data),
+           let errCode = body.error {
+            if errCode == "join_cooldown" {
+                let until = body.until.flatMap {
+                    Self.iso8601WithFractional.date(from: $0) ?? Self.iso8601Basic.date(from: $0)
+                }
+                throw RankingError.guildCooldown(until: until)
+            }
+            if Self.guildErrorCodes.contains(errCode) {
+                throw RankingError.guildConflict(errCode)
+            }
+        }
 
         if code == 409 { throw RankingError.nicknameTaken }
         if code == 403 { throw RankingError.banned }
@@ -797,10 +1143,8 @@ actor RankingAPI {
             let s = (try? JSONDecoder().decode(RateLimitedBody.self, from: data))?.retryAfterSec ?? 60
             throw RankingError.rateLimited(retryAfterSec: s)
         }
-        guard (200..<300).contains(code) else {
-            let body = String(data: data, encoding: .utf8)
-            throw RankingError.http(code, body)
-        }
+        let body = String(data: data, encoding: .utf8)
+        throw RankingError.http(code, body)
     }
 
     /// 응답 본문이 없는 endpoint 전용 (`delete` 등). `execute<Resp>`의 generic 분기에서

@@ -71,7 +71,8 @@ struct ReportView: View {
                 accessoryEditing: accessoryTransformBinding,
                 medals: settings.medalTally,
                 animatedAvatar: true,
-                equippedEffects: settings.equippedEffects[settings.trainerCard.avatar.kind] ?? []
+                equippedEffects: settings.equippedEffects[settings.trainerCard.avatar.kind] ?? [],
+                guildName: settings.guildName.isEmpty ? nil : settings.guildName
             )
             Spacer()
         }
@@ -614,7 +615,8 @@ struct ReportView: View {
             showWatermark: true,
             width: TrainerCardView.standardWidth,
             medals: settings.medalTally,
-            equippedEffects: settings.equippedEffects[settings.trainerCard.avatar.kind] ?? []
+            equippedEffects: settings.equippedEffects[settings.trainerCard.avatar.kind] ?? [],
+            guildName: settings.guildName.isEmpty ? nil : settings.guildName
         )
         let renderer = ImageRenderer(content: cardView)
         renderer.scale = 2.0  // Retina export — 캡처 PNG 960×720
@@ -651,7 +653,8 @@ struct ReportView: View {
                 width: TrainerCardView.standardWidth,
                 medals: settings.medalTally,
                 avatarFrame: i,
-                equippedEffects: effects
+                equippedEffects: effects,
+                guildName: settings.guildName.isEmpty ? nil : settings.guildName
             )
             let renderer = ImageRenderer(content: cardView)
             renderer.scale = 2.0
