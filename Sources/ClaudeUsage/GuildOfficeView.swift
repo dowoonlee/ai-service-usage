@@ -38,8 +38,9 @@ struct GuildOfficeView: View {
     @State private var decorPopoverSlot: Int?
     /// 데코 구매 확인 전 미리보기 — 씬에는 보이지만 아직 결제 안 됨 (구매/취소로 해소).
     @State private var previewDecor: (slot: Int, kind: String)?
-    /// 가구 구매 popover 열림 (재배치 모드 우상단 ＋ 버튼).
-    @State private var purchaseSheetOpen = false
+    /// 가구 구매 popover 열림 — 컨트롤 행의 "가구 구매" 버튼이 재배치 진입과 함께 열 수
+    /// 있도록 바인딩으로 노출 (진입점 발견성 피드백).
+    @Binding var purchaseSheetOpen: Bool
     /// 가구 구매 확인 전 미리보기 인스턴스 — 반투명 렌더, 구매 확정 시 직렬화에 합류.
     @State private var pendingPurchase: OfficeLayout.FurniturePlacement?
     /// 액자 문구 편집 popover가 열린 인스턴스 uid (재배치 모드에서 액자 클릭).
@@ -132,12 +133,13 @@ struct GuildOfficeView: View {
         .onAppear { reconfigureSim() }
         .onDisappear { sim.stop() }
         .onChange(of: membersKey) { _ in reconfigureSim() }
-        .onChange(of: rearrangeMode) { _ in
+        .onChange(of: rearrangeMode) { on in
             draftPlacements = nil
             draggingUid = nil
             pendingPurchase = nil
-            purchaseSheetOpen = false
             editingTextUid = nil
+            // 진입 시에는 유지 — 컨트롤 행 "가구 구매" 버튼이 재배치 진입과 동시에 연다.
+            if !on { purchaseSheetOpen = false }
         }
         // 서버 값이 드래그 결과를 따라잡으면 작업 사본 해제 (refresh 후 재정합).
         .onChange(of: info.guild.officeFurniture ?? "") { _ in
@@ -412,7 +414,8 @@ struct GuildOfficeView: View {
             }
             let baseline = OfficeLayout.baselineY(for: placement, in: renderPlacements)
             let positionX = placement.x * scale
-            let positionY = (baseline - kind.size.height / 2) * scale
+            // artBottomInset — 아트 하단 투명 여백만큼 내려 가시 하단을 baseline에 정렬 ("떠 보임" 방지).
+            let positionY = (baseline - kind.size.height / 2 + kind.artBottomInset) * scale
             if rearrangeMode && !isPending {
                 body
                     .contentShape(Rectangle())
@@ -972,6 +975,7 @@ enum GuildOfficeDemo {
         // `=swapped`면 스왑 배치, `=decor`면 꾸미기 모드 + 데코/테마 프리필로 시작.
         @State private var rearrange =
             ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "rearrange"
+        @State private var purchaseOpen = false
         @State private var decorate =
             ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "decor"
         /// 재배치(드래그)·구매를 로컬에서 즉시 반영 — 서버 없이 동작 확인.
@@ -1039,7 +1043,8 @@ enum GuildOfficeDemo {
                         decorItems.removeAll { $0.slotId == slot }
                         print("OFFICE_DEMO_DECOR remove slot=\(slot)")
                         fflush(stdout)
-                    }
+                    },
+                    purchaseSheetOpen: $purchaseOpen
                 )
                 HStack {
                     Toggle("가구 재배치", isOn: $rearrange).font(.system(size: 11))

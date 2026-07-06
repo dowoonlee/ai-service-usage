@@ -124,17 +124,21 @@ enum OfficeLayout {
         let surfaceInsetY: CGFloat   // 상판 높이 — 올려진 가구의 baseline 올림량
         let canStack: Bool           // isSurface 가구 위 배치 가능 (커피머신 등 탁상 소품)
         let supportsText: Bool       // 액자 — 10자 문구 (FurniturePlacement.text)
+        /// 아트 셀 하단의 투명 여백(px) — 렌더 시 이만큼 내려 그려 "떠 보임"을 없앤다
+        /// (에셋 alpha 실측: PC 9, 책장 8, 커피머신 9, 화이트보드 8, 벽시계 11 등).
+        let artBottomInset: CGFloat
 
         init(id: Int, name: String, price: Int, mount: FurnitureMount, passing: PetPassing,
              imageName: String? = nil, drawKind: DrawKind? = nil,
              size: CGSize, blockingWidth: CGFloat,
              hasPC: Bool = false, isSurface: Bool = false, surfaceInsetY: CGFloat = 0,
-             canStack: Bool = false, supportsText: Bool = false) {
+             canStack: Bool = false, supportsText: Bool = false, artBottomInset: CGFloat = 0) {
             self.id = id; self.name = name; self.price = price; self.mount = mount
             self.passing = passing; self.imageName = imageName; self.drawKind = drawKind
             self.size = size; self.blockingWidth = blockingWidth; self.hasPC = hasPC
             self.isSurface = isSurface; self.surfaceInsetY = surfaceInsetY
             self.canStack = canStack; self.supportsText = supportsText
+            self.artBottomInset = artBottomInset
         }
     }
 
@@ -142,17 +146,18 @@ enum OfficeLayout {
         FurnitureKind(id: 0, name: "데스크+PC", price: 1_500, mount: .floor, passing: .through,
                       imageName: "DESK_FRONT",
                       size: CGSize(width: 48, height: 32), blockingWidth: 40,
-                      hasPC: true, isSurface: true, surfaceInsetY: 13),
+                      hasPC: true, isSurface: true, surfaceInsetY: 19),
         FurnitureKind(id: 1, name: "책장", price: 1_000, mount: .floor, passing: .front,
                       imageName: "DOUBLE_BOOKSHELF",
-                      size: CGSize(width: 32, height: 32), blockingWidth: 28),
+                      size: CGSize(width: 32, height: 32), blockingWidth: 28,
+                      artBottomInset: 8),
         FurnitureKind(id: 2, name: "서버랙", price: 1_200, mount: .floor, passing: .through,
                       drawKind: .serverRack,
                       size: CGSize(width: 20, height: 36), blockingWidth: 18),
         FurnitureKind(id: 3, name: "커피머신", price: 800, mount: .floor, passing: .avoid,
                       imageName: "COFFEE",
                       size: CGSize(width: 16, height: 16), blockingWidth: 12,
-                      canStack: true),
+                      canStack: true, artBottomInset: 9),
         FurnitureKind(id: 4, name: "소파", price: 1_000, mount: .floor, passing: .front,
                       imageName: "SOFA_FRONT",
                       size: CGSize(width: 32, height: 16), blockingWidth: 28),
@@ -161,20 +166,23 @@ enum OfficeLayout {
                       size: CGSize(width: 16, height: 16), blockingWidth: 14),
         FurnitureKind(id: 6, name: "화분", price: 500, mount: .floor, passing: .behind,
                       imageName: "LARGE_PLANT",
-                      size: CGSize(width: 32, height: 48), blockingWidth: 16),
+                      size: CGSize(width: 32, height: 48), blockingWidth: 16,
+                      artBottomInset: 1),
         FurnitureKind(id: 7, name: "스탠딩 데스크", price: 800, mount: .floor, passing: .through,
                       drawKind: .standingDesk,
                       size: CGSize(width: 28, height: 26), blockingWidth: 24,
-                      isSurface: true, surfaceInsetY: 22),
+                      isSurface: true, surfaceInsetY: 21),
         FurnitureKind(id: 8, name: "벽시계", price: 500, mount: .wall, passing: .through,
                       imageName: "CLOCK",
-                      size: CGSize(width: 16, height: 32), blockingWidth: 14),
+                      size: CGSize(width: 16, height: 32), blockingWidth: 14,
+                      artBottomInset: 11),
         FurnitureKind(id: 9, name: "액자", price: 800, mount: .wall, passing: .through,
                       size: CGSize(width: 30, height: 22), blockingWidth: 28,
                       supportsText: true),
         FurnitureKind(id: 10, name: "화이트보드", price: 800, mount: .wall, passing: .through,
                       imageName: "WHITEBOARD",
-                      size: CGSize(width: 32, height: 32), blockingWidth: 30),
+                      size: CGSize(width: 32, height: 32), blockingWidth: 30,
+                      artBottomInset: 8),
     ]
 
     static func furnitureKind(id: Int) -> FurnitureKind? {
@@ -311,9 +319,10 @@ enum OfficeLayout {
                   size: CGSize(width: 26, height: 20), anchorX: 35, baselineY: 46),
     ]
 
-    /// 데스크 위 PC 배치 — hasPC 세트가 놓인 포지션에서 (anchorX, 데스크 상판 y).
+    /// 데스크 위 PC 배치 — (deskX, 데스크 상판 y). 오프셋 실측: PC 아트 하단 투명 9px,
+    /// 데스크 상판 상단 = baseline-21 → PC 가시 하단이 상판에 2px 겹치도록 -10.
     static let pcSize = CGSize(width: 16, height: 32)
-    static func pcBaselineY(deskBaselineY: CGFloat) -> CGFloat { deskBaselineY - 13 }
+    static func pcBaselineY(deskBaselineY: CGFloat) -> CGFloat { deskBaselineY - 10 }
 
     // MARK: - 데코 슬롯 + 카탈로그 (P2b 꾸미기 — 기부 모델, 기획 §2)
 

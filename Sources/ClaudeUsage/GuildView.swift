@@ -39,6 +39,8 @@ struct GuildView: View {
     /// 테마 미리보기 (구매 확인 전) — 스와치 클릭 시 씬에만 적용, "구매"를 눌러야 결제.
     @State private var previewFloorTheme: Int?
     @State private var previewWallTheme: Int?
+    /// 가구 구매 카탈로그 popover — "가구 구매" 버튼이 재배치 진입과 함께 연다.
+    @State private var purchaseSheetOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -324,7 +326,8 @@ struct GuildView: View {
                 },
                 onRemoveDecor: { slot in
                     performRemoveDecor(slot: slot)
-                }
+                },
+                purchaseSheetOpen: $purchaseSheetOpen
             )
             HStack(spacing: 8) {
                 if info.guild.isLeader {
@@ -332,6 +335,14 @@ struct GuildView: View {
                         decorateMode = false
                         clearThemePreview()
                         rearrangeMode.toggle()
+                    }
+                    .font(.system(size: 11))
+                    .disabled(actionBusy)
+                    Button("🪙 가구 구매") {
+                        decorateMode = false
+                        clearThemePreview()
+                        rearrangeMode = true
+                        purchaseSheetOpen = true
                     }
                     .font(.system(size: 11))
                     .disabled(actionBusy)
