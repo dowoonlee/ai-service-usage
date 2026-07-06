@@ -146,7 +146,7 @@ enum OfficeLayout {
         FurnitureKind(id: 0, name: "데스크+PC", price: 1_500, mount: .floor, passing: .through,
                       imageName: "DESK_FRONT",
                       size: CGSize(width: 48, height: 32), blockingWidth: 40,
-                      hasPC: true, isSurface: true, surfaceInsetY: 19),
+                      hasPC: true, isSurface: true, surfaceInsetY: 12),
         FurnitureKind(id: 1, name: "책장", price: 1_000, mount: .floor, passing: .front,
                       imageName: "DOUBLE_BOOKSHELF",
                       size: CGSize(width: 32, height: 32), blockingWidth: 28,
@@ -171,7 +171,7 @@ enum OfficeLayout {
         FurnitureKind(id: 7, name: "스탠딩 데스크", price: 800, mount: .floor, passing: .through,
                       drawKind: .standingDesk,
                       size: CGSize(width: 28, height: 26), blockingWidth: 24,
-                      isSurface: true, surfaceInsetY: 21),
+                      isSurface: true, surfaceInsetY: 20),
         FurnitureKind(id: 8, name: "벽시계", price: 500, mount: .wall, passing: .through,
                       imageName: "CLOCK",
                       size: CGSize(width: 16, height: 32), blockingWidth: 14,
@@ -319,10 +319,11 @@ enum OfficeLayout {
                   size: CGSize(width: 26, height: 20), anchorX: 35, baselineY: 46),
     ]
 
-    /// 데스크 위 PC 배치 — (deskX, 데스크 상판 y). 오프셋 실측: PC 아트 하단 투명 9px,
-    /// 데스크 상판 상단 = baseline-21 → PC 가시 하단이 상판에 2px 겹치도록 -10.
+    /// 데스크 위 PC 배치 — (deskX, 데스크 상판 y). 상판 "모서리 걸침"은 떠 보인다는
+    /// 피드백으로 상판 면 안쪽 깊숙이(가시 하단 = 상판 상단 -9px) 내려 앉힘 — 합성 검증.
+    /// (PC 아트 하단 투명 9px 포함해 frame bottom = baseline - 3.)
     static let pcSize = CGSize(width: 16, height: 32)
-    static func pcBaselineY(deskBaselineY: CGFloat) -> CGFloat { deskBaselineY - 10 }
+    static func pcBaselineY(deskBaselineY: CGFloat) -> CGFloat { deskBaselineY - 3 }
 
     // MARK: - 데코 슬롯 + 카탈로그 (P2b 꾸미기 — 기부 모델, 기획 §2)
 
