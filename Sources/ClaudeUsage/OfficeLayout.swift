@@ -206,6 +206,8 @@ enum OfficeLayout {
         var x: CGFloat
         var lane: Int                // 0..2 바닥 레인, 3 = 벽(wallLane)
         var text: String?            // 액자 문구 (supportsText 전용)
+        /// 벽 가구의 자유 baseline y (벽 밴드 안). 바닥 가구는 nil (레인에서 유도).
+        var wallY: CGFloat? = nil
         var id: Int { uid }
     }
 
@@ -218,62 +220,104 @@ enum OfficeLayout {
         FurniturePlacement(uid: 4, kind: 1, x: 250, lane: 1, text: nil),
     ]
 
-    /// 서버 직렬화("kind:x:lane[:text];…") 파싱 — 형식/범위 위반 항목은 버리고, 전부
-    /// 무효거나 빈 값이면 기본 배치 폴백. text는 percent-encoding 해제 + 길이 캡.
+    /// 서버 직렬화("kind:x:lane[:y[:text]];…") 파싱 — 형식/범위 위반 항목은 버리고, 전부
+    /// 무효거나 빈 값이면 기본 배치 폴백. 벽 가구는 4번째 필드 y(자유 배치), 액자는 5번째 text.
+    /// (레거시 4필드 "kind:x:3:text"는 y가 숫자가 아니면 text로 폴백 해석.)
     static func sanitizedPlacements(_ raw: String?) -> [FurniturePlacement] {
         guard let raw, !raw.isEmpty else { return defaultPlacements }
         var out: [FurniturePlacement] = []
         for entry in raw.split(separator: ";").prefix(furnitureMaxInstances) {
             let parts = entry.split(separator: ":", omittingEmptySubsequences: false)
-            guard (3...4).contains(parts.count),
+            guard (3...5).contains(parts.count),
                   let kindId = Int(parts[0]), let kind = furnitureKind(id: kindId),
                   let x = Double(parts[1]), (0...Double(sceneSize.width)).contains(x),
                   let lane = Int(parts[2]),
                   kind.mount == .wall ? lane == wallLane : (0...2).contains(lane)
             else { continue }
+            let isWall = lane == wallLane
+            var wallY: CGFloat?
+            var textField: Substring?
+            if parts.count == 5 {
+                if isWall, let y = Double(parts[3]) { wallY = clampWallY(CGFloat(y), for: kind) }
+                textField = parts[4]
+            } else if parts.count == 4 {
+                if isWall, let y = Double(parts[3]) {
+                    wallY = clampWallY(CGFloat(y), for: kind)      // 벽 y (신형)
+                } else {
+                    textField = parts[3]                            // 레거시 4필드 text 폴백
+                }
+            }
             var text: String?
-            if parts.count == 4, kind.supportsText {
-                let decoded = String(parts[3]).removingPercentEncoding ?? ""
+            if let textField, kind.supportsText {
+                let decoded = String(textField).removingPercentEncoding ?? ""
                 if !decoded.isEmpty { text = String(decoded.prefix(furnitureTextMax)) }
             }
             out.append(FurniturePlacement(uid: out.count, kind: kindId,
-                                          x: CGFloat(x), lane: lane, text: text))
+                                          x: CGFloat(x), lane: lane, text: text, wallY: wallY))
         }
         return out.isEmpty ? defaultPlacements : out
     }
 
-    /// 서버 전송용 직렬화 — x는 소수 1자리, 문구는 percent-encoding (':'/';' 충돌 방지).
+    /// 서버 전송용 직렬화 — "kind:x:lane[:y[:text]]". 벽 가구는 y 필드(소수 1자리)를 항상
+    /// 포함하고, 액자 문구는 그 뒤 percent-encoding (':'/';' 충돌 방지). 바닥은 3필드.
     static func serializePlacements(_ placements: [FurniturePlacement]) -> String {
         placements.map { p in
             var s = String(format: "%d:%.1f:%d", p.kind, p.x, p.lane)
+            let isWall = p.lane == wallLane
+            if isWall {
+                let y = p.wallY ?? wallFurnitureBaselineY
+                s += String(format: ":%.1f", y)
+            }
             if let text = p.text, !text.isEmpty,
                let enc = text.addingPercentEncoding(withAllowedCharacters: .alphanumerics) {
+                // 문구는 항상 y 필드 뒤 — 액자는 벽 가구라 y가 이미 붙어 있다.
                 s += ":\(enc)"
             }
             return s
         }.joined(separator: ";")
     }
 
-    /// 드롭 시 클램프 — 벽 가구는 벽 밴드(lane 3) 고정, 바닥 가구는 가장 가까운 레인 스냅.
-    static func clampPlacement(kind: Int, x: CGFloat, laneY: CGFloat) -> (x: CGFloat, lane: Int) {
-        let cx = min(max(x, edgeMargin), sceneSize.width - edgeMargin)
-        if furnitureKind(id: kind)?.mount == .wall { return (cx, wallLane) }
-        let lane = lanes.enumerated().min { abs($0.element - laneY) < abs($1.element - laneY) }?.offset ?? 2
-        return (cx, lane)
+    /// 벽 baseline y 클램프 — 아이템이 벽 밴드(0..wallBottom) 안에 온전히 들어오게.
+    /// baseline = 아이템 하단이므로 상단(baseline-h)≥0, 하단(baseline)≤wallBottom.
+    static func clampWallY(_ y: CGFloat, for kind: FurnitureKind) -> CGFloat {
+        let h = kind.size.height
+        return min(max(y, min(h, wallBottom)), wallBottom)
     }
 
-    /// 드래그/구매 배치 겹침 검사 — 같은 구역(벽/같은 바닥 레인)에서 시각 폭이 겹치면 true.
-    /// 예외: canStack 가구 ↔ isSurface 가구는 겹침 허용 (책상 위에 올려놓기 — 사용자 요청).
+    /// 드롭 시 클램프 — 벽 가구는 벽 밴드(lane 3) 안에서 x·y 자유, 바닥은 가장 가까운 레인 스냅.
+    /// dragY = 커서의 논리 y (벽 가구는 아이템 중심이 이를 따르도록 baseline으로 환산).
+    static func clampPlacement(kind kindId: Int, x: CGFloat,
+                               dragY: CGFloat) -> (x: CGFloat, lane: Int, wallY: CGFloat?) {
+        let cx = min(max(x, edgeMargin), sceneSize.width - edgeMargin)
+        guard let kind = furnitureKind(id: kindId) else { return (cx, 2, nil) }
+        if kind.mount == .wall {
+            // 커서 = 아이템 중심 → baseline = 중심 + h/2. 벽 밴드로 클램프.
+            return (cx, wallLane, clampWallY(dragY + kind.size.height / 2, for: kind))
+        }
+        let lane = lanes.enumerated().min { abs($0.element - dragY) < abs($1.element - dragY) }?.offset ?? 2
+        return (cx, lane, nil)
+    }
+
+    /// 드래그/구매 배치 겹침 검사 — 같은 구역에서 시각 폭이 겹치면 true. 벽 가구는 x·y 둘 다
+    /// 겹칠 때만 (자유 배치라 높이가 다르면 나란히 허용). 예외: canStack ↔ isSurface는 겹침 허용.
     static func placementCollides(uid: Int, kind kindId: Int, x: CGFloat, lane: Int,
+                                  wallY: CGFloat? = nil,
                                   others: [FurniturePlacement]) -> Bool {
         guard let kind = furnitureKind(id: kindId) else { return false }
+        let myY = wallY ?? wallFurnitureBaselineY
         return others.contains { p in
             guard p.uid != uid, p.lane == lane,
                   let other = furnitureKind(id: p.kind) else { return false }
             if (kind.canStack && other.isSurface) || (kind.isSurface && other.canStack) {
                 return false
             }
-            return abs(x - p.x) < (kind.size.width + other.size.width) / 2
+            let xOverlap = abs(x - p.x) < (kind.size.width + other.size.width) / 2
+            if lane == wallLane {
+                let otherY = p.wallY ?? wallFurnitureBaselineY
+                let yOverlap = abs(myY - otherY) < (kind.size.height + other.size.height) / 2
+                return xOverlap && yOverlap
+            }
+            return xOverlap
         }
     }
 
@@ -291,10 +335,10 @@ enum OfficeLayout {
             .min { abs($0.x - placement.x) < abs($1.x - placement.x) }
     }
 
-    /// 인스턴스의 렌더 baseline y — 벽 가구는 벽 밴드, 마운트된 소품은 상판 위로 올림.
+    /// 인스턴스의 렌더 baseline y — 벽 가구는 자유 y(없으면 기본), 마운트된 소품은 상판 위로 올림.
     static func baselineY(for placement: FurniturePlacement,
                           in placements: [FurniturePlacement]) -> CGFloat {
-        if placement.lane == wallLane { return wallFurnitureBaselineY }
+        if placement.lane == wallLane { return placement.wallY ?? wallFurnitureBaselineY }
         var y = lanes[min(max(placement.lane, 0), 2)]
         if let surface = mountedSurface(of: placement, in: placements),
            let surfaceKind = furnitureKind(id: surface.kind) {

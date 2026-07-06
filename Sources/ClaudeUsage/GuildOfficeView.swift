@@ -192,7 +192,8 @@ struct GuildOfficeView: View {
         }
         let uid = (placements.map(\.uid).max() ?? -1) + 1
         pendingPurchase = OfficeLayout.FurniturePlacement(
-            uid: uid, kind: kind.id, x: pos.x, lane: pos.lane, text: nil)
+            uid: uid, kind: kind.id, x: pos.x, lane: pos.lane, text: nil,
+            wallY: kind.mount == .wall ? OfficeLayout.wallFurnitureBaselineY : nil)
     }
 
     /// 구매 확정 — 미리보기 인스턴스를 배치에 합류시켜 즉시 렌더하고, 결제·서버 반영은
@@ -211,11 +212,12 @@ struct GuildOfficeView: View {
         for kind: OfficeLayout.FurnitureKind
     ) -> (x: CGFloat, lane: Int)? {
         let lanes: [Int] = kind.mount == .wall ? [OfficeLayout.wallLane] : [2, 1, 0]
+        let wallY = kind.mount == .wall ? OfficeLayout.wallFurnitureBaselineY : nil
         for lane in lanes {
             var x = OfficeLayout.edgeMargin + kind.size.width / 2
             while x < OfficeLayout.sceneSize.width - OfficeLayout.edgeMargin {
                 if !OfficeLayout.placementCollides(uid: -1, kind: kind.id, x: x, lane: lane,
-                                                   others: placements) {
+                                                   wallY: wallY, others: placements) {
                     return (x, lane)
                 }
                 x += 10
@@ -420,14 +422,16 @@ struct GuildOfficeView: View {
                 draggingUid = placement.uid
                 var working = draftPlacements ?? serverPlacements
                 guard let idx = working.firstIndex(where: { $0.uid == placement.uid }) else { return }
+                // 벽 가구는 x·y 자유, 바닥 가구는 x 자유 + 레인 스냅 (dragY = 커서 논리 y).
                 let snapped = OfficeLayout.clampPlacement(kind: placement.kind,
                                                           x: value.location.x / scale,
-                                                          laneY: value.location.y / scale)
+                                                          dragY: value.location.y / scale)
                 guard !OfficeLayout.placementCollides(uid: placement.uid, kind: placement.kind,
                                                       x: snapped.x, lane: snapped.lane,
-                                                      others: working) else { return }
+                                                      wallY: snapped.wallY, others: working) else { return }
                 working[idx].x = snapped.x
                 working[idx].lane = snapped.lane
+                working[idx].wallY = snapped.wallY
                 draftPlacements = working
             }
             .onEnded { _ in
