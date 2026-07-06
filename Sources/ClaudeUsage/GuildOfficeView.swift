@@ -775,14 +775,19 @@ private struct DecorCatalogSheet: View {
 
 // MARK: - 가구 카탈로그 시트 (재배치 모드 ＋ 버튼 popover)
 
-/// 가구 구매 카탈로그 — 아이템 클릭 = 씬 미리보기(onPreview), "구매"를 눌러야 결제(onBuy).
-/// 벽 가구는 "벽" 배지. 구매 후 드래그로 배치를 옮긴다.
+/// 가구 구매 카탈로그 — 바닥/벽 카테고리 탭으로 분리 (사용자 요청). 아이템 클릭 =
+/// 씬 미리보기(onPreview), "구매"를 눌러야 결제(onBuy). 구매 후 드래그로 배치를 옮긴다.
 @MainActor
 private struct FurnitureCatalogSheet: View {
     let onPreview: (OfficeLayout.FurnitureKind?) -> Void
     let onBuy: (OfficeLayout.FurnitureKind) -> Void
     @ObservedObject var settings = Settings.shared
     @State private var pending: OfficeLayout.FurnitureKind?
+    @State private var category: OfficeLayout.FurnitureMount = .floor
+
+    private var items: [OfficeLayout.FurnitureKind] {
+        OfficeLayout.furnitureCatalog.filter { $0.mount == category }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -793,7 +798,14 @@ private struct FurnitureCatalogSheet: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(AppColors.gold)
             }
-            ForEach(OfficeLayout.furnitureCatalog) { kind in
+            Picker("", selection: $category) {
+                Text("바닥 가구").tag(OfficeLayout.FurnitureMount.floor)
+                Text("벽 설치").tag(OfficeLayout.FurnitureMount.wall)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            ForEach(items) { kind in
                 let affordable = settings.coins >= kind.price
                 let selected = pending?.id == kind.id
                 Button {
@@ -803,11 +815,6 @@ private struct FurnitureCatalogSheet: View {
                     HStack(spacing: 8) {
                         catalogIcon(kind)
                         Text(kind.name).font(.system(size: 11))
-                        if kind.mount == .wall {
-                            Text("벽").font(.system(size: 8, weight: .semibold))
-                                .padding(.horizontal, 3).padding(.vertical, 1)
-                                .background(Capsule().fill(Color.pink.opacity(0.2)))
-                        }
                         if kind.supportsText {
                             Text("문구").font(.system(size: 8, weight: .semibold))
                                 .padding(.horizontal, 3).padding(.vertical, 1)
@@ -842,7 +849,7 @@ private struct FurnitureCatalogSheet: View {
                         .disabled(settings.coins < pending.price)
                 }
             }
-            Text("구매한 가구는 길드 소유가 되며, 드래그로 자유 배치할 수 있습니다")
+            Text("구매한 가구는 길드 소유가 되며, 드래그로 자유 배치할 수 있습니다 (벽 설치 가구는 벽 안에서만 이동)")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
