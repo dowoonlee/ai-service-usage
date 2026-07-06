@@ -417,22 +417,29 @@ struct GuildOfficeView: View {
             // artBottomInset — 아트 하단 투명 여백만큼 내려 가시 하단을 baseline에 정렬 ("떠 보임" 방지).
             let positionY = (baseline - kind.size.height / 2 + kind.artBottomInset) * scale
             if rearrangeMode && !isPending {
-                body
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if kind.supportsText { editingTextUid = placement.uid }
-                    }
-                    .popover(isPresented: Binding(
-                        get: { editingTextUid == placement.uid },
-                        set: { if !$0 { editingTextUid = nil } }
-                    ), arrowEdge: .bottom) {
-                        FrameTextEditor(initial: placement.text ?? "") { newText in
-                            editingTextUid = nil
-                            applyFrameText(placement.uid, text: newText)
+                // 탭(문구 편집)은 액자에만 — 다른 가구에 TapGesture가 붙어 드래그 인식을
+                // 방해하지 않도록 조건부로 분기한다.
+                if kind.supportsText {
+                    body
+                        .contentShape(Rectangle())
+                        .onTapGesture { editingTextUid = placement.uid }
+                        .popover(isPresented: Binding(
+                            get: { editingTextUid == placement.uid },
+                            set: { if !$0 { editingTextUid = nil } }
+                        ), arrowEdge: .bottom) {
+                            FrameTextEditor(initial: placement.text ?? "") { newText in
+                                editingTextUid = nil
+                                applyFrameText(placement.uid, text: newText)
+                            }
                         }
-                    }
-                    .gesture(furnitureDrag(placement, scale: scale))
-                    .position(x: positionX, y: positionY)
+                        .gesture(furnitureDrag(placement, scale: scale))
+                        .position(x: positionX, y: positionY)
+                } else {
+                    body
+                        .contentShape(Rectangle())
+                        .gesture(furnitureDrag(placement, scale: scale))
+                        .position(x: positionX, y: positionY)
+                }
             } else {
                 body.position(x: positionX, y: positionY)
             }
@@ -516,6 +523,9 @@ struct GuildOfficeView: View {
                               y: (baseline - size.height / 2) * scale)
             }
         }
+        // 장식 전용 — 데스크보다 위에 그려지므로(z+0.01) 히트테스트를 차단하지 않으면
+        // "데스크+PC"를 PC 부분으로 잡았을 때 드래그가 삼켜진다 (재배치 불가 피드백의 원인).
+        .allowsHitTesting(false)
     }
 
     // MARK: - 펫
