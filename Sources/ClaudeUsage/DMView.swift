@@ -22,6 +22,9 @@ final class DMViewModel: ObservableObject {
     @Published var keyChangeWarning: String?
     /// 받은 길드 초대 (통합 인박스 카드). 서버 평문 — 쪽지와 달리 암호화 대상 아님.
     @Published var invites: [RankingAPI.GuildReceivedInvite] = []
+    /// 수신 정책(anyone/guild/none) · 차단 목록 (dm-settings).
+    @Published var allowFrom: String = "anyone"
+    @Published var blocked: [RankingAPI.DMBlockedPeer] = []
 
     private var didPublishThisSession = false
     private var refreshTask: Task<Void, Never>?
@@ -109,6 +112,8 @@ final class DMViewModel: ObservableObject {
         // 받은 길드 초대도 함께 적재 (통합 인박스). 실패는 조용히 무시.
         invites = (try? await RankingAPI.shared.listGuildInvites(
             deviceId: device, hmacKeyBase64: hmac)) ?? []
+        // 수신 정책·차단 목록도 갱신 (스레드의 차단 상태 표시에 사용).
+        await loadSettings()
     }
 
     private func previewText(for t: RankingAPI.DMThread) -> String {
@@ -240,6 +245,65 @@ final class DMViewModel: ObservableObject {
         return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 
+    // MARK: - 수신 정책 · 차단 · 지문
+
+    /// 내 안전 지문 (대역외 검증용, 읽기 전용).
+    var myFingerprint: String { DMCrypto.myFingerprint }
+
+    /// 상대 지문 — TOFU 핀된 공개키 기준(교신 이력 있는 상대만).
+    func peerFingerprint(for peerDevice: String) -> String? {
+        guard let pub = DMStore.shared.pinnedKey(for: peerDevice) else { return nil }
+        return DMCrypto.fingerprint(ofPubBase64: pub)
+    }
+
+    func loadSettings() async {
+        guard ready else { return }
+        if let s = try? await RankingAPI.shared.dmGetSettings(deviceId: device, hmacKeyBase64: hmac) {
+            allowFrom = s.allowFrom
+            blocked = s.blocked
+        }
+    }
+
+    func setAllowFrom(_ value: String) async {
+        guard ready else { return }
+        error = nil
+        do {
+            let s = try await RankingAPI.shared.dmSetAllowFrom(
+                deviceId: device, allowFrom: value, hmacKeyBase64: hmac)
+            allowFrom = s.allowFrom; blocked = s.blocked
+        } catch { self.error = mapError(error) }
+    }
+
+    /// 닉네임으로 차단. 성공 시 그 상대는 앞으로 나에게 못 보낸다.
+    func block(nickname: String) async {
+        guard ready else { return }
+        error = nil
+        do {
+            let s = try await RankingAPI.shared.dmBlock(
+                deviceId: device, targetNickname: nickname, hmacKeyBase64: hmac)
+            allowFrom = s.allowFrom; blocked = s.blocked
+        } catch {
+            if case RankingAPI.RankingError.guildConflict(let c) = error, c == "cannot_block" {
+                self.error = "차단할 수 없는 사용자입니다."
+            } else { self.error = mapError(error) }
+        }
+    }
+
+    func unblock(device dev: String) async {
+        guard ready else { return }
+        error = nil
+        do {
+            let s = try await RankingAPI.shared.dmUnblock(
+                deviceId: device, targetDevice: dev, hmacKeyBase64: hmac)
+            allowFrom = s.allowFrom; blocked = s.blocked
+        } catch { self.error = mapError(error) }
+    }
+
+    /// 내가 이 상대를 차단했는지 (스레드/인박스 표시용).
+    func isBlocked(_ peerDevice: String) -> Bool {
+        blocked.contains { $0.device.lowercased() == peerDevice.lowercased() }
+    }
+
     private func mapError(_ error: Error) -> String {
         if case RankingAPI.RankingError.guildConflict(let code) = error {
             switch code {
@@ -285,6 +349,7 @@ private struct DMRootView: View {
     @ObservedObject var vm = DMViewModel.shared
     @ObservedObject var settings = Settings.shared
     @State private var composing = false
+    @State private var showingSettings = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -295,12 +360,15 @@ private struct DMRootView: View {
             } else if vm.openPeer != nil {
                 DMThreadView(vm: vm)
             } else {
-                DMInboxView(vm: vm, composing: $composing)
+                DMInboxView(vm: vm, composing: $composing, showingSettings: $showingSettings)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $composing) {
             DMComposeView(vm: vm) { composing = false }
+        }
+        .sheet(isPresented: $showingSettings) {
+            DMSettingsView(vm: vm) { showingSettings = false }
         }
         .onAppear { Task { await vm.refreshInbox() } }
     }
@@ -319,6 +387,7 @@ private struct DMRootView: View {
 private struct DMInboxView: View {
     @ObservedObject var vm: DMViewModel
     @Binding var composing: Bool
+    @Binding var showingSettings: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -328,6 +397,8 @@ private struct DMInboxView: View {
                 if vm.loading { ProgressView().controlSize(.small) }
                 Button { composing = true } label: { Label("새 쪽지", systemImage: "square.and.pencil") }
                     .font(.system(size: 11))
+                Button { showingSettings = true } label: { Image(systemName: "gearshape") }
+                    .buttonStyle(.borderless).help("쪽지 설정 · 차단 · 지문")
             }
             .padding(12)
             Divider()
@@ -438,7 +509,14 @@ private struct DMThreadView: View {
                     .buttonStyle(.borderless)
                 Text(vm.openPeerNickname ?? "쪽지").font(.system(size: 13, weight: .semibold))
                 Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+                if let peer = vm.openPeer, vm.isBlocked(peer) {
+                    Text("차단됨").font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.orange.opacity(0.12)).clipShape(Capsule())
+                }
                 Spacer()
+                peerMenu
             }
             .padding(10)
             Divider()
@@ -462,6 +540,32 @@ private struct DMThreadView: View {
             }
             .padding(8)
         }
+    }
+
+    /// 상대 안전 지문 + 차단/해제.
+    @ViewBuilder
+    private var peerMenu: some View {
+        Menu {
+            if let peer = vm.openPeer, let fp = vm.peerFingerprint(for: peer) {
+                Text("상대 안전 지문")
+                Text(fp).font(.system(.body, design: .monospaced))
+                Divider()
+            }
+            if let peer = vm.openPeer {
+                if vm.isBlocked(peer) {
+                    Button { Task { await vm.unblock(device: peer) } } label: {
+                        Label("차단 해제", systemImage: "hand.raised.slash")
+                    }
+                } else if let nick = vm.openPeerNickname {
+                    Button(role: .destructive) { Task { await vm.block(nickname: nick) } } label: {
+                        Label("이 사용자 차단", systemImage: "hand.raised")
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton).frame(width: 28)
     }
 
     private func sendDraft() {
@@ -540,5 +644,76 @@ private struct DMComposeView: View {
             // 경고가 뜬 게 아니고 에러도 없으면 성공 → 닫고 스레드로.
             if vm.keyChangeWarning == nil && vm.error == nil { onDone() }
         }
+    }
+}
+
+// MARK: - 설정 (수신 정책 · 차단 · 지문)
+
+private struct DMSettingsView: View {
+    @ObservedObject var vm: DMViewModel
+    let onDone: () -> Void
+
+    private let options: [(String, String)] = [
+        ("anyone", "아무나"), ("guild", "같은 길드만"), ("none", "안 받음"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("쪽지 설정").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button("닫기") { onDone() }.font(.system(size: 11))
+            }
+
+            // 수신 정책
+            Text("쪽지 받기").font(.system(size: 12, weight: .semibold))
+            Picker("", selection: Binding(
+                get: { vm.allowFrom },
+                set: { v in Task { await vm.setAllowFrom(v) } })
+            ) {
+                ForEach(options, id: \.0) { Text($0.1).tag($0.0) }
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            Text("‘안 받음’이어도 이미 주고받던 스레드는 유지돼요.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+
+            Divider()
+
+            // 차단 목록
+            Text("차단 목록").font(.system(size: 12, weight: .semibold))
+            if vm.blocked.isEmpty {
+                Text("차단한 사용자가 없어요").font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                ForEach(vm.blocked) { b in
+                    HStack(spacing: 6) {
+                        Image(systemName: "hand.raised.fill").font(.system(size: 10)).foregroundStyle(.orange)
+                        Text(b.nickname ?? "(알 수 없음)").font(.system(size: 12)).lineLimit(1)
+                        Spacer()
+                        Button("차단 해제") { Task { await vm.unblock(device: b.device) } }
+                            .font(.system(size: 10)).controlSize(.small)
+                    }
+                }
+            }
+
+            Divider()
+
+            // 내 안전 지문
+            Text("내 안전 지문").font(.system(size: 12, weight: .semibold))
+            Text(vm.myFingerprint)
+                .font(.system(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.gray.opacity(0.1)))
+            Text("상대와 직접 만나 지문을 맞춰보면 중간자 공격을 잡아낼 수 있어요.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let error = vm.error {
+                Text(error).font(.system(size: 11)).foregroundStyle(.red)
+            }
+        }
+        .padding(16).frame(width: 320)
+        .onAppear { Task { await vm.loadSettings() } }
     }
 }

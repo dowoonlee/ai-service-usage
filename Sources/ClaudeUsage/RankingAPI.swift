@@ -1091,6 +1091,26 @@ actor RankingAPI {
     struct DMReadRequest: Encodable { let payload: DMReadPayload; let signature: String }
     struct DMOkResponse: Decodable, Sendable { let ok: Bool }
 
+    /// 수신 정책 + 차단 (dm-settings). 모든 액션이 갱신 후 현재 상태를 돌려준다.
+    struct DMBlockedPeer: Decodable, Sendable, Identifiable {
+        let device: String
+        let nickname: String?
+        var id: String { device }
+    }
+    struct DMSettingsResponse: Decodable, Sendable {
+        let allowFrom: String            // anyone | guild | none
+        let blocked: [DMBlockedPeer]
+    }
+    struct DMSettingsPayload: Encodable {
+        let action: String
+        let deviceId: String
+        let allowFrom: String?
+        let targetNickname: String?
+        let targetDevice: String?
+        let ts: Int64
+    }
+    struct DMSettingsRequest: Encodable { let payload: DMSettingsPayload; let signature: String }
+
     private func nowTs() -> Int64 { Int64(Date().timeIntervalSince1970) }
 
     /// 내 신원 공개키 게시(신규/rotate).
@@ -1142,6 +1162,41 @@ actor RankingAPI {
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let _: DMOkResponse = try await post(path: "dm-read",
                                              body: DMReadRequest(payload: payload, signature: sig))
+    }
+
+    // MARK: - 수신 정책 · 차단 (dm-settings)
+
+    private func dmSettingsAction(action: String, deviceId: String, hmacKeyBase64: String,
+                                  allowFrom: String? = nil, targetNickname: String? = nil,
+                                  targetDevice: String? = nil) async throws -> DMSettingsResponse {
+        let payload = DMSettingsPayload(action: action, deviceId: deviceId, allowFrom: allowFrom,
+                                        targetNickname: targetNickname, targetDevice: targetDevice,
+                                        ts: nowTs())
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "dm-settings",
+                              body: DMSettingsRequest(payload: payload, signature: sig))
+    }
+
+    func dmGetSettings(deviceId: String, hmacKeyBase64: String) async throws -> DMSettingsResponse {
+        try await dmSettingsAction(action: "get", deviceId: deviceId, hmacKeyBase64: hmacKeyBase64)
+    }
+    @discardableResult
+    func dmSetAllowFrom(deviceId: String, allowFrom: String,
+                        hmacKeyBase64: String) async throws -> DMSettingsResponse {
+        try await dmSettingsAction(action: "set", deviceId: deviceId,
+                                   hmacKeyBase64: hmacKeyBase64, allowFrom: allowFrom)
+    }
+    @discardableResult
+    func dmBlock(deviceId: String, targetNickname: String,
+                 hmacKeyBase64: String) async throws -> DMSettingsResponse {
+        try await dmSettingsAction(action: "block", deviceId: deviceId,
+                                   hmacKeyBase64: hmacKeyBase64, targetNickname: targetNickname)
+    }
+    @discardableResult
+    func dmUnblock(deviceId: String, targetDevice: String,
+                   hmacKeyBase64: String) async throws -> DMSettingsResponse {
+        try await dmSettingsAction(action: "unblock", deviceId: deviceId,
+                                   hmacKeyBase64: hmacKeyBase64, targetDevice: targetDevice)
     }
 
     /// 계정 영구 삭제. 서버측 row + submissions 로그 모두 제거.
