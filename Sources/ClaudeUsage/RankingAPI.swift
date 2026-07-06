@@ -1032,6 +1032,118 @@ actor RankingAPI {
         return try await get(path: "guild-leaderboard", queryItems: items.isEmpty ? nil : items)
     }
 
+    // MARK: - DM (쪽지, E2EE)
+
+    /// 스레드 요약 (dm-inbox). 본문은 ciphertext — 클라가 복호(수신분)/로컬 echo(발신분)로 미리보기.
+    struct DMThread: Decodable, Sendable, Identifiable {
+        let peerDevice: String
+        let peerNickname: String?
+        let peerIdPub: String?
+        let lastId: String
+        let lastCiphertext: String
+        let lastSenderIdPub: String
+        let lastFromMe: Bool
+        let lastAt: Date
+        let unreadCount: Int
+        var id: String { peerDevice }
+    }
+    struct DMInboxResponse: Decodable, Sendable { let threads: [DMThread] }
+
+    /// 스레드 한 메시지 (dm-thread). fromMe면 로컬 echo, 아니면 HPKE 복호.
+    struct DMMessage: Decodable, Sendable, Identifiable {
+        let id: String
+        let fromMe: Bool
+        let ciphertext: String
+        let senderIdPub: String
+        let createdAt: Date
+        let readAt: Date?
+    }
+    struct DMThreadResponse: Decodable, Sendable {
+        let peerNickname: String?
+        let messages: [DMMessage]
+    }
+    struct DMKeyResponse: Decodable, Sendable { let deviceId: String; let x25519Pub: String }
+    struct DMSendResponse: Decodable, Sendable { let id: String; let createdAt: Date }
+
+    struct DMKeysPayload: Encodable {
+        let action: String
+        let deviceId: String
+        let x25519Pub: String?
+        let targetNickname: String?
+        let ts: Int64
+    }
+    struct DMKeysRequest: Encodable { let payload: DMKeysPayload; let signature: String }
+    struct DMSendPayload: Encodable {
+        let deviceId: String
+        let targetNickname: String
+        let ciphertext: String
+        let senderIdPub: String
+        let ts: Int64
+    }
+    struct DMSendRequest: Encodable { let payload: DMSendPayload; let signature: String }
+    struct DMInboxPayload: Encodable { let deviceId: String; let ts: Int64 }
+    struct DMInboxRequest: Encodable { let payload: DMInboxPayload; let signature: String }
+    struct DMThreadPayload: Encodable { let deviceId: String; let peerDevice: String; let ts: Int64 }
+    struct DMThreadRequest: Encodable { let payload: DMThreadPayload; let signature: String }
+    struct DMReadPayload: Encodable {
+        let deviceId: String; let peerDevice: String; let upToTs: Int64; let ts: Int64
+    }
+    struct DMReadRequest: Encodable { let payload: DMReadPayload; let signature: String }
+    struct DMOkResponse: Decodable, Sendable { let ok: Bool }
+
+    private func nowTs() -> Int64 { Int64(Date().timeIntervalSince1970) }
+
+    /// 내 신원 공개키 게시(신규/rotate).
+    func dmPublishKey(deviceId: String, x25519Pub: String, hmacKeyBase64: String) async throws {
+        let payload = DMKeysPayload(action: "publish", deviceId: deviceId, x25519Pub: x25519Pub,
+                                    targetNickname: nil, ts: nowTs())
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let _: DMOkResponse = try await post(path: "dm-keys",
+                                             body: DMKeysRequest(payload: payload, signature: sig))
+    }
+
+    /// 상대 공개키 조회 (닉네임). 미게시면 `.guildConflict("no_key")` throw.
+    func dmFetchKey(deviceId: String, targetNickname: String,
+                    hmacKeyBase64: String) async throws -> DMKeyResponse {
+        let payload = DMKeysPayload(action: "fetch", deviceId: deviceId, x25519Pub: nil,
+                                    targetNickname: targetNickname, ts: nowTs())
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "dm-keys", body: DMKeysRequest(payload: payload, signature: sig))
+    }
+
+    /// 암호문 발신. 반려는 `.guildConflict("cannot_send")` 등.
+    @discardableResult
+    func dmSend(deviceId: String, targetNickname: String, ciphertext: String, senderIdPub: String,
+                hmacKeyBase64: String) async throws -> DMSendResponse {
+        let payload = DMSendPayload(deviceId: deviceId, targetNickname: targetNickname,
+                                    ciphertext: ciphertext, senderIdPub: senderIdPub, ts: nowTs())
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "dm-send", body: DMSendRequest(payload: payload, signature: sig))
+    }
+
+    func dmInbox(deviceId: String, hmacKeyBase64: String) async throws -> [DMThread] {
+        let payload = DMInboxPayload(deviceId: deviceId, ts: nowTs())
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let resp: DMInboxResponse = try await post(path: "dm-inbox",
+                                                   body: DMInboxRequest(payload: payload, signature: sig))
+        return resp.threads
+    }
+
+    func dmThread(deviceId: String, peerDevice: String,
+                  hmacKeyBase64: String) async throws -> DMThreadResponse {
+        let payload = DMThreadPayload(deviceId: deviceId, peerDevice: peerDevice, ts: nowTs())
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "dm-thread", body: DMThreadRequest(payload: payload, signature: sig))
+    }
+
+    func dmRead(deviceId: String, peerDevice: String, upToTs: Int64,
+                hmacKeyBase64: String) async throws {
+        let payload = DMReadPayload(deviceId: deviceId, peerDevice: peerDevice, upToTs: upToTs, ts: nowTs())
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let _: DMOkResponse = try await post(path: "dm-read",
+                                             body: DMReadRequest(payload: payload, signature: sig))
+    }
+
     /// 계정 영구 삭제. 서버측 row + submissions 로그 모두 제거.
     func deleteAccount(deviceId: String, hmacKeyBase64: String) async throws {
         let payload = SubmitPayload(deviceId: deviceId, delta: 0, prevTotal: 0,

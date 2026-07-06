@@ -229,6 +229,7 @@ fileprivate func sectionHeader(
 struct MainView: View {
     @ObservedObject var vm: ViewModel
     @ObservedObject var settings = Settings.shared
+    @ObservedObject var dm = DMViewModel.shared
     var onLogin: () -> Void
     var onSettings: () -> Void
     var onContributors: () -> Void
@@ -312,9 +313,31 @@ struct MainView: View {
                     ProgressView().controlSize(.mini)
                 }
             }
-            // 2줄 — 액션 버튼(게시판 · 운세) · 메뉴 우측 정렬
+            // 2줄 — 액션 버튼(쪽지 · 게시판 · 운세) · 메뉴 우측 정렬
             HStack(spacing: 12) {
                 Spacer()
+                // 쪽지 진입 — 미확인 수가 우상단 빨간 배지.
+                Button {
+                    DMWindowController.shared.present()
+                } label: {
+                    Image(systemName: "envelope.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.teal)
+                        .overlay(alignment: .topTrailing) {
+                            if dm.totalUnread > 0 {
+                                Text("\(min(dm.totalUnread, 99))")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 3)
+                                    .padding(.vertical, 1)
+                                    .background(Color.red)
+                                    .clipShape(Capsule())
+                                    .offset(x: 6, y: -4)
+                            }
+                        }
+                }
+                .buttonStyle(.borderless)
+                .help(dm.totalUnread > 0 ? "쪽지 (미확인 \(dm.totalUnread)개)" : "쪽지 열기")
                 // 게시판 진입 — 미확인 글 수가 우상단 빨간 배지로 표시.
                 Button {
                     BoardWindowController.shared.present()
