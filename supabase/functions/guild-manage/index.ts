@@ -14,7 +14,12 @@ import { isValidUUID } from "../_shared/validation.ts";
 import {
   generateInviteCode,
   JOIN_COOLDOWN_SEC,
-  OFFICE_SLOT_COUNT,
+  FURNITURE_KIND_COUNT,
+  FURNITURE_WALL_KINDS,
+  FURNITURE_TEXT_KINDS,
+  FURNITURE_WALL_LANE,
+  FURNITURE_MAX_INSTANCES,
+  FURNITURE_TEXT_MAX,
 } from "../_shared/guild_policy.ts";
 
 type ManageAction = "kick" | "rotate_code" | "disband" | "set_furniture";
@@ -23,7 +28,7 @@ interface ManagePayload {
   action: ManageAction;
   deviceId: string;
   targetDeviceId: string; // kick 외에는 ""
-  // set_furniture 전용 — "setId:x:lane;…" (가구 자유 배치 좌표 직렬화).
+  // set_furniture 전용 — "kind:x:lane[:text];…" (보유 가구 인스턴스 직렬화, text는 percent-encoding).
   layout?: string;
   ts: number;
 }
@@ -58,27 +63,54 @@ Deno.serve(async (req: Request) => {
   if (p.action === "kick" && !isValidUUID(p.targetDeviceId)) {
     return errorResponse(400, "invalid_target");
   }
-  // set_furniture: "setId:x:lane;…" 검증 — 세트 id 0..N-1 유니크, x/lane 씬 범위 내.
-  // 좌표는 클라 논리 좌표(씬 280×150, 레인 0..2). 서버는 형식·범위만 권위 검증.
+  // set_furniture: "kind:x:lane[:text];…" 검증 — 카탈로그 kind 범위, 벽/바닥 lane 정합,
+  // 인스턴스 수 상한, 액자 문구 percent-encoding + 길이 캡. kind 중복 허용 (동종 다수 구매).
+  // 좌표는 클라 논리 좌표(씬 280×150, 바닥 레인 0..2, 벽 3). 서버는 형식·범위만 권위 검증.
   if (p.action === "set_furniture") {
-    if (typeof p.layout !== "string" || p.layout.length > 600) {
+    if (typeof p.layout !== "string" || p.layout.length > 1500) {
       return errorResponse(400, "invalid_layout");
     }
     const entries = p.layout.length === 0 ? [] : p.layout.split(";");
-    const seen = new Set<number>();
+    if (entries.length > FURNITURE_MAX_INSTANCES) {
+      return errorResponse(400, "invalid_layout");
+    }
     for (const e of entries) {
-      const parts = e.split(":").map((v) => Number(v));
-      const [setId, x, lane] = parts;
+      const parts = e.split(":");
+      if (parts.length !== 3 && parts.length !== 4) {
+        return errorResponse(400, "invalid_layout");
+      }
+      const kind = Number(parts[0]);
+      const x = Number(parts[1]);
+      const lane = Number(parts[2]);
       if (
-        parts.length !== 3 || parts.some((n) => !Number.isFinite(n)) ||
-        !Number.isInteger(setId) || setId < 0 || setId >= OFFICE_SLOT_COUNT ||
-        seen.has(setId) ||
-        x < 0 || x > 280 ||
-        !Number.isInteger(lane) || lane < 0 || lane > 2
+        !Number.isInteger(kind) || kind < 0 || kind >= FURNITURE_KIND_COUNT ||
+        !Number.isFinite(x) || x < 0 || x > 280 ||
+        !Number.isInteger(lane) ||
+        (FURNITURE_WALL_KINDS.has(kind)
+          ? lane !== FURNITURE_WALL_LANE
+          : lane < 0 || lane > 2)
       ) {
         return errorResponse(400, "invalid_layout");
       }
-      seen.add(setId);
+      if (parts.length === 4) {
+        if (!FURNITURE_TEXT_KINDS.has(kind) || parts[3].length > 120) {
+          return errorResponse(400, "invalid_layout");
+        }
+        let text: string;
+        try {
+          text = decodeURIComponent(parts[3]);
+        } catch {
+          return errorResponse(400, "invalid_layout");
+        }
+        // 클라는 grapheme 10자 캡 — 이모지 ZWJ 시퀀스는 code point가 더 많으므로
+        // 서버는 ×2 여유로 검증 (형식 방어가 목적, 정확한 글자 수는 클라 UX 책임).
+        if (
+          text.length === 0 || [...text].length > FURNITURE_TEXT_MAX * 2 ||
+          /[\x00-\x1f\x7f;:]/.test(text)
+        ) {
+          return errorResponse(400, "invalid_layout");
+        }
+      }
     }
   }
   if (typeof body.signature !== "string" || body.signature.length !== 64) {
