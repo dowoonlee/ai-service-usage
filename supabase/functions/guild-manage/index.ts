@@ -63,9 +63,11 @@ Deno.serve(async (req: Request) => {
   if (p.action === "kick" && !isValidUUID(p.targetDeviceId)) {
     return errorResponse(400, "invalid_target");
   }
-  // set_furniture: "kind:x:lane[:text];…" 검증 — 카탈로그 kind 범위, 벽/바닥 lane 정합,
-  // 인스턴스 수 상한, 액자 문구 percent-encoding + 길이 캡. kind 중복 허용 (동종 다수 구매).
+  // set_furniture: "kind:x:lane[:y[:text]];…" 검증 — 카탈로그 kind 범위, 벽/바닥 lane 정합,
+  // 벽 가구 자유 y(4번째 필드), 액자 문구(5번째, percent-encoding). kind 중복 허용.
   // 좌표는 클라 논리 좌표(씬 280×150, 바닥 레인 0..2, 벽 3). 서버는 형식·범위만 권위 검증.
+  // 추가 필드(y·text)는 위치 대신 "숫자면 좌표, 아니면 문구"로 관대하게 판정 (레거시 4필드
+  // text와 신형 4필드 y를 모두 수용). 문구는 TEXT_KIND 한정 + 길이/제어문자 방어.
   if (p.action === "set_furniture") {
     if (typeof p.layout !== "string" || p.layout.length > 1500) {
       return errorResponse(400, "invalid_layout");
@@ -76,7 +78,7 @@ Deno.serve(async (req: Request) => {
     }
     for (const e of entries) {
       const parts = e.split(":");
-      if (parts.length !== 3 && parts.length !== 4) {
+      if (parts.length < 3 || parts.length > 5) {
         return errorResponse(400, "invalid_layout");
       }
       const kind = Number(parts[0]);
@@ -92,13 +94,21 @@ Deno.serve(async (req: Request) => {
       ) {
         return errorResponse(400, "invalid_layout");
       }
-      if (parts.length === 4) {
-        if (!FURNITURE_TEXT_KINDS.has(kind) || parts[3].length > 120) {
+      // 추가 필드 4·5: 숫자면 좌표(y), 비숫자면 문구.
+      for (const field of parts.slice(3)) {
+        if (field.length === 0) continue;
+        const asNum = Number(field);
+        if (Number.isFinite(asNum)) {
+          if (asNum < 0 || asNum > 150) return errorResponse(400, "invalid_layout"); // 씬 y 범위
+          continue;
+        }
+        // 문구 — 액자 등 TEXT_KIND 한정.
+        if (!FURNITURE_TEXT_KINDS.has(kind) || field.length > 120) {
           return errorResponse(400, "invalid_layout");
         }
         let text: string;
         try {
-          text = decodeURIComponent(parts[3]);
+          text = decodeURIComponent(field);
         } catch {
           return errorResponse(400, "invalid_layout");
         }
