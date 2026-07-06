@@ -211,8 +211,13 @@ struct GuildView: View {
                 Button {
                     confirmingPermitPurchase = true
                 } label: {
-                    Label("생성권 구매 · 🪙 \(CoinLedger.guildPermitCost)", systemImage: "ticket.fill")
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 4) {
+                        Image(systemName: "ticket.fill")
+                        Text("생성권 구매 ·")
+                        CoinIcon(size: 12)
+                        Text("\(CoinLedger.guildPermitCost)")
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .disabled(settings.coins < CoinLedger.guildPermitCost || actionBusy)
                 if settings.coins < CoinLedger.guildPermitCost {
@@ -334,10 +339,15 @@ struct GuildView: View {
                     .font(.system(size: 11))
                     .disabled(actionBusy)
                 }
-                Button("🪙 사무실 상점") {
+                Button {
                     // 길드장은 재배치 모드와 함께 열어 구매 직후 바로 드래그 배치 가능.
                     if info.guild.isLeader { rearrangeMode = true }
                     purchaseSheetOpen = true
+                } label: {
+                    HStack(spacing: 4) {
+                        CoinIcon(size: 12)
+                        Text("사무실 상점")
+                    }
                 }
                 .font(.system(size: 11))
                 .disabled(actionBusy)

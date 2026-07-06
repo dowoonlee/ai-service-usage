@@ -695,10 +695,11 @@ private struct OfficeShopSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 4) {
                 Text("사무실 상점").font(.system(size: 12, weight: .semibold))
                 Spacer()
-                Text("🪙 \(settings.coins)")
+                CoinIcon(size: 12)
+                Text("\(settings.coins)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(AppColors.gold)
             }
@@ -896,7 +897,7 @@ private struct OfficeShopSheet: View {
                 onApplyTheme()
             }
         } else {
-            Text("스와치를 누르면 씬에 미리보기가 적용됩니다 (항목당 🪙\(OfficeLayout.themePrice))")
+            Text("스와치를 누르면 씬에 미리보기가 적용됩니다 (항목당 \(OfficeLayout.themePrice)코인)")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -926,10 +927,15 @@ private struct OfficeShopSheet: View {
                 Spacer()
                 Button("취소", action: cancel)
                     .font(.system(size: 11)).controlSize(.small)
-                Button("🪙 \(price) 구매", action: buy)
-                    .font(.system(size: 11)).controlSize(.small)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(settings.coins < price)
+                Button(action: buy) {
+                    HStack(spacing: 3) {
+                        CoinIcon(size: 11)
+                        Text("\(price) 구매")
+                    }
+                }
+                .font(.system(size: 11)).controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .disabled(settings.coins < price)
             }
         }
     }
@@ -941,9 +947,12 @@ private struct OfficeShopSheet: View {
     }
 
     private func priceTag(_ price: Int, affordable: Bool) -> some View {
-        Text("🪙 \(price)")
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(affordable ? AppColors.gold : .secondary)
+        HStack(spacing: 3) {
+            CoinIcon(size: 11)
+            Text("\(price)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(affordable ? AppColors.gold : .secondary)
+        }
     }
 
     private var footer: some View {
