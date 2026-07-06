@@ -14,6 +14,9 @@ import { isValidUUID } from "../_shared/validation.ts";
 import {
   generateInviteCode,
   JOIN_COOLDOWN_SEC,
+  INVITE_EXPIRE_SEC,
+  INVITE_REDECLINE_COOLDOWN_SEC,
+  INVITE_MAX_PENDING_PER_GUILD,
   FURNITURE_KIND_COUNT,
   FURNITURE_WALL_KINDS,
   FURNITURE_TEXT_KINDS,
@@ -22,7 +25,11 @@ import {
   FURNITURE_TEXT_MAX,
 } from "../_shared/guild_policy.ts";
 
-type ManageAction = "kick" | "rotate_code" | "disband" | "set_furniture";
+type ManageAction =
+  | "kick" | "rotate_code" | "disband" | "set_furniture" | "invite" | "cancel_invite";
+const MANAGE_ACTIONS: ReadonlySet<string> = new Set([
+  "kick", "rotate_code", "disband", "set_furniture", "invite", "cancel_invite",
+]);
 
 interface ManagePayload {
   action: ManageAction;
@@ -30,6 +37,10 @@ interface ManagePayload {
   targetDeviceId: string; // kick 외에는 ""
   // set_furniture 전용 — "kind:x:lane[:text];…" (보유 가구 인스턴스 직렬화, text는 percent-encoding).
   layout?: string;
+  // invite 전용 — 초대할 상대의 닉네임 (서버가 device로 해석).
+  targetNickname?: string;
+  // cancel_invite 전용 — 취소할 초대 id (UUID).
+  inviteId?: string;
   ts: number;
 }
 interface ManageRequest {
@@ -53,15 +64,20 @@ Deno.serve(async (req: Request) => {
   const p = body.payload;
   if (!p || typeof p !== "object") return errorResponse(400, "missing_payload");
   if (!isValidUUID(p.deviceId)) return errorResponse(400, "invalid_device_id");
-  if (
-    p.action !== "kick" && p.action !== "rotate_code" && p.action !== "disband" &&
-    p.action !== "set_furniture"
-  ) {
-    return errorResponse(400, "invalid_action");
-  }
+  if (!MANAGE_ACTIONS.has(p.action)) return errorResponse(400, "invalid_action");
   if (typeof p.targetDeviceId !== "string") return errorResponse(400, "invalid_target");
   if (p.action === "kick" && !isValidUUID(p.targetDeviceId)) {
     return errorResponse(400, "invalid_target");
+  }
+  // invite: 닉네임 형식(3..24, 제어문자 금지). cancel_invite: inviteId UUID.
+  if (p.action === "invite") {
+    const n = p.targetNickname;
+    if (typeof n !== "string" || n.length < 3 || n.length > 24 || /[\x00-\x1f\x7f]/.test(n)) {
+      return errorResponse(400, "invalid_nickname");
+    }
+  }
+  if (p.action === "cancel_invite" && !isValidUUID(p.inviteId ?? "")) {
+    return errorResponse(400, "invalid_invite_id");
   }
   // set_furniture: "kind:x:lane[:y[:text]];…" 검증 — 카탈로그 kind 범위, 벽/바닥 lane 정합,
   // 벽 가구 자유 y(4번째 필드), 액자 문구(5번째, percent-encoding). kind 중복 허용.
@@ -152,6 +168,9 @@ Deno.serve(async (req: Request) => {
     ts: p.ts,
   };
   if (typeof p.layout === "string") verifyObj.layout = p.layout;
+  // 클라이언트가 액션별로만 키를 직렬화 → canonical 재현도 동일 조건(present-only).
+  if (typeof p.targetNickname === "string") verifyObj.targetNickname = p.targetNickname;
+  if (typeof p.inviteId === "string") verifyObj.inviteId = p.inviteId;
   const ok = await verifyHmac(verifyObj, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
@@ -224,6 +243,95 @@ Deno.serve(async (req: Request) => {
       if (delErr) {
         console.error("guild disband failed", delErr);
         return errorResponse(500, "disband_failed");
+      }
+      return jsonResponse({ ok: true });
+    }
+
+    case "invite": {
+      // 닉네임 → 피초대자 device 해석 (case-insensitive).
+      const nickNorm = p.targetNickname!.trim().toLowerCase();
+      const { data: invitee } = await db
+        .from("users")
+        .select("device_id, status")
+        .eq("nickname_normalized", nickNorm)
+        .maybeSingle();
+      // 프라이버시 — 존재/소속/쿨다운 여부를 구분해 노출하지 않고 하나로 뭉갠다.
+      if (!invitee || invitee.status === "banned") return errorResponse(404, "cannot_invite");
+      if (invitee.device_id === deviceId) return errorResponse(400, "cannot_invite_self");
+
+      // 이미 어떤 길드에 소속?
+      const { data: existingMember } = await db
+        .from("guild_members")
+        .select("device_id")
+        .eq("device_id", invitee.device_id)
+        .maybeSingle();
+      if (existingMember) return errorResponse(409, "cannot_invite");
+
+      // 재가입 쿨다운(탈퇴/추방 7일) 중이면 초대 불가.
+      const { data: cd } = await db
+        .from("guild_join_cooldowns")
+        .select("until")
+        .eq("device_id", invitee.device_id)
+        .maybeSingle();
+      if (cd && new Date(cd.until).getTime() > Date.now()) {
+        return errorResponse(409, "cannot_invite");
+      }
+
+      // 거절 재초대 쿨다운 — 이 길드가 이 유저에게 최근 거절당했으면 24h 대기.
+      const reInviteFloor = new Date(Date.now() - INVITE_REDECLINE_COOLDOWN_SEC * 1000).toISOString();
+      const { data: recentDecline } = await db
+        .from("guild_invites")
+        .select("id")
+        .eq("guild_id", guild.id)
+        .eq("invitee_device_id", invitee.device_id)
+        .eq("status", "declined")
+        .gt("responded_at", reInviteFloor)
+        .limit(1)
+        .maybeSingle();
+      if (recentDecline) return errorResponse(429, "redecline_cooldown");
+
+      // 길드당 대기중 초대 상한 (스팸 방지).
+      const { count: pendingCount } = await db
+        .from("guild_invites")
+        .select("id", { count: "exact", head: true })
+        .eq("guild_id", guild.id)
+        .eq("status", "pending");
+      if ((pendingCount ?? 0) >= INVITE_MAX_PENDING_PER_GUILD) {
+        return errorResponse(429, "too_many_pending");
+      }
+
+      const expiresAt = new Date(Date.now() + INVITE_EXPIRE_SEC * 1000).toISOString();
+      const { error: insErr } = await db.from("guild_invites").insert({
+        guild_id: guild.id,
+        invitee_device_id: invitee.device_id,
+        inviter_device_id: deviceId,
+        expires_at: expiresAt,
+      });
+      if (insErr) {
+        if (insErr.code === "23505") return errorResponse(409, "already_invited"); // pending 중복
+        console.error("guild invite insert failed", insErr);
+        return errorResponse(500, "invite_failed");
+      }
+      return jsonResponse({ ok: true });
+    }
+
+    case "cancel_invite": {
+      // 내 길드의 대기중 초대만 취소 가능.
+      const { data: inv } = await db
+        .from("guild_invites")
+        .select("id, guild_id, status")
+        .eq("id", p.inviteId!)
+        .maybeSingle();
+      if (!inv || inv.guild_id !== guild.id || inv.status !== "pending") {
+        return errorResponse(404, "invite_not_found");
+      }
+      const { error: updErr } = await db
+        .from("guild_invites")
+        .update({ status: "cancelled", responded_at: new Date().toISOString() })
+        .eq("id", inv.id);
+      if (updErr) {
+        console.error("guild cancel_invite failed", updErr);
+        return errorResponse(500, "cancel_failed");
       }
       return jsonResponse({ ok: true });
     }

@@ -141,6 +141,28 @@ Deno.serve(async (req: Request) => {
     .select("slot_id, item_kind, purchased_at, users(nickname)")
     .eq("guild_id", guild.id);
 
+  // 길드장에게만 — 보낸 대기중 초대(취소 UI용). 피초대자 닉네임 embed.
+  let sentInvites: Array<{
+    inviteId: string;
+    nickname: string | null;
+    expiresAt: string;
+  }> = [];
+  if (isLeader) {
+    // invitee_device_id만 users로의 FK라 embed는 유일 관계로 해석됨 (inviter_device_id는 FK 없음).
+    const { data: inviteRows } = await db
+      .from("guild_invites")
+      .select("id, expires_at, users(nickname)")
+      .eq("guild_id", guild.id)
+      .eq("status", "pending")
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false });
+    sentInvites = (inviteRows ?? []).map((r) => ({
+      inviteId: r.id,
+      nickname: (r.users as unknown as { nickname: string } | null)?.nickname ?? null,
+      expiresAt: r.expires_at,
+    }));
+  }
+
   return jsonResponse({
     guild: {
       id: guild.id,
@@ -163,5 +185,6 @@ Deno.serve(async (req: Request) => {
       itemKind: f.item_kind,
       donorNickname: (f.users as unknown as { nickname: string } | null)?.nickname ?? null,
     })),
+    sentInvites,   // 길드장만 채워짐 (그 외 빈 배열)
   });
 });
