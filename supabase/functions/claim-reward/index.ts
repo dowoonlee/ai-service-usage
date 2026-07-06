@@ -19,6 +19,10 @@ interface ClaimRequest {
   // rewardType은 서명 페이로드 밖 — coins/rp 라우팅용. 서명은 {deviceId,period,rank,ts}로 불변이라
   // 기존 클라(coins claim)와 호환된다. period/rank가 이미 서명돼 자기 보상만 수령 가능하므로 평문 OK.
   rewardType?: "coins" | "rp";
+  // rp 원장 내 트랙 구분 (P2a) — 같은 period·rank에 개인(monthly)과 길드(guild-monthly) 보상이
+  // 공존할 수 있어 라우팅이 필요. 서명 밖 평문 — 자기 row만 수령 가능하므로 rewardType과 동일 논리.
+  // 구클라는 미전송 → 아래에서 "매칭 row 중 첫 미수령"을 수령 (둘 다 같은 RP 원장이라 총액 보존).
+  periodType?: string;
 }
 
 const MAX_CLOCK_SKEW_SEC = 3600;
@@ -78,16 +82,22 @@ Deno.serve(async (req: Request) => {
   );
   if (!ok) return errorResponse(401, "bad_signature");
 
-  // RP 보상 — rp_rewards 원장 (coins의 monthly_winners와 다른 테이블·컬럼). period 형식이 월/주를 함의.
+  // RP 보상 — rp_rewards 원장 (coins의 monthly_winners와 다른 테이블·컬럼).
+  // 같은 (period, rank)에 개인·길드 트랙 row가 공존할 수 있어 단건 조회 대신 목록으로 받아
+  // periodType 우선 매칭 → 첫 미수령 순으로 고른다 (구클라 호환 — §ClaimRequest 주석).
   if (rewardType === "rp") {
-    const { data: row } = await db
+    let query = db
       .from("rp_rewards")
-      .select("id, rp_amount, claimed_at")
+      .select("id, rp_amount, claimed_at, period_type")
       .eq("device_id", p.deviceId)
       .eq("period", p.period)
-      .eq("rank", p.rank)
-      .maybeSingle();
-    if (!row) return errorResponse(404, "no_pending_reward");
+      .eq("rank", p.rank);
+    if (typeof body.periodType === "string" && body.periodType.length > 0) {
+      query = query.eq("period_type", body.periodType);
+    }
+    const { data: rows } = await query;
+    if (!rows || rows.length === 0) return errorResponse(404, "no_pending_reward");
+    const row = rows.find((r) => !r.claimed_at) ?? rows[0];
     if (row.claimed_at) {
       return jsonResponse({ alreadyClaimed: true, rewardType: "rp", rp: row.rp_amount, claimedAt: row.claimed_at });
     }

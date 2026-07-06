@@ -5,35 +5,11 @@
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+// profile_json.backup 누출 방지 SSOT — profileJson을 응답에 싣는 모든 endpoint가 경유.
+// (과거 이 파일의 로컬 함수였으나 guild-info도 쓰게 되어 _shared로 이동. 정책 주석은 profile.ts 참조.)
+import { stripBackup } from "../_shared/profile.ts";
 
 const TOP_N = 100;
-
-// =========================================================================
-// SSOT: profile_json.backup 누출 방지.
-// `BackupPayload` (ProfileState.swift) 는 본인 디바이스 복구 전용 페이로드이며
-// 다른 사용자에게는 절대 노출되면 안 된다. 보드 응답으로 새는 일을 막는 단일
-// 차단 지점이 이 함수다.
-//
-// 호출 의무:
-//   - leaderboard entries[].profileJson         (line ~84)
-//   - previousMonth.entries[].profileJson       (line ~108)
-//   - profileJson 을 응답에 싣는 새 endpoint 가 추가되면 반드시 stripBackup 경유
-//
-// 새 백업 필드 추가 시 점검:
-//   - ProfileState.BackupPayload 에 필드 추가
-//   - Settings.applyBackup 머지 정책 정의
-//   - 본 함수는 키 화이트리스트 방식이 아니라 "backup" 키 자체를 통째로 drop
-//     하므로 백업 페이로드 내부 필드 추가는 본 함수 수정 불필요. 단, 백업이
-//     아닌 새 민감 필드를 ProfileState 에 직접 추가한다면 키 화이트리스트
-//     방식으로 전환 검토.
-// =========================================================================
-function stripBackup(pj: unknown): unknown {
-  if (pj && typeof pj === "object" && pj !== null && "backup" in pj) {
-    const { backup: _drop, ...rest } = pj as Record<string, unknown>;
-    return rest;
-  }
-  return pj;
-}
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
