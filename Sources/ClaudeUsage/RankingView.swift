@@ -362,6 +362,8 @@ private struct LeaderboardRowView: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.purple)
                 .frame(width: 84, alignment: .trailing)
+            messageButton
+                .frame(width: 22)
         }
         .padding(.vertical, 2)
         .padding(.horizontal, 4)
@@ -393,6 +395,25 @@ private struct LeaderboardRowView: View {
                 }
                 .padding(12)
             }
+        }
+    }
+
+    /// 쪽지 보내기 — 본인 행 제외, 랭킹 참여자만. 상대가 아직 쪽지를 시작 안 했으면
+    /// 전송 시 "상대가 아직 쪽지를 시작하지 않았어요" 안내(작성 시트에서 처리).
+    @ViewBuilder
+    private var messageButton: some View {
+        if !isMe && RankingAPI.isConfigured && Settings.shared.rankingRegistered {
+            Button {
+                DMWindowController.shared.present(composeTo: entry.nickname)
+            } label: {
+                Image(systemName: "envelope")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.teal)
+            }
+            .buttonStyle(.borderless)
+            .help("\(entry.nickname)님에게 쪽지")
+        } else {
+            Color.clear
         }
     }
 

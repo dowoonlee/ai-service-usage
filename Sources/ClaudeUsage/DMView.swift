@@ -20,6 +20,8 @@ final class DMViewModel: ObservableObject {
     @Published var openPeerNickname: String?
     /// 작성 중 상대 키 변경 경고(닉네임).
     @Published var keyChangeWarning: String?
+    /// 외부(랭킹/멤버 목록)의 "쪽지 보내기" 진입 시 작성 시트를 미리 채울 닉네임.
+    @Published var pendingComposeNickname: String?
     /// 받은 길드 초대 (통합 인박스 카드). 서버 평문 — 쪽지와 달리 암호화 대상 아님.
     @Published var invites: [RankingAPI.GuildReceivedInvite] = []
     /// 수신 정책(anyone/guild/none) · 차단 목록 (dm-settings).
@@ -165,6 +167,9 @@ final class DMViewModel: ObservableObject {
     }
 
     func closeThread() { openPeer = nil; openMessages = []; openPeerNickname = nil }
+
+    /// 특정 닉네임으로 새 쪽지 작성 시작 (전용 창의 작성 시트가 이 값을 소비).
+    func startCompose(to nickname: String) { pendingComposeNickname = nickname }
 
     /// 새 스레드/답장 발신. trustChangedKey=true면 키 변경 경고를 무시하고 새 키로 고정 후 전송.
     func send(toNickname nickname: String, text: String, trustChangedKey: Bool = false) async {
@@ -341,6 +346,12 @@ final class DMWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
         Task { await DMViewModel.shared.refreshInbox() }
     }
+
+    /// 특정 닉네임에게 바로 쪽지 작성 (랭킹/멤버 목록의 "쪽지 보내기").
+    func present(composeTo nickname: String) {
+        DMViewModel.shared.startCompose(to: nickname)
+        present()
+    }
 }
 
 // MARK: - 루트 (인박스 ↔ 스레드)
@@ -365,12 +376,21 @@ private struct DMRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .sheet(isPresented: $composing) {
-            DMComposeView(vm: vm) { composing = false }
+            DMComposeView(vm: vm, initialNickname: vm.pendingComposeNickname ?? "") {
+                composing = false
+                vm.pendingComposeNickname = nil
+            }
         }
         .sheet(isPresented: $showingSettings) {
             DMSettingsView(vm: vm) { showingSettings = false }
         }
-        .onAppear { Task { await vm.refreshInbox() } }
+        .onAppear {
+            Task { await vm.refreshInbox() }
+            if vm.pendingComposeNickname != nil { composing = true }
+        }
+        .onChange(of: vm.pendingComposeNickname) { nick in
+            if nick != nil { composing = true }
+        }
     }
 
     private func placeholder(_ msg: String) -> some View {
@@ -596,9 +616,15 @@ private struct DMThreadView: View {
 private struct DMComposeView: View {
     @ObservedObject var vm: DMViewModel
     let onDone: () -> Void
-    @State private var nickname = ""
+    @State private var nickname: String
     @State private var body_ = ""
     @State private var sending = false
+
+    init(vm: DMViewModel, initialNickname: String = "", onDone: @escaping () -> Void) {
+        self._vm = ObservedObject(wrappedValue: vm)
+        self.onDone = onDone
+        self._nickname = State(initialValue: initialNickname)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
