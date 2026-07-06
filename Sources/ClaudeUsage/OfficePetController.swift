@@ -8,16 +8,17 @@ import SwiftUI
 /// 기존 `PetSprite`/`PetEffectOverlay` 경로를 뷰에서 그대로 쓴다.
 ///
 /// 행동 FSM (모드별):
-///   normal   — idleAtSpot(2~8s) ↔ wanderNearSpot(스팟 ±40, walkable 클램프)
-///              + 낮은 확률로 **커피머신 방문**(레인 간 2D 이동, 동시 1마리 — P2a 고도화)
-///   working  — 상위 5명(점수 기여자): 대부분 자리 고정(.scan "작업" 모션), 낮은 빈도 wander.
+///   normal   — idle(2~8s) ↔ 자리 중심 반경 45의 **2D 랜덤 산책**(상하좌우대각 자유,
+///              petWalkArea 클램프) + 낮은 확률로 커피머신 방문(동시 1마리 — P2a 고도화)
+///   working  — 상위 5명(점수 기여자): 대부분 자리 고정(.scan "작업" 모션), 좁은 반경 wander.
 ///              데스크 PC ON 연동은 뷰가 처리.
 ///   sleeping — 월 VP 0: 완전 고정 + 💤. 스침 인사에도 무반응.
-///   greeting — 같은 바닥선에서 두 펫이 교차하는 순간 ~10% 확률로 1.5s 멈춤 + 인사 말풍선.
+///   greeting — 두 펫이 근접 교차하는 순간 ~10% 확률로 1.5s 멈춤 + 인사 말풍선.
 ///   special  — Mythic 전용: idle 중 낮은 확률로 특수 모션(Attack/Heal 등) + 전용 대사.
 ///
-/// 레인 간 이동 중에는 가구 blocking을 적용하지 않는다 — 바닥은 자유 통행이고, 목적지가
-/// 항상 가구 옆의 열린 지점이라 경로 검증 없이도 시각적으로 자연스럽다 (기획 §5-2).
+/// 이동은 `OfficeLayout.collisionRects`(avoid 특성 가구·데코의 발밑 사각형)를 피해 다닌다 —
+/// 목표 방향 직진이 막히면 축 하나로 미끄러지고(slide), 양축 다 막히면 도착 처리 후 재선택.
+/// front/behind 특성 가구는 비충돌 — 앞뒤 통과 연출은 뷰의 zIndex가 담당 (기획 §5-2).
 @MainActor
 final class OfficeSimulation: ObservableObject {
 
@@ -25,7 +26,7 @@ final class OfficeSimulation: ObservableObject {
         enum Mode { case normal, working, sleeping }
         enum Phase {
             case idle(until: TimeInterval)
-            case walking(target: CGFloat)
+            case walking(target: CGPoint)
             case greeting(until: TimeInterval)
             /// 공용 지점(커피머신) 방문 — 2D 목표 지점으로 이동. returning이면 자기 스팟 복귀 중.
             case visiting(target: CGPoint, returning: Bool)
@@ -40,12 +41,14 @@ final class OfficeSimulation: ObservableObject {
         let variant: Int
         let equippedEffects: Set<EffectKind>
         let spot: OfficeLayout.Spot
+        /// 산책의 중심점 — 자리 anchor. 2D wander 목표는 이 점 중심 반경에서 뽑는다.
+        let home: CGPoint
         let mode: Mode
         let monthlyVP: Int
         let isMe: Bool
 
         var x: CGFloat
-        /// 현재 바닥선 y — 방문(레인 간 이동) 중에만 자기 레인에서 벗어난다.
+        /// 현재 발(baseline) y — 2D 이동이라 상시 변한다.
         var y: CGFloat
         var facingRight: Bool = true
         var phase: Phase = .idle(until: 0)
@@ -77,7 +80,8 @@ final class OfficeSimulation: ObservableObject {
     @Published private(set) var pets: [PetState] = []
 
     private var timer: Timer?
-    private var wanderRanges: [Int: ClosedRange<CGFloat>] = [:]
+    /// avoid 특성 가구·데코의 발밑 충돌 사각형 — 가구 재배치(layout)마다 재계산.
+    private var blockedRects: [CGRect] = []
     /// 커피머신(가구 세트)이 놓인 포지션 옆의 방문 지점 — 재배치(layout)에 따라 이동한다.
     private var coffeePoint: CGPoint?
     /// 동시 방문 1마리 제한 — 커피머신 앞 정체 방지.
@@ -140,6 +144,7 @@ final class OfficeSimulation: ObservableObject {
             let avatar = member.profileJson?.card.avatar
             let mode: PetState.Mode = member.monthlyVP <= 0 ? .sleeping
                 : (member.isTopContributor ? .working : .normal)
+            let home = CGPoint(x: spot.anchorX, y: OfficeLayout.lanes[spot.lane])
             return PetState(
                 id: member.nickname,
                 kind: avatar?.kind ?? .fox,
@@ -147,19 +152,16 @@ final class OfficeSimulation: ObservableObject {
                 equippedEffects: Set((member.profileJson?.equippedEffects ?? [])
                     .compactMap { EffectKind(rawValue: $0) }),
                 spot: spot,
+                home: home,
                 mode: mode,
                 monthlyVP: member.monthlyVP,
                 isMe: member.isMe,
-                x: spot.anchorX,
-                y: OfficeLayout.lanes[spot.lane]
+                x: home.x,
+                y: home.y
             )
         }
-        // 바닥 데코도 blocking에 합류 (기획 §2 — 바닥 데코는 가구 충돌 모델을 따름).
-        let decorBlocked = OfficeLayout.decorBlockedIntervals(placed: decor)
-        wanderRanges = Dictionary(uniqueKeysWithValues:
-            pets.map { ($0.spot.id,
-                        OfficeLayout.wanderRange(for: $0.spot, placements: placements,
-                                                 extraBlocked: decorBlocked)) })
+        // avoid 특성 가구 + 바닥 데코의 충돌 사각형 — 2D 이동이 피해 다닐 영역 (기획 §2/§5-2).
+        blockedRects = OfficeLayout.collisionRects(placements: placements, decor: decor)
         // 커피머신 방문 지점 — 커피머신 세트가 놓인 좌표 오른쪽 옆 (기계 정면을 비워둔다).
         coffeePoint = placements
             .first { OfficeLayout.furnitureSet(id: $0.setId)?.name == "커피머신" }
@@ -222,11 +224,7 @@ final class OfficeSimulation: ObservableObject {
                         decideNextAction(&pet, now: now)
                     }
                 case .walking(let target):
-                    let dir: CGFloat = target > pet.x ? 1 : -1
-                    pet.x += dir * Self.walkSpeed * dt
-                    pet.facingRight = dir > 0
-                    if abs(pet.x - target) < 1.5 {
-                        pet.x = target
+                    if moveToward(&pet, target: target, speed: Self.walkSpeed, dt: dt) {
                         pet.phase = .idle(until: now + Double.random(in: 2...8))
                     }
                 case .greeting(let until):
@@ -234,10 +232,7 @@ final class OfficeSimulation: ObservableObject {
                         pet.phase = .idle(until: now + Double.random(in: 1...4))
                     }
                 case .visiting(let target, let returning):
-                    moveToward(&pet, target: target, dt: dt)
-                    if hypot(pet.x - target.x, pet.y - target.y) < 1.5 {
-                        pet.x = target.x
-                        pet.y = target.y
+                    if moveToward(&pet, target: target, speed: Self.visitSpeed, dt: dt) {
                         if returning {
                             pet.phase = .idle(until: now + Double.random(in: 2...8))
                             if visitingPetID == pet.id { visitingPetID = nil }
@@ -249,10 +244,8 @@ final class OfficeSimulation: ObservableObject {
                     }
                 case .drinking(let until):
                     if now >= until {
-                        pet.phase = .visiting(
-                            target: CGPoint(x: pet.spot.anchorX, y: OfficeLayout.lanes[pet.spot.lane]),
-                            returning: true)
-                        pet.facingRight = pet.spot.anchorX > pet.x
+                        pet.phase = .visiting(target: pet.home, returning: true)
+                        pet.facingRight = pet.home.x > pet.x
                     }
                 case .special(let until):
                     if now >= until {
@@ -263,14 +256,13 @@ final class OfficeSimulation: ObservableObject {
             updated[i] = pet
         }
 
-        // 스침 인사 — 같은 바닥선, 둘 다 자기 레인 산책(walking) 중, 근접 교차.
+        // 스침 인사 — 둘 다 산책(walking) 중 근접 교차 (2D 거리 기준).
         // 펫끼리는 비충돌(통과)이므로 하드 블록 없이 연출만 (기획 §5-2 충돌 모델).
         for i in updated.indices {
             guard case .walking = updated[i].phase, updated[i].mode != .sleeping else { continue }
             for j in updated.indices where j > i {
                 guard case .walking = updated[j].phase, updated[j].mode != .sleeping,
-                      abs(updated[i].y - updated[j].y) < 1,
-                      abs(updated[i].x - updated[j].x) < 6 else { continue }
+                      hypot(updated[i].x - updated[j].x, updated[i].y - updated[j].y) < 7 else { continue }
                 let pairKey = [updated[i].id, updated[j].id].sorted().joined(separator: "|")
                 if let until = greetCooldown[pairKey], now < until { continue }
                 greetCooldown[pairKey] = now + Self.greetCooldownSec
@@ -309,7 +301,7 @@ final class OfficeSimulation: ObservableObject {
         let visitChance = accel ? 0.9 : (pet.mode == .working ? 0.03 : 0.10)
         if let coffee = coffeePoint, visitingPetID == nil,
            // 커피머신 옆이 자기 자리인 펫은 방문이 무의미.
-           hypot(pet.spot.anchorX - coffee.x, OfficeLayout.lanes[pet.spot.lane] - coffee.y) > 20,
+           hypot(pet.home.x - coffee.x, pet.home.y - coffee.y) > 20,
            Double.random(in: 0..<1) < visitChance {
             visitingPetID = pet.id
             pet.phase = .visiting(target: coffee, returning: false)
@@ -317,12 +309,11 @@ final class OfficeSimulation: ObservableObject {
             return
         }
 
-        // 산책 vs 제자리 — working은 자리 지킴 성향.
+        // 산책 vs 제자리 — working은 자리 지킴 성향 + 좁은 반경.
         let wanderChance = pet.mode == .working ? 0.25 : 0.6
-        if Double.random(in: 0..<1) < wanderChance, let range = wanderRanges[pet.spot.id] {
-            let target = CGFloat.random(in: range)
+        if Double.random(in: 0..<1) < wanderChance, let target = wanderTarget(for: pet) {
             pet.phase = .walking(target: target)
-            pet.facingRight = target > pet.x
+            pet.facingRight = target.x > pet.x
         } else {
             pet.phase = .idle(until: now + Double.random(in: 2...8))
             // idle 시작 시 낮은 확률로 상황극 한마디 — working은 전용 대사 위주로 섞는다.
@@ -336,15 +327,46 @@ final class OfficeSimulation: ObservableObject {
         }
     }
 
-    /// 2D 등속 이동 — 레인 간 이동은 바닥이 자유 통행이라 경로 검증 없이 직선.
-    private func moveToward(_ pet: inout PetState, target: CGPoint, dt: CGFloat) {
+    /// 2D 산책 목표 — 자리(home) 중심 반경에서 랜덤 극좌표 샘플, petWalkArea 클램프 후
+    /// 충돌 사각형 안이면 재추첨(최대 12회). 전부 막히면 nil → 제자리 idle.
+    private func wanderTarget(for pet: PetState) -> CGPoint? {
+        let radius: CGFloat = pet.mode == .working ? 18 : OfficeLayout.wanderRadius
+        let area = OfficeLayout.petWalkArea
+        for _ in 0..<12 {
+            let angle = CGFloat.random(in: 0..<(2 * .pi))
+            let r = CGFloat.random(in: 6...radius)
+            let p = CGPoint(x: min(max(pet.home.x + cos(angle) * r, area.minX), area.maxX),
+                            y: min(max(pet.home.y + sin(angle) * r, area.minY), area.maxY))
+            if !isBlocked(p) { return p }
+        }
+        return nil
+    }
+
+    private func isBlocked(_ p: CGPoint) -> Bool {
+        !OfficeLayout.petWalkArea.contains(p) || blockedRects.contains { $0.contains(p) }
+    }
+
+    /// 충돌 인지 2D 등속 이동 — 목표 직진이 막히면 축 하나로 미끄러져(slide) 가구 모서리를
+    /// 따라 돌아간다. 반환 true = 도착 또는 양축 봉쇄(도착 처리 → idle 후 목표 재선택).
+    private func moveToward(_ pet: inout PetState, target: CGPoint,
+                            speed: CGFloat, dt: CGFloat) -> Bool {
         let dx = target.x - pet.x
         let dy = target.y - pet.y
         let dist = hypot(dx, dy)
-        guard dist > 0.01 else { return }
-        let step = min(Self.visitSpeed * dt, dist)
-        pet.x += dx / dist * step
-        pet.y += dy / dist * step
+        guard dist > 0.01 else { return true }
+        let step = min(speed * dt, dist)
+        let nx = pet.x + dx / dist * step
+        let ny = pet.y + dy / dist * step
+        if !isBlocked(CGPoint(x: nx, y: ny)) {
+            pet.x = nx; pet.y = ny
+        } else if !isBlocked(CGPoint(x: nx, y: pet.y)) {
+            pet.x = nx
+        } else if !isBlocked(CGPoint(x: pet.x, y: ny)) {
+            pet.y = ny
+        } else {
+            return true
+        }
         if abs(dx) > 0.5 { pet.facingRight = dx > 0 }
+        return hypot(target.x - pet.x, target.y - pet.y) < 1.5
     }
 }

@@ -12,18 +12,22 @@ import SwiftUI
 ///   - **가구 세트**: 바닥 가구(데스크+PC/소파/커피머신/…) 12세트. 길드별
 ///     `office_layout` 순열(layout[포지션] = 세트 id)로 포지션 위를 이동한다 (길드장 재배치).
 ///
-/// 충돌 모델: 바닥은 자유 통행, 가구는 **같은 레인에서만** footprint 폭으로 blocking.
-/// 자기 포지션의 가구는 자기에게 비충돌 (자리에 "앉아" 있어야 하므로). 펫 이동은 레인 내
-/// 1D(x)라 판정이 구간 비교 하나로 끝난다. 재배치는 순열 교체뿐이라 겹침 검증이 불필요.
+/// 충돌 모델 (2D 자유 이동 — 사용자 피드백으로 레인 1D 산책에서 전환):
+/// 펫은 `petWalkArea` 안을 상하좌우대각 자유 이동. 가구는 `PetPassing` 특성으로 3분류 —
+/// `.avoid`(발밑 충돌 사각형을 피해감) / `.front`(펫이 항상 앞으로 지나감 = 펫이 위에 그려짐)
+/// / `.behind`(펫이 항상 뒤로 지나감 = 가구가 펫을 가림). front/behind는 비충돌.
+/// 재배치는 자유 드래그 — 같은 레인 내 시각 폭 기준 겹침을 `placementCollides`로 금지.
 enum OfficeLayout {
     static let sceneSize = CGSize(width: 280, height: 150)
     static let wallBottom: CGFloat = 60
-    /// 레인 baseline y (가구·펫의 바닥선). 인덱스 = lane.
+    /// 레인 baseline y (가구의 바닥선, 자리 anchor의 기준선). 인덱스 = lane.
     static let lanes: [CGFloat] = [84, 112, 140]
-    /// 펫 산책 반경 (포지션 anchor ± 이 값, walkable로 클램프).
-    static let wanderRadius: CGFloat = 40
+    /// 펫 산책 반경 (자리 anchor 중심 2D 반경, petWalkArea로 클램프).
+    static let wanderRadius: CGFloat = 45
     /// 씬 좌우 여백 — 펫이 화면 밖으로 나가지 않게.
     static let edgeMargin: CGFloat = 8
+    /// 펫 발(baseline)이 다닐 수 있는 바닥 영역 — 벽 밴드 아래 ~ 씬 하단.
+    static let petWalkArea = CGRect(x: 8, y: 76, width: 264, height: 70)
     /// 펫 기본 표시 높이 (논리 px). Mythic은 ×1.5 (기존 sizeScale 관례).
     static let petHeight: CGFloat = 22
 
@@ -92,11 +96,17 @@ enum OfficeLayout {
     /// 에셋 공백 3종 — CC0 팩에 없어 코드로 그린다 (research/office-assets.md 검증 결과).
     enum DrawKind { case serverRack, standingDesk, window }
 
+    /// 펫-가구 통행 특성 (기획 §5-2 확장 — 사용자 요청 3분류):
+    /// avoid = 피해감(발밑 충돌 사각형), front = 앞으로 지나감(펫이 가구 위에 그려짐),
+    /// behind = 뒤로 지나감(가구가 펫을 가림). front/behind는 비충돌.
+    enum PetPassing { case avoid, front, behind }
+
     struct SetItem {
         let imageName: String?       // nil = drawKind로 코드 드로잉
         let drawKind: DrawKind?
         let size: CGSize
-        let blockingWidth: CGFloat
+        let blockingWidth: CGFloat   // avoid일 때 충돌 사각형 폭 (드래그 겹침 검사에도 사용)
+        let passing: PetPassing
     }
 
     /// 바닥 가구 세트. item == nil 은 "빈 자리 세트" (서서 일하는 오픈 스팟).
@@ -107,48 +117,61 @@ enum OfficeLayout {
         let hasPC: Bool              // 데스크 세트 — 점유자 working 시 PC ON 애니
     }
 
+    /// passing 배정 기준: 몸통이 크고 높은 것(데스크/서버랙/책장/커피머신)은 피해가고,
+    /// 낮은 좌석류(소파/벤치)는 앞으로 지나가며, 다리·잎 사이가 비치는 것(화분/스탠딩
+    /// 데스크)은 뒤로 지나가 가려진다.
     static let furnitureSets: [FurnitureSet] = [
         FurnitureSet(id: 0, name: "데스크+PC",
                      item: SetItem(imageName: "DESK_FRONT", drawKind: nil,
-                                   size: CGSize(width: 48, height: 32), blockingWidth: 40),
+                                   size: CGSize(width: 48, height: 32), blockingWidth: 40,
+                                   passing: .avoid),
                      hasPC: true),
         FurnitureSet(id: 1, name: "빈 자리", item: nil, hasPC: false),
         FurnitureSet(id: 2, name: "서버랙",
                      item: SetItem(imageName: nil, drawKind: .serverRack,
-                                   size: CGSize(width: 20, height: 36), blockingWidth: 18),
+                                   size: CGSize(width: 20, height: 36), blockingWidth: 18,
+                                   passing: .avoid),
                      hasPC: false),
         FurnitureSet(id: 3, name: "빈 자리", item: nil, hasPC: false),
         FurnitureSet(id: 4, name: "데스크+PC",
                      item: SetItem(imageName: "DESK_FRONT", drawKind: nil,
-                                   size: CGSize(width: 48, height: 32), blockingWidth: 40),
+                                   size: CGSize(width: 48, height: 32), blockingWidth: 40,
+                                   passing: .avoid),
                      hasPC: true),
         FurnitureSet(id: 5, name: "데스크+PC",
                      item: SetItem(imageName: "DESK_FRONT", drawKind: nil,
-                                   size: CGSize(width: 48, height: 32), blockingWidth: 40),
+                                   size: CGSize(width: 48, height: 32), blockingWidth: 40,
+                                   passing: .avoid),
                      hasPC: true),
         FurnitureSet(id: 6, name: "커피머신",
                      item: SetItem(imageName: "COFFEE", drawKind: nil,
-                                   size: CGSize(width: 16, height: 16), blockingWidth: 12),
+                                   size: CGSize(width: 16, height: 16), blockingWidth: 12,
+                                   passing: .avoid),
                      hasPC: false),
         FurnitureSet(id: 7, name: "책장",
                      item: SetItem(imageName: "DOUBLE_BOOKSHELF", drawKind: nil,
-                                   size: CGSize(width: 32, height: 32), blockingWidth: 28),
+                                   size: CGSize(width: 32, height: 32), blockingWidth: 28,
+                                   passing: .avoid),
                      hasPC: false),
         FurnitureSet(id: 8, name: "소파",
                      item: SetItem(imageName: "SOFA_FRONT", drawKind: nil,
-                                   size: CGSize(width: 32, height: 16), blockingWidth: 28),
+                                   size: CGSize(width: 32, height: 16), blockingWidth: 28,
+                                   passing: .front),
                      hasPC: false),
         FurnitureSet(id: 9, name: "벤치",
                      item: SetItem(imageName: "CUSHIONED_BENCH", drawKind: nil,
-                                   size: CGSize(width: 16, height: 16), blockingWidth: 14),
+                                   size: CGSize(width: 16, height: 16), blockingWidth: 14,
+                                   passing: .front),
                      hasPC: false),
         FurnitureSet(id: 10, name: "화분",
                      item: SetItem(imageName: "LARGE_PLANT", drawKind: nil,
-                                   size: CGSize(width: 32, height: 48), blockingWidth: 16),
+                                   size: CGSize(width: 32, height: 48), blockingWidth: 16,
+                                   passing: .behind),
                      hasPC: false),
         FurnitureSet(id: 11, name: "스탠딩 데스크",
                      item: SetItem(imageName: nil, drawKind: .standingDesk,
-                                   size: CGSize(width: 28, height: 26), blockingWidth: 24),
+                                   size: CGSize(width: 28, height: 26), blockingWidth: 24,
+                                   passing: .behind),
                      hasPC: false),
     ]
 
@@ -197,6 +220,18 @@ enum OfficeLayout {
         // 가장 가까운 레인으로 스냅.
         let lane = lanes.enumerated().min { abs($0.element - laneY) < abs($1.element - laneY) }?.offset ?? 2
         return (cx, lane)
+    }
+
+    /// 드래그 중 가구 겹침 검사 — 같은 레인에서 두 가구의 시각 폭이 겹치면 true.
+    /// (레인이 다르면 바닥 점유가 다르므로 허용 — 픽셀 씬의 원근 겹침은 자연스럽다.)
+    static func placementCollides(setId: Int, x: CGFloat, lane: Int,
+                                  others: [FurniturePlacement]) -> Bool {
+        guard let myItem = furnitureSet(id: setId)?.item else { return false }
+        return others.contains { p in
+            guard p.setId != setId, p.lane == lane,
+                  let item = furnitureSet(id: p.setId)?.item else { return false }
+            return abs(x - p.x) < (myItem.size.width + item.size.width) / 2
+        }
     }
 
     static func furnitureSet(id: Int) -> FurnitureSet? {
@@ -267,7 +302,8 @@ enum OfficeLayout {
         let category: DecorCategory
         let price: Int
         let size: CGSize
-        let blockingWidth: CGFloat   // 바닥만 의미 (기획: 바닥 데코는 충돌 모델을 따름)
+        let blockingWidth: CGFloat   // passing == .avoid인 바닥 데코의 충돌 폭
+        let passing: PetPassing      // 벽 데코는 펫 동선 밖이라 무의미 (behind로 통일)
         var id: String { kind }
         var imageName: String { kind }
     }
@@ -275,42 +311,50 @@ enum OfficeLayout {
     static let decorCatalog: [DecorItem] = [
         // 벽
         DecorItem(kind: "SMALL_PAINTING", name: "작은 그림 A", category: .wall, price: 300,
-                  size: CGSize(width: 16, height: 32), blockingWidth: 0),
+                  size: CGSize(width: 16, height: 32), blockingWidth: 0, passing: .behind),
         DecorItem(kind: "SMALL_PAINTING_2", name: "작은 그림 B", category: .wall, price: 300,
-                  size: CGSize(width: 16, height: 32), blockingWidth: 0),
+                  size: CGSize(width: 16, height: 32), blockingWidth: 0, passing: .behind),
         DecorItem(kind: "LARGE_PAINTING", name: "큰 그림", category: .wall, price: 1000,
-                  size: CGSize(width: 32, height: 32), blockingWidth: 0),
+                  size: CGSize(width: 32, height: 32), blockingWidth: 0, passing: .behind),
         DecorItem(kind: "HANGING_PLANT", name: "행잉 플랜트", category: .wall, price: 500,
-                  size: CGSize(width: 16, height: 32), blockingWidth: 0),
-        // 바닥
+                  size: CGSize(width: 16, height: 32), blockingWidth: 0, passing: .behind),
+        // 바닥 — 키 큰 식물류는 뒤로 지나가고(가려짐), 소품은 앞으로, 테이블은 피해간다.
         DecorItem(kind: "PLANT", name: "화분 A", category: .floor, price: 300,
-                  size: CGSize(width: 16, height: 32), blockingWidth: 10),
+                  size: CGSize(width: 16, height: 32), blockingWidth: 10, passing: .behind),
         DecorItem(kind: "PLANT_2", name: "화분 B", category: .floor, price: 300,
-                  size: CGSize(width: 16, height: 32), blockingWidth: 10),
+                  size: CGSize(width: 16, height: 32), blockingWidth: 10, passing: .behind),
         DecorItem(kind: "CACTUS", name: "선인장", category: .floor, price: 300,
-                  size: CGSize(width: 16, height: 32), blockingWidth: 10),
+                  size: CGSize(width: 16, height: 32), blockingWidth: 10, passing: .behind),
         DecorItem(kind: "POT", name: "도자기 화분", category: .floor, price: 300,
-                  size: CGSize(width: 16, height: 16), blockingWidth: 10),
+                  size: CGSize(width: 16, height: 16), blockingWidth: 10, passing: .front),
         DecorItem(kind: "BIN", name: "휴지통", category: .floor, price: 300,
-                  size: CGSize(width: 16, height: 16), blockingWidth: 10),
+                  size: CGSize(width: 16, height: 16), blockingWidth: 10, passing: .front),
         DecorItem(kind: "COFFEE_TABLE", name: "커피 테이블", category: .floor, price: 500,
-                  size: CGSize(width: 32, height: 32), blockingWidth: 24),
+                  size: CGSize(width: 32, height: 32), blockingWidth: 24, passing: .avoid),
     ]
 
     static func decorItem(kind: String) -> DecorItem? {
         decorCatalog.first { $0.kind == kind }
     }
 
-    /// 배치된 데코의 바닥 blocking 구간 — 시뮬레이션 산책 범위 계산에 합류 (기획 §2).
-    static func decorBlockedIntervals(
-        placed: [(slotId: Int, kind: String)]
-    ) -> [(lane: Int, range: ClosedRange<CGFloat>)] {
-        placed.compactMap { entry in
-            guard let slot = decorSlot(id: entry.slotId), let lane = slot.lane,
-                  let item = decorItem(kind: entry.kind), item.blockingWidth > 0 else { return nil }
-            let half = item.blockingWidth / 2
-            return (lane, (slot.anchorX - half)...(slot.anchorX + half))
+    /// avoid 특성 가구·바닥 데코의 발밑 충돌 사각형 — 펫 2D 이동이 피해 다닐 영역.
+    /// 사각형은 baseline 주변의 낮은 띠(높이 12) — 펫 "발" 기준 판정이라 몸통 겹침은 허용
+    /// (뒤쪽을 스치듯 지나가는 픽셀 씬 특유의 원근이 살아 있게).
+    static func collisionRects(placements: [FurniturePlacement],
+                               decor: [(slotId: Int, kind: String)]) -> [CGRect] {
+        var rects: [CGRect] = []
+        for p in placements {
+            guard let item = furnitureSet(id: p.setId)?.item, item.passing == .avoid else { continue }
+            rects.append(CGRect(x: p.x - item.blockingWidth / 2, y: lanes[p.lane] - 10,
+                                width: item.blockingWidth, height: 12))
         }
+        for entry in decor {
+            guard let slot = decorSlot(id: entry.slotId), slot.category == .floor,
+                  let item = decorItem(kind: entry.kind), item.passing == .avoid else { continue }
+            rects.append(CGRect(x: slot.anchorX - item.blockingWidth / 2, y: slot.baselineY - 10,
+                                width: item.blockingWidth, height: 12))
+        }
+        return rects
     }
 
     // MARK: - 인테리어 테마 (P2b — 길드장 전용, 가격은 기획 §2 테마 2,000)
@@ -324,42 +368,6 @@ enum OfficeLayout {
         Color(red: 0.45, green: 0.65, blue: 0.95),   // 쿨톤
         Color(red: 0.55, green: 0.85, blue: 0.55),   // 그린
     ]
-
-    // MARK: - 충돌 / 산책 범위 (가구 배치 의존)
-
-    /// 해당 레인의 blocked x-interval 목록 — 현재 가구 배치 기준.
-    static func blockedIntervals(lane: Int,
-                                 placements: [FurniturePlacement]) -> [ClosedRange<CGFloat>] {
-        placements.compactMap { p in
-            guard p.lane == lane,
-                  let item = furnitureSet(id: p.setId)?.item,
-                  item.blockingWidth > 0 else { return nil }
-            let half = item.blockingWidth / 2
-            return (p.x - half)...(p.x + half)
-        }
-    }
-
-    /// 포지션의 펫 산책 가능 범위 — anchor ± wanderRadius를 씬 여백과 가구·바닥 데코 경계로
-    /// 클램프. 막히면 방향 반전이 아니라 애초에 목표를 이 범위에서만 뽑는다.
-    /// 가구가 anchor 위로 드래그돼 오면 범위가 anchor 한 점으로 수렴 — 펫은 가구 앞에 선다.
-    /// extraBlocked = 배치된 데코의 (lane, 구간) — `decorBlockedIntervals`.
-    static func wanderRange(for spot: Spot, placements: [FurniturePlacement],
-                            extraBlocked: [(lane: Int, range: ClosedRange<CGFloat>)] = []
-    ) -> ClosedRange<CGFloat> {
-        var lo = max(edgeMargin, spot.anchorX - wanderRadius)
-        var hi = min(sceneSize.width - edgeMargin, spot.anchorX + wanderRadius)
-        var intervals = blockedIntervals(lane: spot.lane, placements: placements)
-        intervals += extraBlocked.filter { $0.lane == spot.lane }.map(\.range)
-        for interval in intervals {
-            if interval.upperBound <= spot.anchorX {
-                lo = max(lo, interval.upperBound + 2)
-            } else if interval.lowerBound >= spot.anchorX {
-                hi = min(hi, interval.lowerBound - 2)
-            }
-        }
-        if lo > hi { return spot.anchorX...spot.anchorX }
-        return lo...hi
-    }
 
     // MARK: - 배경 (벽+바닥 타일 프리렌더)
 

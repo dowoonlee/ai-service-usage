@@ -3,9 +3,10 @@ import SwiftUI
 
 /// 길드 사무실 씬 — 멤버 대표 펫들이 자기 스팟 주변을 오가는 공유 공간 (docs/plans/guild.md §5-1/5-2).
 ///
-/// 렌더 레이어 (z 오름차순): 배경(벽+바닥 프리렌더) → 벽 장식/가구(레인 순) → 빈 스팟 마커
-/// → 펫(이펙트 backdrop → 스프라이트 → 파티클) → 말풍선. 레인이 뒤(위)일수록 먼저 그려
-/// 앞레인이 자연히 가린다.
+/// 렌더 순서는 전부 zIndex로 결정 (painter's algorithm): 배경(-3000) → 벽 장식(-2800) →
+/// 벽 데코(-2500) → front 가구(baseline-1000, 펫이 항상 앞) → avoid 가구·펫(baseline y 그대로,
+/// 아래쪽이 위를 가림) → behind 가구(baseline+1000, 펫을 가림) → 재배치 모드 가구(+3000,
+/// 펫 위로 — 펫이 드래그를 가로채지 못하게 히트테스트도 차단) → 꾸미기 마커(5000).
 ///
 /// 멤버 배치: 자동 랜덤 — `OfficeLayout.autoAssignments` 결정적 해시로 클라이언트에서 배정
 /// (수동 자리 선택은 사용자 피드백으로 폐기. 서버 office_slot은 더 이상 읽지 않는다).
@@ -16,6 +17,9 @@ struct GuildOfficeView: View {
     let info: RankingAPI.GuildInfoResponse
     @Binding var rearrangeMode: Bool
     @Binding var decorateMode: Bool
+    /// 테마 미리보기 오버라이드 (꾸미기 모드 구매 확인 전) — nil이면 서버 값.
+    var previewFloorTheme: Int? = nil
+    var previewWallTheme: Int? = nil
     /// 가구 드래그 종료 시 — 직렬화된 전체 배치("setId:x:lane;…"). 호출 측이 서버 반영.
     let onSetFurniture: (String) -> Void
     /// 데코 구매 (slot, item) — 호출 측이 코인 검증·서버 반영.
@@ -30,6 +34,8 @@ struct GuildOfficeView: View {
     @State private var draggingSetId: Int?
     /// 꾸미기 모드에서 카탈로그 popover가 열린 데코 슬롯.
     @State private var decorPopoverSlot: Int?
+    /// 데코 구매 확인 전 미리보기 — 씬에는 보이지만 아직 결제 안 됨 (구매/취소로 해소).
+    @State private var previewDecor: (slot: Int, kind: String)?
 
     private var scene: CGSize { OfficeLayout.sceneSize }
     /// 서버 가구 배치 (검증 실패/빈 값은 기본 배치 폴백).
@@ -41,6 +47,13 @@ struct GuildOfficeView: View {
         draftPlacements ?? serverPlacements
     }
     private var placedDecor: [RankingAPI.GuildFurnitureItem] { info.furniture }
+    /// 렌더용 데코 — 미리보기 중이면 해당 슬롯을 미리보기 아이템으로 치환.
+    /// 시뮬레이션(충돌)은 실제 배치(placedDecor) 기준 유지 — 결제 전 동선 변경 방지.
+    private var effectiveDecor: [RankingAPI.GuildFurnitureItem] {
+        guard let pv = previewDecor else { return placedDecor }
+        return placedDecor.filter { $0.slotId != pv.slot }
+            + [RankingAPI.GuildFurnitureItem(slotId: pv.slot, itemKind: pv.kind, donorNickname: nil)]
+    }
     /// 자동 배치 — 기여자·VP 우선 12명을 결정적 해시로 포지션에 배정. isMe 등 클라이언트마다
     /// 다른 값은 정렬에 쓰지 않는다 (모두가 같은 씬을 봐야 하므로).
     private var assignments: [String: Int] {
@@ -57,11 +70,14 @@ struct GuildOfficeView: View {
             let scale = geo.size.width / scene.width
             ZStack(alignment: .topLeading) {
                 background(scale: scale)
+                    .zIndex(-3000)
                 furnitureLayer(scale: scale)
                 decorLayer(scale: scale)
                 petLayer(scale: scale)
+                    .allowsHitTesting(!rearrangeMode)   // 재배치 중 펫이 가구 드래그를 가로채지 않게
                 if decorateMode {
                     decorateLayer(scale: scale)
+                        .zIndex(5000)
                 }
             }
             .frame(width: geo.size.width, height: scene.height * scale)
@@ -85,7 +101,10 @@ struct GuildOfficeView: View {
         .onChange(of: info.guild.officeFurniture ?? "") { _ in
             if draggingSetId == nil { draftPlacements = nil }
         }
-        .onChange(of: decorateMode) { _ in decorPopoverSlot = nil }
+        .onChange(of: decorateMode) { _ in
+            decorPopoverSlot = nil
+            previewDecor = nil
+        }
     }
 
     private func reconfigureSim() {
@@ -108,7 +127,9 @@ struct GuildOfficeView: View {
 
     @ViewBuilder
     private func background(scale: CGFloat) -> some View {
-        if let bg = OfficeLayout.backgroundImage(floorTheme: info.guild.floorTheme) {
+        let floorTheme = previewFloorTheme ?? info.guild.floorTheme
+        let wallTheme = previewWallTheme ?? info.guild.wallTheme
+        if let bg = OfficeLayout.backgroundImage(floorTheme: floorTheme) {
             Image(nsImage: bg)
                 .interpolation(.none)
                 .resizable()
@@ -122,8 +143,8 @@ struct GuildOfficeView: View {
             }
         }
         // 벽지 틴트 — 벽 밴드 위 반투명 오버레이 (0 = 기본, 오버레이 없음).
-        if info.guild.wallTheme > 0, info.guild.wallTheme < OfficeLayout.wallTints.count {
-            OfficeLayout.wallTints[info.guild.wallTheme]
+        if wallTheme > 0, wallTheme < OfficeLayout.wallTints.count {
+            OfficeLayout.wallTints[wallTheme]
                 .opacity(0.18)
                 .frame(width: scene.width * scale, height: OfficeLayout.wallBottom * scale)
                 .allowsHitTesting(false)
@@ -134,13 +155,27 @@ struct GuildOfficeView: View {
 
     @ViewBuilder
     private func decorLayer(scale: CGFloat) -> some View {
-        ForEach(placedDecor, id: \.slotId) { placed in
+        ForEach(effectiveDecor, id: \.slotId) { placed in
             if let slot = OfficeLayout.decorSlot(id: placed.slotId),
                let item = OfficeLayout.decorItem(kind: placed.itemKind) {
+                let isPreview = previewDecor?.slot == placed.slotId
                 itemView(imageName: item.imageName, drawKind: nil, size: item.size,
                          anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                    .opacity(isPreview ? 0.75 : 1)   // 미리보기는 반투명 — 아직 결제 전임이 보이게
                     .help(placed.donorNickname.map { "\(item.name) — \($0) 기부" } ?? item.name)
+                    .zIndex(decorZ(slot: slot, item: item))
             }
+        }
+    }
+
+    /// 데코 zIndex — 벽은 배경 바로 위, 바닥은 통행 특성별 (furnitureZ와 동일 규칙).
+    private func decorZ(slot: OfficeLayout.DecorSlot, item: OfficeLayout.DecorItem) -> Double {
+        guard slot.category == .floor else { return -2500 }
+        let baseline = Double(slot.baselineY)
+        switch item.passing {
+        case .front: return baseline - 1000
+        case .avoid: return baseline
+        case .behind: return baseline + 1000
         }
     }
 
@@ -173,19 +208,27 @@ struct GuildOfficeView: View {
             .onTapGesture { decorPopoverSlot = slot.id }
             .popover(isPresented: Binding(
                 get: { decorPopoverSlot == slot.id },
-                set: { if !$0 { decorPopoverSlot = nil } }
+                set: { if !$0 {
+                    decorPopoverSlot = nil
+                    previewDecor = nil   // 확인 없이 닫으면 미리보기 원복
+                } }
             ), arrowEdge: .bottom) {
                 DecorCatalogSheet(
                     slot: slot,
                     placed: placed,
                     canRemove: placed != nil &&
                         (info.guild.isLeader || placed?.donorNickname == Settings.shared.rankingNickname),
+                    onPreview: { item in
+                        previewDecor = item.map { (slot: slot.id, kind: $0.kind) }
+                    },
                     onBuy: { item in
                         decorPopoverSlot = nil
+                        previewDecor = nil
                         onPlaceDecor(slot.id, item)
                     },
                     onRemove: {
                         decorPopoverSlot = nil
+                        previewDecor = nil
                         onRemoveDecor(slot.id)
                     }
                 )
@@ -201,18 +244,33 @@ struct GuildOfficeView: View {
         ForEach(Array(OfficeLayout.wallDecor.enumerated()), id: \.offset) { _, decor in
             itemView(imageName: decor.imageName, drawKind: decor.drawKind, size: decor.size,
                      anchorX: decor.anchorX, baselineY: decor.baselineY, scale: scale)
+                .zIndex(-2800)
         }
-        // 바닥 가구 — 자유 배치 좌표. 레인 오름차순 = 뒤부터 (드래그 중인 항목은 맨 위).
-        ForEach(placements.sorted {
-            if $0.setId == draggingSetId { return false }
-            if $1.setId == draggingSetId { return true }
-            return $0.lane < $1.lane
-        }) { placement in
+        // 바닥 가구 — 자유 배치 좌표. 앞뒤 관계는 전부 zIndex(furnitureZ)가 결정.
+        ForEach(placements) { placement in
             furnitureView(placement, scale: scale)
+                .zIndex(furnitureZ(placement))
         }
-        // 데스크 세트의 모니터 — 가장 가까운 자리 점유자가 working이면 ON 애니.
+        // 데스크 세트의 모니터 — 데스크 바로 위 z. 가장 가까운 자리 점유자가 working이면 ON 애니.
         ForEach(placements.filter { OfficeLayout.furnitureSet(id: $0.setId)?.hasPC == true }) { placement in
             pcView(for: placement, scale: scale)
+                .zIndex(furnitureZ(placement) + 0.01)
+        }
+    }
+
+    /// 가구 zIndex — 통행 특성이 앞뒤 통과 연출을 만든다: front는 펫(y=76..146)보다 항상
+    /// 아래, avoid는 baseline y로 펫과 상호 가림, behind는 항상 위. 재배치 모드에서는
+    /// 전부 펫 위(+3000)로 올려 드래그가 펫에 가로막히지 않게 한다 (드래그 중인 건 최상단).
+    private func furnitureZ(_ placement: OfficeLayout.FurniturePlacement) -> Double {
+        let baseline = Double(OfficeLayout.lanes[placement.lane])
+        if rearrangeMode {
+            return 3000 + baseline + (draggingSetId == placement.setId ? 500 : 0)
+        }
+        guard let item = OfficeLayout.furnitureSet(id: placement.setId)?.item else { return baseline }
+        switch item.passing {
+        case .front: return baseline - 1000
+        case .avoid: return baseline
+        case .behind: return baseline + 1000
         }
     }
 
@@ -253,6 +311,7 @@ struct GuildOfficeView: View {
     }
 
     /// 드래그 제스처 — 이동 중 작업 사본 갱신(펫 충돌 범위도 실시간 추종), 종료 시 서버 저장.
+    /// 다른 가구와 겹치는 위치는 반영하지 않는다 — 가구가 장애물에 걸려 멈추는 감각.
     private func furnitureDrag(_ placement: OfficeLayout.FurniturePlacement,
                                scale: CGFloat) -> some Gesture {
         DragGesture(coordinateSpace: .named("officeScene"))
@@ -262,6 +321,8 @@ struct GuildOfficeView: View {
                 guard let idx = working.firstIndex(where: { $0.setId == placement.setId }) else { return }
                 let snapped = OfficeLayout.clampPlacement(x: value.location.x / scale,
                                                           laneY: value.location.y / scale)
+                guard !OfficeLayout.placementCollides(setId: placement.setId, x: snapped.x,
+                                                      lane: snapped.lane, others: working) else { return }
                 working[idx].x = snapped.x
                 working[idx].lane = snapped.lane
                 draftPlacements = working
@@ -328,9 +389,9 @@ struct GuildOfficeView: View {
 
     @ViewBuilder
     private func petLayer(scale: CGFloat) -> some View {
-        // 레인(=baseline) 순서로 그려 앞레인이 뒤레인을 가린다.
-        // 현재 바닥선 y 순서로 그려 앞(아래)의 펫이 뒤를 가린다 — 레인 간 이동(커피 방문) 중에도 자연스럽게.
-        ForEach(sim.pets.sorted { $0.y < $1.y }) { pet in
+        // zIndex = 발 y — 아래(앞)의 펫이 뒤를 가리고, avoid 가구(baseline z)와도
+        // 자연스럽게 상호 가림 (가구 뒤를 스치면 가구가 발을 가린다).
+        ForEach(sim.pets) { pet in
             OfficePetView(
                 pet: pet,
                 scale: scale,
@@ -341,6 +402,7 @@ struct GuildOfficeView: View {
                 onTap: { popoverPetID = pet.id },
                 member: info.members.first { $0.nickname == pet.id }
             )
+            .zIndex(Double(pet.y))
         }
     }
 }
@@ -470,16 +532,19 @@ private struct OfficePetView: View {
 
 // MARK: - 데코 카탈로그 시트 (꾸미기 모드 popover)
 
-/// 데코 슬롯 클릭 시 카탈로그 — 카테고리별 아이템 목록 + 가격 + 잔액. 기부 모델이라
-/// 구매 즉시 배치(교체 구매는 기존 아이템 소멸 — 기획 §2). 제거는 기부자/길드장만.
+/// 데코 슬롯 클릭 시 카탈로그 — 아이템 클릭 = 씬 미리보기 적용(onPreview), 하단 확인
+/// 바의 "구매"를 눌러야 결제(onBuy). 취소/닫기는 미리보기 원복 (사용자 요청 — 구매 의사
+/// 1회 확인 필수). 기부 모델이라 교체 구매는 기존 아이템 소멸 (기획 §2). 제거는 기부자/길드장만.
 @MainActor
 private struct DecorCatalogSheet: View {
     let slot: OfficeLayout.DecorSlot
     let placed: RankingAPI.GuildFurnitureItem?
     let canRemove: Bool
+    let onPreview: (OfficeLayout.DecorItem?) -> Void
     let onBuy: (OfficeLayout.DecorItem) -> Void
     let onRemove: () -> Void
     @ObservedObject var settings = Settings.shared
+    @State private var pending: OfficeLayout.DecorItem?
 
     private var items: [OfficeLayout.DecorItem] {
         OfficeLayout.decorCatalog.filter { $0.category == slot.category }
@@ -512,8 +577,11 @@ private struct DecorCatalogSheet: View {
             }
             ForEach(items) { item in
                 let affordable = settings.coins >= item.price
+                let selected = pending?.kind == item.kind
                 Button {
-                    onBuy(item)
+                    // 클릭 = 미리보기 — 결제는 아래 확인 바에서.
+                    pending = item
+                    onPreview(item)
                 } label: {
                     HStack(spacing: 8) {
                         if let img = OfficeLayout.officeImage(item.imageName) {
@@ -530,10 +598,28 @@ private struct DecorCatalogSheet: View {
                             .foregroundStyle(affordable ? AppColors.gold : .secondary)
                     }
                     .contentShape(Rectangle())
+                    .padding(.horizontal, 4).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4)
+                        .fill(selected ? Color.accentColor.opacity(0.15) : Color.clear))
                 }
                 .buttonStyle(.plain)
-                .disabled(!affordable)
-                .opacity(affordable ? 1 : 0.5)
+                .opacity(affordable || selected ? 1 : 0.6)
+            }
+            if let pending {
+                Divider()
+                HStack(spacing: 6) {
+                    Text("미리보기 중").font(.system(size: 10)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("취소") {
+                        self.pending = nil
+                        onPreview(nil)
+                    }
+                    .font(.system(size: 11)).controlSize(.small)
+                    Button("🪙 \(pending.price) 구매") { onBuy(pending) }
+                        .font(.system(size: 11)).controlSize(.small)
+                        .buttonStyle(.borderedProminent)
+                        .disabled(settings.coins < pending.price)
+                }
             }
             Text("구매한 장식은 길드에 기부됩니다 (교체 시 기존 장식 소멸)")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
