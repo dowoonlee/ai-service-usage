@@ -1,10 +1,10 @@
 // POST /guild-manage
 // 길드장 전용 액션 묶음: kick(추방) / rotate_code(초대 코드 재발급) / disband(해체)
-// / set_layout(가구 재배치). 1함수 1액션 관례의 의도적 예외 — 함수 수 억제 (docs/plans/guild.md §3).
+// / set_furniture(가구 자유 배치). 1함수 1액션 관례의 의도적 예외 — 함수 수 억제 (docs/plans/guild.md §3).
 //
 // payload(서명 대상, flat): { action, deviceId, [layout,] targetDeviceId, ts }
 //   - targetDeviceId는 kick에서만 의미. 나머지는 빈 문자열("").
-//   - layout은 set_layout에서만 존재 — 클라이언트가 키 자체를 생략하므로 canonical 재현도
+//   - layout은 set_furniture에서만 존재 — 클라이언트가 키 자체를 생략하므로 canonical 재현도
 //     같은 조건으로 생략해야 서명이 일치한다.
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
@@ -17,13 +17,13 @@ import {
   OFFICE_SLOT_COUNT,
 } from "../_shared/guild_policy.ts";
 
-type ManageAction = "kick" | "rotate_code" | "disband" | "set_layout";
+type ManageAction = "kick" | "rotate_code" | "disband" | "set_furniture";
 
 interface ManagePayload {
   action: ManageAction;
   deviceId: string;
   targetDeviceId: string; // kick 외에는 ""
-  // set_layout 전용 — "3,1,0,…" (포지션 순서대로 가구 세트 id, 0..11 순열).
+  // set_furniture 전용 — "setId:x:lane;…" (가구 자유 배치 좌표 직렬화).
   layout?: string;
   ts: number;
 }
@@ -50,7 +50,7 @@ Deno.serve(async (req: Request) => {
   if (!isValidUUID(p.deviceId)) return errorResponse(400, "invalid_device_id");
   if (
     p.action !== "kick" && p.action !== "rotate_code" && p.action !== "disband" &&
-    p.action !== "set_layout"
+    p.action !== "set_furniture"
   ) {
     return errorResponse(400, "invalid_action");
   }
@@ -58,17 +58,27 @@ Deno.serve(async (req: Request) => {
   if (p.action === "kick" && !isValidUUID(p.targetDeviceId)) {
     return errorResponse(400, "invalid_target");
   }
-  // set_layout: 0..OFFICE_SLOT_COUNT-1 순열 검증.
-  let layoutInts: number[] | null = null;
-  if (p.action === "set_layout") {
-    if (typeof p.layout !== "string") return errorResponse(400, "invalid_layout");
-    layoutInts = p.layout.split(",").map((s) => Number(s.trim()));
-    if (
-      layoutInts.length !== OFFICE_SLOT_COUNT ||
-      layoutInts.some((n) => !Number.isInteger(n)) ||
-      [...layoutInts].sort((a, b) => a - b).some((n, i) => n !== i)
-    ) {
+  // set_furniture: "setId:x:lane;…" 검증 — 세트 id 0..N-1 유니크, x/lane 씬 범위 내.
+  // 좌표는 클라 논리 좌표(씬 280×150, 레인 0..2). 서버는 형식·범위만 권위 검증.
+  if (p.action === "set_furniture") {
+    if (typeof p.layout !== "string" || p.layout.length > 600) {
       return errorResponse(400, "invalid_layout");
+    }
+    const entries = p.layout.length === 0 ? [] : p.layout.split(";");
+    const seen = new Set<number>();
+    for (const e of entries) {
+      const parts = e.split(":").map((v) => Number(v));
+      const [setId, x, lane] = parts;
+      if (
+        parts.length !== 3 || parts.some((n) => !Number.isFinite(n)) ||
+        !Number.isInteger(setId) || setId < 0 || setId >= OFFICE_SLOT_COUNT ||
+        seen.has(setId) ||
+        x < 0 || x > 280 ||
+        !Number.isInteger(lane) || lane < 0 || lane > 2
+      ) {
+        return errorResponse(400, "invalid_layout");
+      }
+      seen.add(setId);
     }
   }
   if (typeof body.signature !== "string" || body.signature.length !== 64) {
@@ -92,7 +102,7 @@ Deno.serve(async (req: Request) => {
   if (!user) return errorResponse(404, "device_not_registered");
   if (user.status === "banned") return errorResponse(403, "banned");
 
-  // layout 키는 클라이언트가 set_layout일 때만 직렬화 — canonical 재현도 동일 조건.
+  // layout 키는 클라이언트가 set_furniture일 때만 직렬화 — canonical 재현도 동일 조건.
   const verifyObj: Record<string, unknown> = {
     action: p.action,
     deviceId: p.deviceId,
@@ -176,17 +186,17 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true });
     }
 
-    case "set_layout": {
-      // 가구 재배치 — 포지션(장소·office_slot 의미)은 고정, 바닥 가구 세트 순열만 교체.
+    case "set_furniture": {
+      // 가구 자유 배치 — 멤버 자리(office_slot 포지션)는 고정, 가구 좌표만 교체.
       const { error: updErr } = await db
         .from("guilds")
-        .update({ office_layout: layoutInts })
+        .update({ office_furniture: p.layout })
         .eq("id", guild.id);
       if (updErr) {
-        console.error("guild set_layout failed", updErr);
+        console.error("guild set_furniture failed", updErr);
         return errorResponse(500, "layout_failed");
       }
-      return jsonResponse({ ok: true, officeLayout: layoutInts });
+      return jsonResponse({ ok: true, officeFurniture: p.layout });
     }
   }
 });
