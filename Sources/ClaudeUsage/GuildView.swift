@@ -34,8 +34,6 @@ struct GuildView: View {
     @State private var copiedCode: Bool = false
     /// 가구 재배치 모드 (길드장) — 가구를 드래그로 자유 이동.
     @State private var rearrangeMode: Bool = false
-    /// 꾸미기 모드 (P2b, 멤버 누구나) — 데코 슬롯에 장식 기부/제거. 테마는 길드장만.
-    @State private var decorateMode: Bool = false
     /// 테마 미리보기 (구매 확인 전) — 스와치 클릭 시 씬에만 적용, "구매"를 눌러야 결제.
     @State private var previewFloorTheme: Int?
     @State private var previewWallTheme: Int?
@@ -305,16 +303,16 @@ struct GuildView: View {
         .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.purple.opacity(0.07)))
     }
 
-    /// 사무실 씬 + 재배치/꾸미기 컨트롤. 멤버 배치는 자동(클라이언트 결정적 해시)이라
-    /// 서버 왕복이 없고, 가구 재배치·데코만 서버 반영 후 refresh로 재정합.
+    /// 사무실 씬 + 재배치/상점 컨트롤. 멤버 배치는 자동(클라이언트 결정적 해시)이라
+    /// 서버 왕복이 없고, 가구 재배치·데코·테마만 서버 반영 후 refresh로 재정합.
+    /// 꾸미기 모드는 폐기 — 장식·테마 구매는 상점 시트로 통합 (사용자 피드백).
     private func officeSection(_ info: RankingAPI.GuildInfoResponse) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             GuildOfficeView(
                 info: info,
                 rearrangeMode: $rearrangeMode,
-                decorateMode: $decorateMode,
-                previewFloorTheme: previewFloorTheme,
-                previewWallTheme: previewWallTheme,
+                previewFloorTheme: $previewFloorTheme,
+                previewWallTheme: $previewWallTheme,
                 onSetFurniture: { serialized in
                     performSetFurniture(serialized)
                 },
@@ -327,111 +325,32 @@ struct GuildView: View {
                 onRemoveDecor: { slot in
                     performRemoveDecor(slot: slot)
                 },
+                onApplyTheme: {
+                    performApplyThemePreview()
+                },
                 purchaseSheetOpen: $purchaseSheetOpen
             )
             HStack(spacing: 8) {
                 if info.guild.isLeader {
                     Button(rearrangeMode ? "재배치 종료" : "가구 재배치") {
-                        decorateMode = false
                         clearThemePreview()
                         rearrangeMode.toggle()
                     }
                     .font(.system(size: 11))
                     .disabled(actionBusy)
-                    Button("🪙 가구 구매") {
-                        decorateMode = false
-                        clearThemePreview()
-                        rearrangeMode = true
-                        purchaseSheetOpen = true
-                    }
-                    .font(.system(size: 11))
-                    .disabled(actionBusy)
                 }
-                Button(decorateMode ? "꾸미기 종료" : "꾸미기") {
-                    rearrangeMode = false
-                    if decorateMode { clearThemePreview() }   // 종료 시 미결제 미리보기 원복
-                    decorateMode.toggle()
+                Button("🪙 사무실 상점") {
+                    // 길드장은 재배치 모드와 함께 열어 구매 직후 바로 드래그 배치 가능.
+                    if info.guild.isLeader { rearrangeMode = true }
+                    purchaseSheetOpen = true
                 }
                 .font(.system(size: 11))
                 .disabled(actionBusy)
                 if rearrangeMode {
-                    Text("드래그로 이동 · 우상단 ＋로 구매 · 액자는 클릭해 문구 입력")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                } else if decorateMode {
-                    Text("점선 자리를 클릭해 장식을 기부하세요")
+                    Text("드래그로 이동 · 액자는 클릭해 문구 입력")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 Spacer()
-            }
-            // 인테리어 테마 (길드장 전용, 꾸미기 모드) — 바닥재 9종 + 벽지 틴트 4종, 회당 2,000코인.
-            if decorateMode && info.guild.isLeader {
-                themePickerRow(info)
-            }
-        }
-    }
-
-    /// 바닥재/벽지 스와치 — 클릭 = 씬 미리보기만, 아래 확인 바의 "구매"를 눌러야 결제
-    /// (사용자 요청 — 구매 의사 1회 확인 필수).
-    @ViewBuilder
-    private func themePickerRow(_ info: RankingAPI.GuildInfoResponse) -> some View {
-        let effFloor = previewFloorTheme ?? info.guild.floorTheme
-        let effWall = previewWallTheme ?? info.guild.wallTheme
-        HStack(spacing: 8) {
-            Text("테마 (회당 🪙\(OfficeLayout.themePrice))")
-                .font(.system(size: 10)).foregroundStyle(.secondary)
-            ForEach(0..<OfficeLayout.floorThemeCount, id: \.self) { i in
-                Button {
-                    previewFloorTheme = (i == info.guild.floorTheme) ? nil : i
-                } label: {
-                    Group {
-                        if let img = OfficeLayout.officeImage("floor_\(i)") {
-                            Image(nsImage: img).interpolation(.none).resizable()
-                        } else {
-                            Color.gray
-                        }
-                    }
-                    .frame(width: 16, height: 16)
-                    .overlay(Rectangle().stroke(
-                        effFloor == i ? Color.accentColor : Color.gray.opacity(0.4),
-                        lineWidth: effFloor == i ? 2 : 0.5))
-                }
-                .buttonStyle(.plain)
-                .disabled(actionBusy)
-                .help("바닥재 \(i + 1) 미리보기")
-            }
-            Divider().frame(height: 14)
-            ForEach(0..<OfficeLayout.wallTints.count, id: \.self) { i in
-                Button {
-                    previewWallTheme = (i == info.guild.wallTheme) ? nil : i
-                } label: {
-                    Circle()
-                        .fill(i == 0 ? Color(NSColor.windowBackgroundColor) : OfficeLayout.wallTints[i])
-                        .frame(width: 14, height: 14)
-                        .overlay(Circle().stroke(
-                            effWall == i ? Color.accentColor : Color.gray.opacity(0.4),
-                            lineWidth: effWall == i ? 2 : 0.5))
-                }
-                .buttonStyle(.plain)
-                .disabled(actionBusy)
-                .help(i == 0 ? "기본 벽지 미리보기" : "벽지 틴트 \(i) 미리보기")
-            }
-            Spacer()
-        }
-        // 구매 확인 바 — 미리보기가 현재 값과 다를 때만.
-        let purchaseCount = (previewFloorTheme != nil ? 1 : 0) + (previewWallTheme != nil ? 1 : 0)
-        if purchaseCount > 0 {
-            let total = OfficeLayout.themePrice * purchaseCount
-            HStack(spacing: 6) {
-                Text("미리보기 중 — 적용하려면 구매")
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-                Spacer()
-                Button("취소") { clearThemePreview() }
-                    .font(.system(size: 11)).controlSize(.small)
-                    .disabled(actionBusy)
-                Button("🪙 \(total) 구매") { performApplyThemePreview() }
-                    .font(.system(size: 11)).controlSize(.small)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(actionBusy || settings.coins < total)
             }
         }
     }

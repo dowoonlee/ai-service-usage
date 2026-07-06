@@ -12,14 +12,14 @@ import SwiftUI
 /// (수동 자리 선택은 사용자 피드백으로 폐기. 서버 office_slot은 더 이상 읽지 않는다).
 /// 재배치 모드(길드장): 가구를 **마우스 드래그**로 자유 이동 — 놓으면 가장 가까운 레인에 스냅
 /// 후 서버 저장 (레포트 탭 악세서리 드래그와 동일한 감각. 스왑 클릭 방식은 사용자 피드백으로 폐기).
-/// 꾸미기 모드(P2b): 데코 슬롯 표시 — 빈 슬롯 클릭 → 카탈로그 구매, 찬 슬롯 → 교체/제거.
+/// 상점(OfficeShopSheet): 가구(바닥/벽)·장식·테마를 카테고리 탭으로 통합 구매 —
+/// 꾸미기 모드는 사용자 피드백으로 폐기, 장식은 빈 슬롯 자동 선택 + 미리보기로 단순화.
 struct GuildOfficeView: View {
     let info: RankingAPI.GuildInfoResponse
     @Binding var rearrangeMode: Bool
-    @Binding var decorateMode: Bool
-    /// 테마 미리보기 오버라이드 (꾸미기 모드 구매 확인 전) — nil이면 서버 값.
-    var previewFloorTheme: Int? = nil
-    var previewWallTheme: Int? = nil
+    /// 테마 미리보기 (상점 테마 탭이 구동, 구매 확인 전) — nil이면 서버 값.
+    @Binding var previewFloorTheme: Int?
+    @Binding var previewWallTheme: Int?
     /// 가구 드래그 종료 시 — 직렬화된 전체 배치("setId:x:lane;…"). 호출 측이 서버 반영.
     let onSetFurniture: (String) -> Void
     /// 가구 구매 확정 (카탈로그 아이템, 새 인스턴스가 포함된 직렬화) — 호출 측이 코인 검증·서버 반영.
@@ -27,6 +27,8 @@ struct GuildOfficeView: View {
     /// 데코 구매 (slot, item) — 호출 측이 코인 검증·서버 반영.
     let onPlaceDecor: (Int, OfficeLayout.DecorItem) -> Void
     let onRemoveDecor: (Int) -> Void
+    /// 테마 미리보기 구매 확정 — 호출 측이 코인 검증·서버 반영 + 미리보기 해제.
+    let onApplyTheme: () -> Void
 
     @StateObject private var sim = OfficeSimulation()
     @State private var popoverPetID: String?
@@ -34,8 +36,6 @@ struct GuildOfficeView: View {
     @State private var draftPlacements: [OfficeLayout.FurniturePlacement]?
     /// 현재 드래그 중인 가구 인스턴스 uid (하이라이트용).
     @State private var draggingUid: Int?
-    /// 꾸미기 모드에서 카탈로그 popover가 열린 데코 슬롯.
-    @State private var decorPopoverSlot: Int?
     /// 데코 구매 확인 전 미리보기 — 씬에는 보이지만 아직 결제 안 됨 (구매/취소로 해소).
     @State private var previewDecor: (slot: Int, kind: String)?
     /// 가구 구매 popover 열림 — 컨트롤 행의 "가구 구매" 버튼이 재배치 진입과 함께 열 수
@@ -88,10 +88,6 @@ struct GuildOfficeView: View {
                 decorLayer(scale: scale)
                 petLayer(scale: scale)
                     .allowsHitTesting(!rearrangeMode)   // 재배치 중 펫이 가구 드래그를 가로채지 않게
-                if decorateMode {
-                    decorateLayer(scale: scale)
-                        .zIndex(5000)
-                }
             }
             .frame(width: geo.size.width, height: scene.height * scale)
             .coordinateSpace(name: "officeScene")   // 가구 드래그 좌표 기준
@@ -103,32 +99,53 @@ struct GuildOfficeView: View {
                 .strokeBorder(rearrangeMode ? Color.orange.opacity(0.6) : Color.gray.opacity(0.25),
                               lineWidth: rearrangeMode ? 1.5 : 1)
         )
-        // 가구 구매 (재배치 모드, 길드장) — 카탈로그에서 선택 = 씬 미리보기, 구매 확정 시 결제.
+        // 사무실 상점 (가구·장식·테마 통합) — 항목 선택 = 씬 미리보기, 구매 확정 시 결제.
+        // 앵커는 재배치 모드에서만 버튼으로 보이고, 그 외에는 투명 앵커 (컨트롤 행 버튼이 연다).
         .overlay(alignment: .topTrailing) {
-            if rearrangeMode {
-                Button {
-                    purchaseSheetOpen = true
-                } label: {
-                    Label("가구 구매", systemImage: "plus")
-                        .font(.system(size: 10, weight: .semibold))
-                        .padding(.horizontal, 6).padding(.vertical, 3)
-                        .background(Capsule().fill(Color(NSColor.windowBackgroundColor).opacity(0.9)))
-                }
-                .buttonStyle(.plain)
-                .popover(isPresented: Binding(
-                    get: { purchaseSheetOpen },
-                    set: { open in
-                        purchaseSheetOpen = open
-                        if !open { pendingPurchase = nil }   // 확인 없이 닫으면 미리보기 원복
+            Group {
+                if rearrangeMode {
+                    Button {
+                        purchaseSheetOpen = true
+                    } label: {
+                        Label("상점", systemImage: "plus")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(Capsule().fill(Color(NSColor.windowBackgroundColor).opacity(0.9)))
                     }
-                ), arrowEdge: .bottom) {
-                    FurnitureCatalogSheet(
-                        onPreview: { kind in setPendingPurchase(kind) },
-                        onBuy: { kind in commitPurchase(kind) }
-                    )
+                    .buttonStyle(.plain)
+                } else {
+                    Color.clear.frame(width: 1, height: 1)
                 }
-                .padding(6)
             }
+            .popover(isPresented: Binding(
+                get: { purchaseSheetOpen },
+                set: { open in
+                    purchaseSheetOpen = open
+                    if !open { clearShopPreviews() }   // 확인 없이 닫으면 미리보기 전부 원복
+                }
+            ), arrowEdge: .bottom) {
+                OfficeShopSheet(
+                    isLeader: info.guild.isLeader,
+                    placedDecor: placedDecor,
+                    currentFloorTheme: info.guild.floorTheme,
+                    currentWallTheme: info.guild.wallTheme,
+                    previewFloorTheme: $previewFloorTheme,
+                    previewWallTheme: $previewWallTheme,
+                    onPreviewFurniture: { kind in setPendingPurchase(kind) },
+                    onBuyFurniture: { kind in commitPurchase(kind) },
+                    onPreviewDecor: { selection in previewDecor = selection },
+                    onBuyDecor: { slot, item in
+                        previewDecor = nil
+                        onPlaceDecor(slot, item)
+                    },
+                    onRemoveDecor: { slot in onRemoveDecor(slot) },
+                    onApplyTheme: {
+                        purchaseSheetOpen = false
+                        onApplyTheme()
+                    }
+                )
+            }
+            .padding(6)
         }
         .onAppear { reconfigureSim() }
         .onDisappear { sim.stop() }
@@ -145,10 +162,14 @@ struct GuildOfficeView: View {
         .onChange(of: info.guild.officeFurniture ?? "") { _ in
             if draggingUid == nil { draftPlacements = nil }
         }
-        .onChange(of: decorateMode) { _ in
-            decorPopoverSlot = nil
-            previewDecor = nil
-        }
+    }
+
+    /// 상점 닫힘 시 미결제 미리보기 전부 원복 (가구·장식·테마).
+    private func clearShopPreviews() {
+        pendingPurchase = nil
+        previewDecor = nil
+        previewFloorTheme = nil
+        previewWallTheme = nil
     }
 
     private func reconfigureSim() {
@@ -279,63 +300,6 @@ struct GuildOfficeView: View {
         case .avoid, .through: return baseline
         case .behind: return baseline + 1000
         }
-    }
-
-    /// 꾸미기 모드 오버레이 — 빈 슬롯은 점선 + 클릭 구매, 찬 슬롯은 교체/제거.
-    @ViewBuilder
-    private func decorateLayer(scale: CGFloat) -> some View {
-        ForEach(OfficeLayout.decorSlots) { slot in
-            let placed = placedDecor.first { $0.slotId == slot.id }
-            decorSlotMarker(slot, placed: placed, scale: scale)
-        }
-    }
-
-    private func decorSlotMarker(_ slot: OfficeLayout.DecorSlot,
-                                 placed: RankingAPI.GuildFurnitureItem?,
-                                 scale: CGFloat) -> some View {
-        let tint: Color = slot.category == .wall ? .pink : .orange
-        return RoundedRectangle(cornerRadius: 3)
-            .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [3]))
-            .foregroundStyle(tint)
-            .background(RoundedRectangle(cornerRadius: 3).fill(tint.opacity(placed == nil ? 0.15 : 0.05)))
-            .frame(width: 20 * scale, height: 18 * scale)
-            .overlay(alignment: .bottom) {
-                Text(placed == nil ? "+" : "↺")
-                    .font(.system(size: max(8, 5 * scale), weight: .bold))
-                    .foregroundStyle(tint)
-            }
-            // 제스처/popover는 .position보다 먼저 — 뒤에 붙이면 탭 영역이 씬 전체가 되고
-            // popover 앵커도 어긋난다 (spotMarker와 동일 원인의 버그).
-            .contentShape(Rectangle())
-            .onTapGesture { decorPopoverSlot = slot.id }
-            .popover(isPresented: Binding(
-                get: { decorPopoverSlot == slot.id },
-                set: { if !$0 {
-                    decorPopoverSlot = nil
-                    previewDecor = nil   // 확인 없이 닫으면 미리보기 원복
-                } }
-            ), arrowEdge: .bottom) {
-                DecorCatalogSheet(
-                    slot: slot,
-                    placed: placed,
-                    canRemove: placed != nil &&
-                        (info.guild.isLeader || placed?.donorNickname == Settings.shared.rankingNickname),
-                    onPreview: { item in
-                        previewDecor = item.map { (slot: slot.id, kind: $0.kind) }
-                    },
-                    onBuy: { item in
-                        decorPopoverSlot = nil
-                        previewDecor = nil
-                        onPlaceDecor(slot.id, item)
-                    },
-                    onRemove: {
-                        decorPopoverSlot = nil
-                        previewDecor = nil
-                        onRemoveDecor(slot.id)
-                    }
-                )
-            }
-            .position(x: slot.anchorX * scale, y: (slot.baselineY - 9) * scale)
     }
 
     // MARK: - 가구
@@ -673,188 +637,317 @@ private struct OfficePetView: View {
     }
 }
 
-// MARK: - 데코 카탈로그 시트 (꾸미기 모드 popover)
+// MARK: - 사무실 상점 시트 (가구·장식·테마 통합 — 꾸미기 모드 폐기 후 단일 진입점)
 
-/// 데코 슬롯 클릭 시 카탈로그 — 아이템 클릭 = 씬 미리보기 적용(onPreview), 하단 확인
-/// 바의 "구매"를 눌러야 결제(onBuy). 취소/닫기는 미리보기 원복 (사용자 요청 — 구매 의사
-/// 1회 확인 필수). 기부 모델이라 교체 구매는 기존 아이템 소멸 (기획 §2). 제거는 기부자/길드장만.
+/// 카테고리 탭: 바닥 가구 / 벽 설치 / 장식 / 테마(길드장). 어느 탭이든 항목 클릭 =
+/// 씬 미리보기, 확인 바의 "구매"를 눌러야 결제. 닫기/취소는 미리보기 원복.
+/// 가구·테마는 길드장 전용(서버 권한과 쌍), 장식은 멤버 누구나 기부 가능.
 @MainActor
-private struct DecorCatalogSheet: View {
-    let slot: OfficeLayout.DecorSlot
-    let placed: RankingAPI.GuildFurnitureItem?
-    let canRemove: Bool
-    let onPreview: (OfficeLayout.DecorItem?) -> Void
-    let onBuy: (OfficeLayout.DecorItem) -> Void
-    let onRemove: () -> Void
-    @ObservedObject var settings = Settings.shared
-    @State private var pending: OfficeLayout.DecorItem?
+private struct OfficeShopSheet: View {
+    enum Tab: Hashable { case floorFurniture, wallFurniture, decor, theme }
 
-    private var items: [OfficeLayout.DecorItem] {
-        OfficeLayout.decorCatalog.filter { $0.category == slot.category }
+    let isLeader: Bool
+    let placedDecor: [RankingAPI.GuildFurnitureItem]
+    let currentFloorTheme: Int
+    let currentWallTheme: Int
+    @Binding var previewFloorTheme: Int?
+    @Binding var previewWallTheme: Int?
+    let onPreviewFurniture: (OfficeLayout.FurnitureKind?) -> Void
+    let onBuyFurniture: (OfficeLayout.FurnitureKind) -> Void
+    let onPreviewDecor: ((slot: Int, kind: String)?) -> Void
+    let onBuyDecor: (Int, OfficeLayout.DecorItem) -> Void
+    let onRemoveDecor: (Int) -> Void
+    let onApplyTheme: () -> Void
+
+    @ObservedObject var settings = Settings.shared
+    @State private var tab: Tab
+    @State private var pendingFurniture: OfficeLayout.FurnitureKind?
+    @State private var pendingDecor: (slot: Int, item: OfficeLayout.DecorItem)?
+
+    init(isLeader: Bool, placedDecor: [RankingAPI.GuildFurnitureItem],
+         currentFloorTheme: Int, currentWallTheme: Int,
+         previewFloorTheme: Binding<Int?>, previewWallTheme: Binding<Int?>,
+         onPreviewFurniture: @escaping (OfficeLayout.FurnitureKind?) -> Void,
+         onBuyFurniture: @escaping (OfficeLayout.FurnitureKind) -> Void,
+         onPreviewDecor: @escaping ((slot: Int, kind: String)?) -> Void,
+         onBuyDecor: @escaping (Int, OfficeLayout.DecorItem) -> Void,
+         onRemoveDecor: @escaping (Int) -> Void,
+         onApplyTheme: @escaping () -> Void) {
+        self.isLeader = isLeader
+        self.placedDecor = placedDecor
+        self.currentFloorTheme = currentFloorTheme
+        self.currentWallTheme = currentWallTheme
+        _previewFloorTheme = previewFloorTheme
+        _previewWallTheme = previewWallTheme
+        self.onPreviewFurniture = onPreviewFurniture
+        self.onBuyFurniture = onBuyFurniture
+        self.onPreviewDecor = onPreviewDecor
+        self.onBuyDecor = onBuyDecor
+        self.onRemoveDecor = onRemoveDecor
+        self.onApplyTheme = onApplyTheme
+        // 가구/테마는 길드장 전용 — 멤버는 장식 탭에서 시작.
+        _tab = State(initialValue: isLeader ? .floorFurniture : .decor)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(slot.category == .wall ? "벽 장식" : "바닥 소품")
-                    .font(.system(size: 12, weight: .semibold))
+                Text("사무실 상점").font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Text("🪙 \(settings.coins)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(AppColors.gold)
             }
-            if let placed, let current = OfficeLayout.decorItem(kind: placed.itemKind) {
-                HStack(spacing: 6) {
-                    Text("현재: \(current.name)")
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
-                    if let donor = placed.donorNickname {
-                        Text("· \(donor) 기부").font(.system(size: 10)).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if canRemove {
-                        Button("제거", role: .destructive) { onRemove() }
-                            .font(.system(size: 10)).controlSize(.small)
-                    }
+            Picker("", selection: $tab) {
+                if isLeader {
+                    Text("바닥 가구").tag(Tab.floorFurniture)
+                    Text("벽 설치").tag(Tab.wallFurniture)
                 }
-                Divider()
-            }
-            ForEach(items) { item in
-                let affordable = settings.coins >= item.price
-                let selected = pending?.kind == item.kind
-                Button {
-                    // 클릭 = 미리보기 — 결제는 아래 확인 바에서.
-                    pending = item
-                    onPreview(item)
-                } label: {
-                    HStack(spacing: 8) {
-                        if let img = OfficeLayout.officeImage(item.imageName) {
-                            Image(nsImage: img)
-                                .interpolation(.none)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 20, height: 20)
-                        }
-                        Text(item.name).font(.system(size: 11))
-                        Spacer()
-                        Text("🪙 \(item.price)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(affordable ? AppColors.gold : .secondary)
-                    }
-                    .contentShape(Rectangle())
-                    .padding(.horizontal, 4).padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 4)
-                        .fill(selected ? Color.accentColor.opacity(0.15) : Color.clear))
+                Text("장식").tag(Tab.decor)
+                if isLeader {
+                    Text("테마").tag(Tab.theme)
                 }
-                .buttonStyle(.plain)
-                .opacity(affordable || selected ? 1 : 0.6)
-            }
-            if let pending {
-                Divider()
-                HStack(spacing: 6) {
-                    Text("미리보기 중").font(.system(size: 10)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("취소") {
-                        self.pending = nil
-                        onPreview(nil)
-                    }
-                    .font(.system(size: 11)).controlSize(.small)
-                    Button("🪙 \(pending.price) 구매") { onBuy(pending) }
-                        .font(.system(size: 11)).controlSize(.small)
-                        .buttonStyle(.borderedProminent)
-                        .disabled(settings.coins < pending.price)
-                }
-            }
-            Text("구매한 장식은 길드에 기부됩니다 (교체 시 기존 장식 소멸)")
-                .font(.system(size: 9)).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(12)
-        .frame(width: 230)
-    }
-}
-
-// MARK: - 가구 카탈로그 시트 (재배치 모드 ＋ 버튼 popover)
-
-/// 가구 구매 카탈로그 — 바닥/벽 카테고리 탭으로 분리 (사용자 요청). 아이템 클릭 =
-/// 씬 미리보기(onPreview), "구매"를 눌러야 결제(onBuy). 구매 후 드래그로 배치를 옮긴다.
-@MainActor
-private struct FurnitureCatalogSheet: View {
-    let onPreview: (OfficeLayout.FurnitureKind?) -> Void
-    let onBuy: (OfficeLayout.FurnitureKind) -> Void
-    @ObservedObject var settings = Settings.shared
-    @State private var pending: OfficeLayout.FurnitureKind?
-    @State private var category: OfficeLayout.FurnitureMount = .floor
-
-    private var items: [OfficeLayout.FurnitureKind] {
-        OfficeLayout.furnitureCatalog.filter { $0.mount == category }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("가구 구매").font(.system(size: 12, weight: .semibold))
-                Spacer()
-                Text("🪙 \(settings.coins)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(AppColors.gold)
-            }
-            Picker("", selection: $category) {
-                Text("바닥 가구").tag(OfficeLayout.FurnitureMount.floor)
-                Text("벽 설치").tag(OfficeLayout.FurnitureMount.wall)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .controlSize(.small)
-            ForEach(items) { kind in
-                let affordable = settings.coins >= kind.price
-                let selected = pending?.id == kind.id
-                Button {
-                    pending = kind
-                    onPreview(kind)
-                } label: {
-                    HStack(spacing: 8) {
-                        catalogIcon(kind)
-                        Text(kind.name).font(.system(size: 11))
-                        if kind.supportsText {
-                            Text("문구").font(.system(size: 8, weight: .semibold))
-                                .padding(.horizontal, 3).padding(.vertical, 1)
-                                .background(Capsule().fill(Color.blue.opacity(0.2)))
+            .onChange(of: tab) { _ in clearPending() }
+            switch tab {
+            case .floorFurniture: furnitureRows(mount: .floor)
+            case .wallFurniture: furnitureRows(mount: .wall)
+            case .decor: decorTab
+            case .theme: themeTab
+            }
+            footer
+        }
+        .padding(12)
+        .frame(width: 260)
+    }
+
+    /// 탭 전환 시 미결제 선택 원복 — 씬 미리보기도 함께 해제.
+    private func clearPending() {
+        if pendingFurniture != nil {
+            pendingFurniture = nil
+            onPreviewFurniture(nil)
+        }
+        if pendingDecor != nil {
+            pendingDecor = nil
+            onPreviewDecor(nil)
+        }
+    }
+
+    // MARK: 가구 탭 (바닥/벽 — 길드장)
+
+    @ViewBuilder
+    private func furnitureRows(mount: OfficeLayout.FurnitureMount) -> some View {
+        ForEach(OfficeLayout.furnitureCatalog.filter { $0.mount == mount }) { kind in
+            let affordable = settings.coins >= kind.price
+            let selected = pendingFurniture?.id == kind.id
+            shopRow(selected: selected, dimmed: !affordable && !selected) {
+                pendingFurniture = kind
+                onPreviewFurniture(kind)
+            } content: {
+                catalogIcon(kind)
+                Text(kind.name).font(.system(size: 11))
+                if kind.supportsText {
+                    badge("문구", color: .blue)
+                }
+                Spacer()
+                priceTag(kind.price, affordable: affordable)
+            }
+        }
+        if let pending = pendingFurniture {
+            confirmBar(price: pending.price) {
+                pendingFurniture = nil
+                onPreviewFurniture(nil)
+            } buy: {
+                onBuyFurniture(pending)
+            }
+        }
+    }
+
+    // MARK: 장식 탭 (멤버 누구나 — 기부 모델, 빈 슬롯 자동 선택)
+
+    @ViewBuilder
+    private var decorTab: some View {
+        ForEach(OfficeLayout.decorCatalog) { item in
+            let freeSlot = firstFreeSlot(category: item.category)
+            let affordable = settings.coins >= item.price
+            let selected = pendingDecor?.item.kind == item.kind
+            shopRow(selected: selected,
+                    dimmed: (freeSlot == nil || !affordable) && !selected) {
+                guard let slot = freeSlot else { return }
+                pendingDecor = (slot: slot, item: item)
+                onPreviewDecor((slot: slot, kind: item.kind))
+            } content: {
+                if let img = OfficeLayout.officeImage(item.imageName) {
+                    Image(nsImage: img)
+                        .interpolation(.none)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 20, height: 20)
+                }
+                Text(item.name).font(.system(size: 11))
+                badge(item.category == .wall ? "벽" : "바닥",
+                      color: item.category == .wall ? .pink : .orange)
+                Spacer()
+                if freeSlot == nil {
+                    Text("자리 없음").font(.system(size: 9)).foregroundStyle(.secondary)
+                } else {
+                    priceTag(item.price, affordable: affordable)
+                }
+            }
+        }
+        if let pending = pendingDecor {
+            confirmBar(price: pending.item.price) {
+                pendingDecor = nil
+                onPreviewDecor(nil)
+            } buy: {
+                let slot = pending.slot
+                let item = pending.item
+                pendingDecor = nil
+                onBuyDecor(slot, item)
+            }
+        }
+        // 배치된 장식 관리 — 제거는 기부자 본인 또는 길드장.
+        if !placedDecor.isEmpty {
+            Divider()
+            Text("배치된 장식").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+            ForEach(placedDecor, id: \.slotId) { placed in
+                if let item = OfficeLayout.decorItem(kind: placed.itemKind) {
+                    HStack(spacing: 6) {
+                        Text(item.name).font(.system(size: 10))
+                        if let donor = placed.donorNickname {
+                            Text("· \(donor) 기부").font(.system(size: 9)).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text("🪙 \(kind.price)")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(affordable ? AppColors.gold : .secondary)
+                        if isLeader || placed.donorNickname == Settings.shared.rankingNickname {
+                            Button("제거", role: .destructive) { onRemoveDecor(placed.slotId) }
+                                .font(.system(size: 9)).controlSize(.mini)
+                        }
                     }
-                    .contentShape(Rectangle())
-                    .padding(.horizontal, 4).padding(.vertical, 2)
-                    .background(RoundedRectangle(cornerRadius: 4)
-                        .fill(selected ? Color.accentColor.opacity(0.15) : Color.clear))
+                }
+            }
+        }
+    }
+
+    /// 카테고리(벽/바닥)에서 비어 있는 첫 데코 슬롯 — 없으면 nil (행 비활성).
+    private func firstFreeSlot(category: OfficeLayout.DecorCategory) -> Int? {
+        let occupied = Set(placedDecor.map(\.slotId))
+        return OfficeLayout.decorSlots
+            .first { $0.category == category && !occupied.contains($0.id) }?.id
+    }
+
+    // MARK: 테마 탭 (길드장 — 바닥재/벽지, 회당 themePrice)
+
+    @ViewBuilder
+    private var themeTab: some View {
+        let effFloor = previewFloorTheme ?? currentFloorTheme
+        let effWall = previewWallTheme ?? currentWallTheme
+        Text("바닥재").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            ForEach(0..<OfficeLayout.floorThemeCount, id: \.self) { i in
+                Button {
+                    previewFloorTheme = (i == currentFloorTheme) ? nil : i
+                } label: {
+                    Group {
+                        if let img = OfficeLayout.officeImage("floor_\(i)") {
+                            Image(nsImage: img).interpolation(.none).resizable()
+                        } else {
+                            Color.gray
+                        }
+                    }
+                    .frame(width: 18, height: 18)
+                    .overlay(Rectangle().stroke(
+                        effFloor == i ? Color.accentColor : Color.gray.opacity(0.4),
+                        lineWidth: effFloor == i ? 2 : 0.5))
                 }
                 .buttonStyle(.plain)
-                .opacity(affordable || selected ? 1 : 0.6)
+                .help("바닥재 \(i + 1) 미리보기")
             }
-            if let pending {
-                Divider()
-                HStack(spacing: 6) {
-                    Text("미리보기 중").font(.system(size: 10)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("취소") {
-                        self.pending = nil
-                        onPreview(nil)
-                    }
-                    .font(.system(size: 11)).controlSize(.small)
-                    Button("🪙 \(pending.price) 구매") { onBuy(pending) }
-                        .font(.system(size: 11)).controlSize(.small)
-                        .buttonStyle(.borderedProminent)
-                        .disabled(settings.coins < pending.price)
+        }
+        Text("벽지").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+            ForEach(0..<OfficeLayout.wallTints.count, id: \.self) { i in
+                Button {
+                    previewWallTheme = (i == currentWallTheme) ? nil : i
+                } label: {
+                    Circle()
+                        .fill(i == 0 ? Color(NSColor.windowBackgroundColor) : OfficeLayout.wallTints[i])
+                        .frame(width: 16, height: 16)
+                        .overlay(Circle().stroke(
+                            effWall == i ? Color.accentColor : Color.gray.opacity(0.4),
+                            lineWidth: effWall == i ? 2 : 0.5))
                 }
+                .buttonStyle(.plain)
+                .help(i == 0 ? "기본 벽지 미리보기" : "벽지 틴트 \(i) 미리보기")
             }
-            Text("구매한 가구는 길드 소유가 되며, 드래그로 자유 배치할 수 있습니다 (벽 설치 가구는 벽 안에서만 이동)")
+        }
+        let purchaseCount = (previewFloorTheme != nil ? 1 : 0) + (previewWallTheme != nil ? 1 : 0)
+        if purchaseCount > 0 {
+            confirmBar(price: OfficeLayout.themePrice * purchaseCount) {
+                previewFloorTheme = nil
+                previewWallTheme = nil
+            } buy: {
+                onApplyTheme()
+            }
+        } else {
+            Text("스와치를 누르면 씬에 미리보기가 적용됩니다 (항목당 🪙\(OfficeLayout.themePrice))")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
-        .frame(width: 250)
+    }
+
+    // MARK: 공통 조각
+
+    private func shopRow(selected: Bool, dimmed: Bool, action: @escaping () -> Void,
+                         @ViewBuilder content: () -> some View) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) { content() }
+                .contentShape(Rectangle())
+                .padding(.horizontal, 4).padding(.vertical, 2)
+                .background(RoundedRectangle(cornerRadius: 4)
+                    .fill(selected ? Color.accentColor.opacity(0.15) : Color.clear))
+        }
+        .buttonStyle(.plain)
+        .opacity(dimmed ? 0.6 : 1)
+    }
+
+    private func confirmBar(price: Int, cancel: @escaping () -> Void,
+                            buy: @escaping () -> Void) -> some View {
+        VStack(spacing: 6) {
+            Divider()
+            HStack(spacing: 6) {
+                Text("미리보기 중").font(.system(size: 10)).foregroundStyle(.secondary)
+                Spacer()
+                Button("취소", action: cancel)
+                    .font(.system(size: 11)).controlSize(.small)
+                Button("🪙 \(price) 구매", action: buy)
+                    .font(.system(size: 11)).controlSize(.small)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(settings.coins < price)
+            }
+        }
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
+        Text(text).font(.system(size: 8, weight: .semibold))
+            .padding(.horizontal, 3).padding(.vertical, 1)
+            .background(Capsule().fill(color.opacity(0.2)))
+    }
+
+    private func priceTag(_ price: Int, affordable: Bool) -> some View {
+        Text("🪙 \(price)")
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(affordable ? AppColors.gold : .secondary)
+    }
+
+    private var footer: some View {
+        Text(tab == .decor
+             ? "구매한 장식은 길드에 기부됩니다 (제거는 기부자/길드장)"
+             : "구매한 가구는 길드 소유 — 재배치 모드에서 드래그로 이동 (벽 설치는 벽 안에서만)")
+            .font(.system(size: 9)).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
@@ -989,12 +1082,12 @@ enum GuildOfficeDemo {
     private struct DemoWrapper: View {
         let members: [RankingAPI.GuildMember]
         // 캡처 자동화 편의 — `AIUSAGE_OFFICE_DEMO=rearrange`면 재배치 모드,
-        // `=swapped`면 스왑 배치, `=decor`면 꾸미기 모드 + 데코/테마 프리필로 시작.
+        // `=swapped`면 커스텀 배치, `=decor`면 데코/테마 프리필로 시작.
         @State private var rearrange =
             ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "rearrange"
         @State private var purchaseOpen = false
-        @State private var decorate =
-            ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "decor"
+        @State private var previewFloor: Int?
+        @State private var previewWall: Int?
         /// 재배치(드래그)·구매를 로컬에서 즉시 반영 — 서버 없이 동작 확인.
         @State private var furnitureLayout: String = {
             if ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "swapped" {
@@ -1038,7 +1131,8 @@ enum GuildOfficeDemo {
                 GuildOfficeView(
                     info: info,
                     rearrangeMode: $rearrange,
-                    decorateMode: $decorate,
+                    previewFloorTheme: $previewFloor,
+                    previewWallTheme: $previewWall,
                     onSetFurniture: { serialized in
                         furnitureLayout = serialized
                         print("OFFICE_DEMO_FURNITURE=\(serialized)")
@@ -1061,11 +1155,17 @@ enum GuildOfficeDemo {
                         print("OFFICE_DEMO_DECOR remove slot=\(slot)")
                         fflush(stdout)
                     },
+                    onApplyTheme: {
+                        print("OFFICE_DEMO_THEME floor=\(previewFloor.map(String.init) ?? "-") wall=\(previewWall.map(String.init) ?? "-")")
+                        fflush(stdout)
+                        previewFloor = nil
+                        previewWall = nil
+                    },
                     purchaseSheetOpen: $purchaseOpen
                 )
                 HStack {
                     Toggle("가구 재배치", isOn: $rearrange).font(.system(size: 11))
-                    Toggle("꾸미기", isOn: $decorate).font(.system(size: 11))
+                    Toggle("상점", isOn: $purchaseOpen).font(.system(size: 11))
                 }
             }
             .padding(12)
