@@ -27,8 +27,6 @@ struct GuildView: View {
     // 초대 (푸시)
     /// 길드장이 초대할 닉네임 입력.
     @State private var inviteNicknameDraft: String = ""
-    /// 내가 받은 대기중 초대 (무소속 온보딩에서 수락/거절).
-    @State private var receivedInvites: [RankingAPI.GuildReceivedInvite] = []
 
     // 확인 다이얼로그
     @State private var confirmingPermitPurchase: Bool = false
@@ -167,16 +165,14 @@ struct GuildView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if !receivedInvites.isEmpty {
-                    receivedInvitesSection
-                }
-
                 HStack(alignment: .top, spacing: 12) {
                     createCard
                     joinCard
                 }
 
                 Divider()
+                Text("받은 길드 초대는 상단 ✉️ 쪽지함에서 확인·수락할 수 있어요.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
                 Text("길드 순위는 랭킹 탭 → 길드에서 확인할 수 있어요.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
@@ -268,45 +264,6 @@ struct GuildView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.gray.opacity(0.08)))
-    }
-
-    // MARK: - 받은 초대 (무소속 온보딩)
-
-    /// 받은 초대 목록 — 길드명·보낸이·만료 + 수락/거절.
-    private var receivedInvitesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("받은 초대 \(receivedInvites.count)건", systemImage: "envelope.badge.fill")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.teal)
-            ForEach(receivedInvites) { inv in
-                HStack(spacing: 8) {
-                    Image(systemName: "shield.lefthalf.filled").foregroundStyle(.teal)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(inv.guildName).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-                        HStack(spacing: 4) {
-                            Text("\(inv.memberCount)명").font(.system(size: 10)).foregroundStyle(.secondary)
-                            if let by = inv.inviterNickname {
-                                Text("· \(by) 초대").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                        }
-                    }
-                    Spacer()
-                    Button("수락") { performAcceptInvite(inv) }
-                        .font(.system(size: 11)).controlSize(.small)
-                        .buttonStyle(.borderedProminent)
-                        .disabled(actionBusy || isCoolingDown)
-                    Button("거절") { performDeclineInvite(inv) }
-                        .font(.system(size: 11)).controlSize(.small)
-                        .disabled(actionBusy)
-                }
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.teal.opacity(0.08)))
-            }
-            if isCoolingDown {
-                Text("재가입 쿨다운 중에는 수락할 수 없습니다.")
-                    .font(.system(size: 10)).foregroundStyle(.orange)
-            }
-        }
     }
 
     // MARK: - 멤버 초대 (길드장, 내 길드)
@@ -562,9 +519,7 @@ struct GuildView: View {
             } catch {
                 self.error = error.localizedDescription
             }
-            // 받은 초대 — 소속/무소속 무관 조회(무소속 온보딩에서만 표시). 실패는 조용히 무시.
-            receivedInvites = (try? await RankingAPI.shared.listGuildInvites(
-                deviceId: deviceId, hmacKeyBase64: key)) ?? []
+            // 받은 초대는 통합 인박스(쪽지함, DMViewModel)에서 조회·수락/거절한다.
             // 길드 랭킹 리스트는 랭킹 탭 → 길드 스코프로 이동 (RankingView.guildContent).
         }
     }
@@ -594,23 +549,6 @@ struct GuildView: View {
         runAction {
             _ = try await RankingAPI.shared.manageGuild(
                 deviceId: settings.rankingDeviceID, action: .cancelInvite, inviteId: inviteId,
-                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
-        }
-    }
-
-    private func performAcceptInvite(_ inv: RankingAPI.GuildReceivedInvite) {
-        runAction {
-            let resp = try await RankingAPI.shared.acceptGuildInvite(
-                deviceId: settings.rankingDeviceID, inviteId: inv.inviteId,
-                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
-            DebugLog.log("Guild: 초대 수락 → [\(resp.name)] (\(resp.memberCount)명)")
-        }
-    }
-
-    private func performDeclineInvite(_ inv: RankingAPI.GuildReceivedInvite) {
-        runAction {
-            try await RankingAPI.shared.declineGuildInvite(
-                deviceId: settings.rankingDeviceID, inviteId: inv.inviteId,
                 hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
         }
     }

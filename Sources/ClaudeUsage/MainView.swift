@@ -324,8 +324,8 @@ struct MainView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Color.teal)
                         .overlay(alignment: .topTrailing) {
-                            if dm.totalUnread > 0 {
-                                Text("\(min(dm.totalUnread, 99))")
+                            if dm.badgeCount > 0 {
+                                Text("\(min(dm.badgeCount, 99))")
                                     .font(.system(size: 8, weight: .bold))
                                     .foregroundStyle(.white)
                                     .padding(.horizontal, 3)
@@ -337,7 +337,7 @@ struct MainView: View {
                         }
                 }
                 .buttonStyle(.borderless)
-                .help(dm.totalUnread > 0 ? "쪽지 (미확인 \(dm.totalUnread)개)" : "쪽지 열기")
+                .help(dm.badgeCount > 0 ? "쪽지·초대 \(dm.badgeCount)건" : "쪽지 열기")
                 // 게시판 진입 — 미확인 글 수가 우상단 빨간 배지로 표시.
                 Button {
                     BoardWindowController.shared.present()

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// 1:1 쪽지 전용 창 (docs/plans/direct-messages.md). E2EE(HPKE) — 본문은 이 기기에서만 복호.
-/// 통합 인박스(P2에서 길드 초대 카드 편입 예정) · 스레드 · 작성. 랭킹 참여자 전용.
+/// 통합 인박스(쪽지 + 받은 길드 초대) · 스레드 · 작성. 랭킹 참여자 전용.
 
 // MARK: - ViewModel
 
@@ -20,6 +20,8 @@ final class DMViewModel: ObservableObject {
     @Published var openPeerNickname: String?
     /// 작성 중 상대 키 변경 경고(닉네임).
     @Published var keyChangeWarning: String?
+    /// 받은 길드 초대 (통합 인박스 카드). 서버 평문 — 쪽지와 달리 암호화 대상 아님.
+    @Published var invites: [RankingAPI.GuildReceivedInvite] = []
 
     private var didPublishThisSession = false
     private var refreshTask: Task<Void, Never>?
@@ -45,6 +47,13 @@ final class DMViewModel: ObservableObject {
     private var device: String { Settings.shared.rankingDeviceID }
     private var hmac: String { Keychain.loadRankingHmacKey() ?? "" }
     private var ready: Bool { RankingAPI.isConfigured && Settings.shared.rankingRegistered && !device.isEmpty }
+
+    /// 무소속일 때만 초대 노출 — 소속 중엔 수락 불가라 숨긴다.
+    var visibleInvites: [RankingAPI.GuildReceivedInvite] {
+        Settings.shared.guildID.isEmpty ? invites : []
+    }
+    /// ✉️ 배지 = 미확인 쪽지 + 처리 대기 초대.
+    var badgeCount: Int { totalUnread + visibleInvites.count }
 
     private init() {
         startAutoRefresh()
@@ -97,6 +106,9 @@ final class DMViewModel: ObservableObject {
         } catch {
             if !silent { self.error = mapError(error) }
         }
+        // 받은 길드 초대도 함께 적재 (통합 인박스). 실패는 조용히 무시.
+        invites = (try? await RankingAPI.shared.listGuildInvites(
+            deviceId: device, hmacKeyBase64: hmac)) ?? []
     }
 
     private func previewText(for t: RankingAPI.DMThread) -> String {
@@ -184,6 +196,48 @@ final class DMViewModel: ObservableObject {
         } catch {
             self.error = mapError(error)
         }
+    }
+
+    // MARK: - 길드 초대 (통합 인박스 카드)
+
+    /// 초대 수락 → 해당 길드 가입. 가입 상태를 즉시 로컬 반영해 남은 초대/길드 탭을 곧바로 갱신.
+    func acceptInvite(_ inv: RankingAPI.GuildReceivedInvite) async {
+        guard ready else { return }
+        error = nil
+        do {
+            let resp = try await RankingAPI.shared.acceptGuildInvite(
+                deviceId: device, inviteId: inv.inviteId, hmacKeyBase64: hmac)
+            Settings.shared.guildID = resp.guildId
+            Settings.shared.guildName = resp.name
+            Settings.shared.isGuildLeader = false
+            DebugLog.log("DM: 길드 초대 수락 → [\(resp.name)] (\(resp.memberCount)명)")
+            await refreshInbox(silent: true)
+        } catch {
+            self.error = mapInviteError(error)
+        }
+    }
+
+    /// 초대 거절 (그 길드는 24h 재초대 쿨다운). 목록에서 즉시 제거.
+    func declineInvite(_ inv: RankingAPI.GuildReceivedInvite) async {
+        guard ready else { return }
+        error = nil
+        do {
+            try await RankingAPI.shared.declineGuildInvite(
+                deviceId: device, inviteId: inv.inviteId, hmacKeyBase64: hmac)
+            invites.removeAll { $0.inviteId == inv.inviteId }
+        } catch {
+            self.error = mapInviteError(error)
+        }
+    }
+
+    private func mapInviteError(_ error: Error) -> String {
+        if case RankingAPI.RankingError.guildCooldown = error {
+            return "재가입 쿨다운 중에는 수락할 수 없어요."
+        }
+        if case RankingAPI.RankingError.guildConflict = error {
+            return "지금은 이 초대를 처리할 수 없어요 (만료되었거나 이미 처리됨)."
+        }
+        return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 
     private func mapError(_ error: Error) -> String {
@@ -280,12 +334,13 @@ private struct DMInboxView: View {
             if let error = vm.error {
                 Text(error).font(.system(size: 11)).foregroundStyle(.red).padding(10)
             }
-            if vm.threads.isEmpty {
+            if vm.threads.isEmpty && vm.visibleInvites.isEmpty {
                 Spacer()
                 Text("아직 쪽지가 없어요").font(.system(size: 12)).foregroundStyle(.secondary)
                 Spacer()
             } else {
                 ScrollView {
+                    if !vm.visibleInvites.isEmpty { invitesSection }
                     LazyVStack(spacing: 0) {
                         ForEach(vm.threads) { row in
                             Button { Task { await vm.openThread(peer: row.peerDevice) } } label: {
@@ -301,6 +356,38 @@ private struct DMInboxView: View {
             Text("🔒 종단간 암호화 · 이 기기에서만 읽힘")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .padding(.vertical, 6)
+        }
+    }
+
+    /// 받은 길드 초대 카드 (쪽지 스레드 위). 길드 탭에서 이곳으로 편입.
+    private var invitesSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("받은 길드 초대 \(vm.visibleInvites.count)건", systemImage: "shield.lefthalf.filled")
+                .font(.system(size: 11, weight: .semibold)).foregroundStyle(.teal)
+                .padding(.horizontal, 12).padding(.top, 8)
+            ForEach(vm.visibleInvites) { inv in
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(inv.guildName).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text("\(inv.memberCount)명").font(.system(size: 10)).foregroundStyle(.secondary)
+                            if let by = inv.inviterNickname {
+                                Text("· \(by) 초대").font(.system(size: 10))
+                                    .foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }
+                    }
+                    Spacer()
+                    Button("수락") { Task { await vm.acceptInvite(inv) } }
+                        .font(.system(size: 11)).controlSize(.small).buttonStyle(.borderedProminent)
+                    Button("거절") { Task { await vm.declineInvite(inv) } }
+                        .font(.system(size: 11)).controlSize(.small)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.teal.opacity(0.08)))
+                .padding(.horizontal, 8)
+            }
+            Divider().padding(.top, 4)
         }
     }
 
