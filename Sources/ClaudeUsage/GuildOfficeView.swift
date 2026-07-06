@@ -146,7 +146,8 @@ struct GuildOfficeView: View {
                     .font(.system(size: max(8, 5 * scale), weight: .bold))
                     .foregroundStyle(tint)
             }
-            .position(x: slot.anchorX * scale, y: (slot.baselineY - 9) * scale)
+            // 제스처/popover는 .position보다 먼저 — 뒤에 붙이면 탭 영역이 씬 전체가 되고
+            // popover 앵커도 어긋난다 (spotMarker와 동일 원인의 버그).
             .contentShape(Rectangle())
             .onTapGesture { decorPopoverSlot = slot.id }
             .popover(isPresented: Binding(
@@ -168,6 +169,7 @@ struct GuildOfficeView: View {
                     }
                 )
             }
+            .position(x: slot.anchorX * scale, y: (slot.baselineY - 9) * scale)
     }
 
     // MARK: - 가구
@@ -267,11 +269,14 @@ struct GuildOfficeView: View {
                 .padding(.horizontal, 3).padding(.vertical, 1)
                 .background(Capsule().fill(Color(NSColor.windowBackgroundColor).opacity(0.7)))
         }
-        .position(x: spot.anchorX * scale, y: (y - 2) * scale)
+        // 제스처는 반드시 .position보다 먼저 — .position은 뷰를 컨테이너 전체 크기로 감싸므로,
+        // 뒤에 붙이면 탭 영역이 씬 전체가 되어 ForEach의 마지막 마커만 반응한다
+        // (로컬 E2E에서 "어딜 눌러도 입구 D/C로 배치"로 발현된 버그).
         .contentShape(Rectangle())
         .onTapGesture {
             if selectable { onSelectSlot(spot.id) }
         }
+        .position(x: spot.anchorX * scale, y: (y - 2) * scale)
         .opacity(occupied && placementMode ? 0.35 : 1)
     }
 
@@ -300,9 +305,10 @@ struct GuildOfficeView: View {
                     .padding(.horizontal, 3).padding(.vertical, 1)
                     .background(Capsule().fill(Color(NSColor.windowBackgroundColor).opacity(0.85)))
             }
-            .position(x: pos.anchorX * scale, y: (OfficeLayout.lanes[pos.lane] - 14) * scale)
+            // 제스처는 .position보다 먼저 (spotMarker의 전체 화면 탭 영역 버그와 동일 원인).
             .contentShape(Rectangle())
             .onTapGesture { handleRearrangeTap(pos.id) }
+            .position(x: pos.anchorX * scale, y: (OfficeLayout.lanes[pos.lane] - 14) * scale)
         }
     }
 
@@ -393,12 +399,18 @@ private struct OfficePetView: View {
                     bubbleView(bubble)
                         .position(x: centerX, y: centerY - height / 2 - 9)
                 }
+                // 히트 영역 — 펫 몸통 크기의 투명 rect에만 툴팁/탭/popover를 건다.
+                // TimelineView 전체에 걸면 씬 전체가 마지막 펫의 탭 타깃이 되는 버그
+                // (spotMarker의 .position 순서 버그와 동일 계열).
+                Color.clear
+                    .frame(width: max(20, height), height: height)
+                    .contentShape(Rectangle())
+                    .help("\(pet.id) · 이번 달 \(pet.monthlyVP) VP · \(pet.spot.name)")
+                    .onTapGesture { onTap() }
+                    .popover(isPresented: $showPopover, arrowEdge: .top) { popoverContent }
+                    .position(x: centerX, y: centerY)
             }
         }
-        .contentShape(Rectangle())
-        .help("\(pet.id) · 이번 달 \(pet.monthlyVP) VP · \(pet.spot.name)")
-        .onTapGesture { onTap() }
-        .popover(isPresented: $showPopover, arrowEdge: .top) { popoverContent }
     }
 
     private func petSprite(_ frame: NSImage, height: CGFloat) -> some View {
