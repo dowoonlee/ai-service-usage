@@ -61,6 +61,32 @@ enum OfficeLayout {
     }
     static func spotName(_ id: Int?) -> String? { spot(id: id)?.name }
 
+    // MARK: - 멤버 자동 배치 (수동 자리 선택 폐기 — 사용자 피드백)
+
+    /// 멤버 → 포지션 자동 랜덤 배정 (rendezvous 해시). 서버 왕복 없이 클라이언트에서
+    /// 결정적으로 계산 — 같은 멤버 구성이면 모든 클라이언트·모든 새로고침에서 같은 씬.
+    /// 멤버 추가/이탈 시에도 경합이 없는 한 기존 멤버의 자리는 유지된다.
+    /// 포지션(12)보다 멤버가 많으면 앞선 순서(호출 측이 기여도순 정렬) 12명만 배치.
+    static func autoAssignments(memberIds: [String], seed: String) -> [String: Int] {
+        var free = Set(spots.map(\.id))
+        var out: [String: Int] = [:]
+        for member in memberIds {
+            guard let pick = free.max(by: {
+                fnv1a("\(seed)|\(member)|\($0)") < fnv1a("\(seed)|\(member)|\($1)")
+            }) else { break }
+            out[member] = pick
+            free.remove(pick)
+        }
+        return out
+    }
+
+    /// FNV-1a 64 — String.hashValue는 실행마다 시드가 달라 재현 불가라 직접 구현.
+    private static func fnv1a(_ s: String) -> UInt64 {
+        var h: UInt64 = 0xcbf2_9ce4_8422_2325
+        for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x0000_0100_0000_01b3 }
+        return h
+    }
+
     // MARK: - 가구 세트 (재배치 대상 — 순열로 포지션 위를 이동)
 
     /// 에셋 공백 3종 — CC0 팩에 없어 코드로 그린다 (research/office-assets.md 검증 결과).
@@ -126,25 +152,55 @@ enum OfficeLayout {
                      hasPC: false),
     ]
 
-    /// 기본 배치 — 세트 id = 포지션 id.
-    static let defaultLayout: [Int] = Array(0..<12)
+    // MARK: - 가구 자유 배치 (드래그 — 사용자 피드백으로 스왑 방식에서 전환)
 
-    /// 서버 응답 검증 — 0..11 순열이 아니면 기본 배치로 폴백 (렌더 크래시 방지).
-    static func sanitizedLayout(_ layout: [Int]?) -> [Int] {
-        guard let layout, layout.count == spots.count,
-              layout.sorted() == defaultLayout else { return defaultLayout }
-        return layout
+    /// 가구 세트 1개의 놓인 자리 — x 연속값, 바닥선은 레인에 스냅 (픽셀 씬 정합).
+    /// 멤버 자리(spots 포지션)와는 독립 — 가구만 움직인다.
+    struct FurniturePlacement: Equatable, Identifiable {
+        let setId: Int
+        var x: CGFloat
+        var lane: Int
+        var id: Int { setId }
     }
 
-    /// 해당 포지션에 현재 놓인 가구 세트.
-    static func furnitureSet(at position: Int, layout: [Int]) -> FurnitureSet? {
-        guard layout.indices.contains(position),
-              furnitureSets.indices.contains(layout[position]) else { return nil }
-        return furnitureSets[layout[position]]
+    /// 기본 배치 — 세트 id = 같은 id의 포지션 위.
+    static let defaultPlacements: [FurniturePlacement] =
+        spots.map { FurniturePlacement(setId: $0.id, x: $0.anchorX, lane: $0.lane) }
+
+    /// 서버 직렬화("setId:x:lane;…") 파싱 — 형식/범위 벗어나면 기본 배치 폴백.
+    /// 서버가 안 주는 세트(부분 저장)는 기본 위치로 보충해 항상 12세트 전부 렌더.
+    static func sanitizedPlacements(_ raw: String?) -> [FurniturePlacement] {
+        guard let raw, !raw.isEmpty else { return defaultPlacements }
+        var byId: [Int: FurniturePlacement] = [:]
+        for entry in raw.split(separator: ";") {
+            let parts = entry.split(separator: ":").compactMap { Double($0) }
+            guard parts.count == 3 else { return defaultPlacements }
+            let setId = Int(parts[0]); let x = CGFloat(parts[1]); let lane = Int(parts[2])
+            guard furnitureSets.indices.contains(setId), byId[setId] == nil,
+                  (0...sceneSize.width).contains(x), (0...2).contains(lane) else {
+                return defaultPlacements
+            }
+            byId[setId] = FurniturePlacement(setId: setId, x: x, lane: lane)
+        }
+        return furnitureSets.map { byId[$0.id] ?? defaultPlacements[$0.id] }
     }
 
-    static func hasPC(at position: Int, layout: [Int]) -> Bool {
-        furnitureSet(at: position, layout: layout)?.hasPC ?? false
+    /// 서버 전송용 직렬화 — x는 소수 1자리로 절사 (payload 크기·서버 600자 제한 고려).
+    static func serializePlacements(_ placements: [FurniturePlacement]) -> String {
+        placements.map { String(format: "%d:%.1f:%d", $0.setId, $0.x, $0.lane) }
+            .joined(separator: ";")
+    }
+
+    /// 드롭 시 클램프 — 씬 여백 안, 레인 0..2.
+    static func clampPlacement(x: CGFloat, laneY: CGFloat) -> (x: CGFloat, lane: Int) {
+        let cx = min(max(x, edgeMargin), sceneSize.width - edgeMargin)
+        // 가장 가까운 레인으로 스냅.
+        let lane = lanes.enumerated().min { abs($0.element - laneY) < abs($1.element - laneY) }?.offset ?? 2
+        return (cx, lane)
+    }
+
+    static func furnitureSet(id: Int) -> FurnitureSet? {
+        furnitureSets.indices.contains(id) ? furnitureSets[id] : nil
     }
 
     // MARK: - 벽 장식 (붙박이 — 재배치 무관)
@@ -269,30 +325,30 @@ enum OfficeLayout {
         Color(red: 0.55, green: 0.85, blue: 0.55),   // 그린
     ]
 
-    // MARK: - 충돌 / 산책 범위 (layout 의존)
+    // MARK: - 충돌 / 산책 범위 (가구 배치 의존)
 
-    /// 해당 레인의 blocked x-interval 목록 (excludingPosition의 가구 제외).
-    static func blockedIntervals(lane: Int, layout: [Int],
-                                 excludingPosition: Int?) -> [ClosedRange<CGFloat>] {
-        spots.compactMap { pos in
-            guard pos.lane == lane, pos.id != excludingPosition,
-                  let item = furnitureSet(at: pos.id, layout: layout)?.item,
+    /// 해당 레인의 blocked x-interval 목록 — 현재 가구 배치 기준.
+    static func blockedIntervals(lane: Int,
+                                 placements: [FurniturePlacement]) -> [ClosedRange<CGFloat>] {
+        placements.compactMap { p in
+            guard p.lane == lane,
+                  let item = furnitureSet(id: p.setId)?.item,
                   item.blockingWidth > 0 else { return nil }
             let half = item.blockingWidth / 2
-            return (pos.anchorX - half)...(pos.anchorX + half)
+            return (p.x - half)...(p.x + half)
         }
     }
 
-    /// 포지션의 펫 산책 가능 범위 — anchor ± wanderRadius를 씬 여백과 이웃 가구(자기 포지션
-    /// 가구 제외)·바닥 데코 경계로 클램프. 막히면 방향 반전이 아니라 애초에 목표를 이
-    /// 범위에서만 뽑는다. extraBlocked = 배치된 데코의 (lane, 구간) — `decorBlockedIntervals`.
-    static func wanderRange(for spot: Spot, layout: [Int],
+    /// 포지션의 펫 산책 가능 범위 — anchor ± wanderRadius를 씬 여백과 가구·바닥 데코 경계로
+    /// 클램프. 막히면 방향 반전이 아니라 애초에 목표를 이 범위에서만 뽑는다.
+    /// 가구가 anchor 위로 드래그돼 오면 범위가 anchor 한 점으로 수렴 — 펫은 가구 앞에 선다.
+    /// extraBlocked = 배치된 데코의 (lane, 구간) — `decorBlockedIntervals`.
+    static func wanderRange(for spot: Spot, placements: [FurniturePlacement],
                             extraBlocked: [(lane: Int, range: ClosedRange<CGFloat>)] = []
     ) -> ClosedRange<CGFloat> {
         var lo = max(edgeMargin, spot.anchorX - wanderRadius)
         var hi = min(sceneSize.width - edgeMargin, spot.anchorX + wanderRadius)
-        var intervals = blockedIntervals(lane: spot.lane, layout: layout,
-                                         excludingPosition: spot.id)
+        var intervals = blockedIntervals(lane: spot.lane, placements: placements)
         intervals += extraBlocked.filter { $0.lane == spot.lane }.map(\.range)
         for interval in intervals {
             if interval.upperBound <= spot.anchorX {

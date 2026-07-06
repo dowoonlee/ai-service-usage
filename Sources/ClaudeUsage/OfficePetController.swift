@@ -120,21 +120,23 @@ final class OfficeSimulation: ObservableObject {
         timer?.invalidate()
     }
 
-    /// 멤버 목록 + 가구 배치 → 배치된(officeSlot != nil) 펫 상태 구성. 같은 구성이면
-    /// 재구성하지 않아 5분 새로고침마다 펫이 순간이동하는 것을 막는다.
+    /// 멤버 목록 + 자동 배치(assignments: nickname → 포지션 id) + 가구 배치 → 펫 상태 구성.
+    /// 같은 구성이면 재구성하지 않아 5분 새로고침마다 펫이 순간이동하는 것을 막는다.
     /// layout이 바뀌면(가구 재배치) 산책 범위·커피머신 위치가 달라지므로 재구성 대상.
-    func configure(members: [RankingAPI.GuildMember], layout: [Int],
+    func configure(members: [RankingAPI.GuildMember],
+                   assignments: [String: Int],
+                   placements: [OfficeLayout.FurniturePlacement],
                    decor: [(slotId: Int, kind: String)] = []) {
         let key = members.map {
-            "\($0.nickname):\($0.officeSlot ?? -1):\($0.isTopContributor):\($0.monthlyVP > 0)"
+            "\($0.nickname):\(assignments[$0.nickname] ?? -1):\($0.isTopContributor):\($0.monthlyVP > 0)"
         }.sorted().joined(separator: ",")
-            + "|layout:" + layout.map(String.init).joined(separator: ",")
+            + "|furniture:" + OfficeLayout.serializePlacements(placements)
             + "|decor:" + decor.map { "\($0.slotId):\($0.kind)" }.sorted().joined(separator: ",")
         guard key != configuredKey else { return }
         configuredKey = key
 
         pets = members.compactMap { member in
-            guard let spot = OfficeLayout.spot(id: member.officeSlot) else { return nil }
+            guard let spot = OfficeLayout.spot(id: assignments[member.nickname]) else { return nil }
             let avatar = member.profileJson?.card.avatar
             let mode: PetState.Mode = member.monthlyVP <= 0 ? .sleeping
                 : (member.isTopContributor ? .working : .normal)
@@ -156,12 +158,12 @@ final class OfficeSimulation: ObservableObject {
         let decorBlocked = OfficeLayout.decorBlockedIntervals(placed: decor)
         wanderRanges = Dictionary(uniqueKeysWithValues:
             pets.map { ($0.spot.id,
-                        OfficeLayout.wanderRange(for: $0.spot, layout: layout,
+                        OfficeLayout.wanderRange(for: $0.spot, placements: placements,
                                                  extraBlocked: decorBlocked)) })
-        // 커피머신 방문 지점 — 커피머신 세트가 놓인 포지션 오른쪽 옆 (기계 정면을 비워둔다).
-        coffeePoint = OfficeLayout.spots
-            .first { OfficeLayout.furnitureSet(at: $0.id, layout: layout)?.name == "커피머신" }
-            .map { CGPoint(x: min($0.anchorX + 12, OfficeLayout.sceneSize.width - OfficeLayout.edgeMargin),
+        // 커피머신 방문 지점 — 커피머신 세트가 놓인 좌표 오른쪽 옆 (기계 정면을 비워둔다).
+        coffeePoint = placements
+            .first { OfficeLayout.furnitureSet(id: $0.setId)?.name == "커피머신" }
+            .map { CGPoint(x: min($0.x + 12, OfficeLayout.sceneSize.width - OfficeLayout.edgeMargin),
                            y: OfficeLayout.lanes[$0.lane]) }
         visitingPetID = nil
         greetCooldown = [:]

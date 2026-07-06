@@ -7,31 +7,50 @@ import SwiftUI
 /// → 펫(이펙트 backdrop → 스프라이트 → 파티클) → 말풍선. 레인이 뒤(위)일수록 먼저 그려
 /// 앞레인이 자연히 가린다.
 ///
-/// 배치 모드: 빈 스팟이 하이라이트되고 클릭 → `onSelectSlot`. 점유 스팟은 클릭 불가.
-/// 재배치 모드(길드장): 포지션을 두 번 클릭해 가구 세트를 스왑 → `onSetLayout`(새 순열).
+/// 멤버 배치: 자동 랜덤 — `OfficeLayout.autoAssignments` 결정적 해시로 클라이언트에서 배정
+/// (수동 자리 선택은 사용자 피드백으로 폐기. 서버 office_slot은 더 이상 읽지 않는다).
+/// 재배치 모드(길드장): 가구를 **마우스 드래그**로 자유 이동 — 놓으면 가장 가까운 레인에 스냅
+/// 후 서버 저장 (레포트 탭 악세서리 드래그와 동일한 감각. 스왑 클릭 방식은 사용자 피드백으로 폐기).
 /// 꾸미기 모드(P2b): 데코 슬롯 표시 — 빈 슬롯 클릭 → 카탈로그 구매, 찬 슬롯 → 교체/제거.
 struct GuildOfficeView: View {
     let info: RankingAPI.GuildInfoResponse
-    @Binding var placementMode: Bool
     @Binding var rearrangeMode: Bool
     @Binding var decorateMode: Bool
-    let onSelectSlot: (Int) -> Void
-    let onSetLayout: ([Int]) -> Void
+    /// 가구 드래그 종료 시 — 직렬화된 전체 배치("setId:x:lane;…"). 호출 측이 서버 반영.
+    let onSetFurniture: (String) -> Void
     /// 데코 구매 (slot, item) — 호출 측이 코인 검증·서버 반영.
     let onPlaceDecor: (Int, OfficeLayout.DecorItem) -> Void
     let onRemoveDecor: (Int) -> Void
 
     @StateObject private var sim = OfficeSimulation()
     @State private var popoverPetID: String?
-    /// 재배치 모드에서 첫 번째로 고른 포지션 — 두 번째 클릭과 스왑.
-    @State private var rearrangeSource: Int?
+    /// 드래그 중 작업 사본 — nil이면 서버 값 사용. 드롭 후 서버 값이 따라오면 자동 해제.
+    @State private var draftPlacements: [OfficeLayout.FurniturePlacement]?
+    /// 현재 드래그 중인 가구 세트 id (하이라이트용).
+    @State private var draggingSetId: Int?
     /// 꾸미기 모드에서 카탈로그 popover가 열린 데코 슬롯.
     @State private var decorPopoverSlot: Int?
 
     private var scene: CGSize { OfficeLayout.sceneSize }
-    /// 길드 가구 배치 — 서버 순열(검증 실패 시 기본 배치 폴백).
-    private var layout: [Int] { OfficeLayout.sanitizedLayout(info.guild.officeLayout) }
+    /// 서버 가구 배치 (검증 실패/빈 값은 기본 배치 폴백).
+    private var serverPlacements: [OfficeLayout.FurniturePlacement] {
+        OfficeLayout.sanitizedPlacements(info.guild.officeFurniture)
+    }
+    /// 렌더/시뮬레이션에 쓰는 유효 배치 — 드래그 중이면 작업 사본.
+    private var placements: [OfficeLayout.FurniturePlacement] {
+        draftPlacements ?? serverPlacements
+    }
     private var placedDecor: [RankingAPI.GuildFurnitureItem] { info.furniture }
+    /// 자동 배치 — 기여자·VP 우선 12명을 결정적 해시로 포지션에 배정. isMe 등 클라이언트마다
+    /// 다른 값은 정렬에 쓰지 않는다 (모두가 같은 씬을 봐야 하므로).
+    private var assignments: [String: Int] {
+        let ordered = info.members.sorted {
+            if $0.isTopContributor != $1.isTopContributor { return $0.isTopContributor }
+            if $0.monthlyVP != $1.monthlyVP { return $0.monthlyVP > $1.monthlyVP }
+            return $0.nickname < $1.nickname
+        }.map(\.nickname)
+        return OfficeLayout.autoAssignments(memberIds: ordered, seed: info.guild.id)
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -40,47 +59,49 @@ struct GuildOfficeView: View {
                 background(scale: scale)
                 furnitureLayer(scale: scale)
                 decorLayer(scale: scale)
-                if !rearrangeMode && !decorateMode {
-                    spotMarkerLayer(scale: scale)
-                }
                 petLayer(scale: scale)
-                if rearrangeMode {
-                    rearrangeLayer(scale: scale)
-                }
                 if decorateMode {
                     decorateLayer(scale: scale)
                 }
             }
             .frame(width: geo.size.width, height: scene.height * scale)
+            .coordinateSpace(name: "officeScene")   // 가구 드래그 좌표 기준
         }
         .aspectRatio(scene.width / scene.height, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md)
-                .strokeBorder(Color.gray.opacity(0.25), lineWidth: 1)
+                .strokeBorder(rearrangeMode ? Color.orange.opacity(0.6) : Color.gray.opacity(0.25),
+                              lineWidth: rearrangeMode ? 1.5 : 1)
         )
         .onAppear { reconfigureSim() }
         .onDisappear { sim.stop() }
         .onChange(of: membersKey) { _ in reconfigureSim() }
-        .onChange(of: rearrangeMode) { _ in rearrangeSource = nil }
+        .onChange(of: rearrangeMode) { _ in
+            draftPlacements = nil
+            draggingSetId = nil
+        }
+        // 서버 값이 드래그 결과를 따라잡으면 작업 사본 해제 (refresh 후 재정합).
+        .onChange(of: info.guild.officeFurniture ?? "") { _ in
+            if draggingSetId == nil { draftPlacements = nil }
+        }
         .onChange(of: decorateMode) { _ in decorPopoverSlot = nil }
     }
 
     private func reconfigureSim() {
-        sim.configure(members: info.members, layout: layout,
+        sim.configure(members: info.members, assignments: assignments, placements: placements,
                       decor: placedDecor.map { (slotId: $0.slotId, kind: $0.itemKind) })
     }
 
-    /// 멤버·가구 배치·데코 변경 감지 키 — 순서 무관.
+    /// 멤버·자동 배치·가구 배치·데코 변경 감지 키 — 순서 무관.
     private var membersKey: String {
-        info.members.map { "\($0.nickname):\($0.officeSlot ?? -1):\($0.isTopContributor):\($0.monthlyVP > 0)" }
+        let assigned = assignments
+        return info.members.map {
+            "\($0.nickname):\(assigned[$0.nickname] ?? -1):\($0.isTopContributor):\($0.monthlyVP > 0)"
+        }
             .sorted().joined(separator: ",")
-            + "|layout:" + layout.map(String.init).joined(separator: ",")
+            + "|furniture:" + OfficeLayout.serializePlacements(placements)
             + "|decor:" + placedDecor.map { "\($0.slotId):\($0.itemKind)" }.sorted().joined(separator: ",")
-    }
-
-    private var occupiedSlots: Set<Int> {
-        Set(info.members.compactMap(\.officeSlot))
     }
 
     // MARK: - 배경 (floorTheme + wall 틴트 — P2b 인테리어 테마)
@@ -181,17 +202,76 @@ struct GuildOfficeView: View {
             itemView(imageName: decor.imageName, drawKind: decor.drawKind, size: decor.size,
                      anchorX: decor.anchorX, baselineY: decor.baselineY, scale: scale)
         }
-        // 바닥 가구 — 포지션 순회 + layout으로 세트 결정. 레인 오름차순 = 뒤부터.
-        ForEach(OfficeLayout.spots) { pos in
-            if let item = OfficeLayout.furnitureSet(at: pos.id, layout: layout)?.item {
-                itemView(imageName: item.imageName, drawKind: item.drawKind, size: item.size,
-                         anchorX: pos.anchorX, baselineY: OfficeLayout.lanes[pos.lane], scale: scale)
+        // 바닥 가구 — 자유 배치 좌표. 레인 오름차순 = 뒤부터 (드래그 중인 항목은 맨 위).
+        ForEach(placements.sorted {
+            if $0.setId == draggingSetId { return false }
+            if $1.setId == draggingSetId { return true }
+            return $0.lane < $1.lane
+        }) { placement in
+            furnitureView(placement, scale: scale)
+        }
+        // 데스크 세트의 모니터 — 가장 가까운 자리 점유자가 working이면 ON 애니.
+        ForEach(placements.filter { OfficeLayout.furnitureSet(id: $0.setId)?.hasPC == true }) { placement in
+            pcView(for: placement, scale: scale)
+        }
+    }
+
+    /// 가구 1점 — 재배치 모드(길드장)에서는 드래그로 이동, 놓으면 레인 스냅 후 서버 저장.
+    /// 제스처/하이라이트는 반드시 .position 앞에 (히트 영역 전체 확장 버그 방지 — spotMarker 참조).
+    @ViewBuilder
+    private func furnitureView(_ placement: OfficeLayout.FurniturePlacement, scale: CGFloat) -> some View {
+        if let item = OfficeLayout.furnitureSet(id: placement.setId)?.item {
+            let isDragging = draggingSetId == placement.setId
+            let w = item.size.width * scale
+            let h = item.size.height * scale
+            let body = Group {
+                if let name = item.imageName, let img = OfficeLayout.officeImage(name) {
+                    Image(nsImage: img).interpolation(.none).resizable()
+                } else if let kind = item.drawKind {
+                    CodeDrawnFurniture(kind: kind)
+                }
+            }
+            .frame(width: w, height: h)
+            .overlay {
+                if rearrangeMode {
+                    RoundedRectangle(cornerRadius: 3)
+                        .strokeBorder(style: StrokeStyle(lineWidth: isDragging ? 2 : 1, dash: [3]))
+                        .foregroundStyle(isDragging ? Color.orange : Color.accentColor)
+                }
+            }
+            let positionX = placement.x * scale
+            let positionY = (OfficeLayout.lanes[placement.lane] - item.size.height / 2) * scale
+            if rearrangeMode {
+                body
+                    .contentShape(Rectangle())
+                    .gesture(furnitureDrag(placement, scale: scale))
+                    .position(x: positionX, y: positionY)
+            } else {
+                body.position(x: positionX, y: positionY)
             }
         }
-        // 데스크 세트가 놓인 포지션의 모니터 — 점유자가 working이면 ON 애니, 아니면 OFF.
-        ForEach(OfficeLayout.spots.filter { OfficeLayout.hasPC(at: $0.id, layout: layout) }) { spot in
-            pcView(for: spot, scale: scale)
-        }
+    }
+
+    /// 드래그 제스처 — 이동 중 작업 사본 갱신(펫 충돌 범위도 실시간 추종), 종료 시 서버 저장.
+    private func furnitureDrag(_ placement: OfficeLayout.FurniturePlacement,
+                               scale: CGFloat) -> some Gesture {
+        DragGesture(coordinateSpace: .named("officeScene"))
+            .onChanged { value in
+                draggingSetId = placement.setId
+                var working = draftPlacements ?? serverPlacements
+                guard let idx = working.firstIndex(where: { $0.setId == placement.setId }) else { return }
+                let snapped = OfficeLayout.clampPlacement(x: value.location.x / scale,
+                                                          laneY: value.location.y / scale)
+                working[idx].x = snapped.x
+                working[idx].lane = snapped.lane
+                draftPlacements = working
+            }
+            .onEnded { _ in
+                draggingSetId = nil
+                if let working = draftPlacements {
+                    onSetFurniture(OfficeLayout.serializePlacements(working))
+                }
+            }
     }
 
     @ViewBuilder
@@ -212,13 +292,20 @@ struct GuildOfficeView: View {
         .position(x: anchorX * scale, y: (baselineY - size.height / 2) * scale)
     }
 
+    /// 데스크 위 모니터 — 데스크가 어느 자리(스팟) 근처에 있으면 그 자리 점유자의 working
+    /// 여부로 ON/OFF. 가구가 자유 이동하므로 "같은 레인 + 24px 이내" 근접 기준.
     @ViewBuilder
-    private func pcView(for spot: OfficeLayout.Spot, scale: CGFloat) -> some View {
-        let working = info.members.contains {
-            $0.officeSlot == spot.id && $0.isTopContributor && $0.monthlyVP > 0
-        }
-        let deskBaseline = OfficeLayout.lanes[spot.lane]
-        let baseline = OfficeLayout.pcBaselineY(deskBaselineY: deskBaseline)
+    private func pcView(for placement: OfficeLayout.FurniturePlacement, scale: CGFloat) -> some View {
+        let nearSpot = OfficeLayout.spots
+            .filter { $0.lane == placement.lane && abs($0.anchorX - placement.x) < 24 }
+            .min { abs($0.anchorX - placement.x) < abs($1.anchorX - placement.x) }
+        let assigned = assignments
+        let working = nearSpot.map { spot in
+            info.members.contains {
+                assigned[$0.nickname] == spot.id && $0.isTopContributor && $0.monthlyVP > 0
+            }
+        } ?? false
+        let baseline = OfficeLayout.pcBaselineY(deskBaselineY: OfficeLayout.lanes[placement.lane])
         let size = OfficeLayout.pcSize
         TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
             let name: String = {
@@ -231,97 +318,10 @@ struct GuildOfficeView: View {
                     .interpolation(.none)
                     .resizable()
                     .frame(width: size.width * scale, height: size.height * scale)
-                    .position(x: spot.anchorX * scale,
+                    .position(x: placement.x * scale,
                               y: (baseline - size.height / 2) * scale)
             }
         }
-    }
-
-    // MARK: - 스팟 마커
-
-    @ViewBuilder
-    private func spotMarkerLayer(scale: CGFloat) -> some View {
-        ForEach(OfficeLayout.spots) { spot in
-            let occupied = occupiedSlots.contains(spot.id)
-            if !occupied || placementMode {
-                spotMarker(spot, occupied: occupied, scale: scale)
-            }
-        }
-    }
-
-    private func spotMarker(_ spot: OfficeLayout.Spot, occupied: Bool, scale: CGFloat) -> some View {
-        let y = OfficeLayout.lanes[spot.lane]
-        let selectable = placementMode && !occupied
-        return VStack(spacing: 1) {
-            RoundedRectangle(cornerRadius: 3)
-                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3]))
-                .foregroundStyle(selectable ? Color.accentColor : Color.gray.opacity(0.45))
-                .background(
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(selectable ? Color.accentColor.opacity(0.15) : Color.clear)
-                )
-                .frame(width: 26 * scale, height: 10 * scale)
-            Text(spot.name)
-                .font(.system(size: max(7, 4.5 * scale)))
-                .foregroundStyle(selectable ? Color.accentColor : .secondary)
-                .lineLimit(1)
-                .fixedSize()   // 박스 폭보다 긴 이름("화이트보드 앞") 잘림 방지
-                .padding(.horizontal, 3).padding(.vertical, 1)
-                .background(Capsule().fill(Color(NSColor.windowBackgroundColor).opacity(0.7)))
-        }
-        // 제스처는 반드시 .position보다 먼저 — .position은 뷰를 컨테이너 전체 크기로 감싸므로,
-        // 뒤에 붙이면 탭 영역이 씬 전체가 되어 ForEach의 마지막 마커만 반응한다
-        // (로컬 E2E에서 "어딜 눌러도 입구 D/C로 배치"로 발현된 버그).
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if selectable { onSelectSlot(spot.id) }
-        }
-        .position(x: spot.anchorX * scale, y: (y - 2) * scale)
-        .opacity(occupied && placementMode ? 0.35 : 1)
-    }
-
-    // MARK: - 가구 재배치 (길드장 전용 모드)
-
-    /// 모든 포지션에 선택 박스 오버레이 — 첫 클릭 선택(주황 하이라이트), 두 번째 클릭과 스왑.
-    /// 같은 포지션 재클릭은 선택 해제. 스왑 즉시 `onSetLayout`(새 순열) 호출.
-    @ViewBuilder
-    private func rearrangeLayer(scale: CGFloat) -> some View {
-        ForEach(OfficeLayout.spots) { pos in
-            let setName = OfficeLayout.furnitureSet(at: pos.id, layout: layout)?.name ?? "?"
-            let isSource = rearrangeSource == pos.id
-            VStack(spacing: 1) {
-                RoundedRectangle(cornerRadius: 3)
-                    .strokeBorder(isSource ? Color.orange : Color.accentColor,
-                                  lineWidth: isSource ? 2 : 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill((isSource ? Color.orange : Color.accentColor).opacity(0.15))
-                    )
-                    .frame(width: 44 * scale, height: 26 * scale)
-                Text(setName)
-                    .font(.system(size: max(7, 4.5 * scale), weight: isSource ? .bold : .regular))
-                    .foregroundStyle(isSource ? Color.orange : Color.accentColor)
-                    .fixedSize()
-                    .padding(.horizontal, 3).padding(.vertical, 1)
-                    .background(Capsule().fill(Color(NSColor.windowBackgroundColor).opacity(0.85)))
-            }
-            // 제스처는 .position보다 먼저 (spotMarker의 전체 화면 탭 영역 버그와 동일 원인).
-            .contentShape(Rectangle())
-            .onTapGesture { handleRearrangeTap(pos.id) }
-            .position(x: pos.anchorX * scale, y: (OfficeLayout.lanes[pos.lane] - 14) * scale)
-        }
-    }
-
-    private func handleRearrangeTap(_ position: Int) {
-        guard let source = rearrangeSource else {
-            rearrangeSource = position
-            return
-        }
-        rearrangeSource = nil
-        guard source != position else { return }   // 같은 곳 재클릭 = 선택 해제
-        var newLayout = layout
-        newLayout.swapAt(source, position)
-        onSetLayout(newLayout)
     }
 
     // MARK: - 펫
@@ -554,7 +554,7 @@ enum GuildOfficeDemo {
     private static var window: NSWindow?
 
     static func present() {
-        func member(_ nick: String, slot: Int?, kind: PetKind, variant: Int = 0,
+        func member(_ nick: String, kind: PetKind, variant: Int = 0,
                     vp: Int, top: Bool, me: Bool = false,
                     effects: [String] = []) -> RankingAPI.GuildMember {
             var card = TrainerCard.default
@@ -565,19 +565,19 @@ enum GuildOfficeDemo {
                 equippedEffects: effects, integrityViolation: false,
                 guildName: "데드락클럽")
             return RankingAPI.GuildMember(
-                nickname: nick, monthlyVP: vp, isTopContributor: top, officeSlot: slot,
+                nickname: nick, monthlyVP: vp, isTopContributor: top, officeSlot: nil,
                 isLeader: me, isMe: me, joinedAt: Date(), githubLogin: nil,
                 profileJson: profile, deviceId: nil)
         }
         let members = [
-            member("dowoon", slot: 0, kind: .fox, variant: 1, vp: 3120, top: true, me: true),
-            member("kimcoder", slot: 4, kind: .warrior, vp: 2400, top: true, effects: ["glow"]),
-            member("vibewolf", slot: 5, kind: .wolf, variant: 4, vp: 1800, top: true),
-            member("nightowl", slot: 8, kind: .whale, vp: 700, top: true),
-            member("lurker42", slot: 6, kind: .ninjaFrog, vp: 400, top: true),
-            member("ghostdev", slot: 9, kind: .slime, vp: 0, top: false),
-            member("newbie", slot: 10, kind: .pawn, vp: 120, top: false),
-            member("미배치멤버", slot: nil, kind: .fox, vp: 50, top: false),
+            member("dowoon", kind: .fox, variant: 1, vp: 3120, top: true, me: true),
+            member("kimcoder", kind: .warrior, vp: 2400, top: true, effects: ["glow"]),
+            member("vibewolf", kind: .wolf, variant: 4, vp: 1800, top: true),
+            member("nightowl", kind: .whale, vp: 700, top: true),
+            member("lurker42", kind: .ninjaFrog, vp: 400, top: true),
+            member("ghostdev", kind: .slime, vp: 0, top: false),
+            member("newbie", kind: .pawn, vp: 120, top: false),
+            member("자동배치멤버", kind: .fox, vp: 50, top: false),
         ]
         // `=visit`이면 확률 이벤트(커피 방문·Mythic 특수 모션)를 가속 — 스크린샷 검증용.
         if ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "visit" {
@@ -596,25 +596,26 @@ enum GuildOfficeDemo {
 
     private struct DemoWrapper: View {
         let members: [RankingAPI.GuildMember]
-        @State private var placement = false
         // 캡처 자동화 편의 — `AIUSAGE_OFFICE_DEMO=rearrange`면 재배치 모드,
         // `=swapped`면 스왑 배치, `=decor`면 꾸미기 모드 + 데코/테마 프리필로 시작.
         @State private var rearrange =
             ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "rearrange"
         @State private var decorate =
             ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "decor"
-        /// 재배치를 로컬에서 즉시 반영 — 서버 없이 스왑 동작 확인.
-        @State private var layout: [Int] = {
+        /// 재배치(드래그)를 로컬에서 즉시 반영 — 서버 없이 동작 확인.
+        @State private var furnitureLayout: String = {
             if ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "swapped" {
-                var l = OfficeLayout.defaultLayout
-                l.swapAt(0, 8)    // 데스크+PC ↔ 소파
-                l.swapAt(5, 10)   // 데스크+PC ↔ 화분
-                return l
+                // 소파를 창가로, 화분을 가운데로 옮긴 커스텀 배치 샘플.
+                var p = OfficeLayout.defaultPlacements
+                p[8].x = 35;  p[8].lane = 0
+                p[0].x = 60;  p[0].lane = 2
+                p[10].x = 115; p[10].lane = 1
+                return OfficeLayout.serializePlacements(p)
             }
-            return OfficeLayout.defaultLayout
+            return ""
         }()
         /// 데코 구매/제거를 로컬에서 즉시 반영 — 서버 없이 기부 흐름 확인.
-        @State private var furniture: [RankingAPI.GuildFurnitureItem] = {
+        @State private var decorItems: [RankingAPI.GuildFurnitureItem] = {
             guard ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "decor" else { return [] }
             return [
                 RankingAPI.GuildFurnitureItem(slotId: 0, itemKind: "SMALL_PAINTING", donorNickname: "kimcoder"),
@@ -632,39 +633,36 @@ enum GuildOfficeDemo {
             let guild = RankingAPI.GuildInfo(
                 id: "demo", name: "데드락클럽", inviteCode: "AB3F9K2M", isLeader: true,
                 floorTheme: isDecorDemo ? 4 : 0, wallTheme: isDecorDemo ? 1 : 0,
-                officeLayout: layout, createdAt: Date(),
+                officeFurniture: furnitureLayout, createdAt: Date(),
                 score: 8420, rank: 3, memberCount: members.count)
-            return RankingAPI.GuildInfoResponse(guild: guild, members: members, furniture: furniture)
+            return RankingAPI.GuildInfoResponse(guild: guild, members: members, furniture: decorItems)
         }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
                 GuildOfficeView(
                     info: info,
-                    placementMode: $placement,
                     rearrangeMode: $rearrange,
                     decorateMode: $decorate,
-                    onSelectSlot: { slot in print("OFFICE_DEMO_SELECT slot=\(slot)") },
-                    onSetLayout: { newLayout in
-                        layout = newLayout
-                        print("OFFICE_DEMO_LAYOUT=\(newLayout.map(String.init).joined(separator: ","))")
+                    onSetFurniture: { serialized in
+                        furnitureLayout = serialized
+                        print("OFFICE_DEMO_FURNITURE=\(serialized)")
                         fflush(stdout)
                     },
                     onPlaceDecor: { slot, item in
-                        furniture.removeAll { $0.slotId == slot }
-                        furniture.append(RankingAPI.GuildFurnitureItem(
+                        decorItems.removeAll { $0.slotId == slot }
+                        decorItems.append(RankingAPI.GuildFurnitureItem(
                             slotId: slot, itemKind: item.kind, donorNickname: "dowoon"))
                         print("OFFICE_DEMO_DECOR place slot=\(slot) kind=\(item.kind)")
                         fflush(stdout)
                     },
                     onRemoveDecor: { slot in
-                        furniture.removeAll { $0.slotId == slot }
+                        decorItems.removeAll { $0.slotId == slot }
                         print("OFFICE_DEMO_DECOR remove slot=\(slot)")
                         fflush(stdout)
                     }
                 )
                 HStack {
-                    Toggle("배치 모드", isOn: $placement).font(.system(size: 11))
                     Toggle("가구 재배치", isOn: $rearrange).font(.system(size: 11))
                     Toggle("꾸미기", isOn: $decorate).font(.system(size: 11))
                 }
