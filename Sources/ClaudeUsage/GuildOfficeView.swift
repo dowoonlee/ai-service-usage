@@ -1136,7 +1136,8 @@ enum GuildOfficeDemo {
                 floorTheme: isDecorDemo ? 4 : 0, wallTheme: isDecorDemo ? 1 : 0,
                 officeFurniture: furnitureLayout, createdAt: Date(),
                 score: 8420, rank: 3, memberCount: members.count)
-            return RankingAPI.GuildInfoResponse(guild: guild, members: members, furniture: decorItems)
+            return RankingAPI.GuildInfoResponse(guild: guild, members: members,
+                                                furniture: decorItems, sentInvites: nil)
         }
 
         var body: some View {
