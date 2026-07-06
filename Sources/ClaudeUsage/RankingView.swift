@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// 월간 랭킹 보드. Top N + 내 순위. 5분에 한 번 자동 새로고침.
-/// `GachaView`의 .ranking 탭에 임베드 — 별도 윈도우 없음. 외부에서 frame 제어.
+/// 월간 랭킹 보드. 개인/길드 스코프 전환 (개인: Top N + 내 순위, 길드: 길드 순위 + 시상대).
+/// 5분에 한 번 자동 새로고침. `GachaView`의 .ranking 탭에 임베드 — 별도 윈도우 없음.
 struct RankingView: View {
     @ObservedObject var settings = Settings.shared
     @State private var entries: [RankingAPI.LeaderboardEntry] = []
@@ -18,6 +18,16 @@ struct RankingView: View {
     /// 시상대 한마디 입력 alert 트리거 + 초안.
     @State private var editingPodium: Bool = false
     @State private var podiumDraft: String = ""
+    /// 개인/길드 스코프 — 세그먼트 토글. 길드 보드는 지연 로드(첫 전환 시 fetch).
+    @State private var scope: Scope = .personal
+    @State private var guildBoard: RankingAPI.GuildLeaderboardResponse?
+
+    enum Scope: String, CaseIterable, Identifiable {
+        case personal, guild
+        var id: String { rawValue }
+        var title: String { self == .personal ? "이달의 VibeCoder" : "이달의 길드" }
+        var pickerLabel: String { self == .personal ? "개인" : "길드" }
+    }
 
     /// 한마디 미등록 시 말풍선 기본 placeholder (남의 칸 기준). 자유롭게 교체 가능.
     private static let defaultPodiumPlaceholder = "🎉"
@@ -33,7 +43,12 @@ struct RankingView: View {
             } else if !settings.rankingRegistered {
                 placeholderView("설정 → 랭킹에서 참여를 시작하세요.")
             } else {
-                content
+                scopePicker
+                Divider()
+                switch scope {
+                case .personal: content
+                case .guild:    guildContent
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -55,9 +70,10 @@ struct RankingView: View {
 
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
-            Image(systemName: "wave.3.right").foregroundStyle(.purple)
-            Text("이달의 VibeCoder").font(.system(size: 14, weight: .semibold))
-            if let reset = periodResetAt {
+            Image(systemName: scope == .personal ? "wave.3.right" : "shield.lefthalf.filled")
+                .foregroundStyle(scope == .personal ? .purple : .teal)
+            Text(scope.title).font(.system(size: 14, weight: .semibold))
+            if let reset = currentResetAt {
                 Text("· \(formatResetCountdown(reset))")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
@@ -71,6 +87,50 @@ struct RankingView: View {
             }
         }
         .padding(12)
+    }
+
+    /// 현재 스코프의 월 리셋 시각 — 개인/길드 각각의 응답에서.
+    private var currentResetAt: Date? {
+        scope == .personal ? periodResetAt : guildBoard?.periodResetAt
+    }
+
+    private var scopePicker: some View {
+        Picker("", selection: $scope) {
+            ForEach(Scope.allCases) { s in
+                Text(s.pickerLabel).tag(s)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .onChange(of: scope) { newScope in
+            // 길드 보드는 첫 전환 시 지연 로드 — 이미 받아온 값이 있으면 재사용.
+            if newScope == .guild, guildBoard == nil { refresh() }
+        }
+    }
+
+    /// 길드 스코프 콘텐츠 — 길드 랭킹 리스트 + 직전 달 시상대 (GuildLeaderboardView 순수 렌더).
+    @ViewBuilder
+    private var guildContent: some View {
+        if let error, guildBoard == nil {
+            Text(error).font(.system(size: 11)).foregroundStyle(.red).padding(12)
+        } else if let board = guildBoard {
+            if board.entries.isEmpty && board.previousMonth == nil {
+                placeholderView("아직 등록된 길드가 없습니다.\n길드 탭에서 길드를 만들어 보세요.")
+            } else {
+                ScrollView {
+                    GuildLeaderboardView(
+                        board: board,
+                        highlightGuildId: settings.guildID.isEmpty ? nil : settings.guildID
+                    )
+                    .padding(12)
+                }
+                footer
+            }
+        } else {
+            placeholderView("불러오는 중…")
+        }
     }
 
     /// "리셋까지 18일" / "오늘 리셋" 형태 — 사용자가 월 경계 직관적으로 인지하도록.
@@ -241,6 +301,7 @@ struct RankingView: View {
         loading = true
         error = nil
         let deviceId = settings.rankingDeviceID.isEmpty ? nil : settings.rankingDeviceID
+        let needGuild = scope == .guild || guildBoard != nil   // 길드 스코프면 항상, 아니면 이미 받아온 경우만 갱신
         refreshTask = Task { @MainActor in
             defer { loading = false }
             do {
@@ -254,9 +315,15 @@ struct RankingView: View {
                 previousMonth = resp.previousMonth
                 lastRefresh = Date()
             } catch is CancellationError {
-                // 무시
+                return
             } catch {
                 self.error = error.localizedDescription
+            }
+            if needGuild {
+                // 길드 랭킹은 실패해도 개인 보드를 가리지 않게 조용히 무시.
+                if let board = try? await RankingAPI.shared.fetchGuildLeaderboard(deviceId: deviceId) {
+                    guildBoard = board
+                }
             }
         }
     }
