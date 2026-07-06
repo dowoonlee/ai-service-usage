@@ -316,6 +316,9 @@ struct GuildView: View {
                 onSetFurniture: { serialized in
                     performSetFurniture(serialized)
                 },
+                onBuyFurniture: { kind, serialized in
+                    performBuyFurniture(kind, serialized: serialized)
+                },
                 onPlaceDecor: { slot, item in
                     performPlaceDecor(slot: slot, item: item)
                 },
@@ -341,7 +344,7 @@ struct GuildView: View {
                 .font(.system(size: 11))
                 .disabled(actionBusy)
                 if rearrangeMode {
-                    Text("가구를 마우스로 끌어 옮기세요 (놓으면 저장)")
+                    Text("드래그로 이동 · 우상단 ＋로 구매 · 액자는 클릭해 문구 입력")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 } else if decorateMode {
                     Text("점선 자리를 클릭해 장식을 기부하세요")
@@ -780,6 +783,22 @@ struct GuildView: View {
                 CoinLedger.shared.spendGuildDecor(
                     OfficeLayout.themePrice, item: "테마(\(purchase.kind) \(purchase.index))")
             }
+        }
+    }
+
+    /// 가구 구매 확정 — 코인 검증 후 새 인스턴스 포함 배치를 서버 반영 + 코인 차감.
+    private func performBuyFurniture(_ kind: OfficeLayout.FurnitureKind, serialized: String) {
+        guard settings.coins >= kind.price else {
+            error = "코인이 부족합니다 (\(kind.price) 필요)."
+            return
+        }
+        runAction {
+            _ = try await RankingAPI.shared.manageGuild(
+                deviceId: settings.rankingDeviceID, action: .setFurniture,
+                furniture: serialized,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            CoinLedger.shared.spendGuildDecor(kind.price, item: "가구(\(kind.name))")
+            DebugLog.log("Guild: 가구 구매 \(kind.name) (\(kind.price)코인)")
         }
     }
 

@@ -8,17 +8,17 @@ import SwiftUI
 /// 기존 `PetSprite`/`PetEffectOverlay` 경로를 뷰에서 그대로 쓴다.
 ///
 /// 행동 FSM (모드별):
-///   normal   — idle(2~8s) ↔ 자리 중심 반경 45의 **2D 랜덤 산책**(상하좌우대각 자유,
-///              petWalkArea 클램프) + 낮은 확률로 커피머신 방문(동시 1마리 — P2a 고도화)
-///   working  — 상위 5명(점수 기여자): 대부분 자리 고정(.scan "작업" 모션), 좁은 반경 wander.
+///   normal   — idle(2~8s) ↔ **바닥 전체에서 랜덤 지점**을 뽑아 A* 최단경로로 이동
+///              (상하좌우대각 8방향) + 낮은 확률로 커피머신 방문(동시 1마리 — P2a 고도화)
+///   working  — 상위 5명(점수 기여자): 대부분 자리 고정(.scan "작업" 모션), 자리 근처만 wander.
 ///              데스크 PC ON 연동은 뷰가 처리.
 ///   sleeping — 월 VP 0: 완전 고정 + 💤. 스침 인사에도 무반응.
 ///   greeting — 두 펫이 근접 교차하는 순간 ~10% 확률로 1.5s 멈춤 + 인사 말풍선.
 ///   special  — Mythic 전용: idle 중 낮은 확률로 특수 모션(Attack/Heal 등) + 전용 대사.
 ///
-/// 이동은 `OfficeLayout.collisionRects`(avoid 특성 가구·데코의 발밑 사각형)를 피해 다닌다 —
-/// 목표 방향 직진이 막히면 축 하나로 미끄러지고(slide), 양축 다 막히면 도착 처리 후 재선택.
-/// front/behind 특성 가구는 비충돌 — 앞뒤 통과 연출은 뷰의 zIndex가 담당 (기획 §5-2).
+/// 경로탐색: `OfficeLayout.collisionRects`(통행 특성별 충돌 밴드)를 4px 셀 그리드로 이산화한
+/// `OfficePathGrid`에서 A*(8방향, 대각선은 모서리 끼임 방지 조건부)로 최단경로를 뽑고,
+/// waypoint를 따라 등속 이동한다. front/behind의 앞뒤 통과 연출은 뷰의 zIndex가 담당.
 @MainActor
 final class OfficeSimulation: ObservableObject {
 
@@ -26,10 +26,11 @@ final class OfficeSimulation: ObservableObject {
         enum Mode { case normal, working, sleeping }
         enum Phase {
             case idle(until: TimeInterval)
-            case walking(target: CGPoint)
+            /// A* waypoint 경로 추종 — step = 현재 향하는 waypoint 인덱스.
+            case walking(path: [CGPoint], step: Int)
             case greeting(until: TimeInterval)
-            /// 공용 지점(커피머신) 방문 — 2D 목표 지점으로 이동. returning이면 자기 스팟 복귀 중.
-            case visiting(target: CGPoint, returning: Bool)
+            /// 공용 지점(커피머신) 방문 경로 — returning이면 자기 스팟 복귀 중.
+            case visiting(path: [CGPoint], step: Int, returning: Bool)
             /// 커피머신 앞 한 모금 — 멈춰서 ☕.
             case drinking(until: TimeInterval)
             /// Mythic 특수 모션 재생 중.
@@ -80,8 +81,8 @@ final class OfficeSimulation: ObservableObject {
     @Published private(set) var pets: [PetState] = []
 
     private var timer: Timer?
-    /// avoid 특성 가구·데코의 발밑 충돌 사각형 — 가구 재배치(layout)마다 재계산.
-    private var blockedRects: [CGRect] = []
+    /// 통행 특성별 충돌 밴드를 이산화한 보행 그리드 — 가구 재배치(layout)마다 재구축.
+    private var grid: OfficePathGrid?
     /// 커피머신(가구 세트)이 놓인 포지션 옆의 방문 지점 — 재배치(layout)에 따라 이동한다.
     private var coffeePoint: CGPoint?
     /// 동시 방문 1마리 제한 — 커피머신 앞 정체 방지.
@@ -160,13 +161,16 @@ final class OfficeSimulation: ObservableObject {
                 y: home.y
             )
         }
-        // avoid 특성 가구 + 바닥 데코의 충돌 사각형 — 2D 이동이 피해 다닐 영역 (기획 §2/§5-2).
-        blockedRects = OfficeLayout.collisionRects(placements: placements, decor: decor)
-        // 커피머신 방문 지점 — 커피머신 세트가 놓인 좌표 오른쪽 옆 (기계 정면을 비워둔다).
+        // 통행 특성별 충돌 밴드 → A* 보행 그리드 (기획 §2/§5-2).
+        grid = OfficePathGrid(
+            blockedRects: OfficeLayout.collisionRects(placements: placements, decor: decor))
+        // 커피머신 방문 지점 — 커피머신이 놓인 레인 바닥, 기계 오른쪽 옆 (정면을 비워둔다).
+        // 책상 위에 올려진 커피머신도 방문 지점은 그 레인의 바닥이다.
         coffeePoint = placements
-            .first { OfficeLayout.furnitureSet(id: $0.setId)?.name == "커피머신" }
+            .first { OfficeLayout.furnitureKind(id: $0.kind)?.name == "커피머신"
+                     && $0.lane != OfficeLayout.wallLane }
             .map { CGPoint(x: min($0.x + 12, OfficeLayout.sceneSize.width - OfficeLayout.edgeMargin),
-                           y: OfficeLayout.lanes[$0.lane]) }
+                           y: OfficeLayout.lanes[min(max($0.lane, 0), 2)]) }
         visitingPetID = nil
         greetCooldown = [:]
 
@@ -223,16 +227,18 @@ final class OfficeSimulation: ObservableObject {
                     if now >= until {
                         decideNextAction(&pet, now: now)
                     }
-                case .walking(let target):
-                    if moveToward(&pet, target: target, speed: Self.walkSpeed, dt: dt) {
+                case .walking(let path, var step):
+                    if advance(&pet, along: path, step: &step, speed: Self.walkSpeed, dt: dt) {
                         pet.phase = .idle(until: now + Double.random(in: 2...8))
+                    } else {
+                        pet.phase = .walking(path: path, step: step)
                     }
                 case .greeting(let until):
                     if now >= until {
                         pet.phase = .idle(until: now + Double.random(in: 1...4))
                     }
-                case .visiting(let target, let returning):
-                    if moveToward(&pet, target: target, speed: Self.visitSpeed, dt: dt) {
+                case .visiting(let path, var step, let returning):
+                    if advance(&pet, along: path, step: &step, speed: Self.visitSpeed, dt: dt) {
                         if returning {
                             pet.phase = .idle(until: now + Double.random(in: 2...8))
                             if visitingPetID == pet.id { visitingPetID = nil }
@@ -241,10 +247,14 @@ final class OfficeSimulation: ObservableObject {
                             pet.bubble = Self.drinkQuotes.randomElement()
                             pet.bubbleUntil = now + Self.drinkDuration
                         }
+                    } else {
+                        pet.phase = .visiting(path: path, step: step, returning: returning)
                     }
                 case .drinking(let until):
                     if now >= until {
-                        pet.phase = .visiting(target: pet.home, returning: true)
+                        let back = grid?.path(from: CGPoint(x: pet.x, y: pet.y), to: pet.home)
+                            ?? [pet.home]
+                        pet.phase = .visiting(path: back, step: 0, returning: true)
                         pet.facingRight = pet.home.x > pet.x
                     }
                 case .special(let until):
@@ -302,17 +312,20 @@ final class OfficeSimulation: ObservableObject {
         if let coffee = coffeePoint, visitingPetID == nil,
            // 커피머신 옆이 자기 자리인 펫은 방문이 무의미.
            hypot(pet.home.x - coffee.x, pet.home.y - coffee.y) > 20,
-           Double.random(in: 0..<1) < visitChance {
+           Double.random(in: 0..<1) < visitChance,
+           let path = grid?.path(from: CGPoint(x: pet.x, y: pet.y), to: coffee) {
             visitingPetID = pet.id
-            pet.phase = .visiting(target: coffee, returning: false)
+            pet.phase = .visiting(path: path, step: 0, returning: false)
             pet.facingRight = coffee.x > pet.x
             return
         }
 
-        // 산책 vs 제자리 — working은 자리 지킴 성향 + 좁은 반경.
+        // 산책 vs 제자리 — working은 자리 지킴 성향 + 자리 근처만, normal은 바닥 전체 랜덤.
         let wanderChance = pet.mode == .working ? 0.25 : 0.6
-        if Double.random(in: 0..<1) < wanderChance, let target = wanderTarget(for: pet) {
-            pet.phase = .walking(target: target)
+        if Double.random(in: 0..<1) < wanderChance,
+           let target = wanderTarget(for: pet),
+           let path = grid?.path(from: CGPoint(x: pet.x, y: pet.y), to: target) {
+            pet.phase = .walking(path: path, step: 0)
             pet.facingRight = target.x > pet.x
         } else {
             pet.phase = .idle(until: now + Double.random(in: 2...8))
@@ -327,46 +340,186 @@ final class OfficeSimulation: ObservableObject {
         }
     }
 
-    /// 2D 산책 목표 — 자리(home) 중심 반경에서 랜덤 극좌표 샘플, petWalkArea 클램프 후
-    /// 충돌 사각형 안이면 재추첨(최대 12회). 전부 막히면 nil → 제자리 idle.
+    /// 산책 목표 — "현재 위치에서 랜덤한 다른 위치" (사용자 요청). normal은 바닥 전체의
+    /// 자유 셀에서 균등 추첨(현재 위치 근처는 제외해 제자리걸음 방지), working은 자리 근처만.
     private func wanderTarget(for pet: PetState) -> CGPoint? {
-        let radius: CGFloat = pet.mode == .working ? 18 : OfficeLayout.wanderRadius
+        guard let grid else { return nil }
+        let current = CGPoint(x: pet.x, y: pet.y)
+        if pet.mode == .working {
+            return grid.randomFreePoint(near: pet.home, radius: 22, awayFrom: current, minDist: 6)
+        }
+        return grid.randomFreePoint(awayFrom: current, minDist: 20)
+    }
+
+    /// waypoint 경로 추종 — 현재 waypoint에 닿으면 다음으로. 반환 true = 경로 끝 도착.
+    private func advance(_ pet: inout PetState, along path: [CGPoint], step: inout Int,
+                         speed: CGFloat, dt: CGFloat) -> Bool {
+        guard step < path.count else { return true }
+        let target = path[step]
+        let dx = target.x - pet.x
+        let dy = target.y - pet.y
+        let dist = hypot(dx, dy)
+        if dist < 0.9 {
+            step += 1
+            return step >= path.count
+        }
+        let move = min(speed * dt, dist)
+        pet.x += dx / dist * move
+        pet.y += dy / dist * move
+        if abs(dx) > 0.5 { pet.facingRight = dx > 0 }
+        return false
+    }
+}
+
+// MARK: - 보행 그리드 + A* (petWalkArea 4px 셀 이산화)
+
+/// 가구 충돌 밴드를 피해 다니는 최단경로 탐색. 셀 수 ~66×18 = 1,200이라 배열 스캔
+/// A*로 충분하다 (호출 빈도도 펫당 산책 결정 시 1회).
+struct OfficePathGrid {
+    static let cellSize: CGFloat = 4
+    let cols: Int
+    let rows: Int
+    private let origin: CGPoint
+    private var blockedCells: [Bool]
+    private var freeCellIndices: [Int] = []
+
+    init(blockedRects: [CGRect]) {
         let area = OfficeLayout.petWalkArea
-        for _ in 0..<12 {
-            let angle = CGFloat.random(in: 0..<(2 * .pi))
-            let r = CGFloat.random(in: 6...radius)
-            let p = CGPoint(x: min(max(pet.home.x + cos(angle) * r, area.minX), area.maxX),
-                            y: min(max(pet.home.y + sin(angle) * r, area.minY), area.maxY))
-            if !isBlocked(p) { return p }
+        origin = CGPoint(x: area.minX, y: area.minY)
+        cols = max(1, Int(area.width / Self.cellSize))
+        rows = max(1, Int(area.height / Self.cellSize))
+        blockedCells = Array(repeating: false, count: cols * rows)
+        for r in 0..<rows {
+            for c in 0..<cols {
+                let p = center(c, r)
+                // 살짝 팽창(-1 inset) — 셀 경계에 걸친 밴드도 막아 스침 침범 방지.
+                if blockedRects.contains(where: { $0.insetBy(dx: -1, dy: -1).contains(p) }) {
+                    blockedCells[r * cols + c] = true
+                }
+            }
+        }
+        freeCellIndices = blockedCells.indices.filter { !blockedCells[$0] }
+    }
+
+    func center(_ c: Int, _ r: Int) -> CGPoint {
+        CGPoint(x: origin.x + (CGFloat(c) + 0.5) * Self.cellSize,
+                y: origin.y + (CGFloat(r) + 0.5) * Self.cellSize)
+    }
+
+    private func cell(of p: CGPoint) -> (c: Int, r: Int) {
+        (min(max(Int((p.x - origin.x) / Self.cellSize), 0), cols - 1),
+         min(max(Int((p.y - origin.y) / Self.cellSize), 0), rows - 1))
+    }
+
+    private func isFree(_ c: Int, _ r: Int) -> Bool {
+        c >= 0 && r >= 0 && c < cols && r < rows && !blockedCells[r * cols + c]
+    }
+
+    /// 막힌 지점 보정 — 주변 링을 넓혀가며 가장 가까운 자유 셀 (가구 위에 낀 시작점 탈출).
+    private func nearestFree(to p: CGPoint) -> (c: Int, r: Int)? {
+        let (c0, r0) = cell(of: p)
+        if isFree(c0, r0) { return (c0, r0) }
+        for radius in 1...8 {
+            var best: (c: Int, r: Int, d: CGFloat)?
+            for dr in -radius...radius {
+                for dc in -radius...radius where abs(dr) == radius || abs(dc) == radius {
+                    let c = c0 + dc, r = r0 + dr
+                    guard isFree(c, r) else { continue }
+                    let q = center(c, r)
+                    let d = hypot(q.x - p.x, q.y - p.y)
+                    if best == nil || d < best!.d { best = (c, r, d) }
+                }
+            }
+            if let best { return (best.c, best.r) }
         }
         return nil
     }
 
-    private func isBlocked(_ p: CGPoint) -> Bool {
-        !OfficeLayout.petWalkArea.contains(p) || blockedRects.contains { $0.contains(p) }
+    /// 자유 셀 랜덤 추첨 — near/radius로 반경 제한, awayFrom/minDist로 제자리 재추첨 방지.
+    func randomFreePoint(near: CGPoint? = nil, radius: CGFloat = .infinity,
+                         awayFrom: CGPoint? = nil, minDist: CGFloat = 0) -> CGPoint? {
+        guard !freeCellIndices.isEmpty else { return nil }
+        for _ in 0..<16 {
+            guard let idx = freeCellIndices.randomElement() else { break }
+            let p = center(idx % cols, idx / cols)
+            if let near, hypot(p.x - near.x, p.y - near.y) > radius { continue }
+            if let awayFrom, hypot(p.x - awayFrom.x, p.y - awayFrom.y) < minDist { continue }
+            return p
+        }
+        return nil
     }
 
-    /// 충돌 인지 2D 등속 이동 — 목표 직진이 막히면 축 하나로 미끄러져(slide) 가구 모서리를
-    /// 따라 돌아간다. 반환 true = 도착 또는 양축 봉쇄(도착 처리 → idle 후 목표 재선택).
-    private func moveToward(_ pet: inout PetState, target: CGPoint,
-                            speed: CGFloat, dt: CGFloat) -> Bool {
-        let dx = target.x - pet.x
-        let dy = target.y - pet.y
-        let dist = hypot(dx, dy)
-        guard dist > 0.01 else { return true }
-        let step = min(speed * dt, dist)
-        let nx = pet.x + dx / dist * step
-        let ny = pet.y + dy / dist * step
-        if !isBlocked(CGPoint(x: nx, y: ny)) {
-            pet.x = nx; pet.y = ny
-        } else if !isBlocked(CGPoint(x: nx, y: pet.y)) {
-            pet.x = nx
-        } else if !isBlocked(CGPoint(x: pet.x, y: ny)) {
-            pet.y = ny
-        } else {
-            return true
+    /// A* 최단경로 — 8방향, 대각선은 양쪽 직교 셀이 모두 자유일 때만(모서리 끼임 방지).
+    /// 반환 waypoint는 방향이 꺾이는 지점만 남긴 셀 중심 목록 (+ 마지막에 목표점).
+    /// 시작·목표가 막혀 있으면 가장 가까운 자유 셀로 보정, 도달 불가면 nil.
+    func path(from: CGPoint, to: CGPoint) -> [CGPoint]? {
+        guard let s = nearestFree(to: from), let g = nearestFree(to: to) else { return nil }
+        let start = s.r * cols + s.c
+        let goal = g.r * cols + g.c
+        if start == goal { return [center(g.c, g.r)] }
+
+        var gScore = Array(repeating: CGFloat.infinity, count: cols * rows)
+        var cameFrom = Array(repeating: -1, count: cols * rows)
+        var closed = Array(repeating: false, count: cols * rows)
+        var open: [(idx: Int, f: CGFloat)] = []
+        func heuristic(_ idx: Int) -> CGFloat {
+            let dc = abs(idx % cols - goal % cols), dr = abs(idx / cols - goal / cols)
+            // octile 거리 — 대각 이동 비용 √2 반영.
+            return CGFloat(max(dc, dr)) + 0.41421 * CGFloat(min(dc, dr))
         }
-        if abs(dx) > 0.5 { pet.facingRight = dx > 0 }
-        return hypot(target.x - pet.x, target.y - pet.y) < 1.5
+        gScore[start] = 0
+        open.append((start, heuristic(start)))
+
+        while !open.isEmpty {
+            // 소규모 그리드 — min 스캔으로 충분 (힙 불필요).
+            let minAt = open.indices.min { open[$0].f < open[$1].f }!
+            let (current, _) = open.remove(at: minAt)
+            if current == goal { break }
+            if closed[current] { continue }
+            closed[current] = true
+            let c = current % cols, r = current / cols
+            for dr in -1...1 {
+                for dc in -1...1 where dr != 0 || dc != 0 {
+                    let nc = c + dc, nr = r + dr
+                    guard isFree(nc, nr) else { continue }
+                    // 대각선 모서리 끼임 방지 — 양쪽 직교가 뚫려 있어야 통과.
+                    if dr != 0 && dc != 0 && (!isFree(c + dc, r) || !isFree(c, r + dr)) { continue }
+                    let next = nr * cols + nc
+                    guard !closed[next] else { continue }
+                    let cost: CGFloat = (dr != 0 && dc != 0) ? 1.41421 : 1
+                    let tentative = gScore[current] + cost
+                    if tentative < gScore[next] {
+                        gScore[next] = tentative
+                        cameFrom[next] = current
+                        open.append((next, tentative + heuristic(next)))
+                    }
+                }
+            }
+        }
+        guard cameFrom[goal] >= 0 || goal == start else { return nil }
+
+        // 경로 복원 + 방향 전환점만 waypoint로 (collinear 병합).
+        var cells: [Int] = [goal]
+        var cursor = goal
+        while cursor != start {
+            cursor = cameFrom[cursor]
+            guard cursor >= 0 else { return nil }
+            cells.append(cursor)
+        }
+        cells.reverse()
+        var waypoints: [CGPoint] = []
+        for (i, idx) in cells.enumerated() {
+            guard i > 0 else { continue }
+            let prev = cells[i - 1]
+            let dir = (idx % cols - prev % cols, idx / cols - prev / cols)
+            if i + 1 < cells.count {
+                let next = cells[i + 1]
+                let nextDir = (next % cols - idx % cols, next / cols - idx / cols)
+                if dir == nextDir { continue }   // 같은 방향 — 중간점 생략
+            }
+            waypoints.append(center(idx % cols, idx / cols))
+        }
+        if waypoints.isEmpty { waypoints = [center(g.c, g.r)] }
+        return waypoints
     }
 }
