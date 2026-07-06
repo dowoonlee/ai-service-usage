@@ -4,8 +4,8 @@ import Darwin
 
 // htop 스타일의 터미널 dashboard. `swift run ClaudeUsage --tui` 또는
 // `/Applications/AIUsage.app/Contents/MacOS/ClaudeUsage --tui` 로 실행.
-// 인증은 GUI와 동일 — Claude 는 Keychain 의 sessionKey, Cursor 는 로컬 SQLite JWT.
-// 따라서 Claude 처음 사용자는 GUI 앱에서 한 번 로그인 후에 TUI 사용 가능.
+// 인증은 GUI와 동일 — Claude 는 Keychain 의 sessionKey, Cursor 는 로컬 SQLite JWT,
+// Codex 는 ~/.codex/auth.json. Claude 처음 사용자는 GUI 앱에서 한 번 로그인 후에 사용 가능.
 
 @MainActor
 enum TUIApp {
@@ -55,6 +55,7 @@ enum TUIApp {
             Task { @MainActor in
                 await vm.refreshClaude()
                 await vm.refreshCursor()
+                await vm.refreshCodex()
             }
         default:
             break
@@ -168,11 +169,15 @@ enum Renderer {
         Terminal.clear()
         let now = Date()
 
-        // 양 섹션의 입력을 먼저 빌드해서, 두 섹션 모두에 동일한 tilesW 를 쓸 수 있도록.
-        let sections = [
+        // 모든 섹션의 입력을 먼저 빌드해서, 전 섹션에 동일한 tilesW 를 쓸 수 있도록.
+        // Codex 는 선택적 소스 — GUI 와 동일하게 수집 성공 이력이 있을 때만 섹션 추가.
+        var sections = [
             buildClaudeSection(vm: vm, now: now),
             buildCursorSection(vm: vm),
         ]
+        if let codex = buildCodexSection(vm: vm, now: now) {
+            sections.append(codex)
+        }
         let leftPad = "    "
         let labelW = 6
         let pctVisible = 4
@@ -206,7 +211,7 @@ enum Renderer {
             }
         }
 
-        let auto = vm.claudeLoading || vm.cursorLoading ? "갱신 중…" : "5분마다 자동"
+        let auto = vm.claudeLoading || vm.cursorLoading || vm.codexLoading ? "갱신 중…" : "10분마다 자동"
         Terminal.write("\r\n \(DIM)[q]\(RST)\(DIM) 종료  ·  \(RST)\(DIM)[r]\(RST)\(DIM) 즉시 갱신  ·  (\(auto))\(RST)\r\n")
         Terminal.write("\(CYAN)╰\(String(repeating: "─", count: max(0, cols - 2)))╯\(RST)\r\n")
     }
@@ -220,7 +225,7 @@ enum Renderer {
         let suffix: String
     }
 
-    /// 한 섹션 (Claude / Cursor) 의 모든 입력. warning 이 있으면 rows 대신 표시.
+    /// 한 섹션 (Claude / Cursor / Codex) 의 모든 입력. warning 이 있으면 rows 대신 표시.
     private struct SectionData {
         let bullet: String     // 색이 입혀진 bullet (예: "\u{1B}[36m●\u{1B}[0m")
         let title: String
@@ -303,6 +308,39 @@ enum Renderer {
         }
         let axisTimes = vm.cursorHistory.map { $0.takenAt }
         return SectionData(bullet: bullet, title: "Cursor", plan: plan, warning: nil, rows: rows, axisTimes: axisTimes)
+    }
+
+    /// Codex 는 선택적 소스 — GUI(CodexSection)와 동일하게 한 번이라도 수집에
+    /// 성공(codexCurrent != nil)한 경우에만 그린다. 미사용자는 nil 로 섹션 자체를 숨김.
+    /// Plus/Pro 는 5h(+7d) 창, free 는 monthly 단일 창이 오므로 있는 창만 row 로 그린다.
+    private static func buildCodexSection(vm: ViewModel, now: Date) -> SectionData? {
+        guard let snap = vm.codexCurrent else { return nil }
+        let bullet = "\(GREEN)●\(RST)"
+        // GUI 의 prettyPlan 과 동일 — plan_type 원문("plus")의 첫 글자만 대문자.
+        let plan = snap.planName.map { s -> String in
+            guard let first = s.first else { return s }
+            return first.uppercased() + s.dropFirst()
+        }
+        var rows: [MetricRow] = []
+        if let pct = snap.fiveHourPct {
+            let history = vm.codexHistory.compactMap { $0.fiveHourPct }
+            let suffix = snap.fiveHourResetAt.map {
+                "   \(DIM)reset \(formatRemaining(from: now, to: $0))\(RST)"
+            } ?? ""
+            rows.append(MetricRow(label: "5h", history: history, pct: pct, suffix: suffix))
+        }
+        if let pct = snap.sevenDayPct {
+            rows.append(MetricRow(label: "주간", history: nil, pct: pct, suffix: ""))
+        }
+        if let pct = snap.monthlyPct {
+            let history = vm.codexHistory.compactMap { $0.monthlyPct }
+            let suffix = snap.monthlyResetAt.map {
+                "   \(DIM)reset \(dateFmt.string(from: $0))\(RST)"
+            } ?? ""
+            rows.append(MetricRow(label: "월간", history: history, pct: pct, suffix: suffix))
+        }
+        let axisTimes = vm.codexHistory.map { $0.takenAt }
+        return SectionData(bullet: bullet, title: "Codex", plan: plan, warning: nil, rows: rows, axisTimes: axisTimes)
     }
 
     private static func drawSectionHeader(_ s: SectionData) {
