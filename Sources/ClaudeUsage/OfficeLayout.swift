@@ -127,62 +127,75 @@ enum OfficeLayout {
         /// 아트 셀 하단의 투명 여백(px) — 렌더 시 이만큼 내려 그려 "떠 보임"을 없앤다
         /// (에셋 alpha 실측: PC 9, 책장 8, 커피머신 9, 화이트보드 8, 벽시계 11 등).
         let artBottomInset: CGFloat
+        /// 유효 충돌 크기 — 셀 size가 아닌 실제 가시 아트 크기 (에셋 alpha bbox 실측).
+        /// 겹침 판정·벽 y 클램프에 쓴다 (시계처럼 셀에 여백이 큰 가구가 과대 충돌하지 않게).
+        let collisionSize: CGSize
 
         init(id: Int, name: String, price: Int, mount: FurnitureMount, passing: PetPassing,
              imageName: String? = nil, drawKind: DrawKind? = nil,
              size: CGSize, blockingWidth: CGFloat,
              hasPC: Bool = false, isSurface: Bool = false, surfaceInsetY: CGFloat = 0,
-             canStack: Bool = false, supportsText: Bool = false, artBottomInset: CGFloat = 0) {
+             canStack: Bool = false, supportsText: Bool = false, artBottomInset: CGFloat = 0,
+             collisionSize: CGSize? = nil) {
             self.id = id; self.name = name; self.price = price; self.mount = mount
             self.passing = passing; self.imageName = imageName; self.drawKind = drawKind
             self.size = size; self.blockingWidth = blockingWidth; self.hasPC = hasPC
             self.isSurface = isSurface; self.surfaceInsetY = surfaceInsetY
             self.canStack = canStack; self.supportsText = supportsText
             self.artBottomInset = artBottomInset
+            self.collisionSize = collisionSize ?? size
         }
     }
 
+    // collisionSize는 에셋 alpha bbox 실측 (여백 큰 가구가 과대 충돌하지 않게). 코드 드로잉
+    // 가구(서버랙·스탠딩·액자)는 도형이 셀을 거의 채우므로 소폭만 줄인다.
     static let furnitureCatalog: [FurnitureKind] = [
         FurnitureKind(id: 0, name: "데스크+PC", price: 1_500, mount: .floor, passing: .through,
                       imageName: "DESK_FRONT",
                       size: CGSize(width: 48, height: 32), blockingWidth: 40,
-                      hasPC: true, isSurface: true, surfaceInsetY: 8),
+                      hasPC: true, isSurface: true, surfaceInsetY: 8,
+                      collisionSize: CGSize(width: 44, height: 21)),
         FurnitureKind(id: 1, name: "책장", price: 1_000, mount: .floor, passing: .front,
                       imageName: "DOUBLE_BOOKSHELF",
                       size: CGSize(width: 32, height: 32), blockingWidth: 28,
-                      artBottomInset: 8),
+                      artBottomInset: 8, collisionSize: CGSize(width: 32, height: 18)),
         FurnitureKind(id: 2, name: "서버랙", price: 1_200, mount: .floor, passing: .through,
                       drawKind: .serverRack,
-                      size: CGSize(width: 20, height: 36), blockingWidth: 18),
+                      size: CGSize(width: 20, height: 36), blockingWidth: 18,
+                      collisionSize: CGSize(width: 18, height: 34)),
         FurnitureKind(id: 3, name: "커피머신", price: 800, mount: .floor, passing: .avoid,
                       imageName: "COFFEE",
                       size: CGSize(width: 16, height: 16), blockingWidth: 12,
-                      canStack: true, artBottomInset: 9),
+                      canStack: true, artBottomInset: 9,
+                      collisionSize: CGSize(width: 10, height: 8)),
         FurnitureKind(id: 4, name: "소파", price: 1_000, mount: .floor, passing: .front,
                       imageName: "SOFA_FRONT",
-                      size: CGSize(width: 32, height: 16), blockingWidth: 28),
+                      size: CGSize(width: 32, height: 16), blockingWidth: 28,
+                      collisionSize: CGSize(width: 32, height: 16)),
         FurnitureKind(id: 5, name: "벤치", price: 500, mount: .floor, passing: .front,
                       imageName: "CUSHIONED_BENCH",
-                      size: CGSize(width: 16, height: 16), blockingWidth: 14),
+                      size: CGSize(width: 16, height: 16), blockingWidth: 14,
+                      collisionSize: CGSize(width: 12, height: 12)),
         FurnitureKind(id: 6, name: "화분", price: 500, mount: .floor, passing: .behind,
                       imageName: "LARGE_PLANT",
                       size: CGSize(width: 32, height: 48), blockingWidth: 16,
-                      artBottomInset: 1),
+                      artBottomInset: 1, collisionSize: CGSize(width: 32, height: 40)),
         FurnitureKind(id: 7, name: "스탠딩 데스크", price: 800, mount: .floor, passing: .through,
                       drawKind: .standingDesk,
                       size: CGSize(width: 28, height: 26), blockingWidth: 24,
-                      isSurface: true, surfaceInsetY: 19),
+                      isSurface: true, surfaceInsetY: 19,
+                      collisionSize: CGSize(width: 26, height: 24)),
         FurnitureKind(id: 8, name: "벽시계", price: 500, mount: .wall, passing: .through,
                       imageName: "CLOCK",
                       size: CGSize(width: 16, height: 32), blockingWidth: 14,
-                      artBottomInset: 11),
+                      artBottomInset: 11, collisionSize: CGSize(width: 12, height: 10)),
         FurnitureKind(id: 9, name: "액자", price: 800, mount: .wall, passing: .through,
                       size: CGSize(width: 30, height: 22), blockingWidth: 28,
-                      supportsText: true),
+                      supportsText: true, collisionSize: CGSize(width: 28, height: 20)),
         FurnitureKind(id: 10, name: "화이트보드", price: 800, mount: .wall, passing: .through,
                       imageName: "WHITEBOARD",
                       size: CGSize(width: 32, height: 32), blockingWidth: 30,
-                      artBottomInset: 8),
+                      artBottomInset: 8, collisionSize: CGSize(width: 28, height: 16)),
     ]
 
     static func furnitureKind(id: Int) -> FurnitureKind? {
@@ -277,10 +290,11 @@ enum OfficeLayout {
         }.joined(separator: ";")
     }
 
-    /// 벽 baseline y 클램프 — 아이템이 벽 밴드(0..wallBottom) 안에 온전히 들어오게.
-    /// baseline = 아이템 하단이므로 상단(baseline-h)≥0, 하단(baseline)≤wallBottom.
+    /// 벽 baseline y 클램프 — 가시 아트가 벽 밴드(0..wallBottom) 안에 온전히 들어오게.
+    /// baseline = 가시 아트 하단이므로 상단(baseline-가시높이)≥0, 하단(baseline)≤wallBottom.
+    /// (셀 size가 아닌 collisionSize 기준이라 여백 큰 시계도 벽 위쪽까지 올릴 수 있다.)
     static func clampWallY(_ y: CGFloat, for kind: FurnitureKind) -> CGFloat {
-        let h = kind.size.height
+        let h = kind.collisionSize.height
         return min(max(y, min(h, wallBottom)), wallBottom)
     }
 
@@ -311,10 +325,15 @@ enum OfficeLayout {
             if (kind.canStack && other.isSurface) || (kind.isSurface && other.canStack) {
                 return false
             }
-            let xOverlap = abs(x - p.x) < (kind.size.width + other.size.width) / 2
+            // 셀 size가 아닌 유효 충돌 크기(collisionSize)로 판정 — 여백 큰 가구 과대 충돌 방지.
+            let xOverlap = abs(x - p.x) < (kind.collisionSize.width + other.collisionSize.width) / 2
             if lane == wallLane {
                 let otherY = p.wallY ?? wallFurnitureBaselineY
-                let yOverlap = abs(myY - otherY) < (kind.size.height + other.size.height) / 2
+                // baseline(하단) → 가시 중심 y로 환산해 높이 다른 가구도 정확히 판정.
+                let myCenter = myY - kind.collisionSize.height / 2
+                let otherCenter = otherY - other.collisionSize.height / 2
+                let yOverlap = abs(myCenter - otherCenter)
+                    < (kind.collisionSize.height + other.collisionSize.height) / 2
                 return xOverlap && yOverlap
             }
             return xOverlap
