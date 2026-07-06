@@ -15,7 +15,7 @@ BUNDLE_ID="com.dwlee.AIUsage"
 EXECUTABLE="AIUsage"            # 실행 파일명 (SwiftPM 산출물은 ClaudeUsage이지만 복사 시 이 이름으로)
 SPM_PRODUCT="ClaudeUsage"       # SwiftPM 타깃 이름 (내부 유지)
 VERSION="${VERSION:-0.1.8}"
-MIN_OS="13.0"
+MIN_OS="14.0"   # appcast minimumSystemVersion(14.0)과 정합. 시스템 CryptoKit HPKE 등 14+ API 사용.
 
 # Sparkle 자동 업데이트
 SU_FEED_URL="${SU_FEED_URL:-https://raw.githubusercontent.com/dowoonlee/ai-service-usage/main/appcast.xml}"
