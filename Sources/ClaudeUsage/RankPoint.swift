@@ -170,6 +170,10 @@ final class RankPointLedger {
         s.equippedEffects = equipped
     }
 
+    /// 길드명 변경 비용 (RP). 길드장만 소비하며, 서버 rename 성공 응답 후 차감한다
+    /// (생성권·데코와 동일한 "실패 시 보존" 원칙 — 차감은 `GuildView.performRename`이 직접 수행).
+    static let guildRenameCostRP: Int = 300
+
     /// RP 프리미엄 가챠권 1장 가격. 랭킹 월 1등 수입(2000 RP) 대비 ~0.75개월치 — "신중한 한 방".
     static let premiumTicketCostRP: Int = 1500
 

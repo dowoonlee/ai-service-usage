@@ -1,11 +1,15 @@
 // POST /guild-manage
 // 길드장 전용 액션 묶음: kick(추방) / rotate_code(초대 코드 재발급) / disband(해체)
-// / set_furniture(가구 자유 배치). 1함수 1액션 관례의 의도적 예외 — 함수 수 억제 (docs/plans/guild.md §3).
+// / set_furniture(가구 자유 배치) / rename(길드명 변경). 1함수 1액션 관례의 의도적 예외 — 함수 수 억제 (docs/plans/guild.md §3).
 //
-// payload(서명 대상, flat): { action, deviceId, [layout,] targetDeviceId, ts }
+// payload(서명 대상, flat): { action, deviceId, [layout,] [newName,] targetDeviceId, ts }
 //   - targetDeviceId는 kick에서만 의미. 나머지는 빈 문자열("").
 //   - layout은 set_furniture에서만 존재 — 클라이언트가 키 자체를 생략하므로 canonical 재현도
 //     같은 조건으로 생략해야 서명이 일치한다.
+//   - newName은 rename에서만 존재 (layout과 동일한 present-only 규약).
+//
+// rename의 RP 300 소모는 클라이언트 로컬 경제(생성권·데코와 동일)라 서버가 검증하지 않는다 —
+// 서버는 이름 규칙(isValidGuildName)·유일성·길드장 권한만 강제한다.
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
@@ -23,12 +27,13 @@ import {
   FURNITURE_WALL_LANE,
   FURNITURE_MAX_INSTANCES,
   FURNITURE_TEXT_MAX,
+  isValidGuildName,
 } from "../_shared/guild_policy.ts";
 
 type ManageAction =
-  | "kick" | "rotate_code" | "disband" | "set_furniture" | "invite" | "cancel_invite";
+  | "kick" | "rotate_code" | "disband" | "set_furniture" | "invite" | "cancel_invite" | "rename";
 const MANAGE_ACTIONS: ReadonlySet<string> = new Set([
-  "kick", "rotate_code", "disband", "set_furniture", "invite", "cancel_invite",
+  "kick", "rotate_code", "disband", "set_furniture", "invite", "cancel_invite", "rename",
 ]);
 
 interface ManagePayload {
@@ -41,6 +46,8 @@ interface ManagePayload {
   targetNickname?: string;
   // cancel_invite 전용 — 취소할 초대 id (UUID).
   inviteId?: string;
+  // rename 전용 — 새 길드명 (2~24자, isValidGuildName).
+  newName?: string;
   ts: number;
 }
 interface ManageRequest {
@@ -78,6 +85,10 @@ Deno.serve(async (req: Request) => {
   }
   if (p.action === "cancel_invite" && !isValidUUID(p.inviteId ?? "")) {
     return errorResponse(400, "invalid_invite_id");
+  }
+  // rename: 새 길드명 형식(2~24자, 제어문자·앞뒤공백·연속공백 금지) — guild-create와 동일 규칙.
+  if (p.action === "rename" && !isValidGuildName(p.newName)) {
+    return errorResponse(400, "invalid_guild_name");
   }
   // set_furniture: "kind:x:lane[:y[:text]];…" 검증 — 카탈로그 kind 범위, 벽/바닥 lane 정합,
   // 벽 가구 자유 y(4번째 필드), 액자 문구(5번째, percent-encoding). kind 중복 허용.
@@ -171,6 +182,7 @@ Deno.serve(async (req: Request) => {
   // 클라이언트가 액션별로만 키를 직렬화 → canonical 재현도 동일 조건(present-only).
   if (typeof p.targetNickname === "string") verifyObj.targetNickname = p.targetNickname;
   if (typeof p.inviteId === "string") verifyObj.inviteId = p.inviteId;
+  if (typeof p.newName === "string") verifyObj.newName = p.newName;
   const ok = await verifyHmac(verifyObj, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
@@ -347,6 +359,31 @@ Deno.serve(async (req: Request) => {
         return errorResponse(500, "layout_failed");
       }
       return jsonResponse({ ok: true, officeFurniture: p.layout });
+    }
+
+    case "rename": {
+      // 길드명 변경 — name + name_normalized 동시 갱신 (create와 동일한 저장 패턴).
+      const newName = p.newName!;
+      const normalized = newName.toLowerCase();
+      // 유일성 선검사 — 다른 길드가 이미 그 이름이면 거부. 대소문자만 바꾸는 self-rename은
+      // normalized가 같아 자기 자신이 걸리므로 id 비교로 통과시킨다. UNIQUE 인덱스가 race 최종 방어.
+      const { data: nameClash } = await db
+        .from("guilds")
+        .select("id")
+        .eq("name_normalized", normalized)
+        .maybeSingle();
+      if (nameClash && nameClash.id !== guild.id) return errorResponse(409, "name_taken");
+
+      const { error: updErr } = await db
+        .from("guilds")
+        .update({ name: newName, name_normalized: normalized })
+        .eq("id", guild.id);
+      if (updErr) {
+        if (updErr.code === "23505") return errorResponse(409, "name_taken");
+        console.error("guild rename failed", updErr);
+        return errorResponse(500, "rename_failed");
+      }
+      return jsonResponse({ ok: true, name: newName });
     }
   }
 });

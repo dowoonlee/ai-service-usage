@@ -339,6 +339,9 @@ private struct LeaderboardRowView: View {
     let entry: RankingAPI.LeaderboardEntry
     let isMe: Bool
     @State private var hovering: Bool = false
+    /// 내 행은 서버 스냅샷 대신 로컬 트레이너 카드를 실시간 반영하기 위해 관찰
+    /// (레포트에서 방금 바꾼 아바타·배경·칭호가 서버 submit 왕복 없이 즉시 보이도록).
+    @ObservedObject private var settings = Settings.shared
 
     var body: some View {
         HStack(spacing: 10) {
@@ -385,7 +388,11 @@ private struct LeaderboardRowView: View {
 
     @ViewBuilder
     private var cardPopover: some View {
-        if let profile = entry.profileJson {
+        // 내 행은 서버 스냅샷 대신 현재 로컬 프로필(레포트 편집 즉시 반영)을 렌더 — 아바타·배경·칭호·
+        // 이펙트·길드명까지 최신값. 무거운 `current`는 hover 시점(이 popover)에서만 계산한다.
+        // medals는 로컬에 없으므로 항상 서버 값(entry.medals)을 쓴다.
+        let profile = isMe ? ProfileState.current(from: settings) : entry.profileJson
+        if let profile {
             TrainerCardView(
                 card: profile.card,
                 trainerID: profile.trainerID,
@@ -445,9 +452,9 @@ private struct LeaderboardRowView: View {
     /// 110으로 truncate. profileJson 없는 행(미옵트인 구버전)은 미표시.
     @ViewBuilder
     private var titleChip: some View {
-        if let profile = entry.profileJson {
-            let title = profile.card.title
-            let frame = profile.card.frame
+        if let card = displayCard {
+            let title = card.title
+            let frame = card.frame
             HStack(spacing: 3) {
                 Image(systemName: "rosette")
                     .font(.system(size: 9, weight: .bold))
@@ -514,8 +521,13 @@ private struct LeaderboardRowView: View {
         }
     }
 
-    private var avatarKind: PetKind? { entry.profileJson?.card.avatar.kind }
-    private var avatarVariant: Int { entry.profileJson?.card.avatar.variant ?? 0 }
+    /// 내 행은 로컬 트레이너 카드(레포트 편집 즉시 반영), 남은 서버 스냅샷. 아바타·칭호처럼
+    /// 항상 보이는 부분은 이 가벼운 경로로 그린다 (전체 `ProfileState.current`는 hover 카드에서만).
+    private var displayCard: TrainerCard? {
+        isMe ? settings.trainerCard : entry.profileJson?.card
+    }
+    private var avatarKind: PetKind? { displayCard?.avatar.kind }
+    private var avatarVariant: Int { displayCard?.avatar.variant ?? 0 }
 
     private func formatVPRow(_ n: Int) -> String { formatVPLabel(n) }
 }

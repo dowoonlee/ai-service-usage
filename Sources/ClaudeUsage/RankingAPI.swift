@@ -397,6 +397,7 @@ actor RankingAPI {
         case setFurniture = "set_furniture"
         case invite
         case cancelInvite = "cancel_invite"
+        case rename
     }
 
     struct GuildCreatePayload: Encodable {
@@ -455,6 +456,8 @@ actor RankingAPI {
         let targetNickname: String?
         /// cancel_invite 전용 — 취소할 초대 id.
         let inviteId: String?
+        /// rename 전용 — 새 길드명. nil이면 키 자체가 직렬화에서 빠진다(서버 present-only).
+        let newName: String?
         let ts: Int64
     }
     struct GuildManageRequest: Encodable {
@@ -467,6 +470,8 @@ actor RankingAPI {
         let inviteCode: String?
         /// set_furniture 응답에만 — 반영된 가구 배치 직렬화.
         let officeFurniture: String?
+        /// rename 응답에만 — 반영된 새 길드명.
+        let name: String?
     }
 
     /// 사무실 액션 payload — 액션 무관 고정 형태 {action, deviceId, item, slot, ts}.
@@ -917,17 +922,20 @@ actor RankingAPI {
                               body: GuildLeaveRequest(payload: payload, signature: sig))
     }
 
-    /// 길드장 액션 (kick / 코드 재발급 / 해체 / 가구 재배치 / 초대 발송·취소).
+    /// 길드장 액션 (kick / 코드 재발급 / 해체 / 가구 재배치 / 초대 발송·취소 / 길드명 변경).
     /// kick 외에는 targetDeviceId 생략, furniture는 setFurniture에서만, targetNickname은 invite에서만,
-    /// inviteId는 cancelInvite에서만 (나머지는 nil → canonical에서 키 제외, 서버 present-only와 일치).
+    /// inviteId는 cancelInvite에서만, newName은 rename에서만
+    /// (나머지는 nil → canonical에서 키 제외, 서버 present-only와 일치).
     func manageGuild(deviceId: String, action: GuildManageAction, targetDeviceId: String? = nil,
                      furniture: String? = nil, targetNickname: String? = nil, inviteId: String? = nil,
+                     newName: String? = nil,
                      hmacKeyBase64: String) async throws -> GuildManageResponse {
         let payload = GuildManagePayload(action: action.rawValue, deviceId: deviceId,
                                          targetDeviceId: targetDeviceId ?? "",
                                          layout: furniture,
                                          targetNickname: targetNickname,
                                          inviteId: inviteId,
+                                         newName: newName,
                                          ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         return try await post(path: "guild-manage",
