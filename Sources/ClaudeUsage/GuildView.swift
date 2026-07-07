@@ -24,6 +24,10 @@ struct GuildView: View {
     /// 서버가 알려준 재가입 쿨다운 만료 시각 — 가입/창설 버튼 비활성 + 안내.
     @State private var cooldownUntil: Date?
 
+    // 초대 (푸시)
+    /// 길드장이 초대할 닉네임 입력.
+    @State private var inviteNicknameDraft: String = ""
+
     // 확인 다이얼로그
     @State private var confirmingPermitPurchase: Bool = false
     @State private var confirmingCreate: Bool = false
@@ -167,6 +171,8 @@ struct GuildView: View {
                 }
 
                 Divider()
+                Text("받은 길드 초대는 상단 ✉️ 쪽지함에서 확인·수락할 수 있어요.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
                 Text("길드 순위는 랭킹 탭 → 길드에서 확인할 수 있어요.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
@@ -260,6 +266,48 @@ struct GuildView: View {
         .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.gray.opacity(0.08)))
     }
 
+    // MARK: - 멤버 초대 (길드장, 내 길드)
+
+    /// 닉네임으로 초대 발송 + 보낸 대기중 초대 목록(취소).
+    private func inviteSection(_ info: RankingAPI.GuildInfoResponse) -> some View {
+        let sent = info.sentInvites ?? []
+        return VStack(alignment: .leading, spacing: 6) {
+            Label("멤버 초대", systemImage: "person.crop.circle.badge.plus")
+                .font(.system(size: 12, weight: .semibold))
+            HStack(spacing: 6) {
+                TextField("초대할 트레이너 닉네임", text: $inviteNicknameDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+                    .onSubmit { if canSendInvite { performSendInvite() } }
+                Button("초대") { performSendInvite() }
+                    .font(.system(size: 11))
+                    .disabled(!canSendInvite || actionBusy)
+            }
+            Text("가입 가능한 트레이너(무소속·재가입 쿨다운 없음)만 초대할 수 있어요.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            if !sent.isEmpty {
+                Divider().padding(.vertical, 2)
+                Text("보낸 초대 \(sent.count)건").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                ForEach(sent) { inv in
+                    HStack(spacing: 6) {
+                        Text(inv.nickname ?? "(알 수 없음)").font(.system(size: 11)).lineLimit(1)
+                        Text("· 대기중").font(.system(size: 9)).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("취소", role: .destructive) { performCancelInvite(inv.inviteId) }
+                            .font(.system(size: 10)).controlSize(.mini)
+                            .disabled(actionBusy)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.teal.opacity(0.06)))
+    }
+
+    private var canSendInvite: Bool {
+        inviteNicknameDraft.trimmingCharacters(in: .whitespaces).count >= 3
+    }
+
     private var isValidGuildNameDraft: Bool {
         let t = guildNameDraft.trimmingCharacters(in: .whitespaces)
         return t.count >= 2 && t.count <= 24
@@ -281,6 +329,9 @@ struct GuildView: View {
                 membersSection(info)
                 Divider()
                 inviteCodeSection(info.guild)
+                if info.guild.isLeader {
+                    inviteSection(info)
+                }
                 if let error {
                     Text(error).font(.system(size: 11)).foregroundStyle(.red)
                 }
@@ -468,6 +519,7 @@ struct GuildView: View {
             } catch {
                 self.error = error.localizedDescription
             }
+            // 받은 초대는 통합 인박스(쪽지함, DMViewModel)에서 조회·수락/거절한다.
             // 길드 랭킹 리스트는 랭킹 탭 → 길드 스코프로 이동 (RankingView.guildContent).
         }
     }
@@ -475,6 +527,46 @@ struct GuildView: View {
     private func performPermitPurchase() {
         if !CoinLedger.shared.purchaseGuildPermit() {
             error = "코인이 부족합니다."
+        }
+    }
+
+    // MARK: - 초대 액션
+
+    /// 길드장 — 닉네임으로 초대 발송. 자격 미달/재초대 쿨다운 등은 friendly 메시지로.
+    private func performSendInvite() {
+        let nickname = inviteNicknameDraft.trimmingCharacters(in: .whitespaces)
+        guard nickname.count >= 3 else { return }
+        runAction {
+            _ = try await RankingAPI.shared.manageGuild(
+                deviceId: settings.rankingDeviceID, action: .invite, targetNickname: nickname,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            inviteNicknameDraft = ""
+            DebugLog.log("Guild: 초대 발송 → \(nickname)")
+        } mapError: { Self.inviteErrorMessage($0) }
+    }
+
+    private func performCancelInvite(_ inviteId: String) {
+        runAction {
+            _ = try await RankingAPI.shared.manageGuild(
+                deviceId: settings.rankingDeviceID, action: .cancelInvite, inviteId: inviteId,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+        }
+    }
+
+    /// 초대 발송 서버 코드 → 사용자 메시지. 프라이버시상 자격 관련은 하나로 뭉갠다.
+    private static func inviteErrorMessage(_ error: Error) -> String? {
+        guard case RankingAPI.RankingError.guildConflict(let code) = error else { return nil }
+        switch code {
+        case "cannot_invite", "cannot_invite_self":
+            return "초대할 수 없는 사용자입니다 (없거나 이미 길드에 속했거나 최근 탈퇴)."
+        case "already_invited":
+            return "이미 초대를 보냈습니다."
+        case "redecline_cooldown":
+            return "최근 거절한 사용자입니다. 24시간 후 다시 초대할 수 있어요."
+        case "too_many_pending":
+            return "대기 중인 초대가 너무 많습니다."
+        default:
+            return nil
         }
     }
 
@@ -626,7 +718,9 @@ struct GuildView: View {
     }
 
     /// 서버 액션 공통 래퍼 — busy 토글, 쿨다운/에러 수집, 성공·실패 무관 refresh로 재정합.
-    private func runAction(_ op: @escaping () async throws -> Void) {
+    /// mapError: 특정 서버 코드를 friendly 메시지로 치환(nil 반환 시 기본 처리로 폴백).
+    private func runAction(_ op: @escaping () async throws -> Void,
+                           mapError: ((Error) -> String?)? = nil) {
         actionBusy = true
         error = nil
         Task { @MainActor in
@@ -639,7 +733,7 @@ struct GuildView: View {
             } catch is CancellationError {
                 return
             } catch {
-                self.error = error.localizedDescription
+                self.error = mapError?(error) ?? error.localizedDescription
             }
             refresh()
         }
