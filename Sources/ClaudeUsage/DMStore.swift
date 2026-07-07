@@ -71,4 +71,11 @@ final class DMStore {
             .map { (id: $0.key, echo: $0.value) }
             .sorted { $0.echo.ts < $1.echo.ts }
     }
+
+    /// 대화 삭제 시 그 상대에게 보낸 echo도 로컬에서 제거.
+    func removeEchoes(peer: String) {
+        let key = peer.lowercased()
+        data.sent = data.sent.filter { $0.value.peer != key }
+        persist()
+    }
 }

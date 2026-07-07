@@ -1089,6 +1089,8 @@ actor RankingAPI {
         let deviceId: String; let peerDevice: String; let upToTs: Int64; let ts: Int64
     }
     struct DMReadRequest: Encodable { let payload: DMReadPayload; let signature: String }
+    struct DMDeletePayload: Encodable { let deviceId: String; let peerDevice: String; let ts: Int64 }
+    struct DMDeleteRequest: Encodable { let payload: DMDeletePayload; let signature: String }
     struct DMOkResponse: Decodable, Sendable { let ok: Bool }
 
     /// 수신 정책 + 차단 (dm-settings). 모든 액션이 갱신 후 현재 상태를 돌려준다.
@@ -1162,6 +1164,14 @@ actor RankingAPI {
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let _: DMOkResponse = try await post(path: "dm-read",
                                              body: DMReadRequest(payload: payload, signature: sig))
+    }
+
+    /// 특정 상대와의 대화를 내 쪽에서 삭제(tombstone). 상대 사본은 유지("나만 삭제").
+    func dmDeleteThread(deviceId: String, peerDevice: String, hmacKeyBase64: String) async throws {
+        let payload = DMDeletePayload(deviceId: deviceId, peerDevice: peerDevice, ts: nowTs())
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let _: DMOkResponse = try await post(path: "dm-delete",
+                                             body: DMDeleteRequest(payload: payload, signature: sig))
     }
 
     // MARK: - 수신 정책 · 차단 (dm-settings)
