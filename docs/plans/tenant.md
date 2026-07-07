@@ -406,6 +406,16 @@ export async function assertSameTenant(db, a: string, b: string): Promise<boolea
 - **[검증완료] 발송 경로 / From**: **Gmail SMTP**(도메인 미구입, 사내 릴레이 없음). From=개인 Gmail 고정.
   2026-07-07 실발송으로 TCP(465)·앱비번 인증·**sk.com 받은편지함 딜리버리**·한글 인코딩 모두 정상 확인.
   남은 리스크는 **Gmail 일 500통 한도**뿐(초기 점진 공개로 흡수). denomailer는 `mimeContent`+base64 필수(§3-4).
+- **[열림·리뷰] 전환 후 쪽지 열람**: 현재 dm-inbox/thread/read/delete가 현재 테넌트로 필터 → 전환 시
+  과거 스레드(미확인 E2EE 포함)가 영구 비노출. 완화안 = 읽기 필터 제거(dm-send 교차차단은 유지)로 본인
+  이력 보존 + 코드 단순화. **사용자 결정 대기** (권장: 완화). skax 유저 0이라 배포 차단 아님.
+- **[열림·리뷰] finalize 오귀속**: 지난달 정산(명예의전당·RP)이 현재 tenant_id 기준이라, 경쟁 후 월초
+  전환 시 지난달 우승/RP가 새 테넌트로 이동(+ public은 1등 상실, podium 한마디 등록 불가). carry의
+  스냅샷 부작용. **사용자 결정 대기** (권장: 현행+문서화 / 대안: 전환 가드 or submissions.tenant_id freeze).
+- **[열림·리뷰] resolveTenant fail-open**: users 조회 transient 에러 시 null→public 폴백(gated 유저가
+  잠시 public 보드 노출). 읽기 전용·다음 폴링 자가복구라 경미. 하드닝은 선택.
+- **[해소·리뷰] OTP 발송 실패 rate-limit 소모**: 발송 실패 시 OTP row 삭제로 수정(재시도 잠금 방지).
+- **[해소·리뷰] 클라 에러 오표시**: 403 cross_tenant→"차단", verify 429→게시판 문구, dead state 수정.
 - **[열림] OTP purge**: 만료/소비 row 정리를 lazy(조회 시) vs 크론 — P1에서 확정.
 - **[비고]** `daily_fortunes`·`codex_usage_samples`는 비소셜이라 격리 제외했으나, 사내 데이터 분리
   정책상 태깅이 필요하면 P2에서 tenant_id 추가 가능(파괴적 변경 아님).

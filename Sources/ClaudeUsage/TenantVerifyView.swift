@@ -91,7 +91,7 @@ struct TenantVerifyView: View {
 
     @ViewBuilder
     private var codeStep: some View {
-        Text("\(fullEmail)로 6자리 코드를 보냈습니다. 메일함(스팸함 포함)을 확인하세요.")
+        Text("\(targetTenantName.isEmpty ? "" : "\(targetTenantName) 보드 · ")\(fullEmail)로 6자리 코드를 보냈습니다. 메일함(스팸함 포함)을 확인하세요.")
             .font(.system(size: 11)).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         TextField("6자리 코드", text: $code)
@@ -148,9 +148,17 @@ struct TenantVerifyView: View {
                 targetTenantName = resp.tenant.uppercased()
                 step = .code
             } catch {
-                self.error = error.localizedDescription
+                self.error = Self.message(for: error)
             }
         }
+    }
+
+    /// verify 전용 에러 메시지 — 429 rate_limited는 게시판 문구("다음 글 작성까지 …")로 새지 않게 override.
+    private static func message(for error: Error) -> String {
+        if let re = error as? RankingAPI.RankingError, case .rateLimited = re {
+            return "인증 코드 요청이 너무 잦습니다. 잠시 후 다시 시도하세요."
+        }
+        return error.localizedDescription
     }
 
     private func confirmCode() {
@@ -168,7 +176,7 @@ struct TenantVerifyView: View {
                 onDone()
                 dismiss()
             } catch {
-                self.error = error.localizedDescription
+                self.error = Self.message(for: error)
             }
         }
     }

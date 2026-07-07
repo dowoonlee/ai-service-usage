@@ -677,6 +677,7 @@ actor RankingAPI {
                 case "too_many_attempts":   return "시도 횟수를 초과했습니다. 다시 요청하세요."
                 case "mail_failed", "mail_not_configured":
                     return "인증 메일 발송에 실패했습니다. 잠시 후 다시 시도하세요."
+                case "cross_tenant":        return "다른 소속의 콘텐츠에는 접근할 수 없습니다."
                 default:                    return "인증 요청이 거부되었습니다 (\(code))."
                 }
             case .http(let code, let msg):
@@ -1498,6 +1499,8 @@ actor RankingAPI {
         "domain_not_allowed", "invalid_email", "already_gated",
         "bad_code", "code_expired", "no_pending_code", "too_many_attempts",
         "mail_failed", "mail_not_configured",
+        // 교차 테넌트 상호작용 거부(403) — body 코드 우선 처리해 전역 403→banned 오매핑 방지.
+        "cross_tenant",
     ]
 
     private func validateHTTPStatus(data: Data, response: URLResponse) throws {

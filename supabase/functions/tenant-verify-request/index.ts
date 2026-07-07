@@ -104,13 +104,13 @@ Deno.serve(async (req: Request) => {
   const code = String(Math.floor(100000 + Math.random() * 900000));
   const codeHash = await sha256Hex(code);
   const expiresAt = new Date(Date.now() + OTP_TTL_SEC * 1000).toISOString();
-  const { error: insErr } = await db.from("tenant_otp").insert({
+  const { data: otpRow, error: insErr } = await db.from("tenant_otp").insert({
     device_id: deviceId,
     tenant_slug: tenantSlug,
     code_hash: codeHash,
     expires_at: expiresAt,
-  });
-  if (insErr) {
+  }).select("id").single();
+  if (insErr || !otpRow) {
     console.error("tenant_otp insert failed", insErr);
     return errorResponse(500, "otp_failed");
   }
@@ -145,6 +145,9 @@ Deno.serve(async (req: Request) => {
     await client.close();
   } catch (e) {
     try { await client?.close(); } catch { /* 정리 실패 무시 */ }
+    // 발송 실패 시 방금 만든 OTP row를 되돌린다 — 코드도 못 받았는데 rate-limit(60초/일5회)을
+    // 소모해 재시도가 막히는 것을 방지(리뷰 지적). best-effort.
+    await db.from("tenant_otp").delete().eq("id", otpRow.id);
     console.error("tenant-verify-request mail send failed", (e as { message?: string })?.message ?? e);
     return errorResponse(502, "mail_failed");
   }
