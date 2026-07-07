@@ -342,6 +342,28 @@ private struct LeaderboardRowView: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            // identity 영역만 hover → 트레이너 카드. ✉️/VP는 이 영역 밖이라, 버튼으로
+            // 마우스를 옮기면 hover 이탈로 카드가 먼저 닫혀 버튼이 한 번에 눌린다
+            // (popover가 열린 채면 첫 클릭이 '닫기'로 소비되던 문제 해결).
+            identityZone
+                .contentShape(Rectangle())
+                .onHover { hovering = $0 }
+                .popover(isPresented: $hovering, arrowEdge: .leading) { cardPopover }
+            messageButton
+                .frame(width: 30)
+            Text(formatVPRow(entry.totalCoins))
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.purple)
+                .frame(width: 84, alignment: .trailing)
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 4)
+        .background(isMe ? Color.accentColor.opacity(0.12) : Color.clear)
+    }
+
+    /// 순위·아바타·닉네임·칭호 — hover 시 카드. (✉️/VP는 밖에 둬 원클릭 보장)
+    private var identityZone: some View {
+        HStack(spacing: 10) {
             rankBadge
             avatarIcon
             VStack(alignment: .leading, spacing: 1) {
@@ -358,43 +380,34 @@ private struct LeaderboardRowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             titleChip
                 .frame(width: 130, alignment: .center)
-            Text(formatVPRow(entry.totalCoins))
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.purple)
-                .frame(width: 84, alignment: .trailing)
-            messageButton
-                .frame(width: 22)
         }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 4)
-        .background(isMe ? Color.accentColor.opacity(0.12) : Color.clear)
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .popover(isPresented: $hovering, arrowEdge: .leading) {
-            if let profile = entry.profileJson {
-                TrainerCardView(
-                    card: profile.card,
-                    trainerID: profile.trainerID,
-                    trainerName: entry.nickname,
-                    stats: profile.stats,
-                    badges: profile.badgeRowsForRender(),
-                    collections: profile.collectionRowsForRender(),
-                    showWatermark: false,
-                    width: 460,
-                    medals: entry.medals,
-                    animatedAvatar: true,
-                    equippedEffects: Set((profile.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) }),
-                    guildName: profile.guildName
-                )
-                .padding(8)
-            } else {
-                // profileJson 없는 사용자 (구버전 클라이언트 등) — 닉네임/코인 정도만.
-                VStack(spacing: 4) {
-                    Text(entry.nickname).font(.system(size: 13, weight: .semibold))
-                    Text("\(entry.totalCoins) coin").font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                .padding(12)
+    }
+
+    @ViewBuilder
+    private var cardPopover: some View {
+        if let profile = entry.profileJson {
+            TrainerCardView(
+                card: profile.card,
+                trainerID: profile.trainerID,
+                trainerName: entry.nickname,
+                stats: profile.stats,
+                badges: profile.badgeRowsForRender(),
+                collections: profile.collectionRowsForRender(),
+                showWatermark: false,
+                width: 460,
+                medals: entry.medals,
+                animatedAvatar: true,
+                equippedEffects: Set((profile.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) }),
+                guildName: profile.guildName
+            )
+            .padding(8)
+        } else {
+            // profileJson 없는 사용자 (구버전 클라이언트 등) — 닉네임/코인 정도만.
+            VStack(spacing: 4) {
+                Text(entry.nickname).font(.system(size: 13, weight: .semibold))
+                Text("\(entry.totalCoins) coin").font(.system(size: 11)).foregroundStyle(.secondary)
             }
+            .padding(12)
         }
     }
 
@@ -406,9 +419,11 @@ private struct LeaderboardRowView: View {
             Button {
                 DMWindowController.shared.present(composeTo: entry.nickname)
             } label: {
-                Image(systemName: "envelope")
-                    .font(.system(size: 11))
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 12))
                     .foregroundStyle(.teal)
+                    .frame(width: 28, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .help("\(entry.nickname)님에게 쪽지")

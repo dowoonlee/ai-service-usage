@@ -131,12 +131,19 @@ final class DMViewModel: ObservableObject {
 
     func openThread(peer: String) async {
         guard ready else { return }
+        if openPeer != peer { openMessages = []; openPeerNickname = nil }  // 다른 상대면 잔상 제거
         openPeer = peer
         error = nil
+        await refreshOpenThread(silent: false)
+        await refreshInbox(silent: true)   // 인박스 미확인 배지 즉시 반영
+    }
+
+    /// 열린 스레드 재로드(복호 + 읽음 처리). 최초 오픈·발신·주기 폴링(뷰 `.task`)에서 재사용.
+    func refreshOpenThread(silent: Bool = true) async {
+        guard ready, let peer = openPeer else { return }
         do {
             let resp = try await RankingAPI.shared.dmThread(
                 deviceId: device, peerDevice: peer, hmacKeyBase64: hmac)
-            openPeerNickname = resp.peerNickname
             var msgs: [DisplayMessage] = []
             var latestReceived: Date?
             for m in resp.messages {
@@ -153,20 +160,37 @@ final class DMViewModel: ObservableObject {
                     latestReceived = m.createdAt
                 }
             }
+            guard openPeer == peer else { return }   // 그 사이 닫히거나 바뀌면 무시
+            openPeerNickname = resp.peerNickname
             openMessages = msgs
-            // 읽음 처리 (마지막 수신 시각까지).
             if let latest = latestReceived {
                 try? await RankingAPI.shared.dmRead(
                     deviceId: device, peerDevice: peer,
                     upToTs: Int64(latest.timeIntervalSince1970) + 1, hmacKeyBase64: hmac)
-                await refreshInbox(silent: true)
             }
+        } catch {
+            if !silent { self.error = mapError(error) }
+        }
+    }
+
+    func closeThread() {
+        openPeer = nil; openMessages = []; openPeerNickname = nil
+        Task { await refreshInbox(silent: true) }
+    }
+
+    /// 현재 열린 대화를 내 쪽에서 삭제(tombstone). 상대 사본은 유지.
+    func deleteThread() async {
+        guard ready, let peer = openPeer else { return }
+        error = nil
+        do {
+            try await RankingAPI.shared.dmDeleteThread(
+                deviceId: device, peerDevice: peer, hmacKeyBase64: hmac)
+            DMStore.shared.removeEchoes(peer: peer)
+            closeThread()
         } catch {
             self.error = mapError(error)
         }
     }
-
-    func closeThread() { openPeer = nil; openMessages = []; openPeerNickname = nil }
 
     /// 특정 닉네임으로 새 쪽지 작성 시작 (전용 창의 작성 시트가 이 값을 소비).
     func startCompose(to nickname: String) { pendingComposeNickname = nickname }
@@ -313,10 +337,13 @@ final class DMViewModel: ObservableObject {
         if case RankingAPI.RankingError.guildConflict(let code) = error {
             switch code {
             case "cannot_send", "cannot_send_self": return "보낼 수 없는 상대입니다."
-            case "no_key": return "상대가 아직 쪽지를 시작하지 않았어요."
-            case "rate_limited": return "잠시 후 다시 시도해 주세요 (발신 한도)."
+            case "no_key": return "상대가 아직 쪽지를 시작하지 않았어요. (상대가 v0.15.0으로 업데이트한 뒤 쪽지함을 한 번 열어야 받을 수 있어요)"
             default: break
             }
+        }
+        // 발신 한도(429)는 게시판과 코드를 공유해 rateLimited로 들어온다 — DM 문구로 덮어씀.
+        if case RankingAPI.RankingError.rateLimited = error {
+            return "잠시 후 다시 시도해 주세요 (발신 한도)."
         }
         return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
@@ -521,6 +548,8 @@ private struct DMInboxView: View {
 private struct DMThreadView: View {
     @ObservedObject var vm: DMViewModel
     @State private var draft = ""
+    @State private var confirmingDelete = false
+    private static let bottomAnchor = "dm-bottom"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -543,12 +572,22 @@ private struct DMThreadView: View {
             if let error = vm.error {
                 Text(error).font(.system(size: 11)).foregroundStyle(.red).padding(8)
             }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 6) {
-                    ForEach(vm.openMessages) { m in bubble(m) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(vm.openMessages) { m in bubble(m) }
+                        Color.clear.frame(height: 1).id(Self.bottomAnchor)   // 최하단 앵커
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
+                // 열 때 + 새 메시지 추가 시 최신(최하단)으로. 그 사이엔 자유롭게 위로 스크롤 가능.
+                .onAppear { proxy.scrollTo(Self.bottomAnchor, anchor: .bottom) }
+                .onChange(of: vm.openMessages.count) { _ in
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(Self.bottomAnchor, anchor: .bottom)
+                    }
+                }
             }
             Divider()
             HStack(spacing: 6) {
@@ -559,6 +598,22 @@ private struct DMThreadView: View {
                     .font(.system(size: 11)).disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .padding(8)
+        }
+        // 스레드가 열려 있는 동안 8초마다 새 메시지 폴링 — 뷰가 사라지면 자동 취소.
+        .task(id: vm.openPeer) {
+            guard vm.openPeer != nil else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(8))
+                if Task.isCancelled { break }
+                await vm.refreshOpenThread()
+            }
+        }
+        .confirmationDialog("이 대화를 삭제할까요?", isPresented: $confirmingDelete,
+                            titleVisibility: .visible) {
+            Button("대화 삭제", role: .destructive) { Task { await vm.deleteThread() } }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("내 쪽에서만 삭제됩니다. 상대에게는 남아 있어요.")
         }
     }
 
@@ -580,6 +635,12 @@ private struct DMThreadView: View {
                     Button(role: .destructive) { Task { await vm.block(nickname: nick) } } label: {
                         Label("이 사용자 차단", systemImage: "hand.raised")
                     }
+                }
+            }
+            if vm.openPeer != nil {
+                Divider()
+                Button(role: .destructive) { confirmingDelete = true } label: {
+                    Label("대화 삭제", systemImage: "trash")
                 }
             }
         } label: {
