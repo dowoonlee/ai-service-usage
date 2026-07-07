@@ -165,7 +165,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, tenant_id")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -196,7 +196,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: guild } = await db
     .from("guilds")
-    .select("id, leader_device_id")
+    .select("id, leader_device_id, tenant_id")
     .eq("id", membership.guild_id)
     .maybeSingle();
   if (!guild) return errorResponse(404, "guild_not_found");
@@ -264,11 +264,13 @@ Deno.serve(async (req: Request) => {
       const nickNorm = p.targetNickname!.trim().toLowerCase();
       const { data: invitee } = await db
         .from("users")
-        .select("device_id, status")
+        .select("device_id, status, tenant_id")
         .eq("nickname_normalized", nickNorm)
         .maybeSingle();
       // 프라이버시 — 존재/소속/쿨다운 여부를 구분해 노출하지 않고 하나로 뭉갠다.
       if (!invitee || invitee.status === "banned") return errorResponse(404, "cannot_invite");
+      // 다른 테넌트 사용자는 "존재하지 않음"과 동일 취급 — 타 테넌트로는 초대 불가(존재 노출 없이 격리).
+      if (invitee.tenant_id !== guild.tenant_id) return errorResponse(404, "cannot_invite");
       if (invitee.device_id === deviceId) return errorResponse(400, "cannot_invite_self");
 
       // 이미 어떤 길드에 소속?
@@ -370,6 +372,7 @@ Deno.serve(async (req: Request) => {
       const { data: nameClash } = await db
         .from("guilds")
         .select("id")
+        .eq("tenant_id", guild.tenant_id)
         .eq("name_normalized", normalized)
         .maybeSingle();
       if (nameClash && nameClash.id !== guild.id) return errorResponse(409, "name_taken");

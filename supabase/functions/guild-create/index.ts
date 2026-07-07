@@ -69,7 +69,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, tenant_id")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -117,11 +117,12 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // 길드명 충돌 선검사 — UNIQUE 인덱스가 race 최종 방어.
+  // 길드명 충돌 선검사 — 테넌트 내에서만. UNIQUE(tenant_id, name_normalized)가 race 최종 방어.
   const normalized = p.name.toLowerCase();
   const { data: nameClash } = await db
     .from("guilds")
     .select("id")
+    .eq("tenant_id", user.tenant_id)
     .eq("name_normalized", normalized)
     .maybeSingle();
   if (nameClash) return errorResponse(409, "name_taken");
@@ -138,15 +139,17 @@ Deno.serve(async (req: Request) => {
         name_normalized: normalized,
         invite_code: inviteCode,
         leader_device_id: deviceId,
+        tenant_id: user.tenant_id,   // 창설자 테넌트 스탬프 — 길드는 이 테넌트 안에서만 경쟁·상호작용
       })
       .select("id")
       .single();
     if (insErr) {
       if (insErr.code === "23505") {
-        // name/invite_code 어느 쪽 UNIQUE인지 구분 — 이름 충돌이면 재시도 무의미.
+        // name/invite_code 어느 쪽 UNIQUE인지 구분 — 이름 충돌(테넌트 내)이면 재시도 무의미.
         const { data: recheck } = await db
           .from("guilds")
           .select("id")
+          .eq("tenant_id", user.tenant_id)
           .eq("name_normalized", normalized)
           .maybeSingle();
         if (recheck) return errorResponse(409, "name_taken");

@@ -5,6 +5,7 @@
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { resolveTenant } from "../_shared/tenant.ts";
 // profile_json.backup 누출 방지 SSOT — profileJson을 응답에 싣는 모든 endpoint가 경유.
 // (과거 이 파일의 로컬 함수였으나 guild-info도 쓰게 되어 _shared로 이동. 정책 주석은 profile.ts 참조.)
 import { stripBackup } from "../_shared/profile.ts";
@@ -36,10 +37,19 @@ Deno.serve(async (req: Request) => {
   await db.rpc("finalize_monthly_rp_if_needed");
   await db.rpc("finalize_weekly_rp_if_needed");
 
-  // Top N — 월간 보드 + profile_json. device_id는 메달 매핑 internal용 — 응답엔 절대 미노출.
+  // 호출자 테넌트 결정. 미등록/익명(deviceId 없음)은 기본 테넌트(public) 보드를 본다.
+  // 클라는 tenant를 주장할 수 없다 — 서버가 device_id로만 판정(§2-1).
+  let tenant = "public";
+  if (deviceId) {
+    const t = await resolveTenant(db, deviceId);
+    if (t) tenant = t;
+  }
+
+  // Top N — 월간 보드(테넌트 파티션) + profile_json. device_id는 메달 매핑 internal용 — 응답엔 절대 미노출.
   const { data: top, error: topErr } = await db
     .from("monthly_leaderboard")
     .select("device_id, rank, nickname, github_login, monthly_coins, profile_json")
+    .eq("tenant_id", tenant)
     .order("rank", { ascending: true })
     .limit(TOP_N);
   if (topErr) {
@@ -47,10 +57,11 @@ Deno.serve(async (req: Request) => {
     return errorResponse(500, "fetch_failed");
   }
 
-  // 총 참여자 (이번 달 monthly_coins > 0)
+  // 총 참여자 — 호출자 테넌트 내 active 사용자
   const { count: totalCount } = await db
     .from("monthly_leaderboard")
-    .select("device_id", { count: "exact", head: true });
+    .select("device_id", { count: "exact", head: true })
+    .eq("tenant_id", tenant);
 
   // 내 순위 — view에서 device_id로 조회
   let myRank: number | null = null;
@@ -120,9 +131,12 @@ Deno.serve(async (req: Request) => {
   // 직전 달 명예의 전당 — 가장 최근 finalized period의 top 3.
   // 보드 상단 섹션 + reward 알림용. 클라이언트가 표시.
   // device_id/podium_message는 internal·표시용으로 select — device_id는 응답에 미노출.
+  // 명예의 전당은 호출자 테넌트로 필터 — 타 테넌트의 직전 달 우승자 명단은 비노출(교차노출차단, §2-4-4).
+  // (개인 메달 집계 device_medals는 필터 안 함 = 평생 업적 D11 — 별개 표면.)
   const { data: prevWinners } = await db
     .from("monthly_winners")
     .select("period, rank, final_score, nickname_snapshot, profile_json_snapshot, reward_coins, device_id, podium_message")
+    .eq("tenant_id", tenant)
     .order("period", { ascending: false })
     .order("rank", { ascending: true })
     .limit(3);
@@ -220,5 +234,6 @@ Deno.serve(async (req: Request) => {
     previousMonth,
     pendingReward,
     pendingRpReward,
+    tenant,   // 클라 배지용 — 호출자 현재 테넌트(익명/미등록은 "public")
   });
 });

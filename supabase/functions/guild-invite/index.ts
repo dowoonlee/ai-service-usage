@@ -59,7 +59,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, tenant_id")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -160,10 +160,12 @@ Deno.serve(async (req: Request) => {
 
   const { data: guild } = await db
     .from("guilds")
-    .select("id, name")
+    .select("id, name, tenant_id")
     .eq("id", inv.guild_id)
     .maybeSingle();
   if (!guild) return errorResponse(404, "guild_not_found"); // 초대 후 해체됨
+  // 전환(one-way) 등으로 초대 당시와 테넌트가 달라졌으면 가입 불가 — 타 테넌트 길드엔 못 들어간다.
+  if (guild.tenant_id !== user.tenant_id) return errorResponse(404, "guild_not_found");
 
   const { error: insErr } = await db
     .from("guild_members")

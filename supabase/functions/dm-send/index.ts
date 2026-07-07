@@ -63,7 +63,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, tenant_id")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -80,10 +80,12 @@ Deno.serve(async (req: Request) => {
   // 수신자 해석 (닉네임 → device).
   const { data: recipient } = await db
     .from("users")
-    .select("device_id, status")
+    .select("device_id, status, tenant_id")
     .eq("nickname_normalized", p.targetNickname.trim().toLowerCase())
     .maybeSingle();
   if (!recipient || recipient.status === "banned") return errorResponse(404, "cannot_send");
+  // 다른 테넌트 사용자는 이 테넌트에서 "존재하지 않음"과 동일 취급 — 존재 노출 없이 격리(프라이버시 모델 유지, §4).
+  if (recipient.tenant_id !== user.tenant_id) return errorResponse(404, "cannot_send");
   if (recipient.device_id === deviceId) return errorResponse(400, "cannot_send_self");
 
   // 수신자가 키를 게시했어야 함(쪽지 시작 유저).
@@ -148,6 +150,7 @@ Deno.serve(async (req: Request) => {
       recipient_device: recipient.device_id,
       ciphertext: p.ciphertext,
       sender_id_pub: p.senderIdPub,
+      tenant_id: user.tenant_id,   // 발·수신 동일 테넌트(위에서 검증). 스레드 조회 필터의 기준.
     })
     .select("id, created_at")
     .single();

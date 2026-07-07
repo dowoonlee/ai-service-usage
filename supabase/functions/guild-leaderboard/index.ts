@@ -11,6 +11,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { stripBackup } from "../_shared/profile.ts";
+import { resolveTenant } from "../_shared/tenant.ts";
 
 const TOP_N = 50;
 
@@ -29,12 +30,20 @@ Deno.serve(async (req: Request) => {
 
   const db = getDb();
 
-  // 직전 달 길드 정산 lazy trigger — 개인 leaderboard의 finalize 패턴과 동일.
+  // 직전 달 길드 정산 lazy trigger — 개인 leaderboard의 finalize 패턴과 동일(테넌트별 정산은 함수 내부).
   await db.rpc("finalize_monthly_guild_rp_if_needed");
+
+  // 호출자 테넌트 — 미등록/익명은 기본(public) 길드 보드. 클라는 tenant를 주장 못 한다(§2-1).
+  let tenant = "public";
+  if (deviceId) {
+    const t = await resolveTenant(db, deviceId);
+    if (t) tenant = t;
+  }
 
   const { data: top, error: topErr } = await db
     .from("guild_monthly_scores")
     .select("guild_id, name, score, member_count, rank")
+    .eq("tenant_id", tenant)
     .order("rank", { ascending: true })
     .limit(TOP_N);
   if (topErr) {
@@ -44,7 +53,8 @@ Deno.serve(async (req: Request) => {
 
   const { count: totalCount } = await db
     .from("guild_monthly_scores")
-    .select("guild_id", { count: "exact", head: true });
+    .select("guild_id", { count: "exact", head: true })
+    .eq("tenant_id", tenant);
 
   // 내 길드 — deviceId가 멤버일 때만.
   let myGuild: unknown = null;
@@ -78,6 +88,7 @@ Deno.serve(async (req: Request) => {
     const { data: prevWinners } = await db
       .from("guild_monthly_winners")
       .select("period, rank, guild_id, name_snapshot, score, member_count, leader_nickname_snapshot, leader_profile_json_snapshot")
+      .eq("tenant_id", tenant)
       .order("period", { ascending: false })
       .order("rank", { ascending: true })
       .limit(3);

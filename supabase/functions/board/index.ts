@@ -11,6 +11,7 @@
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { resolveTenant } from "../_shared/tenant.ts";
 import {
   DISPLAY_WINDOW_HOURS,
   POST_COOLDOWN_SEC,
@@ -79,11 +80,20 @@ Deno.serve(async (req: Request) => {
 
   const db = getDb();
 
-  // 1) 최근 1일 + 최대 100개 글. 두 조건 모두 적용 — 1일 안에 100개 넘게 와도 LIMIT으로 컷.
+  // 호출자 테넌트 — 미등록/익명(deviceId 없음)은 기본(public) 게시판. 클라는 tenant를 주장 못 한다(§2-1).
+  let tenant = "public";
+  if (deviceId) {
+    const t = await resolveTenant(db, deviceId);
+    if (t) tenant = t;
+  }
+
+  // 1) 최근 1일 + 최대 100개 글(테넌트 내). 두 조건 모두 적용 — 1일 안에 100개 넘게 와도 LIMIT으로 컷.
+  //    likes/comments/comment_likes는 아래에서 post_id IN (이 테넌트 글)로 조회되므로 자연히 테넌트 스코프.
   const windowStart = new Date(Date.now() - DISPLAY_WINDOW_HOURS * 3600 * 1000).toISOString();
   const { data: posts, error: postsErr } = await db
     .from("board_posts")
     .select("id, device_id, nickname_snapshot, content, created_at")
+    .eq("tenant_id", tenant)
     .gte("created_at", windowStart)
     .order("created_at", { ascending: false })
     .limit(POST_LIMIT);

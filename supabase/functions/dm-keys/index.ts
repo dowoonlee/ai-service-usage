@@ -65,7 +65,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, tenant_id")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -93,10 +93,12 @@ Deno.serve(async (req: Request) => {
   // fetch — 닉네임 → device → 공개키. 키 미게시(쪽지 미시작) 유저는 404 no_key.
   const { data: target } = await db
     .from("users")
-    .select("device_id")
+    .select("device_id, tenant_id")
     .eq("nickname_normalized", p.targetNickname!.trim().toLowerCase())
     .maybeSingle();
   if (!target) return errorResponse(404, "no_key");   // 존재 여부 뭉갬 (프라이버시)
+  // 다른 테넌트 사용자는 "키 없음"과 동일 취급 — 존재 노출 없이 격리(프라이버시 모델 유지).
+  if (target.tenant_id !== user.tenant_id) return errorResponse(404, "no_key");
   const { data: key } = await db
     .from("user_keys")
     .select("x25519_pub")

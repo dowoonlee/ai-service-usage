@@ -52,7 +52,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, tenant_id")
     .eq("device_id", p.deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -68,11 +68,13 @@ Deno.serve(async (req: Request) => {
   // 글 존재 + 본인 글 + 윈도우 검증.
   const { data: post } = await db
     .from("board_posts")
-    .select("id, device_id, created_at")
+    .select("id, device_id, created_at, tenant_id")
     .eq("id", p.postId)
     .maybeSingle();
   if (!post) return errorResponse(404, "post_not_found");
   if (post.device_id !== p.deviceId) return errorResponse(403, "not_post_owner");
+  // 현재 테넌트에서만 행위 — 전환(one-way) 후 옛 테넌트 글은 건드리지 못한다(§2-4).
+  if (post.tenant_id !== user.tenant_id) return errorResponse(403, "cross_tenant");
 
   const ageSec = (Date.now() - new Date(post.created_at).getTime()) / 1000;
   if (ageSec > DELETE_POST_WINDOW_SEC) {

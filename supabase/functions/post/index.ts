@@ -56,7 +56,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, nickname, status, last_post_at")
+    .select("device_id, hmac_key_b64, nickname, status, last_post_at, tenant_id")
     .eq("device_id", p.deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -93,6 +93,7 @@ Deno.serve(async (req: Request) => {
       device_id: p.deviceId,
       nickname_snapshot: user.nickname,
       content,
+      tenant_id: user.tenant_id,   // 작성 시점 호출자 테넌트 스탬프(§2-2) — 과거 글은 원 테넌트에 잔류
     })
     .select("id, created_at")
     .single();
