@@ -28,6 +28,10 @@ struct GuildView: View {
     /// 길드장이 초대할 닉네임 입력.
     @State private var inviteNicknameDraft: String = ""
 
+    // 길드명 변경 (길드장, RP 300)
+    @State private var renameNameDraft: String = ""
+    @State private var confirmingRename: Bool = false
+
     // 확인 다이얼로그
     @State private var confirmingPermitPurchase: Bool = false
     @State private var confirmingCreate: Bool = false
@@ -103,6 +107,14 @@ struct GuildView: View {
             Button("취소", role: .cancel) { kickTarget = nil }
         } message: {
             Text("\(kickTarget?.nickname ?? "")님을 추방합니다. 추방된 멤버는 7일 동안 재가입할 수 없습니다.")
+        }
+        .alert("길드명 변경", isPresented: $confirmingRename) {
+            Button("변경 (RP \(RankPointLedger.guildRenameCostRP))") {
+                performRename(current: info?.guild.name ?? "")
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("길드명을 \"\(renameNameDraft.trimmingCharacters(in: .whitespaces))\"(으)로 변경합니다. RP \(RankPointLedger.guildRenameCostRP)이 소모됩니다.")
         }
     }
 
@@ -308,6 +320,51 @@ struct GuildView: View {
         inviteNicknameDraft.trimmingCharacters(in: .whitespaces).count >= 3
     }
 
+    // MARK: - 길드명 변경 (길드장, RP 300)
+
+    /// 새 길드명 입력 + 변경 버튼. 서버가 유일성·형식을 검증하고, 성공 시 RP를 차감한다.
+    private func renameSection(_ guild: RankingAPI.GuildInfo) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("길드명 변경", systemImage: "pencil")
+                .font(.system(size: 12, weight: .semibold))
+            HStack(spacing: 6) {
+                TextField(guild.name, text: $renameNameDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: 12))
+                    .onSubmit { if canRename(current: guild.name) { confirmingRename = true } }
+                Button {
+                    confirmingRename = true
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "diamond.fill").font(.system(size: 9)).foregroundStyle(.cyan)
+                        Text("변경 · \(RankPointLedger.guildRenameCostRP)")
+                    }
+                }
+                .font(.system(size: 11))
+                .disabled(!canRename(current: guild.name) || actionBusy)
+            }
+            HStack(spacing: 4) {
+                Image(systemName: "diamond.fill").font(.system(size: 9)).foregroundStyle(.cyan)
+                Text("보유 RP \(settings.rp) · 변경에 \(RankPointLedger.guildRenameCostRP) RP 소모 (2~24자)")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            if settings.rp < RankPointLedger.guildRenameCostRP {
+                Text("RP 부족 — \(RankPointLedger.guildRenameCostRP - settings.rp) RP 더 필요")
+                    .font(.system(size: 10)).foregroundStyle(.orange)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.cyan.opacity(0.06)))
+    }
+
+    /// 변경 가능 조건 — 2~24자 + 현재 이름과 다름 + RP 충분. 최종 형식은 서버가 검증.
+    private func canRename(current: String) -> Bool {
+        let t = renameNameDraft.trimmingCharacters(in: .whitespaces)
+        guard t.count >= 2, t.count <= 24, t != current else { return false }
+        return settings.rp >= RankPointLedger.guildRenameCostRP
+    }
+
     private var isValidGuildNameDraft: Bool {
         let t = guildNameDraft.trimmingCharacters(in: .whitespaces)
         return t.count >= 2 && t.count <= 24
@@ -331,6 +388,7 @@ struct GuildView: View {
                 inviteCodeSection(info.guild)
                 if info.guild.isLeader {
                     inviteSection(info)
+                    renameSection(info.guild)
                 }
                 if let error {
                     Text(error).font(.system(size: 11)).foregroundStyle(.red)
@@ -714,6 +772,26 @@ struct GuildView: View {
                 deviceId: settings.rankingDeviceID, action: .rotateCode,
                 hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
             DebugLog.log("Guild: 초대 코드 재발급 \(resp.inviteCode ?? "?")")
+        }
+    }
+
+    /// 길드명 변경 (길드장) — 서버 rename 성공 후 RP 차감 (생성권/데코 원칙: 실패 시 보존).
+    /// 이름 충돌은 `.guildConflict("name_taken")` → runAction 기본 처리로 friendly 메시지.
+    private func performRename(current: String) {
+        let name = renameNameDraft.trimmingCharacters(in: .whitespaces)
+        guard name.count >= 2, name.count <= 24, name != current else { return }
+        guard settings.rp >= RankPointLedger.guildRenameCostRP else {
+            error = "RP가 부족합니다 (\(RankPointLedger.guildRenameCostRP) 필요)."
+            return
+        }
+        runAction {
+            let resp = try await RankingAPI.shared.manageGuild(
+                deviceId: settings.rankingDeviceID, action: .rename, newName: name,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            RankPointLedger.shared.spend(RankPointLedger.guildRenameCostRP, reason: "guild.rename")
+            settings.guildName = resp.name ?? name
+            renameNameDraft = ""
+            DebugLog.log("Guild: 길드명 변경 → \(resp.name ?? name) (RP \(RankPointLedger.guildRenameCostRP) 소모)")
         }
     }
 

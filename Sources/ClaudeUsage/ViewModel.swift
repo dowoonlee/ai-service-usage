@@ -203,6 +203,17 @@ final class ViewModel: ObservableObject {
             Task { @MainActor in await self?.refreshWeather(force: true) }
         }
         .store(in: &weatherCancellables)
+
+        // 레포트에서 트레이너 카드(아바타·배경·칭호·프레임)를 바꾸면 서버 프로필을 즉시 push —
+        // 코인 delta 없이 profileJson만 갱신해 랭킹 대시보드가 다음 코인 적립 cycle을 기다리지 않게.
+        // 스와치를 연달아 누르므로 2s debounce로 마지막 상태만 전송(서버 submissions/트래픽 절약).
+        Settings.shared.$trainerCard
+            .dropFirst()
+            .debounce(for: .seconds(2), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                Task { @MainActor in await self?.pushProfileNow() }
+            }
+            .store(in: &weatherCancellables)
     }
 
     /// 영속된 history/events를 백그라운드 스레드에서 읽어 @Published에 1회 반영 (issue #19-1).
@@ -579,6 +590,29 @@ final class ViewModel: ObservableObject {
             }
         } catch {
             DebugLog.log("Ranking submit failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 트레이너 카드(아바타·배경 등) 편집 직후 호출 — 코인 delta 없이 프로필만 서버에 즉시 반영한다.
+    /// 서버 submit은 delta=0이어도 total_coins는 그대로 두고 profile_json만 갱신하므로(submit/index.ts),
+    /// 랭킹 대시보드가 다음 코인 적립 cycle을 기다리지 않고 최신 카드를 노출한다. fire-and-forget이라
+    /// lastSubmittedTotal은 건드리지 않는다(코인 total 불변). 미등록/미설정이면 no-op.
+    private func pushProfileNow() async {
+        let s = Settings.shared
+        guard hasRankingPrerequisites,
+              let hmacKey = Keychain.loadRankingHmacKey() else { return }
+        let profile = ProfileState.current(from: s)
+        do {
+            _ = try await RankingAPI.shared.submitDelta(
+                deviceId: s.rankingDeviceID,
+                delta: 0,
+                prevTotal: s.rankingLastSubmittedTotal,
+                hmacKeyBase64: hmacKey,
+                profileJson: profile
+            )
+            DebugLog.log("Ranking: 프로필 즉시 push (delta=0, 트레이너 카드 변경 반영)")
+        } catch {
+            DebugLog.log("Ranking 프로필 push 실패: \(error.localizedDescription)")
         }
     }
 
