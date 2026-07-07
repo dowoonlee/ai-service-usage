@@ -379,8 +379,10 @@ export async function assertSameTenant(db, a: string, b: string): Promise<boolea
     갱신 + 타 테넌트 길드 자동탈퇴, one-way 가드) + 함수 `tenant-verify-request`(Gmail OTP, 서명 필수)
     `tenant-verify-confirm`(RPC 편입) `tenant-domains`(드롭다운) `tenant-announcements`(테넌트 공지) +
     leaderboard 응답에 `tenant` 필드. 로컬 검증: 전환 시 solo길드 해체/리더 승계/one-way 가드 정상.
-  - **P1 클라 (예정, 별도 앱 릴리스)**: 도메인 드롭다운 인증 UI, 테넌트 배지, 테넌트 공지 섹션.
-    서버가 하위호환이라 서버 먼저 배포 후 앱 릴리스로 나간다.
+  - **P1 클라 (작성·빌드 완료, 별도 앱 릴리스)**: `RankingAPI`에 tenant 모델·4메서드(domains/
+    verify-request/confirm/announcements)·`tenantError` 처리 + `LeaderboardResponse.tenant`.
+    `RankingView` 헤더에 테넌트 배지 + "사내 인증" 진입 + 테넌트 공지 배너. `TenantVerifyView`
+    (로컬파트+도메인 드롭다운 → 6자리 코드 2단계). 서버가 하위호환이라 서버 먼저 배포 후 앱 릴리스.
 - **P2 — 운영**: 테넌트 공지(`tenant_announcements` 작성·노출 + 클라 별도 섹션), 관리자 도구
   (디바이스 강제 이동/이관), 테넌트별 통계.
 

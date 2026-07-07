@@ -21,6 +21,11 @@ struct RankingView: View {
     /// 개인/길드 스코프 — 세그먼트 토글. 길드 보드는 지연 로드(첫 전환 시 fetch).
     @State private var scope: Scope = .personal
     @State private var guildBoard: RankingAPI.GuildLeaderboardResponse?
+    /// 호출자 현재 테넌트 slug(배지용) + 사내 인증 시트 트리거.
+    @State private var tenant: String?
+    @State private var showingVerify = false
+    /// 테넌트 전용 공지 (전역 패치공지와 별개). 비어 있으면 배너 미표시.
+    @State private var tenantAnnouncements: [RankingAPI.TenantAnnouncementRow] = []
 
     enum Scope: String, CaseIterable, Identifiable {
         case personal, guild
@@ -43,6 +48,7 @@ struct RankingView: View {
             } else if !settings.rankingRegistered {
                 placeholderView("설정 → 랭킹에서 참여를 시작하세요.")
             } else {
+                if !tenantAnnouncements.isEmpty { tenantAnnouncementBanner }
                 scopePicker
                 Divider()
                 switch scope {
@@ -66,6 +72,12 @@ struct RankingView: View {
         } message: {
             Text("한 번 등록하면 수정할 수 없습니다. \(Self.podiumMessageMaxLen)자 이내.")
         }
+        .sheet(isPresented: $showingVerify) {
+            TenantVerifyView(deviceId: settings.rankingDeviceID) {
+                // 인증 성공 → 배지·보드 즉시 갱신.
+                refresh()
+            }
+        }
     }
 
     private var header: some View {
@@ -76,6 +88,21 @@ struct RankingView: View {
             if let reset = currentResetAt {
                 Text("· \(formatResetCountdown(reset))")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            // 테넌트 배지 / 사내 인증 진입 — gated 소속이면 배지, 기본(public) 등록자면 인증 버튼.
+            if let tenant, tenant != "public" {
+                Text(tenant.uppercased())
+                    .font(.system(size: 9, weight: .bold))
+                    .padding(.horizontal, 5).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.teal.opacity(0.18)))
+                    .foregroundStyle(.teal)
+                    .help("현재 \(tenant.uppercased()) 보드에 참여 중입니다.")
+            } else if settings.rankingRegistered {
+                Button { showingVerify = true } label: {
+                    Label("사내 인증", systemImage: "lock.shield").font(.system(size: 10, weight: .medium))
+                }
+                .buttonStyle(.borderless)
+                .help("회사 이메일 인증으로 사내 전용 보드에 참여합니다.")
             }
             Spacer()
             if loading {
@@ -288,6 +315,28 @@ struct RankingView: View {
         .padding(.vertical, 6)
     }
 
+    /// 테넌트 전용 공지 배너 — 현재 테넌트의 활성 공지(최신순). 전역 패치공지와 별개 표면(§D7).
+    private var tenantAnnouncementBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(tenantAnnouncements) { a in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "megaphone.fill").font(.system(size: 9)).foregroundStyle(.teal)
+                        Text(a.title).font(.system(size: 11, weight: .semibold))
+                    }
+                    Text(a.body).font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.teal.opacity(0.08)))
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+
     private func placeholderView(_ msg: String) -> some View {
         VStack(spacing: 8) {
             Image(systemName: "trophy").font(.system(size: 28)).foregroundStyle(.secondary)
@@ -313,7 +362,12 @@ struct RankingView: View {
                 totalPlayers = resp.total
                 periodResetAt = resp.periodResetAt
                 previousMonth = resp.previousMonth
+                tenant = resp.tenant
                 lastRefresh = Date()
+                // 테넌트 전용 공지 — 실패해도 보드를 가리지 않게 조용히 무시.
+                if let ann = try? await RankingAPI.shared.fetchTenantAnnouncements(deviceId: deviceId) {
+                    tenantAnnouncements = ann.announcements
+                }
             } catch is CancellationError {
                 return
             } catch {
