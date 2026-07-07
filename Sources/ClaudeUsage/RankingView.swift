@@ -358,12 +358,12 @@ private struct LeaderboardRowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             titleChip
                 .frame(width: 130, alignment: .center)
+            messageButton
+                .frame(width: 30)
             Text(formatVPRow(entry.totalCoins))
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundStyle(.purple)
                 .frame(width: 84, alignment: .trailing)
-            messageButton
-                .frame(width: 22)
         }
         .padding(.vertical, 2)
         .padding(.horizontal, 4)
@@ -406,9 +406,11 @@ private struct LeaderboardRowView: View {
             Button {
                 DMWindowController.shared.present(composeTo: entry.nickname)
             } label: {
-                Image(systemName: "envelope")
-                    .font(.system(size: 11))
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 12))
                     .foregroundStyle(.teal)
+                    .frame(width: 28, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
             .help("\(entry.nickname)님에게 쪽지")
