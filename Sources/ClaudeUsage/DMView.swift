@@ -313,10 +313,13 @@ final class DMViewModel: ObservableObject {
         if case RankingAPI.RankingError.guildConflict(let code) = error {
             switch code {
             case "cannot_send", "cannot_send_self": return "보낼 수 없는 상대입니다."
-            case "no_key": return "상대가 아직 쪽지를 시작하지 않았어요."
-            case "rate_limited": return "잠시 후 다시 시도해 주세요 (발신 한도)."
+            case "no_key": return "상대가 아직 쪽지를 시작하지 않았어요. (상대가 v0.15.0으로 업데이트한 뒤 쪽지함을 한 번 열어야 받을 수 있어요)"
             default: break
             }
+        }
+        // 발신 한도(429)는 게시판과 코드를 공유해 rateLimited로 들어온다 — DM 문구로 덮어씀.
+        if case RankingAPI.RankingError.rateLimited = error {
+            return "잠시 후 다시 시도해 주세요 (발신 한도)."
         }
         return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }

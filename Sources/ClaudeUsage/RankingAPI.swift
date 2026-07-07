@@ -1354,11 +1354,20 @@ actor RankingAPI {
         let until: String?
     }
 
-    /// body의 error 코드가 길드 도메인이면 전역 매핑보다 우선 처리.
-    private static let guildErrorCodes: Set<String> = [
+    /// body의 error 코드가 길드/초대/쪽지 도메인이면 전역 상태코드 매핑(409→닉네임중복 등)보다
+    /// 우선해 `guildConflict(code)`로 던진다. 호출 측이 코드로 친절한 메시지 분기.
+    /// ⚠️ `rate_limited`(429)는 게시판(post/comment)과 공유되므로 넣지 않는다 — 429 경로가
+    ///    `rateLimited(retryAfterSec)`로 처리(게시판 카운트다운 유지). DM은 mapError가 별도 처리.
+    private static let domainErrorCodes: Set<String> = [
+        // 길드
         "already_in_guild", "name_taken", "invalid_guild_name", "slot_taken",
         "not_in_guild", "invalid_code", "not_leader", "target_not_in_guild",
         "cannot_kick_self", "guild_not_found",
+        // 초대
+        "cannot_invite", "cannot_invite_self", "already_invited",
+        "invite_not_found", "invite_expired", "redecline_cooldown", "too_many_pending",
+        // 쪽지
+        "no_key", "cannot_send", "cannot_send_self", "cannot_block",
     ]
 
     private func validateHTTPStatus(data: Data, response: URLResponse) throws {
@@ -1375,7 +1384,7 @@ actor RankingAPI {
                 }
                 throw RankingError.guildCooldown(until: until)
             }
-            if Self.guildErrorCodes.contains(errCode) {
+            if Self.domainErrorCodes.contains(errCode) {
                 throw RankingError.guildConflict(errCode)
             }
         }
