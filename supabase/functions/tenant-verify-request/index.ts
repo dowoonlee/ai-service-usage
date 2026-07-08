@@ -10,7 +10,7 @@ import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { emailDomain, sha256Hex } from "../_shared/tenant.ts";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { sendMail } from "../_shared/mailer.ts";
 
 interface RequestPayload {
   deviceId: string;
@@ -115,36 +115,27 @@ Deno.serve(async (req: Request) => {
     return errorResponse(500, "otp_failed");
   }
 
-  // Gmail SMTP 발송 — charset=utf-8 + base64 필수(한글 mojibake 방지, 2026-07-07 검증 레시피).
+  // Gmail SMTP 발송 — 커스텀 발신기(_shared/mailer.ts: 단일 text/html·CRLF·B-encoded 제목)로
+  // Exchange/M365 호환. denomailer의 중첩 multipart 출력은 일부 사내 메일서버(SKCC)에서 raw로
+  // 노출되거나 빈 본문이 돼 교체함.
   const gmailUser = Deno.env.get("GMAIL_USER");
   const gmailPass = Deno.env.get("GMAIL_APP_PASSWORD");
   if (!gmailUser || !gmailPass) {
     console.error("GMAIL_USER/GMAIL_APP_PASSWORD missing");
     return errorResponse(500, "mail_not_configured");
   }
-  let client: SMTPClient | null = null;
+  const tName = tenantSlug.toUpperCase();
+  const html =
+    `<div style="font-family:-apple-system,'Segoe UI',sans-serif;font-size:15px;color:#111;line-height:1.5;">`
+    + `<p style="margin:0 0 8px;">AIUsage <strong>${tName}</strong> 인증 코드</p>`
+    + `<div style="font-size:30px;font-weight:700;letter-spacing:5px;margin:6px 0 12px;">${code}</div>`
+    + `<p style="margin:0;color:#888;font-size:13px;">앱에 이 코드를 입력하세요. (10분 유효)</p></div>`;
   try {
-    client = new SMTPClient({
-      connection: {
-        hostname: "smtp.gmail.com",
-        port: 465,
-        tls: true,
-        auth: { username: gmailUser, password: gmailPass },
-      },
+    await sendMail({
+      from: gmailUser, to: p.email.trim(), subject: "AIUsage 인증 코드",
+      html, user: gmailUser, pass: gmailPass,
     });
-    await client.send({
-      from: gmailUser,   // Gmail은 인증 계정으로 From 강제
-      to: p.email.trim(),
-      subject: "AIUsage 인증 코드",
-      mimeContent: [{
-        mimeType: "text/plain; charset=utf-8",
-        content: `AIUsage ${tenantSlug.toUpperCase()} 인증 코드: ${code}\n\n앱에 이 코드를 입력하세요. (10분 유효)`,
-        transferEncoding: "base64",
-      }],
-    });
-    await client.close();
   } catch (e) {
-    try { await client?.close(); } catch { /* 정리 실패 무시 */ }
     // 발송 실패 시 방금 만든 OTP row를 되돌린다 — 코드도 못 받았는데 rate-limit(60초/일5회)을
     // 소모해 재시도가 막히는 것을 방지(리뷰 지적). best-effort.
     await db.from("tenant_otp").delete().eq("id", otpRow.id);
