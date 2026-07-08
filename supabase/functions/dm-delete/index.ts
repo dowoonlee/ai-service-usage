@@ -47,7 +47,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
 
   const { data: user } = await db
-    .from("users").select("device_id, hmac_key_b64, status, tenant_id").eq("device_id", deviceId).maybeSingle();
+    .from("users").select("device_id, hmac_key_b64, status").eq("device_id", deviceId).maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
   if (user.status === "banned") return errorResponse(403, "banned");
 
@@ -55,12 +55,12 @@ Deno.serve(async (req: Request) => {
     { deviceId: p.deviceId, peerDevice: p.peerDevice, ts: p.ts }, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
-  // 내 쪽 tombstone — 받은 것(peer→나) / 보낸 것(나→peer) 각각. 현재 테넌트 메시지만(§2-4).
+  // 내 쪽 tombstone — 받은 것(peer→나) / 보낸 것(나→peer) 각각. 테넌트 필터 없음(본인 이력 정리는 항상 허용).
   const [rRes, sRes] = await Promise.all([
     db.from("direct_messages").update({ del_recipient: true })
-      .eq("recipient_device", deviceId).eq("sender_device", peer).eq("del_recipient", false).eq("tenant_id", user.tenant_id),
+      .eq("recipient_device", deviceId).eq("sender_device", peer).eq("del_recipient", false),
     db.from("direct_messages").update({ del_sender: true })
-      .eq("sender_device", deviceId).eq("recipient_device", peer).eq("del_sender", false).eq("tenant_id", user.tenant_id),
+      .eq("sender_device", deviceId).eq("recipient_device", peer).eq("del_sender", false),
   ]);
   if (rRes.error || sRes.error) {
     console.error("dm-delete tombstone failed", rRes.error ?? sRes.error);

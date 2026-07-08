@@ -104,8 +104,9 @@
 
 1. **길드**: 호출자가 속한 길드의 tenant가 skax가 아니면 그 멤버십을 삭제(→ 기존 승계/해체 트리거가
    처리). skax 유저는 skax 길드에만 있을 수 있다.
-2. **콘텐츠 잔류**: 과거 public 게시글/쪽지 스레드는 public에 남아 본인 화면에선 사라진다(읽기 필터
-   불일치). 상대(public) 입장에선 과거 글/스레드는 보이나, 신규 발신은 `cross_tenant`로 차단.
+2. **콘텐츠 잔류**: 과거 public 게시글은 public에 남아 본인 화면에선 사라진다(읽기 필터 불일치).
+   **쪽지는 예외 — 전환 후에도 본인 과거 스레드를 계속 열람/삭제할 수 있다**(읽기 필터 미적용, 리뷰
+   반영). 교차 격리는 dm-send가 신규 발신을 `cross_tenant`로 차단하는 것으로 충분(§7).
 3. **랭킹 carry**: 리더보드가 `users.tenant_id` 기준이라, 전환 즉시 이번 달 사용량이 skax 보드로 옮겨온다.
    인증은 보통 초기에 일어나므로 이월량은 작다(§7에 freeze 대안).
 4. **메달(개인 업적)**: 전환해도 **유지**된다(D11). `device_medals`는 테넌트 무관 *평생 집계*라 public
@@ -255,7 +256,7 @@ export async function assertSameTenant(db, a: string, b: string): Promise<boolea
 | `board`/`post`/`comment`/`like`/`comment-like` | 읽기 `.eq("tenant_id", tenant)`, 쓰기 `tenant_id: tenant` 스탬프 |
 | `delete-post`/`delete-comment` | 대상 row의 tenant가 caller와 다르면 403 |
 | `dm-send` | `assertSameTenant(sender, recipient)` 아니면 403 `cross_tenant`; insert에 tenant 스탬프 |
-| `dm-inbox`/`dm-thread`/`dm-read`/`dm-delete` | `.eq("tenant_id", tenant)` |
+| `dm-inbox`/`dm-thread`/`dm-read`/`dm-delete` | 테넌트 필터 없음 — 본인 과거 스레드 열람/정리 유지(§7 완화) |
 | `dm-keys` | 공개키 조회를 같은 테넌트 유저로 제한 |
 | `guild-create` | `tenant_id: caller.tenant` 스탬프, 이름 유니크 테넌트별 |
 | `guild-join`/`guild-invite` | 대상 길드 tenant == caller.tenant 아니면 403 |
@@ -406,12 +407,12 @@ export async function assertSameTenant(db, a: string, b: string): Promise<boolea
 - **[검증완료] 발송 경로 / From**: **Gmail SMTP**(도메인 미구입, 사내 릴레이 없음). From=개인 Gmail 고정.
   2026-07-07 실발송으로 TCP(465)·앱비번 인증·**sk.com 받은편지함 딜리버리**·한글 인코딩 모두 정상 확인.
   남은 리스크는 **Gmail 일 500통 한도**뿐(초기 점진 공개로 흡수). denomailer는 `mimeContent`+base64 필수(§3-4).
-- **[열림·리뷰] 전환 후 쪽지 열람**: 현재 dm-inbox/thread/read/delete가 현재 테넌트로 필터 → 전환 시
-  과거 스레드(미확인 E2EE 포함)가 영구 비노출. 완화안 = 읽기 필터 제거(dm-send 교차차단은 유지)로 본인
-  이력 보존 + 코드 단순화. **사용자 결정 대기** (권장: 완화). skax 유저 0이라 배포 차단 아님.
-- **[열림·리뷰] finalize 오귀속**: 지난달 정산(명예의전당·RP)이 현재 tenant_id 기준이라, 경쟁 후 월초
-  전환 시 지난달 우승/RP가 새 테넌트로 이동(+ public은 1등 상실, podium 한마디 등록 불가). carry의
-  스냅샷 부작용. **사용자 결정 대기** (권장: 현행+문서화 / 대안: 전환 가드 or submissions.tenant_id freeze).
+- **[확정·완화] 전환 후 쪽지 열람**: 읽기 필터(dm-inbox/thread/read/delete의 `.eq("tenant_id")`) 제거 —
+  전환(one-way) 후에도 본인 과거 스레드를 열람/삭제할 수 있다. 교차 테넌트 격리는 **dm-send의 발신
+  차단**이 담당(신규 발신만 `cross_tenant`). 미확인 E2EE 손실 방지 + 코드 단순화. dm-send 스탬프·검사는 유지.
+- **[확정·현행] finalize 오귀속**: carry(현재 tenant_id) 유지. "경쟁 후 월초·정산 전 전환" 시 지난달
+  우승/RP가 새 테넌트로 이동(+ 옛 테넌트 1등 상실, podium 한마디 상실)하는 엣지 케이스는 **수용**
+  (배포 무관·범위 좁음). skax에서 실제 관측되면 전환 가드(정산 전 구간 전환 차단)를 후속으로 추가.
 - **[열림·리뷰] resolveTenant fail-open**: users 조회 transient 에러 시 null→public 폴백(gated 유저가
   잠시 public 보드 노출). 읽기 전용·다음 폴링 자가복구라 경미. 하드닝은 선택.
 - **[해소·리뷰] OTP 발송 실패 rate-limit 소모**: 발송 실패 시 OTP row 삭제로 수정(재시도 잠금 방지).

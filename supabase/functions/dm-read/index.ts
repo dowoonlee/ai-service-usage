@@ -49,7 +49,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status, tenant_id")
+    .select("device_id, hmac_key_b64, status")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -66,7 +66,6 @@ Deno.serve(async (req: Request) => {
     .update({ read_at: new Date().toISOString() })
     .eq("recipient_device", deviceId)
     .eq("sender_device", peer)
-    .eq("tenant_id", user.tenant_id)   // 현재 테넌트 메시지만(§2-4)
     .is("read_at", null)
     .lte("created_at", upTo);
   if (error) {

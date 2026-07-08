@@ -50,7 +50,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status, tenant_id")
+    .select("device_id, hmac_key_b64, status")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -61,15 +61,15 @@ Deno.serve(async (req: Request) => {
     body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
-  // 현재 테넌트 메시지만 — 전환 후 옛 테넌트 스레드는 비노출(§2-4).
+  // 테넌트 필터 없음 — 전환 후에도 본인 과거 스레드 열람 가능(§2-4 재검토). 발신 차단은 dm-send가 담당.
   const [{ data: received }, { data: sent }] = await Promise.all([
     db.from("direct_messages")
       .select("id, ciphertext, sender_id_pub, created_at, read_at")
-      .eq("recipient_device", deviceId).eq("sender_device", peer).eq("del_recipient", false).eq("tenant_id", user.tenant_id)
+      .eq("recipient_device", deviceId).eq("sender_device", peer).eq("del_recipient", false)
       .order("created_at", { ascending: false }).limit(DM_THREAD_PAGE),
     db.from("direct_messages")
       .select("id, ciphertext, sender_id_pub, created_at")
-      .eq("sender_device", deviceId).eq("recipient_device", peer).eq("del_sender", false).eq("tenant_id", user.tenant_id)
+      .eq("sender_device", deviceId).eq("recipient_device", peer).eq("del_sender", false)
       .order("created_at", { ascending: false }).limit(DM_THREAD_PAGE),
   ]);
 
