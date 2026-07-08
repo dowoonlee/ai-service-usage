@@ -59,7 +59,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, nickname, status")
+    .select("device_id, hmac_key_b64, nickname, status, tenant_id")
     .eq("device_id", p.deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -75,10 +75,12 @@ Deno.serve(async (req: Request) => {
   // 대상 글 존재 검증.
   const { data: postRow } = await db
     .from("board_posts")
-    .select("id")
+    .select("id, tenant_id")
     .eq("id", p.postId)
     .maybeSingle();
   if (!postRow) return errorResponse(404, "post_not_found");
+  // 교차 테넌트 상호작용 차단(§3-3) — 다른 테넌트 글엔 댓글 불가.
+  if (postRow.tenant_id !== user.tenant_id) return errorResponse(403, "cross_tenant");
 
   // 서버측 rate limit — 본인 최근 댓글 시각 기준.
   const cooldownThreshold = new Date(Date.now() - COMMENT_COOLDOWN_SEC * 1000).toISOString();
@@ -112,6 +114,7 @@ Deno.serve(async (req: Request) => {
       device_id: p.deviceId,
       nickname_snapshot: user.nickname,
       content,
+      tenant_id: user.tenant_id,   // 글의 테넌트와 동일(위에서 일치 검증)
     })
     .select("id, created_at")
     .single();

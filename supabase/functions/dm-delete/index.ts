@@ -55,7 +55,7 @@ Deno.serve(async (req: Request) => {
     { deviceId: p.deviceId, peerDevice: p.peerDevice, ts: p.ts }, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
-  // 내 쪽 tombstone — 받은 것(peer→나) / 보낸 것(나→peer) 각각.
+  // 내 쪽 tombstone — 받은 것(peer→나) / 보낸 것(나→peer) 각각. 테넌트 필터 없음(본인 이력 정리는 항상 허용).
   const [rRes, sRes] = await Promise.all([
     db.from("direct_messages").update({ del_recipient: true })
       .eq("recipient_device", deviceId).eq("sender_device", peer).eq("del_recipient", false),

@@ -50,7 +50,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, tenant_id")
     .eq("device_id", p.deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -66,7 +66,7 @@ Deno.serve(async (req: Request) => {
   // 소유권 + 삭제 윈도우 검증.
   const { data: comment } = await db
     .from("board_post_comments")
-    .select("id, device_id, created_at")
+    .select("id, device_id, created_at, tenant_id")
     .eq("id", p.commentId)
     .maybeSingle();
   if (!comment) return errorResponse(404, "comment_not_found");
@@ -74,6 +74,8 @@ Deno.serve(async (req: Request) => {
   if (String(comment.device_id).toLowerCase() !== p.deviceId.toLowerCase()) {
     return errorResponse(403, "not_owner");
   }
+  // 현재 테넌트에서만 행위 — 전환(one-way) 후 옛 테넌트 댓글은 건드리지 못한다(§2-4).
+  if (comment.tenant_id !== user.tenant_id) return errorResponse(403, "cross_tenant");
   const createdAt = new Date(comment.created_at).getTime();
   if (Date.now() - createdAt > DELETE_COMMENT_WINDOW_SEC * 1000) {
     return errorResponse(403, "delete_window_expired");

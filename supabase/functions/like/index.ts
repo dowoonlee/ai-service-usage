@@ -51,7 +51,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, nickname, status")
+    .select("device_id, hmac_key_b64, nickname, status, tenant_id")
     .eq("device_id", p.deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -67,10 +67,12 @@ Deno.serve(async (req: Request) => {
   // 글 존재 검증 — 없으면 like 자체 거부.
   const { data: postRow } = await db
     .from("board_posts")
-    .select("id")
+    .select("id, tenant_id")
     .eq("id", p.postId)
     .maybeSingle();
   if (!postRow) return errorResponse(404, "post_not_found");
+  // 교차 테넌트 상호작용 차단(§3-3) — 다른 테넌트 글엔 좋아요 불가.
+  if (postRow.tenant_id !== user.tenant_id) return errorResponse(403, "cross_tenant");
 
   // shadow_banned는 DB 변경 없이 silent 응답 — 본인에겐 toggle된 것처럼 보이지만
   // 다른 사용자에겐 좋아요 안 보임. post의 shadow_banned 처리와 일관.
@@ -118,6 +120,7 @@ Deno.serve(async (req: Request) => {
         post_id: p.postId,
         device_id: p.deviceId,
         nickname_snapshot: user.nickname,
+        tenant_id: user.tenant_id,   // 글의 테넌트와 동일(위에서 일치 검증)
       });
     if (insErr && insErr.code !== "23505") {  // 23505 = unique_violation
       console.error("like insert failed", insErr);

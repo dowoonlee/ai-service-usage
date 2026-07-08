@@ -53,7 +53,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, tenant_id")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -82,10 +82,12 @@ Deno.serve(async (req: Request) => {
   // 초대 코드는 대문자 셋으로 발급 — 입력 관용을 위해 대문자로 정규화 후 조회.
   const { data: guild } = await db
     .from("guilds")
-    .select("id, name")
+    .select("id, name, tenant_id")
     .eq("invite_code", p.inviteCode.toUpperCase())
     .maybeSingle();
   if (!guild) return errorResponse(404, "invalid_code");
+  // 다른 테넌트 길드의 코드는 "존재하지 않는 코드"와 동일 취급 — 존재 노출 없이 격리.
+  if (guild.tenant_id !== user.tenant_id) return errorResponse(404, "invalid_code");
 
   const { error: insErr } = await db
     .from("guild_members")

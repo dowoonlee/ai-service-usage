@@ -115,6 +115,8 @@ actor RankingAPI {
         let pendingReward: PendingReward?
         /// 본인의 미수령 RP 보상 — 랭킹 순위 정산(월간/주간). coins와 별도 원장. 구버전 서버 nil.
         let pendingRpReward: PendingRpReward?
+        /// 호출자의 현재 테넌트 slug — 배지 표시용. 익명/미등록·구버전 서버는 nil("public" 취급).
+        let tenant: String?
     }
 
     struct PreviousMonth: Decodable, Sendable {
@@ -624,6 +626,9 @@ actor RankingAPI {
         case guildConflict(String)
         /// 길드 재가입 쿨다운 (탈퇴/추방 후 7일). until은 서버가 body에 포함.
         case guildCooldown(until: Date?)
+        /// 테넌트(skax 등) 편입 관련 서버 거부 — 서버 error 코드 그대로 (domain_not_allowed /
+        /// already_gated / bad_code / code_expired / …). 호출 측이 코드로 분기.
+        case tenantError(String)
         case http(Int, String?)
         case decoding(String)
         case network(String)
@@ -661,6 +666,20 @@ actor RankingAPI {
                     return "탈퇴/추방 후 재가입 쿨다운 중입니다 — 약 \(hours)시간 남음."
                 }
                 return "탈퇴/추방 후 재가입 쿨다운 중입니다."
+            case .tenantError(let code):
+                switch code {
+                case "domain_not_allowed":  return "허용된 도메인의 이메일만 인증할 수 있습니다."
+                case "invalid_email":       return "이메일 형식이 올바르지 않습니다."
+                case "already_gated":       return "이미 인증된 소속이라 다시 바꿀 수 없습니다."
+                case "bad_code":            return "인증 코드가 올바르지 않습니다."
+                case "code_expired":        return "인증 코드가 만료되었습니다. 다시 요청하세요."
+                case "no_pending_code":     return "먼저 인증 코드를 요청하세요."
+                case "too_many_attempts":   return "시도 횟수를 초과했습니다. 다시 요청하세요."
+                case "mail_failed", "mail_not_configured":
+                    return "인증 메일 발송에 실패했습니다. 잠시 후 다시 시도하세요."
+                case "cross_tenant":        return "다른 소속의 콘텐츠에는 접근할 수 없습니다."
+                default:                    return "인증 요청이 거부되었습니다 (\(code))."
+                }
             case .http(let code, let msg):
                 return "서버 오류 \(code)\(msg.map { ": \($0)" } ?? "")"
             case .decoding(let s):     return "응답 디코딩 오류(랭킹): \(s)"
@@ -826,6 +845,92 @@ actor RankingAPI {
         if let v = currentVersion, !v.isEmpty { q.append(URLQueryItem(name: "current", value: v)) }
         let resp: AnnouncementsResponse = try await get(path: "announcements", queryItems: q.isEmpty ? nil : q)
         return resp.announcements
+    }
+
+    // MARK: - 테넌트 (완전 격리형 멀티테넌시) — docs/plans/tenant.md
+
+    /// 인증 폼 도메인 드롭다운 소스. `[로컬파트] @ [도메인 ▼]` 채우기용. 인증 불필요(공개 목록).
+    struct TenantDomain: Decodable, Sendable, Identifiable {
+        let domain: String        // 예: "sk.com"
+        let label: String         // 표시용(없으면 domain)
+        let tenant: String        // 편입될 테넌트 slug (예: "skax")
+        let tenantName: String    // 테넌트 표시명 (예: "SKAX")
+        var id: String { domain }
+    }
+    struct TenantDomainsResponse: Decodable, Sendable { let domains: [TenantDomain] }
+
+    struct TenantVerifyRequestResponse: Decodable, Sendable {
+        let ok: Bool
+        let tenant: String
+        let expiresInSec: Int
+    }
+    struct TenantVerifyConfirmResponse: Decodable, Sendable {
+        let ok: Bool
+        let tenant: String
+    }
+
+    struct TenantAnnouncementRow: Decodable, Sendable, Identifiable {
+        let id: Int
+        let title: String
+        let body: String
+        let publishedAt: Date
+    }
+    struct TenantAnnouncementsResponse: Decodable, Sendable {
+        let tenant: String
+        let announcements: [TenantAnnouncementRow]
+    }
+
+    // HMAC 서명 페이로드 — 서버 verifyHmac 대상과 필드 일치(키는 encoder가 정렬).
+    private struct TenantVerifyRequestPayload: Encodable {
+        let deviceId: String
+        let email: String
+        let ts: Int64
+    }
+    private struct TenantVerifyRequestBody: Encodable {
+        let payload: TenantVerifyRequestPayload
+        let signature: String
+    }
+    private struct TenantVerifyConfirmPayload: Encodable {
+        let code: String
+        let deviceId: String
+        let ts: Int64
+    }
+    private struct TenantVerifyConfirmBody: Encodable {
+        let payload: TenantVerifyConfirmPayload
+        let signature: String
+    }
+
+    /// 선택 가능한 이메일 도메인 목록 (드롭다운).
+    func fetchTenantDomains() async throws -> TenantDomainsResponse {
+        try await get(path: "tenant-domains")
+    }
+
+    /// 게이트 테넌트 편입용 이메일 OTP 발송. 성공 시 6자리 코드가 해당 이메일로 전송된다.
+    /// 도메인 불일치/이미 편입/레이트리밋은 `.tenantError(code)`로 던진다.
+    func requestTenantVerification(deviceId: String, email: String,
+                                   hmacKeyBase64: String) async throws -> TenantVerifyRequestResponse {
+        let payload = TenantVerifyRequestPayload(deviceId: deviceId, email: email,
+                                                 ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let body = TenantVerifyRequestBody(payload: payload, signature: sig)
+        return try await post(path: "tenant-verify-request", body: body)
+    }
+
+    /// OTP 코드 확인 → 게이트 테넌트로 편입(one-way). 성공 시 서버가 tenant_id 갱신 + 타 테넌트 길드 자동탈퇴.
+    /// 코드 불일치/만료는 `.tenantError(code)`.
+    func confirmTenantVerification(deviceId: String, code: String,
+                                   hmacKeyBase64: String) async throws -> TenantVerifyConfirmResponse {
+        let payload = TenantVerifyConfirmPayload(code: code, deviceId: deviceId,
+                                                 ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let body = TenantVerifyConfirmBody(payload: payload, signature: sig)
+        return try await post(path: "tenant-verify-confirm", body: body)
+    }
+
+    /// 호출자 테넌트의 전용 공지(전역 패치공지와 별개). 읽기 전용 — HMAC 불필요.
+    func fetchTenantAnnouncements(deviceId: String?) async throws -> TenantAnnouncementsResponse {
+        let q = deviceId.map { [URLQueryItem(name: "deviceId", value: $0)] }
+        return try await get(path: "tenant-announcements", queryItems: q)
     }
 
     /// 게시글 작성. content는 trim 전 그대로 전송 — 서버가 trim + 검증.
@@ -1388,6 +1493,16 @@ actor RankingAPI {
         "no_key", "cannot_send", "cannot_send_self", "cannot_block",
     ]
 
+    /// 테넌트 편입 전용 error 코드 — tenant 엔드포인트에서만 반환되므로 전역 매핑(409→닉네임중복)보다
+    /// 우선해도 다른 endpoint와 충돌 없음. `rate_limited`는 제외(429 경로 공유).
+    private static let tenantErrorCodes: Set<String> = [
+        "domain_not_allowed", "invalid_email", "already_gated",
+        "bad_code", "code_expired", "no_pending_code", "too_many_attempts",
+        "mail_failed", "mail_not_configured",
+        // 교차 테넌트 상호작용 거부(403) — body 코드 우선 처리해 전역 403→banned 오매핑 방지.
+        "cross_tenant",
+    ]
+
     private func validateHTTPStatus(data: Data, response: URLResponse) throws {
         let http = response as? HTTPURLResponse
         let code = http?.statusCode ?? 0
@@ -1404,6 +1519,9 @@ actor RankingAPI {
             }
             if Self.domainErrorCodes.contains(errCode) {
                 throw RankingError.guildConflict(errCode)
+            }
+            if Self.tenantErrorCodes.contains(errCode) {
+                throw RankingError.tenantError(errCode)
             }
         }
 

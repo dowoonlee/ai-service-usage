@@ -61,6 +61,7 @@ Deno.serve(async (req: Request) => {
     body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
+  // 테넌트 필터 없음 — 전환 후에도 본인 과거 스레드 열람 가능(§2-4 재검토). 발신 차단은 dm-send가 담당.
   const [{ data: received }, { data: sent }] = await Promise.all([
     db.from("direct_messages")
       .select("id, ciphertext, sender_id_pub, created_at, read_at")

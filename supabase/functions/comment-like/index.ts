@@ -49,7 +49,7 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, nickname, status")
+    .select("device_id, hmac_key_b64, nickname, status, tenant_id")
     .eq("device_id", p.deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -65,10 +65,12 @@ Deno.serve(async (req: Request) => {
   // 댓글 존재 검증.
   const { data: commentRow } = await db
     .from("board_post_comments")
-    .select("id")
+    .select("id, tenant_id")
     .eq("id", p.commentId)
     .maybeSingle();
   if (!commentRow) return errorResponse(404, "comment_not_found");
+  // 교차 테넌트 상호작용 차단(§3-3) — 다른 테넌트 댓글엔 좋아요 불가.
+  if (commentRow.tenant_id !== user.tenant_id) return errorResponse(403, "cross_tenant");
 
   const countLikes = async (): Promise<number> => {
     const { count } = await db
@@ -115,6 +117,7 @@ Deno.serve(async (req: Request) => {
         comment_id: p.commentId,
         device_id: p.deviceId,
         nickname_snapshot: user.nickname,
+        tenant_id: user.tenant_id,   // 댓글의 테넌트와 동일(위에서 일치 검증)
       });
     if (insErr && insErr.code !== "23505") {  // 23505 = unique_violation (race)
       console.error("comment like insert failed", insErr);

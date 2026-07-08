@@ -58,7 +58,8 @@ Deno.serve(async (req: Request) => {
     { deviceId: p.deviceId, ts: p.ts }, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
-  // 받은 것 + 보낸 것 (각각 내 쪽 tombstone 제외), 최근 순.
+  // 받은 것 + 보낸 것 (각각 내 쪽 tombstone 제외), 최근 순. 테넌트 필터 없음 — 전환(one-way) 후에도
+  // 본인 과거 쪽지는 열람 가능(§2-4 재검토). 교차 테넌트 격리는 dm-send의 발신 차단이 담당한다.
   const [{ data: received }, { data: sent }] = await Promise.all([
     db.from("direct_messages")
       .select("id, sender_device, ciphertext, sender_id_pub, created_at, read_at")
