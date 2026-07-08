@@ -99,9 +99,13 @@ struct RankingView: View {
                     .help("현재 \(tenant.uppercased()) 보드에 참여 중입니다.")
             } else if settings.rankingRegistered {
                 Button { showingVerify = true } label: {
-                    Label("사내 인증", systemImage: "lock.shield").font(.system(size: 10, weight: .medium))
+                    Label("사내 인증", systemImage: "lock.shield")
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.teal))
+                        .foregroundStyle(.white)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("회사 이메일 인증으로 사내 전용 보드에 참여합니다.")
             }
             Spacer()
