@@ -24,6 +24,13 @@ interface ConfirmRequest {
 const MAX_CLOCK_SKEW_SEC = 3600;
 const MAX_ATTEMPTS = 5;
 
+// 사내 인증 유도 캠페인(v0.16.2) 보상 — 신규 인증자에게 RP 1회 지급. coin(3000)은 클라가 로컬
+// 원장에 직접 지급하고, RP는 여기서 rp_rewards 미수령 행을 넣어 다음 폴링 때 클라가 자동 수령한다.
+// sentinel period '2099-00'은 실존 월이 아니고 기존 정산(2026-*)·버그보상(2026-00)과 무충돌.
+// UNIQUE(period_type, period, device_id) + upsert ignoreDuplicates 로 재호출에도 멱등.
+const TENANT_VERIFY_RP_PERIOD = "2099-00";
+const TENANT_VERIFY_RP_AMOUNT = 3000;
+
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -99,6 +106,27 @@ Deno.serve(async (req: Request) => {
 
   // OTP 소비 마킹 — 재사용 방지. best-effort(이미 전환 완료).
   await db.from("tenant_otp").update({ consumed_at: new Date().toISOString() }).eq("id", otp.id);
+
+  // 사내 인증 유도 캠페인 보상 — RP 3000 미수령 행 INSERT(멱등). 인증은 one-way라 여기서 놓치면
+  // 재confirm으로 복구 불가(위 already_gated 409)하므로, transient 오류에 대비해 몇 회 재시도해
+  // 손실 위험을 낮춘다. tenant_id는 방금 편입된 게이트 테넌트로 귀속(다른 RP 행과 일관). 최종
+  // 실패 시에도 전환은 이미 성공했으므로 인증 자체는 성공 처리하고 로그만 남긴다(운영자가
+  // reward-grants로 보정). coin 3,000은 클라가 로컬 원장에 별도 지급.
+  let rpErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { error } = await db.from("rp_rewards").upsert({
+      period: TENANT_VERIFY_RP_PERIOD,
+      period_type: "monthly",
+      tenant_id: otp.tenant_slug,
+      device_id: deviceId,
+      rank: 1,
+      rp_amount: TENANT_VERIFY_RP_AMOUNT,
+    }, { onConflict: "period_type,period,device_id", ignoreDuplicates: true });
+    if (!error) { rpErr = null; break; }
+    rpErr = error;
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 150));
+  }
+  if (rpErr) console.error("tenant verify RP grant failed after retries", rpErr);
 
   return jsonResponse({ ok: true, tenant: otp.tenant_slug });
 });

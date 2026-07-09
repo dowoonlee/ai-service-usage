@@ -131,6 +131,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 패치 공지 — 업데이트 후 첫 실행 시 (직전 본 버전, 현재 버전] 구간 공지를 별도 창으로 표시.
         // fetch는 async라 여기서 블록되지 않음. 크래시 알림(modal) 이후에 둬서 창이 겹치지 않게 한다.
         AnnouncementManager.shared.checkOnLaunch()
+        // 사내 인증 유도 — 미인증 사용자에게 하루 1회 인증 팝업(+3,000 coin·RP 보상). 공지와
+        // 마찬가지로 async fetch라 여기서 블록되지 않는다. 둘 다 뜨면 인증 창을 중앙에서 살짝
+        // 어긋나게 배치해 공지 창과 겹치지 않게 한다(TenantVerifyWindowController.present).
+        TenantVerifyPromptManager.shared.checkOnLaunch()
 #if DEBUG
         // 로컬 미리보기 — `AIUSAGE_ANNOUNCE_DEMO=1 swift run` 이면 샘플 공지 창을 즉시 띄운다.
         // 번들/Supabase 없는 dev 실행에서도 UI 확인용. 정상 경로엔 영향 없음.
