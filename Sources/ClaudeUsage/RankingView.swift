@@ -21,8 +21,8 @@ struct RankingView: View {
     /// 개인/길드 스코프 — 세그먼트 토글. 길드 보드는 지연 로드(첫 전환 시 fetch).
     @State private var scope: Scope = .personal
     @State private var guildBoard: RankingAPI.GuildLeaderboardResponse?
-    /// 호출자 현재 테넌트 slug(배지용) + 사내 인증 시트 트리거.
-    @State private var tenant: String?
+    /// 사내 인증 시트 트리거. 현재 테넌트 배지는 `settings.currentTenant`(폴링/시트/자동팝업이
+    /// 공유하는 단일 소스)를 읽으므로, 어느 경로로 인증해도 헤더가 즉시 갱신된다.
     @State private var showingVerify = false
     /// 테넌트 전용 공지 (전역 패치공지와 별개). 비어 있으면 배너 미표시.
     @State private var tenantAnnouncements: [RankingAPI.TenantAnnouncementRow] = []
@@ -90,7 +90,7 @@ struct RankingView: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             // 테넌트 배지 / 사내 인증 진입 — gated 소속이면 배지, 기본(public) 등록자면 인증 버튼.
-            if let tenant, tenant != "public" {
+            if let tenant = settings.currentTenant, tenant != "public" {
                 Text(tenant.uppercased())
                     .font(.system(size: 9, weight: .bold))
                     .padding(.horizontal, 5).padding(.vertical, 2)
@@ -99,14 +99,14 @@ struct RankingView: View {
                     .help("현재 \(tenant.uppercased()) 보드에 참여 중입니다.")
             } else if settings.rankingRegistered {
                 Button { showingVerify = true } label: {
-                    Label("사내 인증", systemImage: "lock.shield")
+                    Label("사내 인증 🎁", systemImage: "lock.shield")
                         .font(.system(size: 10, weight: .semibold))
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(Capsule().fill(Color.teal))
                         .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
-                .help("회사 이메일 인증으로 사내 전용 보드에 참여합니다.")
+                .help("지금 회사 이메일로 인증하면 3,000 coin · 3,000 RP를 드립니다.")
             }
             Spacer()
             if loading {
@@ -366,7 +366,9 @@ struct RankingView: View {
                 totalPlayers = resp.total
                 periodResetAt = resp.periodResetAt
                 previousMonth = resp.previousMonth
-                tenant = resp.tenant
+                // 현재 소속 캐시 — 헤더 배지(단일 소스)이자 자동 팝업 판정용. 랭킹 탭만 열고 폴링
+                // 전이어도 최신 소속을 반영한다.
+                settings.currentTenant = resp.tenant
                 lastRefresh = Date()
                 // 테넌트 전용 공지 — 실패해도 보드를 가리지 않게 조용히 무시.
                 if let ann = try? await RankingAPI.shared.fetchTenantAnnouncements(deviceId: deviceId) {

@@ -383,6 +383,24 @@ final class Settings: ObservableObject {
     @Published var hasReceivedCoffeeReward: Bool {
         didSet { UserDefaults.standard.set(hasReceivedCoffeeReward, forKey: Keys.hasReceivedCoffeeReward) }
     }
+    /// 마지막 leaderboard 폴링에서 받은 현재 소속 테넌트 slug("public"=미인증). 사내 인증 유도
+    /// 자동 팝업(`TenantVerifyPromptManager`)이 시작 시점에 미인증 여부를 판단하는 캐시.
+    @Published var currentTenant: String? {
+        didSet { UserDefaults.standard.set(currentTenant, forKey: Keys.currentTenant) }
+    }
+    /// 사내 인증 유도 팝업을 마지막으로 띄운 시각. 하루 1회로 억제(24h 경과 시 재표시).
+    @Published var lastTenantPromptAt: Date? {
+        didSet { UserDefaults.standard.set(lastTenantPromptAt, forKey: Keys.lastTenantPromptAt) }
+    }
+    /// 사내 인증 유도 캠페인(v0.16.2) coin 3,000 보너스를 1회 수령했는지. RP는 서버 rp_rewards가 담당.
+    @Published var hasReceivedTenantVerifyBonus: Bool {
+        didSet { UserDefaults.standard.set(hasReceivedTenantVerifyBonus, forKey: Keys.hasReceivedTenantVerifyBonus) }
+    }
+    /// 사내 인증 유도 자동 팝업을 '다시 보지 않기'로 껐는지. true면 팝업은 영구 중단되고, 이후엔
+    /// 랭킹 헤더의 '사내 인증 🎁' 버튼으로만 인증 진입할 수 있다.
+    @Published var tenantPromptOptedOut: Bool {
+        didSet { UserDefaults.standard.set(tenantPromptOptedOut, forKey: Keys.tenantPromptOptedOut) }
+    }
 
     // MARK: - 펫 컬렉션 (셋 보너스)
     //
@@ -796,6 +814,10 @@ final class Settings: ObservableObject {
         self.hasViewedGymPage      = (d.object(forKey: Keys.hasViewedGymPage) as? Bool) ?? false
         self.hasViewedGuide        = (d.object(forKey: Keys.hasViewedGuide) as? Bool) ?? false
         self.hasReceivedCoffeeReward = (d.object(forKey: Keys.hasReceivedCoffeeReward) as? Bool) ?? false
+        self.currentTenant = d.string(forKey: Keys.currentTenant)
+        self.lastTenantPromptAt = d.object(forKey: Keys.lastTenantPromptAt) as? Date
+        self.hasReceivedTenantVerifyBonus = (d.object(forKey: Keys.hasReceivedTenantVerifyBonus) as? Bool) ?? false
+        self.tenantPromptOptedOut = (d.object(forKey: Keys.tenantPromptOptedOut) as? Bool) ?? false
 
         // 펫 컬렉션 (셋 보너스) 로드
         let completedColData = d.data(forKey: Keys.completedCollections)
@@ -1519,6 +1541,10 @@ final class Settings: ObservableObject {
         static let hasViewedGymPage            = "settings.hasViewedGymPage"
         static let hasViewedGuide              = "settings.hasViewedGuide"
         static let hasReceivedCoffeeReward     = "settings.hasReceivedCoffeeReward"
+        static let currentTenant               = "settings.currentTenant"
+        static let lastTenantPromptAt          = "settings.lastTenantPromptAt"
+        static let hasReceivedTenantVerifyBonus = "settings.hasReceivedTenantVerifyBonus"
+        static let tenantPromptOptedOut        = "settings.tenantPromptOptedOut"
         static let hasMigratedGymBadges        = "settings.hasMigratedGymBadges"
         // 펫 컬렉션 (셋 보너스)
         static let completedCollections        = "settings.completedCollections"

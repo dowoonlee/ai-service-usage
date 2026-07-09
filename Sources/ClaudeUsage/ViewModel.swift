@@ -632,6 +632,9 @@ final class ViewModel: ObservableObject {
             let resp = try await RankingAPI.shared.fetchLeaderboard(deviceId: s.rankingDeviceID)
             // 본인 누적 메달 캐시 갱신 — pendingReward 유무와 무관하게 매 cycle 반영.
             s.applyMyMedals(resp.myMedals)
+            // 현재 소속 테넌트 캐시 — 사내 인증 유도 팝업(TenantVerifyPromptManager)이
+            // 다음 실행 시작 시점에 미인증("public") 여부를 판단하는 데 쓴다.
+            s.currentTenant = resp.tenant
             // coins 보상 (명예의 전당 Top3) — credit 먼저 + 로컬 dedup, 서버 claim은 마킹용.
             if let reward = resp.pendingReward {
                 let dedupKey = reward.dedupKey
