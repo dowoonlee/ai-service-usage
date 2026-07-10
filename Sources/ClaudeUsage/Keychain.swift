@@ -138,7 +138,12 @@ enum Keychain {
         }
         guard !d.isEmpty else { return [:] }   // 신규 설치 — 이전할 것 없음
         if writeVaultDict(d) {
-            for account in legacyAccounts { clearItem(account: account) }
+            // ⚠️ 읽어서 vault로 옮긴 항목(`d.keys`)만 삭제한다. 과거 버그: `legacyAccounts` 전체를
+            // 지우는 바람에, ad-hoc ACL 재승인 프롬프트를 거부/취소해 loadItem이 실패한 항목의
+            // 원본까지 삭제돼 영구 유실됐다(예: integrityKey 유실 → 체크섬 키 재생성 → 무결성 오탐).
+            // 못 읽은 원본은 남겨 유실을 막는다(vault가 이미 생겨 재진입은 없으므로 dead 데이터로
+            // 남을 뿐, 삭제 실패와 동일하게 무해).
+            for account in d.keys { clearItem(account: account) }
         }
         return d
     }

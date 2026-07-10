@@ -34,4 +34,15 @@ enum IntegrityGuard {
                                                   using: SymmetricKey(data: keyData))
         return mac.map { String(format: "%02x", $0) }.joined()
     }
+
+    /// 체크섬을 만든 **키가 바뀌었는지** 감지하기 위한 짧은 지문. 키 자체를 UserDefaults에 노출하지
+    /// 않도록 HMAC-SHA256(key, "fp")의 앞 16바이트만 hex로 뽑는다. keychain vault 마이그레이션 부분
+    /// 실패 등으로 integrityKey가 유실→재생성되면 값이 달라지므로, verify가 "조작"과 "키 교체"를
+    /// 구분해 후자를 오탐하지 않게 한다. 키가 비었거나 디코딩 실패면 빈 문자열.
+    static func keyFingerprint(keyBase64: String) -> String {
+        guard !keyBase64.isEmpty, let keyData = Data(base64Encoded: keyBase64) else { return "" }
+        let mac = HMAC<SHA256>.authenticationCode(for: Data("fp".utf8),
+                                                  using: SymmetricKey(data: keyData))
+        return mac.prefix(16).map { String(format: "%02x", $0) }.joined()
+    }
 }

@@ -1037,6 +1037,8 @@ final class Settings: ObservableObject {
             ownedPetsSerialized: serialized, keyBase64: key) else { return }
         UserDefaults.standard.set(cs, forKey: Keys.integrityChecksum)
         UserDefaults.standard.set(IntegrityGuard.formatVersion, forKey: Keys.integrityChecksumVersion)
+        // 이 체크섬을 만든 키의 지문도 함께 저장 → 다음 verify가 키 교체(유실→재생성)를 감지.
+        UserDefaults.standard.set(IntegrityGuard.keyFingerprint(keyBase64: key), forKey: Keys.integrityKeyFingerprint)
     }
 
     /// 시작 시 1회 — 저장된 체크섬과 현재 값을 비교해 앱 외부 조작을 탐지. 데이터는 수정하지
@@ -1062,6 +1064,19 @@ final class Settings: ObservableObject {
         let storedVersion = UserDefaults.standard.integer(forKey: Keys.integrityChecksumVersion)
         if storedVersion < IntegrityGuard.formatVersion {
             recordIntegrityChecksum()
+            return
+        }
+        // 체크섬 키가 바뀌었으면(keychain vault 마이그레이션 부분 실패 등으로 integrityKey가 유실→
+        // 재생성) 저장된 체크섬은 옛 키 기반이라 무조건 불일치 — 조작이 아니므로 오탐하면 안 된다.
+        // 지문이 없던 레거시(이 필드 도입 전) 역시 첫 실행에서 여기로 흡수돼, 이미 이 버그로 잘못
+        // 켜진 integrityViolation을 함께 해제한다(가드는 casual deterrent이고 로컬 조작은 타인 피해가
+        // 없어, formatVersion 마이그레이션과 동일하게 1회 신뢰 리베이스를 택한다).
+        let storedFingerprint = UserDefaults.standard.string(forKey: Keys.integrityKeyFingerprint)
+        let currentFingerprint = IntegrityGuard.keyFingerprint(keyBase64: key)
+        if storedFingerprint != currentFingerprint {
+            if integrityViolation { integrityViolation = false }
+            recordIntegrityChecksum()
+            DebugLog.log("IntegrityGuard: 체크섬 키 교체 감지 — 신뢰 재기록(오탐 방지)")
             return
         }
         if stored != current && !integrityViolation {
@@ -1453,6 +1468,7 @@ final class Settings: ObservableObject {
         static let ownedPets                   = "settings.ownedPets"
         // 무결성 가드 (탐지 전용)
         static let integrityChecksum           = "settings.integrityChecksum"
+        static let integrityKeyFingerprint     = "settings.integrityKeyFingerprint"
         static let integrityViolation          = "settings.integrityViolation"
         static let petClaudeVariant            = "settings.petClaudeVariant"
         static let petCursorVariant            = "settings.petCursorVariant"
