@@ -63,6 +63,17 @@ export function emailDomain(email: string): string | null {
   return m ? m[1] : null;
 }
 
+// 로그에 새어들 수 있는 이메일을 마스킹 — 로컬파트 첫 글자만 남기고 나머지를 ***로 가린다.
+// SMTP 서버의 RCPT 거부 응답이 수신 주소를 echo해 에러 메시지에 섞일 수 있어, 로깅 전에 통과시켜
+// 회사 이메일이 Edge Function 로그에 평문으로 남지 않게 한다. 도메인은 유지(이미 공개된 테넌트
+// 도메인이고 실패 원인 디버깅에 필요). 예: "user@sk.com" → "u***@sk.com".
+export function maskEmails(s: string): string {
+  return s.replace(
+    /([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g,
+    "$1***$2",
+  );
+}
+
 // 두 device가 같은 테넌트인지. 어느 한쪽이라도 미등록이면 false(격리 우선 — 모르면 차단).
 export async function sameTenant(
   db: SupabaseClient,

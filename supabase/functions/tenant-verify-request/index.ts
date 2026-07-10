@@ -9,7 +9,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
-import { emailDomain, sha256Hex } from "../_shared/tenant.ts";
+import { emailDomain, sha256Hex, maskEmails } from "../_shared/tenant.ts";
 import { sendMail } from "../_shared/mailer.ts";
 
 interface RequestPayload {
@@ -139,7 +139,10 @@ Deno.serve(async (req: Request) => {
     // 발송 실패 시 방금 만든 OTP row를 되돌린다 — 코드도 못 받았는데 rate-limit(60초/일5회)을
     // 소모해 재시도가 막히는 것을 방지(리뷰 지적). best-effort.
     await db.from("tenant_otp").delete().eq("id", otpRow.id);
-    console.error("tenant-verify-request mail send failed", (e as { message?: string })?.message ?? e);
+    // SMTP 거부 응답에 수신 이메일이 echo될 수 있어 마스킹 후 로깅(회사 이메일 평문 노출 방지).
+    // 에러 객체를 그대로 넘기면 마스킹이 안 되므로 문자열로 만든 뒤 통과시킨다.
+    const detail = (e as { message?: string })?.message ?? String(e);
+    console.error("tenant-verify-request mail send failed", maskEmails(detail));
     return errorResponse(502, "mail_failed");
   }
 
