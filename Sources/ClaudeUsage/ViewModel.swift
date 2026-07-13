@@ -688,6 +688,36 @@ final class ViewModel: ObservableObject {
                     DebugLog.log("RP claim failed: \(error.localizedDescription) — retry next cycle")
                 }
             }
+
+            // 통합 보상 (ops grant) — RP·코인 공용 per-device 지급. RP와 동일한 claim-first 패턴:
+            // 서버 claim이 !alreadyClaimed일 때만 currency로 원장을 골라 크레딧 → 백업 복원에도 안전.
+            if let grant = resp.pendingGrant, !s.claimedGrants.contains(grant.dedupKey) {
+                do {
+                    let claimResp = try await RankingAPI.shared.claimReward(
+                        deviceId: s.rankingDeviceID,
+                        period: grant.grantKey,   // grant_key를 period 슬롯에 서명 (서버와 합의된 재활용)
+                        rank: 1,                  // grant는 rank 미사용 — 서명 채움용 더미
+                        rewardType: "grant",
+                        hmacKeyBase64: hmacKey
+                    )
+                    if !claimResp.alreadyClaimed {
+                        switch grant.currency {
+                        case "coin":
+                            CoinLedger.shared.creditBonus(grant.amount, reason: "grant.\(grant.grantKey)")
+                        case "rp":
+                            RankPointLedger.shared.creditReward(grant.amount, reason: "grant.\(grant.grantKey)")
+                        default:
+                            DebugLog.log("Unknown grant currency: \(grant.currency) — skipped")
+                        }
+                        NotificationManager.shared.rewardGrantEarned(
+                            currency: grant.currency, amount: grant.amount)
+                        DebugLog.log("Grant reward: \(grant.grantKey) +\(grant.amount) \(grant.currency)")
+                    }
+                    s.claimedGrants.insert(grant.dedupKey)
+                } catch {
+                    DebugLog.log("Grant claim failed: \(error.localizedDescription) — retry next cycle")
+                }
+            }
         } catch {
             DebugLog.log("Podium check failed: \(error.localizedDescription)")
         }

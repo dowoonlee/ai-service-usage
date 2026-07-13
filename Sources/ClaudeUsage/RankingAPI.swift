@@ -115,6 +115,8 @@ actor RankingAPI {
         let pendingReward: PendingReward?
         /// 본인의 미수령 RP 보상 — 랭킹 순위 정산(월간/주간). coins와 별도 원장. 구버전 서버 nil.
         let pendingRpReward: PendingRpReward?
+        /// 본인의 미수령 통합 보상(ops grant) — RP·코인 공용. currency로 원장 분기. 구버전 서버 nil.
+        let pendingGrant: PendingGrant?
         /// 호출자의 현재 테넌트 slug — 배지 표시용. 익명/미등록·구버전 서버는 nil("public" 취급).
         let tenant: String?
     }
@@ -156,6 +158,16 @@ actor RankingAPI {
         let rp: Int                         // 보상 RP
         /// dedup key — "type.period.rank" 형식. Settings.claimedRpRewards에 매칭.
         var dedupKey: String { "\(periodType).\(period).\(rank)" }
+    }
+
+    /// 통합 ops 보상 — 운영이 RP·코인을 임의 인원에게 지급하는 per-device 원장(reward_grants).
+    /// podium/정산/메달과 무관 — 부작용 없이 currency로 원장만 골라 적립.
+    struct PendingGrant: Decodable, Sendable {
+        let currency: String                // "rp" | "coin"
+        let amount: Int                     // 지급액
+        let grantKey: String                // dedup 키 = claim 서명의 period 슬롯
+        /// dedup key — grant_key 자체(캠페인/사유 슬러그, device당 UNIQUE). Settings.claimedGrants에 매칭.
+        var dedupKey: String { grantKey }
     }
 
     struct ClaimRewardPayload: Encodable {
