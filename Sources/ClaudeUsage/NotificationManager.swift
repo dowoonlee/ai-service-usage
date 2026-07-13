@@ -105,6 +105,14 @@ final class NotificationManager {
              body: "\(rank)등 — +\(coins) 코인이 적립되었습니다!")
     }
 
+    /// 통합 보상(ops grant) 수령 알림 — RP·코인 공용. podium의 "명예의 전당 N등"과 달리
+    /// 순위·달과 무관한 선물 형태라 가짜 period가 노출되지 않는다. claim 성공 시 1회.
+    func rewardGrantEarned(currency: String, amount: Int) {
+        let unit = currency == "rp" ? "RP" : "코인"
+        send(title: "🎁 보상 도착",
+             body: "+\(amount) \(unit)이 적립되었습니다!")
+    }
+
     /// 길드 월간 시상대 RP 보상 알림 — RP claim 성공 시 1회 (dedup은 claimedRpRewards가 담당).
     func guildRpRewardEarned(period: String, guildRank: Int, rp: Int) {
         let medal: String

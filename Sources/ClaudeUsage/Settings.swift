@@ -590,6 +590,11 @@ final class Settings: ObservableObject {
     @Published var claimedRpRewards: Set<String> {
         didSet { persist(claimedRpRewards, forKey: Keys.claimedRpRewards) }
     }
+    /// 이미 수령한 통합 보상(ops grant) dedup. 형식: grant_key(캠페인/사유 슬러그).
+    /// claimedRpRewards와 동일 — 로컬 1차 방어, 진짜 이중지급 방어는 서버 claim의 alreadyClaimed.
+    @Published var claimedGrants: Set<String> {
+        didSet { persist(claimedGrants, forKey: Keys.claimedGrants) }
+    }
     /// Cursor Pro/Free 사용자의 request delta 추적용. Ultra는 events 기반이라 불필요.
     /// startOfMonth가 바뀌면 reset.
     @Published var cursorLastRequestsSeen: Int? {
@@ -780,6 +785,8 @@ final class Settings: ObservableObject {
         self.claimedPodiumPeriods = (claimedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         let claimedRpData = d.data(forKey: Keys.claimedRpRewards)
         self.claimedRpRewards = (claimedRpData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let claimedGrantData = d.data(forKey: Keys.claimedGrants)
+        self.claimedGrants = (claimedGrantData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.cursorLastRequestsSeen    = d.object(forKey: Keys.cursorLastRequestsSeen) as? Int
         self.cursorLastStartOfMonth    = d.object(forKey: Keys.cursorLastStartOfMonth) as? Date
         self.boardLastSeenAt           = d.object(forKey: Keys.boardLastSeenAt) as? Date
@@ -1535,6 +1542,7 @@ final class Settings: ObservableObject {
         static let rankingScoreFractionVP      = "settings.rankingScoreFractionVP"
         static let claimedPodiumPeriods        = "settings.claimedPodiumPeriods"
         static let claimedRpRewards            = "settings.claimedRpRewards"
+        static let claimedGrants               = "settings.claimedGrants"
         static let cursorLastRequestsSeen      = "settings.cursorLastRequestsSeen"
         static let cursorLastStartOfMonth      = "settings.cursorLastStartOfMonth"
         static let boardLastSeenAt             = "settings.boardLastSeenAt"

@@ -216,6 +216,27 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // 본인의 미수령 통합 보상(reward_grants) — RP·코인 공용 ops 지급 원장. currency로 클라가
+  // 원장을 고른다. 가장 오래된 미수령 1건만 반환(클라가 claim 후 다음 폴링에서 다음 건 수령).
+  let pendingGrant: unknown = null;
+  if (deviceId) {
+    const { data: grant } = await db
+      .from("reward_grants")
+      .select("currency, amount, grant_key")
+      .eq("device_id", deviceId)
+      .is("claimed_at", null)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (grant) {
+      pendingGrant = {
+        currency: grant.currency,
+        amount: grant.amount,
+        grantKey: grant.grant_key,
+      };
+    }
+  }
+
   // 다음 달 1일 00:00 KST를 ISO 형태로 노출 — 클라이언트가 "리셋까지 N일" 표시에 사용.
   const now = new Date();
   const seoulOffsetMs = 9 * 60 * 60 * 1000;
@@ -234,6 +255,7 @@ Deno.serve(async (req: Request) => {
     previousMonth,
     pendingReward,
     pendingRpReward,
+    pendingGrant,   // 통합 ops 보상(RP·코인 공용) — 구클라는 미인식 필드라 무시
     tenant,   // 클라 배지용 — 호출자 현재 테넌트(익명/미등록은 "public")
   });
 });

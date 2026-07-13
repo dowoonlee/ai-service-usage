@@ -16,9 +16,10 @@ interface ClaimPayload {
 interface ClaimRequest {
   payload: ClaimPayload;
   signature: string;
-  // rewardType은 서명 페이로드 밖 — coins/rp 라우팅용. 서명은 {deviceId,period,rank,ts}로 불변이라
-  // 기존 클라(coins claim)와 호환된다. period/rank가 이미 서명돼 자기 보상만 수령 가능하므로 평문 OK.
-  rewardType?: "coins" | "rp";
+  // rewardType은 서명 페이로드 밖 — coins/rp/grant 라우팅용. 서명은 {deviceId,period,rank,ts}로
+  // 불변이라 기존 클라(coins claim)와 호환. period/rank가 이미 서명돼 자기 보상만 수령 가능하므로 평문 OK.
+  // grant: 통합 ops 보상(reward_grants). period 슬롯에 grant_key를 실어 재활용한다.
+  rewardType?: "coins" | "rp" | "grant";
   // rp 원장 내 트랙 구분 (P2a) — 같은 period·rank에 개인(monthly)과 길드(guild-monthly) 보상이
   // 공존할 수 있어 라우팅이 필요. 서명 밖 평문 — 자기 row만 수령 가능하므로 rewardType과 동일 논리.
   // 구클라는 미전송 → 아래에서 "매칭 row 중 첫 미수령"을 수령 (둘 다 같은 RP 원장이라 총액 보존).
@@ -44,16 +45,23 @@ Deno.serve(async (req: Request) => {
   if (typeof body.signature !== "string" || body.signature.length !== 64) {
     return errorResponse(400, "invalid_signature");
   }
-  const rewardType = body.rewardType === "rp" ? "rp" : "coins";
-  // period: coins=월간(YYYY-MM). rp=월간(YYYY-MM) 또는 주간(YYYY-Www).
-  const periodOk = rewardType === "rp"
+  const rewardType = (body.rewardType === "rp" || body.rewardType === "grant")
+    ? body.rewardType
+    : "coins";
+  // period 슬롯: coins=월간(YYYY-MM). rp=월간(YYYY-MM)/주간(YYYY-Www).
+  //             grant=grant_key(reward_grants 서명 슬롯 재활용) — CHECK와 동일 문자셋.
+  const periodOk = rewardType === "grant"
+    ? /^[A-Za-z0-9._-]{1,64}$/.test(p.period)
+    : rewardType === "rp"
     ? /^\d{4}-(\d{2}|W\d{2})$/.test(p.period)
     : /^\d{4}-\d{2}$/.test(p.period);
   if (typeof p.period !== "string" || !periodOk) {
     return errorResponse(400, "invalid_period");
   }
-  // rank: coins=Top3만. rp=전체 순위(1~).
-  const rankOk = rewardType === "rp"
+  // rank 슬롯: coins=Top3만. rp=전체 순위(1~). grant=미사용(서명 채움용 더미, 1 고정).
+  const rankOk = rewardType === "grant"
+    ? p.rank === 1
+    : rewardType === "rp"
     ? (Number.isInteger(p.rank) && p.rank >= 1)
     : [1, 2, 3].includes(p.rank);
   if (typeof p.rank !== "number" || !rankOk) {
@@ -81,6 +89,36 @@ Deno.serve(async (req: Request) => {
     user.hmac_key_b64,
   );
   if (!ok) return errorResponse(401, "bad_signature");
+
+  // 통합 보상(grant) — reward_grants 원장. period 슬롯 = grant_key(서명됨 → 본인 것만 수령).
+  // rp/coins 어느 통화든 여기서 claim만 처리하고, 크레딧은 클라가 currency로 원장을 골라 적립.
+  if (rewardType === "grant") {
+    const { data: grant } = await db
+      .from("reward_grants")
+      .select("id, currency, amount, claimed_at")
+      .eq("device_id", p.deviceId)
+      .eq("grant_key", p.period)
+      .maybeSingle();
+    if (!grant) return errorResponse(404, "no_pending_reward");
+    if (grant.claimed_at) {
+      return jsonResponse({
+        alreadyClaimed: true, rewardType: "grant",
+        currency: grant.currency, amount: grant.amount, claimedAt: grant.claimed_at,
+      });
+    }
+    const { error: gErr } = await db
+      .from("reward_grants")
+      .update({ claimed_at: new Date().toISOString() })
+      .eq("id", grant.id);
+    if (gErr) {
+      console.error("grant claim update failed", gErr);
+      return errorResponse(500, "claim_failed");
+    }
+    return jsonResponse({
+      alreadyClaimed: false, rewardType: "grant",
+      currency: grant.currency, amount: grant.amount, claimedAt: new Date().toISOString(),
+    });
+  }
 
   // RP 보상 — rp_rewards 원장 (coins의 monthly_winners와 다른 테이블·컬럼).
   // 같은 (period, rank)에 개인·길드 트랙 row가 공존할 수 있어 단건 조회 대신 목록으로 받아
