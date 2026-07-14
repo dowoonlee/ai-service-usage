@@ -13,12 +13,12 @@ enum Gacha {
         // 최상위 — 일반 가챠 미등장(weight 0), RP 프리미엄 가챠권 제한 풀 전용.
         // Tiny Swords 엘리트 기사단 (Pixel Frog, CC0).
         .mythic:    [.warrior, .lancer, .monk, .archer, .pawn],
-        .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale, .tRex],
+        .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale, .tRex, .medievalKing],
         .epic:      [.maskDude, .ghost, .plant, .skull,
                      .ogre, .bigDemon, .kingHuman, .clownCaptain, .wizardM, .knightF,
                      .visorBot, .princessSera, .mrMochi, .geralt,
                      .roboRetro, .orc, .fairy, .gordon, .skeletonLord,
-                     .dinoDragon, .pterodactyl],
+                     .dinoDragon, .pterodactyl, .heroKnight, .huntress],
         .rare:      [.mushroom, .slime, .trunk, .radish, .rock1, .rock2, .rock3, .chameleon, .rino,
                      .bigZombie, .necromancer, .fierceTooth, .kingPig, .baldPirate, .bigGuy,
                      .dwarfM, .elfM, .lizardM, .wizardF, .doc, .orcShaman, .orcWarrior,
@@ -28,7 +28,9 @@ enum Gacha {
                      .onionLad, .roboTotem, .robotJ5, .tommy,
                      .lilWiz, .mrChomps, .grizzly, .diego, .holly, .toggle, .tracy, .armand,
                      .goblinBrute, .flyingEye,
-                     .dinoLizard, .miniRex, .dinoPlant],
+                     .dinoLizard, .miniRex, .dinoPlant,
+                     .caverman, .lionWarrior, .dragonMan,
+                     .evilWizard, .martialHero, .fantasyWarrior, .fireWorm, .mimic],
         .common:    [.fox, .wolf, .bear, .boar, .deer, .rabbit,
                      .angryPig, .bunny, .chicken, .duck, .blueBird, .fatBird,
                      .bat, .bee, .snail, .turtle,
@@ -48,7 +50,11 @@ enum Gacha {
                      .orchidOwl, .roach, .mrCircuit, .blankey, .bigRed, .squirmyWormy, .moeScotty,
                      .wispyFire, .penguin, .skeletonG, .orangeFruit, .percy, .vessa, .angie, .barryCherry,
                      .myconid,
-                     .dinoBat, .dinoBug, .dinoTurtle],
+                     .dinoBat, .dinoBug, .dinoTurtle,
+                     .caveGirl, .caveGirl1, .littleCaveBoy,
+                     .vampireBat, .giantRat, .kingSlime,
+                     .cat1, .cat2, .cat3, .cat4, .cat5, .cat6,
+                     .akita, .goldenRetriever, .greatDane, .saintBernard, .schnauzer, .husky],
     ]
 
     /// 마이그레이션 시 legacy default petKind를 ownedPets로 옮길 때 등급 화이트리스트.
