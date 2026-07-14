@@ -32,6 +32,23 @@ struct GachaView: View {
     @State private var pullIsPremium: Bool = false
     /// 상점/도장/레포트/랭킹/길드 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
     @State private var selectedTab: Tab = .shop
+    /// 도감 이름 검색어 (부분일치, 대소문자 무시). 비어있으면 필터 안 함.
+    @State private var dexSearch: String = ""
+    /// 도감 보유 상태 필터.
+    @State private var dexFilter: DexFilter = .all
+
+    /// 도감 보유 상태 필터. 195종 규모에서 "미보유"만 보면 뭘 더 뽑을지 바로 파악된다.
+    enum DexFilter: String, CaseIterable, Identifiable {
+        case all, owned, missing
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .all:     return "전체"
+            case .owned:   return "보유"
+            case .missing: return "미보유"
+            }
+        }
+    }
 
     enum Tab: String, CaseIterable, Identifiable {
         case shop, party, gym, report, ranking, guild
@@ -809,18 +826,81 @@ struct GachaView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
+            // 검색 + 보유 필터 — 195종 규모에서 특정 펫/미보유를 빠르게 찾기 위한 도구.
+            HStack(spacing: 8) {
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    TextField("이름 검색", text: $dexSearch)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                    if !dexSearch.isEmpty {
+                        Button { dexSearch = "" } label: {
+                            Image(systemName: "xmark.circle.fill").font(.system(size: 11))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.1)))
+                Picker("", selection: $dexFilter) {
+                    ForEach(DexFilter.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 168)
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     // 희귀한 등급 먼저 (위 → 아래).
                     ForEach([Rarity.mythic, .legendary, .epic, .rare, .common], id: \.self) { r in
                         raritySection(r)
                     }
-                    // 컬렉션 업적 섹션 — rarity 레이아웃 그대로 유지하고 그 아래에 묶음.
-                    Divider().padding(.vertical, 4)
-                    collectionsAchievementSection()
+                    // 검색/필터 결과가 전무하면 안내 (빈 화면 방지).
+                    if dexVisibleTotal == 0 {
+                        Text("조건에 맞는 펫이 없어요")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 20)
+                    }
+                    // 컬렉션 업적 섹션 — 검색/필터 중엔 숨겨 도감 결과에 집중.
+                    if !dexFilterActive {
+                        Divider().padding(.vertical, 4)
+                        collectionsAchievementSection()
+                    }
                 }
             }
         }
+    }
+
+    /// 검색어 또는 보유 필터가 활성인지 — 활성이면 섹션을 강제 펼치고 빈 섹션은 숨긴다.
+    private var dexFilterActive: Bool {
+        !dexSearch.trimmingCharacters(in: .whitespaces).isEmpty || dexFilter != .all
+    }
+
+    /// 현재 검색/필터를 통과한 전체 종 수 (0이면 "결과 없음" 안내용).
+    private var dexVisibleTotal: Int {
+        [Rarity.mythic, .legendary, .epic, .rare, .common]
+            .reduce(0) { $0 + (Gacha.pool[$1] ?? []).filter(dexMatches).count }
+    }
+
+    /// 한 종이 현재 검색어/보유 필터를 통과하는지.
+    private func dexMatches(_ kind: PetKind) -> Bool {
+        let owned = settings.ownedPets[kind] != nil
+        if dexFilter == .owned && !owned { return false }
+        if dexFilter == .missing && owned { return false }
+        let q = dexSearch.trimmingCharacters(in: .whitespaces)
+        if !q.isEmpty {
+            let name = PetMetaStore.shared.displayName(for: kind)
+            let hit = name.range(of: q, options: .caseInsensitive) != nil
+                || kind.rawValue.range(of: q, options: .caseInsensitive) != nil
+            if !hit { return false }
+        }
+        return true
     }
 
     // MARK: - Collections (셋 보너스 업적)
@@ -874,37 +954,44 @@ struct GachaView: View {
         }
     }
 
+    @ViewBuilder
     private func raritySection(_ rarity: Rarity) -> some View {
         let kinds = Gacha.pool[rarity] ?? []
+        let visible = kinds.filter(dexMatches)
         let ownedCount = kinds.filter { settings.ownedPets[$0] != nil }.count
-        let collapsed = settings.gachaInventoryCollapsed.contains(rarity.rawValue)
-        return VStack(alignment: .leading, spacing: 6) {
-            Button {
-                toggleInventoryCollapsed(rarity.rawValue)
-            } label: {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(rarity.color)
-                        .frame(width: 8, height: 8)
-                    Text(rarity.displayName)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(rarity.color)
-                    Spacer()
-                    Text("\(ownedCount)/\(kinds.count)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                    Image(systemName: collapsed ? "chevron.down" : "chevron.up")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+        // 검색/필터 중엔 강제 펼침(토글 무시)하고, 결과 없는 등급 섹션은 통째로 숨긴다.
+        let collapsed = !dexFilterActive && settings.gachaInventoryCollapsed.contains(rarity.rawValue)
+        if !(dexFilterActive && visible.isEmpty) {
+            VStack(alignment: .leading, spacing: 6) {
+                Button {
+                    toggleInventoryCollapsed(rarity.rawValue)
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(rarity.color)
+                            .frame(width: 8, height: 8)
+                        Text(rarity.displayName)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(rarity.color)
+                        Spacer()
+                        Text(dexFilterActive ? "\(visible.count)" : "\(ownedCount)/\(kinds.count)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        if !dexFilterActive {
+                            Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if !collapsed {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 10)], spacing: 12) {
-                    ForEach(kinds) { kind in
-                        InventorySlot(
+                .buttonStyle(.plain)
+                .disabled(dexFilterActive)
+                if !collapsed {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 70), spacing: 10)], spacing: 12) {
+                        ForEach(visible) { kind in
+                            InventorySlot(
                             kind: kind,
                             ownership: settings.ownedPets[kind],
                             isHighlighted: settings.pendingHighlights.contains(kind),
@@ -924,6 +1011,7 @@ struct GachaView: View {
                         )
                     }
                 }
+            }
             }
         }
     }
