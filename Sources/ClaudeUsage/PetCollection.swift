@@ -27,6 +27,8 @@ enum PetCollection: String, CaseIterable, Codable {
     case noVerify           // "--no-verify"           — 해적단
     case happyPath          // "Happy Path"            — 밝고 귀여운 마스코트 (메이플풍)
     case onCall             // "On-Call"               — Tiny Swords 엘리트 기사단 (Mythic/Legendary)
+    case ciRunners          // "CI Runners"            — 0x72 로봇 (자동화 봇)
+    case helloWorld         // "Hello World"           — GrafxKid 레트로 플랫포머 마스코트
 
     var displayName: String {
         switch self {
@@ -43,6 +45,8 @@ enum PetCollection: String, CaseIterable, Codable {
         case .noVerify:         return "--no-verify"
         case .happyPath:        return "Happy Path"
         case .onCall:           return "On-Call"
+        case .ciRunners:        return "CI Runners"
+        case .helloWorld:       return "Hello World"
         }
     }
 
@@ -62,6 +66,8 @@ enum PetCollection: String, CaseIterable, Codable {
         case .noVerify:         return "hook? 그게 뭔데"
         case .happyPath:        return "엣지 케이스 없는, 그 평화로운 실행 경로"
         case .onCall:           return "삐삐가 울릴 때마다 출동하는 정예들"
+        case .ciRunners:        return "새벽 3시에도 묵묵히 빌드 돌리는 무쇠팔들"
+        case .helloWorld:       return "누구나 처음 찍어보는, 그 한 줄의 마스코트들"
         }
     }
 
@@ -83,6 +89,8 @@ enum PetCollection: String, CaseIterable, Codable {
         case .noVerify:         return Color(red: 0.20, green: 0.55, blue: 0.55)  // teal
         case .happyPath:        return Color(red: 0.55, green: 0.80, blue: 0.40)  // lime
         case .onCall:           return Color(red: 0.42, green: 0.50, blue: 0.62)  // steel blue-gray
+        case .ciRunners:        return Color(red: 0.25, green: 0.72, blue: 0.82)  // electric cyan
+        case .helloWorld:       return Color(red: 0.96, green: 0.58, blue: 0.42)  // warm coral
         }
     }
 
@@ -103,6 +111,8 @@ enum PetCollection: String, CaseIterable, Codable {
         case .noVerify:         return "bolt.slash.fill"                    // hook 무시
         case .happyPath:        return "sun.max.fill"                       // 엣지 케이스 없는 평화
         case .onCall:           return "shield.lefthalf.filled"             // 프로덕션 수호 기사단
+        case .ciRunners:        return "gearshape.2.fill"                   // 자동화 러너/봇
+        case .helloWorld:       return "hand.wave.fill"                     // 첫 인사, 입문 마스코트
         }
     }
 
@@ -111,31 +121,47 @@ enum PetCollection: String, CaseIterable, Codable {
     var members: [PetKind] {
         switch self {
         case .mainframe:
-            return [.fox, .wolf, .bear, .boar, .deer, .rabbit, .bunny, .rino]
+            return [.fox, .wolf, .bear, .boar, .deer, .rabbit, .bunny, .rino, .grizzly]
         case .dns:
-            return [.bat, .bee, .blueBird, .chicken, .duck, .fatBird]
+            return [.bat, .bee, .blueBird, .chicken, .duck, .fatBird, .chiChiBird, .orchidOwl, .penguin]
         case .npmInstall:
-            return [.chameleon, .turtle, .snail, .slug, .tinySlug]
+            return [.chameleon, .turtle, .snail, .slug, .tinySlug, .snipCrab,
+                    .hermie, .roach, .squirmyWormy, .moeScotty]
         case .nodeModules:
             return [.angryPig, .kingPig, .pig, .pigBoxer, .pigBomber]
         case .todoSince2019:
-            return [.mushroom, .slime, .plant, .radish, .trunk, .rock1, .rock2, .rock3]
+            return [.mushroom, .slime, .plant, .radish, .trunk, .rock1, .rock2, .rock3,
+                    .bushly, .gloppySlime, .wispyFire, .fairy, .angie]
         case .wontfix:
-            return [.ghost, .skull, .necromancer, .skelet, .tinyZombie, .iceZombie, .zombie, .bigZombie]
+            return [.ghost, .skull, .necromancer, .skelet, .tinyZombie, .iceZombie, .zombie, .bigZombie,
+                    .blankey, .skeletonG]
         case .fridayDeploy:
-            return [.chort, .pumpkinDude, .imp, .muddy, .swampy, .bigDemon, .ogre, .wogol]
+            return [.chort, .pumpkinDude, .imp, .muddy, .swampy, .bigDemon, .ogre, .wogol, .devoDevil,
+                    .martianRed, .bigRed, .mrChomps]
         case .vibeCoders:
-            return [.maskDude, .ninjaFrog, .dwarfF, .dwarfM, .elfF, .elfM, .knightF, .knightM]
+            return [.maskDude, .ninjaFrog, .dwarfF, .dwarfM, .elfF, .elfM, .knightF, .knightM, .geralt,
+                    .diego, .holly, .gordon, .toggle, .tracy, .armand]
         case .tokenBurners:
-            return [.wizardF, .wizardM, .doc, .angel, .kingHuman]
+            return [.wizardF, .wizardM, .doc, .angel, .kingHuman, .lilWiz]
         case .rustEvangelists:
-            return [.maskedOrc, .orcShaman, .orcWarrior, .lizardF, .lizardM, .goblin]
+            return [.maskedOrc, .orcShaman, .orcWarrior, .lizardF, .lizardM, .goblin, .orc]
         case .noVerify:
             return [.bombGuy, .baldPirate, .cucumber, .bigGuy, .pirateCaptain, .whale, .clownCaptain, .fierceTooth]
         case .happyPath:
             return [.jellySlime, .sunFrog, .oposum, .sunFox]
         case .onCall:
             return [.warrior, .lancer, .monk, .archer, .pawn]
+        case .ciRunners:
+            return [.scrapBot, .antennaBot, .pixelBot, .spiderBot, .sentryBot,
+                    .miniBot, .visorBot, .batBot, .beaconBot,
+                    .roboPumpkin, .roboTotem, .gumBot, .robotJ5,
+                    .robotWalky, .mrCircuit, .roboRetro]
+        case .helloWorld:
+            return [.mrMan, .bumpyBot, .princessSera, .rollingNero, .diverFish,
+                    .bub, .spikeyBub, .pokeyBub, .blockyBub,
+                    .onionLad, .mrMochi, .octi, .daikon, .rocketCherry, .cheesePuff,
+                    .twiggy, .tommy,
+                    .agentMike, .ballooney, .jumpyLumpy, .orangeFruit, .percy, .vessa, .barryCherry]
         }
     }
 }
