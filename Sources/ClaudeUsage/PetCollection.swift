@@ -29,6 +29,8 @@ enum PetCollection: String, CaseIterable, Codable {
     case onCall             // "On-Call"               — Tiny Swords 엘리트 기사단 (Mythic/Legendary)
     case ciRunners          // "CI Runners"            — 0x72 로봇 (자동화 봇)
     case helloWorld         // "Hello World"           — GrafxKid 레트로 플랫포머 마스코트
+    case oomKilled          // "OOMKilled"             — LuizMelo 다크판타지 몬스터
+    case deprecated         // "Deprecated"            — Superpowers 공룡 (멸종 = 레거시)
 
     var displayName: String {
         switch self {
@@ -47,6 +49,8 @@ enum PetCollection: String, CaseIterable, Codable {
         case .onCall:           return "On-Call"
         case .ciRunners:        return "CI Runners"
         case .helloWorld:       return "Hello World"
+        case .oomKilled:        return "OOMKilled"
+        case .deprecated:       return "Deprecated"
         }
     }
 
@@ -68,6 +72,8 @@ enum PetCollection: String, CaseIterable, Codable {
         case .onCall:           return "삐삐가 울릴 때마다 출동하는 정예들"
         case .ciRunners:        return "새벽 3시에도 묵묵히 빌드 돌리는 무쇠팔들"
         case .helloWorld:       return "누구나 처음 찍어보는, 그 한 줄의 마스코트들"
+        case .oomKilled:        return "메모리가 바닥나 강제 종료된 넋들"
+        case .deprecated:       return "멸종했지만 아직 prod에 살아있는 공룡들"
         }
     }
 
@@ -91,6 +97,8 @@ enum PetCollection: String, CaseIterable, Codable {
         case .onCall:           return Color(red: 0.42, green: 0.50, blue: 0.62)  // steel blue-gray
         case .ciRunners:        return Color(red: 0.25, green: 0.72, blue: 0.82)  // electric cyan
         case .helloWorld:       return Color(red: 0.96, green: 0.58, blue: 0.42)  // warm coral
+        case .oomKilled:        return Color(red: 0.62, green: 0.14, blue: 0.22)  // deep crimson
+        case .deprecated:       return Color(red: 0.85, green: 0.45, blue: 0.15)  // burnt orange
         }
     }
 
@@ -113,6 +121,8 @@ enum PetCollection: String, CaseIterable, Codable {
         case .onCall:           return "shield.lefthalf.filled"             // 프로덕션 수호 기사단
         case .ciRunners:        return "gearshape.2.fill"                   // 자동화 러너/봇
         case .helloWorld:       return "hand.wave.fill"                     // 첫 인사, 입문 마스코트
+        case .oomKilled:        return "xmark.octagon.fill"                 // 강제 종료된 몬스터
+        case .deprecated:       return "hourglass"                          // 멸종·구시대(공룡)
         }
     }
 
@@ -162,6 +172,11 @@ enum PetCollection: String, CaseIterable, Codable {
                     .onionLad, .mrMochi, .octi, .daikon, .rocketCherry, .cheesePuff,
                     .twiggy, .tommy,
                     .agentMike, .ballooney, .jumpyLumpy, .orangeFruit, .percy, .vessa, .barryCherry]
+        case .oomKilled:
+            return [.flyingEye, .goblinBrute, .myconid, .skeletonLord]
+        case .deprecated:
+            return [.tRex, .miniRex, .pterodactyl, .dinoDragon, .dinoLizard,
+                    .dinoPlant, .dinoBug, .dinoTurtle, .dinoBat]
         }
     }
 }

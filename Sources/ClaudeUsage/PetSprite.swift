@@ -124,6 +124,10 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
     case diego, holly, gordon
     // GrafxKid Sprite Pack 8 (CC0)
     case toggle, tracy, armand, percy, vessa, angie, barryCherry
+    // LuizMelo Monsters Creatures Fantasy (CC0) — 다크판타지 몬스터 (150px 캔버스 bbox 트림)
+    case flyingEye, goblinBrute, myconid, skeletonLord
+    // Superpowers prehistoric-platformer (CC0, pixel-boy) — 공룡. 좌향, 멀티애니 그리드 트림.
+    case dinoBat, dinoDragon, dinoBug, dinoLizard, miniRex, dinoPlant, pterodactyl, dinoTurtle, tRex
 
     var id: String { rawValue }
 
@@ -939,6 +943,75 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  cellSize: (32, 32), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
+
+        // ─── LuizMelo Monsters Creatures Fantasy (CC0) — 다크판타지 몬스터 ──
+        case .flyingEye:
+            return PetDefinition(prefix: "FlyingEye", displayName: "비행 눈알",
+                                 cellSize: (42, 33), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .goblinBrute:
+            return PetDefinition(prefix: "GoblinBrute", displayName: "고블린 전사",
+                                 cellSize: (38, 38), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .myconid:
+            return PetDefinition(prefix: "Myconid", displayName: "버섯 마수",
+                                 cellSize: (26, 39), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .toxic)
+        case .skeletonLord:
+            return PetDefinition(prefix: "SkeletonLord", displayName: "해골 기사",
+                                 cellSize: (45, 51), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+
+        // ─── Superpowers 공룡 (CC0) — 좌향. 셀 크기는 그리드 트림 실측값 ─────
+        case .dinoBat:
+            return PetDefinition(prefix: "DinoBat", displayName: "선사 익수룡",
+                                 cellSize: (51, 54), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .dinoDragon:
+            return PetDefinition(prefix: "DinoDragon", displayName: "새끼 드래곤",
+                                 cellSize: (93, 86), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .dinoBug:
+            return PetDefinition(prefix: "DinoBug", displayName: "고대 곤충",
+                                 cellSize: (78, 69), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .dinoLizard:
+            return PetDefinition(prefix: "DinoLizard", displayName: "고대 도마뱀",
+                                 cellSize: (97, 68), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .desert)
+        case .miniRex:
+            return PetDefinition(prefix: "MiniRex", displayName: "아기 렉스",
+                                 cellSize: (80, 82), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .dinoPlant:
+            return PetDefinition(prefix: "DinoPlant", displayName: "식충 식물룡",
+                                 cellSize: (135, 113), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .toxic)
+        case .pterodactyl:
+            return PetDefinition(prefix: "Pterodactyl", displayName: "프테라노돈",
+                                 cellSize: (122, 150), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .aurora)
+        case .dinoTurtle:
+            return PetDefinition(prefix: "DinoTurtle", displayName: "고대 거북",
+                                 cellSize: (60, 34), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .sea)
+        case .tRex:
+            return PetDefinition(prefix: "TRex", displayName: "티라노사우루스",
+                                 cellSize: (117, 76), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
         }
     }
 

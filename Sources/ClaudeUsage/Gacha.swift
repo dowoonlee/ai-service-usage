@@ -13,11 +13,12 @@ enum Gacha {
         // 최상위 — 일반 가챠 미등장(weight 0), RP 프리미엄 가챠권 제한 풀 전용.
         // Tiny Swords 엘리트 기사단 (Pixel Frog, CC0).
         .mythic:    [.warrior, .lancer, .monk, .archer, .pawn],
-        .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale],
+        .legendary: [.ninjaFrog, .knightM, .pirateCaptain, .whale, .tRex],
         .epic:      [.maskDude, .ghost, .plant, .skull,
                      .ogre, .bigDemon, .kingHuman, .clownCaptain, .wizardM, .knightF,
                      .visorBot, .princessSera, .mrMochi, .geralt,
-                     .roboRetro, .orc, .fairy, .gordon],
+                     .roboRetro, .orc, .fairy, .gordon, .skeletonLord,
+                     .dinoDragon, .pterodactyl],
         .rare:      [.mushroom, .slime, .trunk, .radish, .rock1, .rock2, .rock3, .chameleon, .rino,
                      .bigZombie, .necromancer, .fierceTooth, .kingPig, .baldPirate, .bigGuy,
                      .dwarfM, .elfM, .lizardM, .wizardF, .doc, .orcShaman, .orcWarrior,
@@ -25,7 +26,9 @@ enum Gacha {
                      .pixelBot, .sentryBot, .batBot,
                      .mrMan, .devoDevil, .bumpyBot,
                      .onionLad, .roboTotem, .robotJ5, .tommy,
-                     .lilWiz, .mrChomps, .grizzly, .diego, .holly, .toggle, .tracy, .armand],
+                     .lilWiz, .mrChomps, .grizzly, .diego, .holly, .toggle, .tracy, .armand,
+                     .goblinBrute, .flyingEye,
+                     .dinoLizard, .miniRex, .dinoPlant],
         .common:    [.fox, .wolf, .bear, .boar, .deer, .rabbit,
                      .angryPig, .bunny, .chicken, .duck, .blueBird, .fatBird,
                      .bat, .bee, .snail, .turtle,
@@ -43,7 +46,9 @@ enum Gacha {
                      .gumBot, .twiggy,
                      .agentMike, .martianRed, .hermie, .ballooney, .robotWalky, .jumpyLumpy,
                      .orchidOwl, .roach, .mrCircuit, .blankey, .bigRed, .squirmyWormy, .moeScotty,
-                     .wispyFire, .penguin, .skeletonG, .orangeFruit, .percy, .vessa, .angie, .barryCherry],
+                     .wispyFire, .penguin, .skeletonG, .orangeFruit, .percy, .vessa, .angie, .barryCherry,
+                     .myconid,
+                     .dinoBat, .dinoBug, .dinoTurtle],
     ]
 
     /// 마이그레이션 시 legacy default petKind를 ownedPets로 옮길 때 등급 화이트리스트.

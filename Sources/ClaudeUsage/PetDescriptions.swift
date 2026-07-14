@@ -190,6 +190,21 @@ enum PetDescriptions {
         .vessa: "춤추는 소녀 베사. 그린 CI가 뜨면 스텝을 밟는다.",
         .angie: "분홍빛 요정 앤지. 반짝임으로 스탠드업을 밝힌다.",
         .barryCherry: "쌍둥이 체리 배리. 체리픽 커밋이 특기, 늘 둘이 붙어 다닌다.",
+        // LuizMelo Monsters Creatures Fantasy — 다크판타지 몬스터
+        .flyingEye: "허공을 떠도는 외눈 감시자. 모든 PR을 노려보지만 approve는 안 한다.",
+        .goblinBrute: "단검 든 고블린. 코드 리뷰 대신 일단 칼부터 뽑는다.",
+        .myconid: "포자를 뿜는 버섯 마수. 한 번 감염되면 모듈 전체로 fan-out.",
+        .skeletonLord: "방패와 검을 든 해골 기사. 죽어서도 on-call을 놓지 않는 언데드.",
+        // Superpowers 공룡 — "Deprecated" (멸종했지만 prod에 남은 것들)
+        .tRex: "생태계 최상위 포식자. prod를 지배하는 절대 권력이지만, 팔이 짧아 키보드가 멀다.",
+        .miniRex: "작지만 이빨은 진짜. 언젠가 대장이 될 주니어 렉스.",
+        .pterodactyl: "하늘을 지배한 익룡. 배포 현장을 공중에서 내려다본다.",
+        .dinoDragon: "아직 불을 못 뿜는 새끼 용. 언젠가 prod를 통째로 태울 재목.",
+        .dinoLizard: "재빠른 고생대 도마뱀. 꼬리 자르고 도망치는 게 그의 롤백 전략.",
+        .dinoPlant: "지나가는 요청을 덥석 무는 쥐라기 식충식물. 뿌리는 못 옮겨도 입은 빠르다.",
+        .dinoBug: "삼엽충 시절부터 기어온 벌레. 코드베이스에서 가장 오래된 레거시 종.",
+        .dinoTurtle: "느리지만 절대 안 죽는 고대 거북. 등껍질이 곧 방화벽.",
+        .dinoBat: "쥐라기 밤하늘을 순찰하는 익수룡. 야간 배치의 원조.",
     ]
 
     /// 종 전용 설명 반환. dict에 없으면 폴백.
