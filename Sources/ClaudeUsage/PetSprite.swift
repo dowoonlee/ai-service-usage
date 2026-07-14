@@ -105,6 +105,36 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
     case sunFox, sunFrog, oposum
     // Tiny Swords (Pixel Frog, CC0) — Mythic/Legendary 신규
     case warrior, lancer, monk, archer, pawn
+    // 0x72 16x16+ Robot Tileset (CC0) — "CI Runners" 컬렉션. 전부 우향, Idle 4f / Run 8f.
+    case scrapBot, antennaBot, pixelBot, spiderBot, sentryBot, miniBot, visorBot, batBot, beaconBot
+    // GrafxKid Sprite Pack 1 (CC0) — 레트로 플랫포머 마스코트. 전부 우향, 16x16(세라만 16x32).
+    case mrMan, bumpyBot, princessSera, bushly, devoDevil, rollingNero, gloppySlime
+    case chiChiBird, diverFish, bub, spikeyBub, pokeyBub, blockyBub
+    // GrafxKid Sprite Pack 2 (CC0) — 음식·사물 마스코트. 전부 우향, 셀 크기 다양.
+    case onionLad, mrMochi, octi, roboPumpkin, daikon, roboTotem, rocketCherry, cheesePuff, snipCrab
+    // GrafxKid Sprite Pack 3 (CC0) — 로봇·모험가. 전부 우향, 32x32.
+    case gumBot, twiggy, robotJ5, tommy, geralt
+    // GrafxKid Sprite Pack 4 (CC0)
+    case agentMike, martianRed, hermie, ballooney, robotWalky, jumpyLumpy, orchidOwl, roach, mrCircuit, blankey
+    // GrafxKid Sprite Pack 5 (CC0)
+    case roboRetro, lilWiz, bigRed, squirmyWormy, moeScotty, mrChomps, grizzly, orc, wispyFire
+    // GrafxKid Sprite Pack 6 (CC0)
+    case penguin, fairy, skeletonG, orangeFruit
+    // GrafxKid Sprite Pack 7 (CC0)
+    case diego, holly, gordon
+    // GrafxKid Sprite Pack 8 (CC0)
+    case toggle, tracy, armand, percy, vessa, angie, barryCherry
+    // LuizMelo Monsters Creatures Fantasy (CC0) — 다크판타지 몬스터 (150px 캔버스 bbox 트림)
+    case flyingEye, goblinBrute, myconid, skeletonLord
+    // Superpowers prehistoric-platformer (CC0, pixel-boy) — 공룡. 좌향, 멀티애니 그리드 트림.
+    case dinoBat, dinoDragon, dinoBug, dinoLizard, miniRex, dinoPlant, pterodactyl, dinoTurtle, tRex
+    // Superpowers prehistoric characters (CC0) — 원시부족. 우향, 그리드 트림.
+    case caverman, caveGirl, caveGirl1, dragonMan, lionWarrior, littleCaveBoy
+    // LuizMelo 히어로/몬스터/반려동물 (CC0) — 우향, 정사각 프레임 bbox 트림
+    case heroKnight, huntress, evilWizard, medievalKing, martialHero, fantasyWarrior, fireWorm
+    case vampireBat, mimic, giantRat, kingSlime
+    case cat1, cat2, cat3, cat4, cat5, cat6
+    case akita, goldenRetriever, greatDane, saintBernard, schnauzer, husky
 
     var id: String { rawValue }
 
@@ -561,6 +591,583 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  cellSize: (66, 69), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
+
+        // ─── 0x72 16x16+ Robot Tileset (CC0) — "CI Runners" ───────────────
+        // 단일 512×512 시트에서 IDLE(4f)/WALK(8f)를 종별 strip으로 추출(scripts/import-robot-tileset.py).
+        // 전부 우향(defaultFacingLeft: false). walk는 Run으로 alias. cellSize는 추출 실측값.
+        case .scrapBot:
+            return PetDefinition(prefix: "ScrapBot", displayName: "고철 로봇",
+                                 cellSize: (14, 26), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .antennaBot:
+            return PetDefinition(prefix: "AntennaBot", displayName: "안테나 로봇",
+                                 cellSize: (16, 25), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .pixelBot:
+            return PetDefinition(prefix: "PixelBot", displayName: "픽셀 로봇",
+                                 cellSize: (14, 25), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .spiderBot:
+            return PetDefinition(prefix: "SpiderBot", displayName: "거미 로봇",
+                                 cellSize: (16, 26), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .sentryBot:
+            return PetDefinition(prefix: "SentryBot", displayName: "감시 로봇",
+                                 cellSize: (15, 23), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .miniBot:
+            return PetDefinition(prefix: "MiniBot", displayName: "꼬마 로봇",
+                                 cellSize: (14, 25), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .visorBot:
+            return PetDefinition(prefix: "VisorBot", displayName: "바이저 로봇",
+                                 cellSize: (14, 25), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .batBot:
+            return PetDefinition(prefix: "BatBot", displayName: "박쥐 로봇",
+                                 cellSize: (13, 25), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .beaconBot:
+            return PetDefinition(prefix: "BeaconBot", displayName: "신호등 로봇",
+                                 cellSize: (14, 25), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+
+        // ─── GrafxKid Sprite Pack 1 (CC0) — 레트로 플랫포머 마스코트 ───────
+        // 캐릭터별 개별 strip(셀 크기 파일명 명시). 정지/이동 애니메이션이 없는 종은
+        // Standing/Swimming/Rolling/Flapping을 idle/run으로 alias(scripts/import-grafxkid.py).
+        case .mrMan:
+            return PetDefinition(prefix: "MrMan", displayName: "픽셀 히어로",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .bumpyBot:
+            return PetDefinition(prefix: "BumpyBot", displayName: "범피",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .princessSera:
+            return PetDefinition(prefix: "PrincessSera", displayName: "세라 공주",
+                                 cellSize: (16, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .sakura)
+        case .bushly:
+            return PetDefinition(prefix: "Bushly", displayName: "부시 정령",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .devoDevil:
+            return PetDefinition(prefix: "DevoDevil", displayName: "데보 악마",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .rollingNero:
+            return PetDefinition(prefix: "RollingNero", displayName: "롤링 네로",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .gloppySlime:
+            return PetDefinition(prefix: "GloppySlime", displayName: "글로피 슬라임",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .chiChiBird:
+            return PetDefinition(prefix: "ChiChiBird", displayName: "치치 새",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .diverFish:
+            return PetDefinition(prefix: "DiverFish", displayName: "물고기 다이버",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .sea)
+        case .bub:
+            return PetDefinition(prefix: "Bub", displayName: "버브",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .spikeyBub:
+            return PetDefinition(prefix: "SpikeyBub", displayName: "가시 버브",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .pokeyBub:
+            return PetDefinition(prefix: "PokeyBub", displayName: "뾰족 버브",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .blockyBub:
+            return PetDefinition(prefix: "BlockyBub", displayName: "블록 버브",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+
+        // ─── GrafxKid Sprite Pack 2 (CC0) — 음식·사물 마스코트 ─────────────
+        case .onionLad:
+            return PetDefinition(prefix: "OnionLad", displayName: "양파 소년",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .mrMochi:
+            return PetDefinition(prefix: "MrMochi", displayName: "모찌 씨",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .sakura)
+        case .octi:
+            return PetDefinition(prefix: "Octi", displayName: "옥티",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .sea)
+        case .roboPumpkin:
+            return PetDefinition(prefix: "RoboPumpkin", displayName: "호박 로봇",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .daikon:
+            return PetDefinition(prefix: "Daikon", displayName: "다이콘 무",
+                                 cellSize: (16, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .roboTotem:
+            return PetDefinition(prefix: "RoboTotem", displayName: "토템 로봇",
+                                 cellSize: (16, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .rocketCherry:
+            return PetDefinition(prefix: "RocketCherry", displayName: "로켓 체리",
+                                 cellSize: (16, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .cheesePuff:
+            return PetDefinition(prefix: "CheesePuff", displayName: "치즈볼 동무",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .snipCrab:
+            return PetDefinition(prefix: "SnipCrab", displayName: "집게 게",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .sea)
+
+        // ─── GrafxKid Sprite Pack 3 (CC0) — 로봇·모험가 (32x32) ────────────
+        case .gumBot:
+            return PetDefinition(prefix: "GumBot", displayName: "껌 로봇",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .twiggy:
+            return PetDefinition(prefix: "Twiggy", displayName: "트위기",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .robotJ5:
+            return PetDefinition(prefix: "RobotJ5", displayName: "J5 로봇",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .tommy:
+            return PetDefinition(prefix: "Tommy", displayName: "토미",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .geralt:
+            return PetDefinition(prefix: "Geralt", displayName: "게롤트",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+
+        // ─── GrafxKid Sprite Pack 4~8 (CC0) — 마스코트·몬스터·모험가·기사 ───
+        case .agentMike:
+            return PetDefinition(prefix: "AgentMike", displayName: "요원 마이크",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .martianRed:
+            return PetDefinition(prefix: "MartianRed", displayName: "붉은 화성인",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .hermie:
+            return PetDefinition(prefix: "Hermie", displayName: "소라게 허미",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .sea)
+        case .ballooney:
+            return PetDefinition(prefix: "Ballooney", displayName: "벌루니",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .robotWalky:
+            return PetDefinition(prefix: "RobotWalky", displayName: "워키 로봇",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .jumpyLumpy:
+            return PetDefinition(prefix: "JumpyLumpy", displayName: "점피 럼피",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .orchidOwl:
+            return PetDefinition(prefix: "OrchidOwl", displayName: "난초 올빼미",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .roach:
+            return PetDefinition(prefix: "Roach", displayName: "바퀴 로치",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .mrCircuit:
+            return PetDefinition(prefix: "MrCircuit", displayName: "서킷 씨",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .blankey:
+            return PetDefinition(prefix: "Blankey", displayName: "담요 유령",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .roboRetro:
+            return PetDefinition(prefix: "RoboRetro", displayName: "레트로 로봇",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .space)
+        case .lilWiz:
+            return PetDefinition(prefix: "LilWiz", displayName: "꼬마 마법사",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .aurora)
+        case .bigRed:
+            return PetDefinition(prefix: "BigRed", displayName: "빅 레드",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .squirmyWormy:
+            return PetDefinition(prefix: "SquirmyWormy", displayName: "꿈틀 지렁이",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .moeScotty:
+            return PetDefinition(prefix: "MoeScotty", displayName: "모 스코티",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .mrChomps:
+            return PetDefinition(prefix: "MrChomps", displayName: "촘프 씨",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .toxic)
+        case .grizzly:
+            return PetDefinition(prefix: "Grizzly", displayName: "그리즐리 곰",
+                                 cellSize: (48, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .snowMountain)
+        case .orc:
+            return PetDefinition(prefix: "Orc", displayName: "덩치 오크",
+                                 cellSize: (64, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .wispyFire:
+            return PetDefinition(prefix: "WispyFire", displayName: "도깨비불",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .penguin:
+            return PetDefinition(prefix: "Penguin", displayName: "펭귄",
+                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .snowMountain)
+        case .fairy:
+            return PetDefinition(prefix: "Fairy", displayName: "요정",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .aurora)
+        case .skeletonG:
+            return PetDefinition(prefix: "Skeleton", displayName: "해골 병사",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .orangeFruit:
+            return PetDefinition(prefix: "Orange", displayName: "오렌지",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .diego:
+            return PetDefinition(prefix: "Diego", displayName: "디에고",
+                                 cellSize: (32, 48), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .holly:
+            return PetDefinition(prefix: "Holly", displayName: "홀리",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .gordon:
+            return PetDefinition(prefix: "Gordon", displayName: "고든",
+                                 cellSize: (48, 48), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .toggle:
+            return PetDefinition(prefix: "Toggle", displayName: "토글",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .tracy:
+            return PetDefinition(prefix: "Tracy", displayName: "트레이시",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .armand:
+            return PetDefinition(prefix: "Armand", displayName: "아르망",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .percy:
+            return PetDefinition(prefix: "Percy", displayName: "퍼시",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .vessa:
+            return PetDefinition(prefix: "Vessa", displayName: "베사",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .sakura)
+        case .angie:
+            return PetDefinition(prefix: "Angie", displayName: "앤지",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .aurora)
+        case .barryCherry:
+            return PetDefinition(prefix: "BarryCherry", displayName: "배리 체리",
+                                 cellSize: (32, 32), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+
+        // ─── LuizMelo Monsters Creatures Fantasy (CC0) — 다크판타지 몬스터 ──
+        case .flyingEye:
+            return PetDefinition(prefix: "FlyingEye", displayName: "비행 눈알",
+                                 cellSize: (42, 33), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .goblinBrute:
+            return PetDefinition(prefix: "GoblinBrute", displayName: "고블린 전사",
+                                 cellSize: (38, 38), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .myconid:
+            return PetDefinition(prefix: "Myconid", displayName: "버섯 마수",
+                                 cellSize: (26, 39), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .toxic)
+        case .skeletonLord:
+            return PetDefinition(prefix: "SkeletonLord", displayName: "해골 기사",
+                                 cellSize: (45, 51), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+
+        // ─── Superpowers 공룡 (CC0) — 좌향. 셀 크기는 그리드 트림 실측값 ─────
+        case .dinoBat:
+            return PetDefinition(prefix: "DinoBat", displayName: "선사 익수룡",
+                                 cellSize: (51, 54), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .dinoDragon:
+            return PetDefinition(prefix: "DinoDragon", displayName: "새끼 드래곤",
+                                 cellSize: (93, 86), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .dinoBug:
+            return PetDefinition(prefix: "DinoBug", displayName: "고대 곤충",
+                                 cellSize: (78, 69), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .dinoLizard:
+            return PetDefinition(prefix: "DinoLizard", displayName: "고대 도마뱀",
+                                 cellSize: (97, 68), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .desert)
+        case .miniRex:
+            return PetDefinition(prefix: "MiniRex", displayName: "아기 렉스",
+                                 cellSize: (80, 82), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .dinoPlant:
+            return PetDefinition(prefix: "DinoPlant", displayName: "식충 식물룡",
+                                 cellSize: (135, 113), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .toxic)
+        case .pterodactyl:
+            return PetDefinition(prefix: "Pterodactyl", displayName: "프테라노돈",
+                                 cellSize: (122, 150), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .aurora)
+        case .dinoTurtle:
+            return PetDefinition(prefix: "DinoTurtle", displayName: "고대 거북",
+                                 cellSize: (60, 34), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .sea)
+        case .tRex:
+            return PetDefinition(prefix: "TRex", displayName: "티라노사우루스",
+                                 cellSize: (117, 76), defaultFacingLeft: true,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+
+        // ─── Superpowers 원시부족 캐릭터 (CC0) — 우향 ─────────────────────
+        case .caverman:
+            return PetDefinition(prefix: "Caveman", displayName: "원시인",
+                                 cellSize: (57, 60), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .caveGirl:
+            return PetDefinition(prefix: "CaveGirl", displayName: "부족 채집가",
+                                 cellSize: (66, 64), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .caveGirl1:
+            return PetDefinition(prefix: "CaveGirl1", displayName: "부족 소녀",
+                                 cellSize: (59, 64), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .dragonMan:
+            return PetDefinition(prefix: "DragonMan", displayName: "드래곤맨",
+                                 cellSize: (145, 134), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .lionWarrior:
+            return PetDefinition(prefix: "LionWarrior", displayName: "사자 전사",
+                                 cellSize: (64, 64), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .desert)
+        case .littleCaveBoy:
+            return PetDefinition(prefix: "LittleCaveBoy", displayName: "꼬마 원시인",
+                                 cellSize: (69, 52), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+
+        // ─── LuizMelo 히어로/몬스터/반려동물 (CC0) — 우향 ─────────────────
+        case .heroKnight:
+            return PetDefinition(prefix: "HeroKnight", displayName: "영웅 기사",
+                                 cellSize: (50, 56), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .huntress:
+            return PetDefinition(prefix: "Huntress", displayName: "여전사 사냥꾼",
+                                 cellSize: (50, 42), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .evilWizard:
+            return PetDefinition(prefix: "EvilWizard", displayName: "흑마법사",
+                                 cellSize: (76, 104), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .aurora)
+        case .medievalKing:
+            return PetDefinition(prefix: "MedievalKing", displayName: "중세 왕",
+                                 cellSize: (74, 82), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .martialHero:
+            return PetDefinition(prefix: "MartialHero", displayName: "무술 영웅",
+                                 cellSize: (46, 52), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .fantasyWarrior:
+            return PetDefinition(prefix: "FantasyWarrior", displayName: "판타지 전사",
+                                 cellSize: (58, 45), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .fireWorm:
+            return PetDefinition(prefix: "FireWorm", displayName: "화염 벌레",
+                                 cellSize: (52, 45), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .volcano)
+        case .vampireBat:
+            return PetDefinition(prefix: "VampireBat", displayName: "흡혈 박쥐",
+                                 cellSize: (67, 55), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .mimic:
+            return PetDefinition(prefix: "Mimic", displayName: "미믹",
+                                 cellSize: (47, 34), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .giantRat:
+            return PetDefinition(prefix: "GiantRat", displayName: "거대 쥐",
+                                 cellSize: (59, 20), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .wilderness)
+        case .kingSlime:
+            return PetDefinition(prefix: "KingSlime", displayName: "킹 슬라임",
+                                 cellSize: (46, 20), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .toxic)
+        case .cat1:
+            return PetDefinition(prefix: "Cat1", displayName: "나비",
+                                 cellSize: (30, 15), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .cat2:
+            return PetDefinition(prefix: "Cat2", displayName: "까망",
+                                 cellSize: (30, 15), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .cat3:
+            return PetDefinition(prefix: "Cat3", displayName: "모모",
+                                 cellSize: (30, 14), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .cat4:
+            return PetDefinition(prefix: "Cat4", displayName: "루비",
+                                 cellSize: (30, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .cat5:
+            return PetDefinition(prefix: "Cat5", displayName: "보리",
+                                 cellSize: (30, 16), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .cat6:
+            return PetDefinition(prefix: "Cat6", displayName: "고등어",
+                                 cellSize: (30, 15), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .akita:
+            return PetDefinition(prefix: "Akita", displayName: "아키타",
+                                 cellSize: (23, 17), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .goldenRetriever:
+            return PetDefinition(prefix: "GoldenRetriever", displayName: "골든 리트리버",
+                                 cellSize: (38, 23), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .grassland)
+        case .greatDane:
+            return PetDefinition(prefix: "GreatDane", displayName: "그레이트 데인",
+                                 cellSize: (50, 34), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .saintBernard:
+            return PetDefinition(prefix: "SaintBernard", displayName: "세인트 버나드",
+                                 cellSize: (50, 30), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .snowMountain)
+        case .schnauzer:
+            return PetDefinition(prefix: "Schnauzer", displayName: "슈나우저",
+                                 cellSize: (31, 25), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .field)
+        case .husky:
+            return PetDefinition(prefix: "Husky", displayName: "허스키",
+                                 cellSize: (34, 26), defaultFacingLeft: false,
+                                 walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
+                                 defaultTheme: .snowMountain)
         }
     }
 

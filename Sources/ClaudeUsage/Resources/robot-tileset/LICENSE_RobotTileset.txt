@@ -1,0 +1,5 @@
+16x16 Robot Tileset — by 0x72
+Source: https://0x72.itch.io/16x16-robot-tileset
+License: CC0 1.0 Universal (Public Domain). "Credit is not necessary" (author).
+Only the animated robot sprites (IDLE 4f / WALK 8f) were extracted from the
+original 512x512 sheet and re-stitched into per-species horizontal strips.

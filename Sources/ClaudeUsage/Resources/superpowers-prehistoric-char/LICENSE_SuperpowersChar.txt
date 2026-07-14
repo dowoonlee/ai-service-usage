@@ -1,0 +1,3 @@
+Superpowers Asset Packs (prehistoric-platformer/characters) — pixel-boy / Sparklin Labs
+Source: https://github.com/sparklinlabs/superpowers-asset-packs
+License: CC0 1.0 Universal.

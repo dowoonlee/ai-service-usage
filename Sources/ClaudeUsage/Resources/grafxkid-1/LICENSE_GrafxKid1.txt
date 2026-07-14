@@ -1,0 +1,4 @@
+Sprite Pack 1 — by GrafxKid
+Source: https://grafxkid.itch.io/sprite-pack-1
+License: CC0 (Public Domain). Crediting is optional (author).
+Only Idle/Run(or aliased Standing/Swimming/Rolling/Flapping) strips were extracted per character.
