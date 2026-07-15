@@ -41,4 +41,24 @@ final class PetSpriteTests: XCTestCase {
             XCTAssertFalse(Mythic.spec(for: kind)?.stressQuotes.isEmpty ?? true, "\(kind.rawValue) stressQuotes")
         }
     }
+
+    // 모든 PetKind는 종 전용 말풍선 대사(Quotes.perPet)를 갖춰야 한다.
+    // 누락 시 random(for:)이 "..."로 폴백해 사실상 무음이 되므로, 펫 대량 추가 때
+    // Quotes 항목 빠뜨리는 실수를 CI에서 즉시 잡는다.
+    func testEveryKindHasQuotes() {
+        for kind in PetKind.allCases {
+            let pool = Quotes.perPet[kind]
+            XCTAssertNotNil(pool, "\(kind.rawValue) missing from Quotes.perPet")
+            XCTAssertFalse(pool?.isEmpty ?? true, "\(kind.rawValue) has empty quote pool")
+        }
+    }
+
+    // 모든 PetKind는 도감 캐릭터 설명(PetDescriptions.perPet)도 갖춰야 한다 (동일 취지의 폴백 방지).
+    func testEveryKindHasDescription() {
+        for kind in PetKind.allCases {
+            let desc = PetDescriptions.perPet[kind]
+            XCTAssertNotNil(desc, "\(kind.rawValue) missing from PetDescriptions.perPet")
+            XCTAssertFalse(desc?.isEmpty ?? true, "\(kind.rawValue) has empty description")
+        }
+    }
 }
