@@ -355,8 +355,21 @@ struct TrainerCardView: View {
     // MARK: - Badges + Collections
 
     /// 도장 뱃지 8 + 컬렉션 11. 레이아웃 옵션 제거 — 항상 두 행 노출.
+    /// dot 행이 카드 폭을 넘지 않도록 개수에 맞춰 dot 지름을 축소한다 (base 이하로만, 최소 9).
+    /// 컬렉션(sets)이 19개로 늘면서 고정 16pt × 19개 + 라벨이 카드 내부폭을 초과해 body 전체가
+    /// 넓어지고 `.frame(width)` center 정렬로 좌우가 잘리던 회귀를 막는다.
+    /// available = 카드폭 - padding(36) - 라벨(80) - 라벨/도트 간격(6) - 우측 여유(8).
+    private func rowDotSize(count: Int, base: CGFloat, spacing: CGFloat = 5) -> CGFloat {
+        guard count > 1 else { return base }
+        let available = width - 36 - 80 - 6 - 8
+        let raw = (available - CGFloat(count - 1) * spacing) / CGFloat(count)
+        return min(base, max(9, raw))
+    }
+
     private var badgesSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        let badgeSize = rowDotSize(count: badges.count, base: 20)
+        let setSize = rowDotSize(count: collections.count, base: 16)
+        return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Text("BADGES")
                     .font(.system(size: 11, weight: .heavy, design: .monospaced))
@@ -364,7 +377,7 @@ struct TrainerCardView: View {
                     .frame(width: 80, alignment: .leading)
                 HStack(spacing: 5) {
                     ForEach(badges, id: \.category.rawValue) { b in
-                        badgeDot(category: b.category, cleared: b.cleared, available: b.available)
+                        badgeDot(size: badgeSize, category: b.category, cleared: b.cleared, available: b.available)
                     }
                 }
                 Spacer(minLength: 0)
@@ -376,7 +389,7 @@ struct TrainerCardView: View {
                     .frame(width: 80, alignment: .leading)
                 HStack(spacing: 5) {
                     ForEach(collections, id: \.collection.rawValue) { c in
-                        collectionDot(collection: c.collection, complete: c.complete)
+                        collectionDot(size: setSize, collection: c.collection, complete: c.complete)
                     }
                 }
                 Spacer(minLength: 0)
@@ -384,30 +397,30 @@ struct TrainerCardView: View {
         }
     }
 
-    private func badgeDot(category: BadgeCategory, cleared: Bool, available: Bool) -> some View {
+    private func badgeDot(size: CGFloat, category: BadgeCategory, cleared: Bool, available: Bool) -> some View {
         let color = available
             ? (cleared ? Color(hex: category.gemColorHex) : Color.gray.opacity(0.5))
             : Color.black.opacity(0.4)
         return ZStack {
-            RoundedRectangle(cornerRadius: 3)
+            RoundedRectangle(cornerRadius: size * 0.15)
                 .fill(color)
-                .frame(width: 20, height: 20)
+                .frame(width: size, height: size)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 3)
+                    RoundedRectangle(cornerRadius: size * 0.15)
                         .stroke(.white.opacity(0.35), lineWidth: 0.7)
                 )
             if cleared {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .black))
+                    .font(.system(size: size * 0.55, weight: .black))
                     .foregroundStyle(.white)
             }
         }
     }
 
-    private func collectionDot(collection: PetCollection, complete: Bool) -> some View {
+    private func collectionDot(size: CGFloat, collection: PetCollection, complete: Bool) -> some View {
         Circle()
             .fill(complete ? collection.accentColor : Color.gray.opacity(0.4))
-            .frame(width: 16, height: 16)
+            .frame(width: size, height: size)
             .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 0.7))
     }
 
