@@ -412,6 +412,8 @@ actor RankingAPI {
         case invite
         case cancelInvite = "cancel_invite"
         case rename
+        case approveRequest = "approve_request"
+        case rejectRequest = "reject_request"
     }
 
     struct GuildCreatePayload: Encodable {
@@ -470,6 +472,8 @@ actor RankingAPI {
         let targetNickname: String?
         /// cancel_invite 전용 — 취소할 초대 id.
         let inviteId: String?
+        /// approve_request/reject_request 전용 — 처리할 가입신청 id. nil이면 키 제외(present-only).
+        let requestId: String?
         /// rename 전용 — 새 길드명. nil이면 키 자체가 직렬화에서 빠진다(서버 present-only).
         let newName: String?
         let ts: Int64
@@ -572,12 +576,33 @@ actor RankingAPI {
         let expiresAt: Date
         var id: String { inviteId }
     }
+    /// 내가 보낸 대기중 가입신청 (guild-request list) — 온보딩 "내 신청" 목록.
+    struct GuildOutgoingRequest: Decodable, Sendable, Identifiable {
+        let requestId: String
+        let guildId: String
+        let guildName: String
+        let memberCount: Int
+        let expiresAt: Date
+        var id: String { requestId }
+    }
+    /// 길드장이 받은 대기중 가입신청 (guild-info joinRequests — 길드장에게만 채워짐).
+    struct GuildIncomingRequest: Decodable, Sendable, Identifiable {
+        let requestId: String
+        let nickname: String?
+        let githubLogin: String?
+        let profileJson: ProfileState?
+        let requestedAt: Date
+        let expiresAt: Date
+        var id: String { requestId }
+    }
     struct GuildInfoResponse: Decodable, Sendable {
         let guild: GuildInfo
         let members: [GuildMember]
         let furniture: [GuildFurnitureItem]
         /// 길드장이 보낸 대기중 초대. 구버전 서버는 키가 없어 nil → 빈 배열로 취급.
         let sentInvites: [GuildSentInvite]?
+        /// 길드장이 받은 대기중 가입신청. 구버전 서버는 키가 없어 nil → 빈 배열로 취급.
+        let joinRequests: [GuildIncomingRequest]?
     }
 
     struct GuildLeaderboardEntry: Decodable, Identifiable, Sendable {
@@ -668,6 +693,13 @@ actor RankingAPI {
                 case "not_leader":          return "길드장만 할 수 있는 작업입니다."
                 case "target_not_in_guild": return "대상이 이미 길드에 없습니다."
                 case "cannot_kick_self":    return "자기 자신은 추방할 수 없습니다."
+                case "guild_not_found":     return "길드를 찾을 수 없습니다."
+                case "already_requested":   return "이미 이 길드에 가입신청을 보냈습니다."
+                case "too_many_requests":   return "보낼 수 있는 가입신청 수를 초과했습니다. 기존 신청을 취소하세요."
+                case "too_many_pending":    return "이 길드의 대기중 신청이 가득 찼습니다. 잠시 후 다시 시도하세요."
+                case "redecline_cooldown":  return "최근 거절된 길드입니다. 24시간 후 다시 신청할 수 있어요."
+                case "request_not_found":   return "이미 처리되었거나 만료된 신청입니다."
+                case "request_expired":     return "만료된 신청입니다."
                 default:                    return "길드 요청이 거부되었습니다 (\(code))."
                 }
             case .guildCooldown(let until):
@@ -1045,13 +1077,14 @@ actor RankingAPI {
     /// (나머지는 nil → canonical에서 키 제외, 서버 present-only와 일치).
     func manageGuild(deviceId: String, action: GuildManageAction, targetDeviceId: String? = nil,
                      furniture: String? = nil, targetNickname: String? = nil, inviteId: String? = nil,
-                     newName: String? = nil,
+                     requestId: String? = nil, newName: String? = nil,
                      hmacKeyBase64: String) async throws -> GuildManageResponse {
         let payload = GuildManagePayload(action: action.rawValue, deviceId: deviceId,
                                          targetDeviceId: targetDeviceId ?? "",
                                          layout: furniture,
                                          targetNickname: targetNickname,
                                          inviteId: inviteId,
+                                         requestId: requestId,
                                          newName: newName,
                                          ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
@@ -1106,6 +1139,77 @@ actor RankingAPI {
                             hmacKeyBase64: String) async throws -> GuildManageResponse {
         try await inviteAction(action: "decline", inviteId: inviteId,
                                deviceId: deviceId, hmacKeyBase64: hmacKeyBase64)
+    }
+
+    // MARK: - 길드 가입신청 (신청자 액션 — guild-request)
+
+    struct GuildRequestPayload: Encodable {
+        let action: String
+        let deviceId: String
+        /// create 전용 — 신청 대상 길드 id. nil이면 키 제외 (서버 present-only).
+        let guildId: String?
+        /// cancel 전용 — 취소할 신청 id. nil이면 키 제외.
+        let requestId: String?
+        let ts: Int64
+    }
+    struct GuildRequestBody: Encodable {
+        let payload: GuildRequestPayload
+        let signature: String
+    }
+    struct GuildRequestListResponse: Decodable, Sendable {
+        let requests: [GuildOutgoingRequest]
+    }
+
+    private func requestAction<R: Decodable>(action: String, guildId: String?, requestId: String?,
+                                             deviceId: String, hmacKeyBase64: String) async throws -> R {
+        let payload = GuildRequestPayload(action: action, deviceId: deviceId, guildId: guildId,
+                                          requestId: requestId,
+                                          ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-request",
+                              body: GuildRequestBody(payload: payload, signature: sig))
+    }
+
+    /// 가입신청 발송 — 리스트에서 고른 길드에 신청. 이미 소속 `.guildConflict("already_in_guild")`,
+    /// 중복 신청 `.guildConflict("already_requested")`, 쿨다운 `.guildCooldown`.
+    @discardableResult
+    func sendJoinRequest(deviceId: String, guildId: String,
+                         hmacKeyBase64: String) async throws -> GuildManageResponse {
+        try await requestAction(action: "create", guildId: guildId, requestId: nil,
+                                deviceId: deviceId, hmacKeyBase64: hmacKeyBase64)
+    }
+
+    /// 내가 보낸 신청 취소.
+    @discardableResult
+    func cancelJoinRequest(deviceId: String, requestId: String,
+                           hmacKeyBase64: String) async throws -> GuildManageResponse {
+        try await requestAction(action: "cancel", guildId: nil, requestId: requestId,
+                                deviceId: deviceId, hmacKeyBase64: hmacKeyBase64)
+    }
+
+    /// 내가 보낸 대기중 신청 목록 (온보딩 "내 신청" 표시·취소용).
+    func listMyJoinRequests(deviceId: String,
+                            hmacKeyBase64: String) async throws -> [GuildOutgoingRequest] {
+        let resp: GuildRequestListResponse = try await requestAction(
+            action: "list", guildId: nil, requestId: nil,
+            deviceId: deviceId, hmacKeyBase64: hmacKeyBase64)
+        return resp.requests
+    }
+
+    /// 길드장 — 받은 가입신청 수락 → 신청자 편입. 자격 재검사 실패 시 guildConflict/guildCooldown.
+    @discardableResult
+    func approveJoinRequest(deviceId: String, requestId: String,
+                            hmacKeyBase64: String) async throws -> GuildManageResponse {
+        try await manageGuild(deviceId: deviceId, action: .approveRequest, requestId: requestId,
+                              hmacKeyBase64: hmacKeyBase64)
+    }
+
+    /// 길드장 — 받은 가입신청 거절 (거절 후 그 신청자는 이 길드에 24h 재신청 쿨다운).
+    @discardableResult
+    func rejectJoinRequest(deviceId: String, requestId: String,
+                           hmacKeyBase64: String) async throws -> GuildManageResponse {
+        try await manageGuild(deviceId: deviceId, action: .rejectRequest, requestId: requestId,
+                              hmacKeyBase64: hmacKeyBase64)
     }
 
     /// guild-office 공통 호출 — 액션별 래퍼가 아래에.
@@ -1580,6 +1684,8 @@ actor RankingAPI {
         // 초대
         "cannot_invite", "cannot_invite_self", "already_invited",
         "invite_not_found", "invite_expired", "redecline_cooldown", "too_many_pending",
+        // 가입신청
+        "already_requested", "request_not_found", "request_expired", "too_many_requests",
         // 쪽지
         "no_key", "cannot_send", "cannot_send_self", "cannot_block",
     ]

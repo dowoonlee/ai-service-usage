@@ -163,6 +163,54 @@ Deno.serve(async (req: Request) => {
     }));
   }
 
+  // 길드장에게만 — 받은 대기중 가입신청(수락/거절 UI용). 신청자 닉네임·대표펫 embed.
+  // requester_device_id만 users FK라 embed는 유일 관계로 해석됨.
+  let joinRequests: Array<{
+    requestId: string;
+    nickname: string | null;
+    githubLogin: string | null;
+    profileJson: unknown;
+    requestedAt: string;
+    expiresAt: string;
+  }> = [];
+  if (isLeader) {
+    const { data: reqRows } = await db
+      .from("guild_join_requests")
+      .select("id, requester_device_id, created_at, expires_at, users(nickname, github_login, profile_json)")
+      .eq("guild_id", guild.id)
+      .eq("status", "pending")
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: true });
+    const rows = reqRows ?? [];
+    // 이미 다른 길드에 소속된 신청자는 제외 — 승인해도 already_in_guild로 실패할 stale 신청.
+    const requesterIds = rows.map((r) => r.requester_device_id);
+    const inGuild = new Set<string>();
+    if (requesterIds.length > 0) {
+      const { data: members } = await db
+        .from("guild_members")
+        .select("device_id")
+        .in("device_id", requesterIds);
+      for (const m of members ?? []) inGuild.add(m.device_id);
+    }
+    joinRequests = rows
+      .filter((r) => !inGuild.has(r.requester_device_id))
+      .map((r) => {
+        const u = r.users as unknown as {
+          nickname: string;
+          github_login: string | null;
+          profile_json: unknown;
+        } | null;
+        return {
+          requestId: r.id,
+          nickname: u?.nickname ?? null,
+          githubLogin: u?.github_login ?? null,
+          profileJson: stripBackup(u?.profile_json ?? null),
+          requestedAt: r.created_at,
+          expiresAt: r.expires_at,
+        };
+      });
+  }
+
   return jsonResponse({
     guild: {
       id: guild.id,
@@ -186,5 +234,6 @@ Deno.serve(async (req: Request) => {
       donorNickname: (f.users as unknown as { nickname: string } | null)?.nickname ?? null,
     })),
     sentInvites,   // 길드장만 채워짐 (그 외 빈 배열)
+    joinRequests,  // 길드장만 채워짐 — 받은 대기중 가입신청 (그 외 빈 배열)
   });
 });
