@@ -106,13 +106,24 @@ Deno.serve(async (req: Request) => {
         currency: grant.currency, amount: grant.amount, claimedAt: grant.claimed_at,
       });
     }
-    const { error: gErr } = await db
+    // 원자적 claim — claimed_at이 여전히 NULL일 때만 갱신. 위 select→update 사이에 같은
+    // device의 동시 요청이 끼어도 UPDATE ... WHERE claimed_at IS NULL 이라 하나만 성공한다
+    // (affected rows=0 → 다른 요청이 먼저 수령 → 이 요청은 재크레딧 방지).
+    const { data: updated, error: gErr } = await db
       .from("reward_grants")
       .update({ claimed_at: new Date().toISOString() })
-      .eq("id", grant.id);
+      .eq("id", grant.id)
+      .is("claimed_at", null)
+      .select("id");
     if (gErr) {
       console.error("grant claim update failed", gErr);
       return errorResponse(500, "claim_failed");
+    }
+    if (!updated || updated.length === 0) {
+      return jsonResponse({
+        alreadyClaimed: true, rewardType: "grant",
+        currency: grant.currency, amount: grant.amount,
+      });
     }
     return jsonResponse({
       alreadyClaimed: false, rewardType: "grant",
@@ -139,13 +150,18 @@ Deno.serve(async (req: Request) => {
     if (row.claimed_at) {
       return jsonResponse({ alreadyClaimed: true, rewardType: "rp", rp: row.rp_amount, claimedAt: row.claimed_at });
     }
-    const { error: rpErr } = await db
+    const { data: rpUpdated, error: rpErr } = await db
       .from("rp_rewards")
       .update({ claimed_at: new Date().toISOString() })
-      .eq("id", row.id);
+      .eq("id", row.id)
+      .is("claimed_at", null)
+      .select("id");
     if (rpErr) {
       console.error("rp claim update failed", rpErr);
       return errorResponse(500, "claim_failed");
+    }
+    if (!rpUpdated || rpUpdated.length === 0) {
+      return jsonResponse({ alreadyClaimed: true, rewardType: "rp", rp: row.rp_amount });
     }
     return jsonResponse({ alreadyClaimed: false, rewardType: "rp", rp: row.rp_amount, claimedAt: new Date().toISOString() });
   }
@@ -171,13 +187,20 @@ Deno.serve(async (req: Request) => {
   }
 
   // claim 완료 처리.
-  const { error } = await db
+  const { data: coinUpdated, error } = await db
     .from("monthly_winners")
     .update({ reward_claimed_at: new Date().toISOString() })
-    .eq("id", winner.id);
+    .eq("id", winner.id)
+    .is("reward_claimed_at", null)
+    .select("id");
   if (error) {
     console.error("claim update failed", error);
     return errorResponse(500, "claim_failed");
+  }
+  if (!coinUpdated || coinUpdated.length === 0) {
+    return jsonResponse({
+      alreadyClaimed: true, rewardType: "coins", rewardCoins: winner.reward_coins,
+    });
   }
 
   return jsonResponse({
