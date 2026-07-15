@@ -36,7 +36,7 @@ interface QuizRequest {
 const MAX_CLOCK_SKEW_SEC = 3600;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const OPENAI_MODEL = "gpt-4o-mini";
-const PROMPT_VERSION = "quiz-v2";  // v2: 5건 종합 → 기사 1건 기반 출제로 변경
+const PROMPT_VERSION = "quiz-v3";  // v3: brief를 근거로 못박고(요약 밖 출제 금지) 본문 확보 강화
 const MODEL_LABEL = `${OPENAI_MODEL}:${PROMPT_VERSION}`;
 const NUM_QUESTIONS = 3;
 const NUM_CHOICES = 4;
@@ -312,9 +312,11 @@ function parseFeed(xml: string): { title: string; link: string; summary: string 
     const title = cleanText(extractTag(body, "title"));
     if (!title) continue;
     const link = extractLink(body);
+    // content:encoded(전문/긴 발췌)를 최우선 — description만으론 짧아 문제 근거가 부족했다.
     const summary = cleanText(
-      extractTag(body, "description") || extractTag(body, "summary") || extractTag(body, "content"),
-    ).slice(0, 600);
+      extractTag(body, "content:encoded") || extractTag(body, "description") ||
+      extractTag(body, "summary") || extractTag(body, "content"),
+    ).slice(0, 2000);
     out.push({ title, link, summary });
   }
   return out;
@@ -351,14 +353,16 @@ interface GeneratedQuestion { question: string; choices: string[]; answer: numbe
 interface GeneratedQuiz { brief: string; questions: GeneratedQuestion[]; }
 
 async function generateQuiz(article: Article, apiKey: string): Promise<GeneratedQuiz> {
-  const articleText = `제목: ${article.title}\n\n요약: ${article.summary}`;
+  const articleText = `제목: ${article.title}\n\n본문: ${article.summary}`;
 
   const systemPrompt = [
     "당신은 최신 AI 뉴스 기사 하나를 개발자용 퀴즈로 만드는 출제자입니다.",
-    "입력으로 AI 관련 뉴스 기사 한 건의 제목과 요약이 주어집니다.",
-    `이 기사 하나를 바탕으로 (1) 기사 핵심을 한국어 2-3문장으로 요약한 brief, (2) ${NUM_QUESTIONS}개의 4지선다 객관식 문제를 만드세요.`,
-    "문제는 이 기사 내용에 근거해야 하며, 기사 요약만 읽어도 풀 수 있어야 합니다(기사에 없는 지엽적 사실 금지).",
-    "각 문제는 보기 4개 중 정답 1개. 오답도 그럴듯해야 합니다.",
+    "입력으로 AI 관련 뉴스 기사 한 건의 제목과 본문이 주어집니다.",
+    `먼저 이 기사를 한국어 3-4문장으로 충실히 요약한 brief를 쓰고, 그 brief에 담긴 사실만으로 ${NUM_QUESTIONS}개의 4지선다 문제를 만드세요.`,
+    "가장 중요한 규칙: 모든 문제와 정답은 당신이 쓴 brief 문장 안에서 반드시 확인 가능해야 합니다. brief만 읽은 사람이 답을 고를 수 없는 문제(brief에 안 나온 날짜·행사명·수치·인물·장소 등)는 절대 출제하지 마세요.",
+    "기사 본문에 없는 외부 지식이나 추측으로 문제·정답을 만들지 마세요. 근거가 불확실한 소재는 아예 문제로 내지 마세요.",
+    "각 문제를 만들 때 '이 정답의 근거가 brief 어느 문장에 있는가'를 스스로 확인하고, 근거가 없으면 그 문제를 버리고 다른 소재로 바꾸세요.",
+    "각 문제는 보기 4개 중 정답 1개. 오답도 그럴듯하되 brief를 근거로 명확히 배제 가능해야 합니다.",
     "정답 위치(index)는 문제마다 고르게 섞으세요.",
     "출력은 반드시 JSON: {\"brief\": string, \"questions\": [{\"question\": string, \"choices\": [4개 string], \"answer\": 0-3 정수}]}.",
     "모든 텍스트는 한국어. 이모지 없이.",
