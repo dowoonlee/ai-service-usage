@@ -313,6 +313,11 @@ final class Settings: ObservableObject {
     @Published var dailyFortuneLastShownDate: Date? {
         didSet { UserDefaults.standard.set(dailyFortuneLastShownDate, forKey: Keys.dailyFortuneLastShownDate) }
     }
+    /// 오늘의 AI 뉴스 퀴즈를 마지막으로 푼 날짜 — topBar dot(오늘 미완료 표시)용 로컬 캐시.
+    /// 실제 제출 상태의 source-of-truth는 서버(daily_quiz_submissions); 이 값은 dot 즉시 반영용.
+    @Published var dailyQuizLastSolvedDate: Date? {
+        didSet { UserDefaults.standard.set(dailyQuizLastSolvedDate, forKey: Keys.dailyQuizLastSolvedDate) }
+    }
 
     // MARK: - 도장 (Gym Badges)
     //
@@ -349,6 +354,15 @@ final class Settings: ObservableObject {
     /// Night Owl — 자정~6시 polling cycle의 sleep length 누적 (초).
     @Published var nightOwlSecondsAccumulated: Int {
         didSet { UserDefaults.standard.set(nightOwlSecondsAccumulated, forKey: Keys.nightOwlSecondsAccumulated) }
+    }
+    /// 사용량 스트릭 — 실제 usage 이벤트가 발생한 연속 일수. StreakLedger가 그날 첫 이벤트에 갱신.
+    /// Heartbeat(폴링 생존)와 달리 실제 사용량이 있어야만 오르므로 조작 불가.
+    @Published var usageStreak: Int {
+        didSet { UserDefaults.standard.set(usageStreak, forKey: Keys.usageStreak) }
+    }
+    /// 사용량 스트릭 판정 기준일 — 마지막으로 usage가 인정된 날. 같은 날 재발동 방지 + 연속성 판정.
+    @Published var usageStreakLastDay: Date? {
+        didSet { UserDefaults.standard.set(usageStreakLastDay, forKey: Keys.usageStreakLastDay) }
     }
     /// 클리어된 뱃지 ID 집합. 형식: `"<category>.<tier>"` (예: `"standup.production"`).
     @Published var clearedBadges: Set<String> {
@@ -743,6 +757,7 @@ final class Settings: ObservableObject {
         self.firstCreditedAt = d.object(forKey: Keys.firstCreditedAt) as? Date
         self.lastWellnessShownAt = d.object(forKey: Keys.lastWellnessShownAt) as? Date
         self.dailyFortuneLastShownDate = d.object(forKey: Keys.dailyFortuneLastShownDate) as? Date
+        self.dailyQuizLastSolvedDate = d.object(forKey: Keys.dailyQuizLastSolvedDate) as? Date
 
         self.githubLogin = d.string(forKey: Keys.githubLogin)
         self.githubUserID = (d.object(forKey: Keys.githubUserID) as? Int)
@@ -803,6 +818,8 @@ final class Settings: ObservableObject {
         self.heartbeatStreak        = (d.object(forKey: Keys.heartbeatStreak) as? Int) ?? 0
         self.heartbeatLastActiveAt  = d.object(forKey: Keys.heartbeatLastActiveAt) as? Date
         self.nightOwlSecondsAccumulated = (d.object(forKey: Keys.nightOwlSecondsAccumulated) as? Int) ?? 0
+        self.usageStreak            = (d.object(forKey: Keys.usageStreak) as? Int) ?? 0
+        self.usageStreakLastDay     = d.object(forKey: Keys.usageStreakLastDay) as? Date
         let clearedData = d.data(forKey: Keys.clearedBadges)
         let loadedClearedBadges: Set<String> = (clearedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.clearedBadges = loadedClearedBadges
@@ -1511,6 +1528,7 @@ final class Settings: ObservableObject {
         static let firstCreditedAt             = "settings.firstCreditedAt"
         static let lastWellnessShownAt         = "settings.lastWellnessShownAt"
         static let dailyFortuneLastShownDate   = "settings.dailyFortuneLastShownDate"
+        static let dailyQuizLastSolvedDate     = "settings.dailyQuizLastSolvedDate"
         static let githubCreatedAt             = "settings.githubCreatedAt"
         static let petUsageSeconds             = "settings.petUsageSeconds"
         static let pendingHighlights           = "settings.pendingHighlights"
@@ -1558,6 +1576,8 @@ final class Settings: ObservableObject {
         static let heartbeatStreak             = "settings.heartbeatStreak"
         static let heartbeatLastActiveAt       = "settings.heartbeatLastActiveAt"
         static let nightOwlSecondsAccumulated  = "settings.nightOwlSecondsAccumulated"
+        static let usageStreak                 = "settings.usageStreak"
+        static let usageStreakLastDay          = "settings.usageStreakLastDay"
         static let clearedBadges               = "settings.clearedBadges"
         static let masteredRegions             = "settings.masteredRegions"
         static let creditedBadgeRewards        = "settings.creditedBadgeRewards"

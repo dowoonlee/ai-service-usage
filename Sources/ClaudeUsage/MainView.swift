@@ -360,6 +360,24 @@ struct MainView: View {
                 }
                 .buttonStyle(.borderless)
                 .help(vm.boardUnreadCount > 0 ? "게시판 (미확인 \(vm.boardUnreadCount)개)" : "게시판 열기")
+                // 오늘의 AI 퀴즈 — 오늘 안 풀었으면 빨간 dot 배지. 게시판 바로 옆.
+                Button {
+                    QuizWindowController.shared.present()
+                } label: {
+                    Image(systemName: "newspaper.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Color.orange)
+                        .overlay(alignment: .topTrailing) {
+                            if !Calendar.current.isDateInToday(settings.dailyQuizLastSolvedDate ?? .distantPast) {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 5, height: 5)
+                                    .offset(x: 4, y: -2)
+                            }
+                        }
+                }
+                .buttonStyle(.borderless)
+                .help("오늘의 AI 퀴즈")
                 // 오늘의 개발 운세 — 오늘 한 번도 안 봤으면 빨간 dot 배지.
                 Button {
                     onDailyFortune()

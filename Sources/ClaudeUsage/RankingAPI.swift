@@ -1479,6 +1479,85 @@ actor RankingAPI {
         return resp.row
     }
 
+    // MARK: - 오늘의 AI 뉴스 퀴즈 (daily-quiz)
+
+    /// 전역 1세트/일. 문제·보기만 내려오고 정답은 서버에만 — 채점도 서버가 한다.
+    struct DailyQuizResponse: Decodable, Sendable {
+        let date: String
+        let brief: String
+        let sourceName: String
+        let sourceTitle: String
+        let sourceUrl: String
+        let questions: [QuizQuestion]
+        /// 이미 제출했으면 결과(+ 정답), 미제출이면 nil.
+        let submission: QuizSubmission?
+    }
+    struct QuizQuestion: Decodable, Sendable {
+        let question: String
+        let choices: [String]
+    }
+    struct QuizSubmission: Decodable, Sendable {
+        let correctCount: Int
+        let rewardCoins: Int
+        let answers: [Int]     // 내가 낸 답
+        let correct: [Int]?    // 정답 (제출 후 공개)
+    }
+    /// 채점 결과. 코인은 서버가 reward_grants에 적재 → 다음 leaderboard 폴링에서 자동 수령.
+    struct DailyQuizSubmitResponse: Decodable, Sendable {
+        let alreadySubmitted: Bool
+        let correctCount: Int
+        let rewardCoins: Int
+        let correct: [Int]     // 정답
+        let submitted: [Int]   // 내가 낸 답
+    }
+
+    private struct DailyQuizTodayPayload: Encodable {
+        let action: String
+        let date: String
+        let deviceId: String
+        let ts: Int64
+    }
+    private struct DailyQuizSubmitPayload: Encodable {
+        let action: String
+        let answersJson: String
+        let date: String
+        let deviceId: String
+        let ts: Int64
+    }
+    private struct DailyQuizTodayRequest: Encodable {
+        let payload: DailyQuizTodayPayload
+        let signature: String
+    }
+    private struct DailyQuizSubmitRequest: Encodable {
+        let payload: DailyQuizSubmitPayload
+        let signature: String
+    }
+
+    /// 오늘 퀴즈 조회 — 서버가 캐시 조회 → 미스 시 RSS fetch + OpenAI 생성 → 반환.
+    func fetchDailyQuiz(deviceId: String, hmacKeyBase64: String,
+                        date: String) async throws -> DailyQuizResponse {
+        let payload = DailyQuizTodayPayload(
+            action: "today", date: date, deviceId: deviceId,
+            ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let req = DailyQuizTodayRequest(payload: payload, signature: sig)
+        return try await post(path: "daily-quiz", body: req)
+    }
+
+    /// 답안 제출 — 서버 채점 + 코인 지급(reward_grants). 이미 풀었으면 alreadySubmitted=true로 기존 결과.
+    func submitDailyQuiz(deviceId: String, hmacKeyBase64: String,
+                         date: String, answers: [Int]) async throws -> DailyQuizSubmitResponse {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let answersJson = String(data: try enc.encode(answers), encoding: .utf8) ?? "[]"
+        let payload = DailyQuizSubmitPayload(
+            action: "submit", answersJson: answersJson, date: date, deviceId: deviceId,
+            ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let req = DailyQuizSubmitRequest(payload: payload, signature: sig)
+        return try await post(path: "daily-quiz", body: req)
+    }
+
     /// 응답 statusline + body 만 검증. 본문 디코드가 없는 endpoint(`executeVoid`)와
     /// 공유하기 위해 추출. 404는 호출 측이 body 메시지로 분기 매핑하므로 여기선
     /// generic `.http(404, body)`만 throw — 사용자에게 정확한 메시지 노출.
