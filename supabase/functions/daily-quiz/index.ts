@@ -36,7 +36,7 @@ interface QuizRequest {
 const MAX_CLOCK_SKEW_SEC = 3600;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const OPENAI_MODEL = "gpt-4o-mini";
-const PROMPT_VERSION = "quiz-v1";
+const PROMPT_VERSION = "quiz-v2";  // v2: 5건 종합 → 기사 1건 기반 출제로 변경
 const MODEL_LABEL = `${OPENAI_MODEL}:${PROMPT_VERSION}`;
 const NUM_QUESTIONS = 3;
 const NUM_CHOICES = 4;
@@ -241,23 +241,23 @@ async function ensureTodayQuiz(db: ReturnType<typeof getDb>, date: string): Prom
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) throw new Error("openai_not_configured");
 
-  // 1) RSS에서 최신 기사 확보 (날짜 seed로 소스 로테이션).
+  // 1) RSS에서 후보 확보 → 최신 1건 선택. 문제는 이 기사 하나에서만 출제(출처 링크와 정확히 일치).
   const articles = await fetchArticles(date);
   if (articles.length === 0) throw new Error("no_articles");
+  const article = articles[0];
 
-  // 2) OpenAI로 브리핑 + 3문항 생성.
-  const generated = await generateQuiz(articles, apiKey);
+  // 2) OpenAI로 그 기사 하나에서 브리핑 + 3문항 생성.
+  const generated = await generateQuiz(article, apiKey);
 
   // 3) 정답 분리 저장. questions(클라용)엔 answer 제거.
   const questions = generated.questions.map((q) => ({ question: q.question, choices: q.choices }));
   const answers = generated.questions.map((q) => q.answer);
-  const head = articles[0];
 
   const row: QuizRow & { model_label: string } = {
     brief: generated.brief,
-    source_name: articles.length > 1 ? `${head.source} 외 ${articles.length - 1}건` : head.source,
-    source_title: head.title,
-    source_url: head.link,
+    source_name: article.source,
+    source_title: article.title,
+    source_url: article.link,
     questions,
     answers,
     model_label: MODEL_LABEL,
@@ -350,16 +350,14 @@ function cleanText(s: string): string {
 interface GeneratedQuestion { question: string; choices: string[]; answer: number; }
 interface GeneratedQuiz { brief: string; questions: GeneratedQuestion[]; }
 
-async function generateQuiz(articles: Article[], apiKey: string): Promise<GeneratedQuiz> {
-  const brief = articles
-    .map((a, i) => `[${i + 1}] ${a.title}\n${a.summary}`)
-    .join("\n\n");
+async function generateQuiz(article: Article, apiKey: string): Promise<GeneratedQuiz> {
+  const articleText = `제목: ${article.title}\n\n요약: ${article.summary}`;
 
   const systemPrompt = [
-    "당신은 최신 AI 뉴스를 개발자용 퀴즈로 만드는 출제자입니다.",
-    "입력으로 오늘의 AI 관련 뉴스 기사 제목과 요약이 주어집니다.",
-    `이를 종합해 (1) 오늘의 AI 근황을 한국어 2-3문장으로 요약한 brief, (2) ${NUM_QUESTIONS}개의 4지선다 객관식 문제를 만드세요.`,
-    "문제는 제공된 뉴스 내용에 근거해야 하며, 기사 요약만 읽어도 풀 수 있어야 합니다(기사에 없는 지엽적 사실 금지).",
+    "당신은 최신 AI 뉴스 기사 하나를 개발자용 퀴즈로 만드는 출제자입니다.",
+    "입력으로 AI 관련 뉴스 기사 한 건의 제목과 요약이 주어집니다.",
+    `이 기사 하나를 바탕으로 (1) 기사 핵심을 한국어 2-3문장으로 요약한 brief, (2) ${NUM_QUESTIONS}개의 4지선다 객관식 문제를 만드세요.`,
+    "문제는 이 기사 내용에 근거해야 하며, 기사 요약만 읽어도 풀 수 있어야 합니다(기사에 없는 지엽적 사실 금지).",
     "각 문제는 보기 4개 중 정답 1개. 오답도 그럴듯해야 합니다.",
     "정답 위치(index)는 문제마다 고르게 섞으세요.",
     "출력은 반드시 JSON: {\"brief\": string, \"questions\": [{\"question\": string, \"choices\": [4개 string], \"answer\": 0-3 정수}]}.",
@@ -373,7 +371,7 @@ async function generateQuiz(articles: Article[], apiKey: string): Promise<Genera
       model: OPENAI_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `오늘의 AI 뉴스:\n\n${brief}` },
+        { role: "user", content: articleText },
       ],
       temperature: 0.4,
       max_tokens: 1200,
