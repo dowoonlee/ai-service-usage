@@ -14,6 +14,12 @@ export const INVITE_EXPIRE_SEC = 7 * 24 * 3600;        // 초대 만료 (7일)
 export const INVITE_REDECLINE_COOLDOWN_SEC = 24 * 3600; // 거절 후 같은 길드의 재초대 쿨다운 (24시간)
 export const INVITE_MAX_PENDING_PER_GUILD = 30;         // 길드당 동시 대기중 초대 상한 (스팸 방지)
 
+// 가입신청 (guild_join_requests 테이블) — 초대장의 대칭. 유저가 신청 → 길드장 수락.
+export const REQUEST_EXPIRE_SEC = 7 * 24 * 3600;        // 신청 만료 (7일)
+export const REQUEST_REDECLINE_COOLDOWN_SEC = 24 * 3600; // 거절 후 같은 길드에 재신청 쿨다운 (24시간)
+export const REQUEST_MAX_PENDING_PER_GUILD = 50;         // 길드당 동시 대기중 신청 상한 (수신함 스팸 방지)
+export const REQUEST_MAX_PENDING_PER_USER = 10;          // 유저당 동시 보낸 신청 상한 (전 길드 무차별 신청 방지)
+
 // 가구 카탈로그 — 클라 OfficeLayout.furnitureCatalog와 쌍 (id 순서 재배열 금지).
 export const FURNITURE_KIND_COUNT = 11;                   // kind 0..10
 export const FURNITURE_WALL_KINDS = new Set([8, 9, 10]);  // 벽 전용(시계/액자/화이트보드) — lane 3 강제

@@ -1137,7 +1137,8 @@ enum GuildOfficeDemo {
                 officeFurniture: furnitureLayout, createdAt: Date(),
                 score: 8420, rank: 3, memberCount: members.count)
             return RankingAPI.GuildInfoResponse(guild: guild, members: members,
-                                                furniture: decorItems, sentInvites: nil)
+                                                furniture: decorItems, sentInvites: nil,
+                                                joinRequests: nil)
         }
 
         var body: some View {

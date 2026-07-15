@@ -48,6 +48,11 @@ struct GuildView: View {
     /// 가구 구매 카탈로그 popover — "가구 구매" 버튼이 재배치 진입과 함께 연다.
     @State private var purchaseSheetOpen = false
 
+    /// 온보딩 "길드 둘러보기" 리스트 (guild-leaderboard) + 내가 보낸 가입신청.
+    @State private var browseGuilds: [RankingAPI.GuildLeaderboardEntry] = []
+    @State private var myRequests: [RankingAPI.GuildOutgoingRequest] = []
+    @State private var browseLoading: Bool = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -183,13 +188,83 @@ struct GuildView: View {
                 }
 
                 Divider()
+                browseSection
+
                 Text("받은 길드 초대는 상단 ✉️ 쪽지함에서 확인·수락할 수 있어요.")
-                    .font(.system(size: 11)).foregroundStyle(.secondary)
-                Text("길드 순위는 랭킹 탭 → 길드에서 확인할 수 있어요.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             .padding(14)
         }
+    }
+
+    // MARK: - 길드 둘러보기 · 가입신청 (온보딩)
+
+    /// 가입신청 대상 길드 리스트 + 내가 보낸 신청(취소). 신청하면 길드장이 수락 시 가입된다.
+    private var browseSection: some View {
+        let requestedIds = Set(myRequests.map { $0.guildId })
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Label("길드 둘러보기 · 가입신청", systemImage: "magnifyingglass")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                if browseLoading { ProgressView().controlSize(.mini) }
+            }
+            Text("마음에 드는 길드에 가입을 신청하면 길드장이 수락할 때 가입돼요.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+
+            // 내가 보낸 신청 — 대기중. 둘러보기 리스트에 없는 길드도 여기서 취소 가능.
+            if !myRequests.isEmpty {
+                Text("보낸 신청 \(myRequests.count)건")
+                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                ForEach(myRequests) { req in
+                    HStack(spacing: 6) {
+                        Image(systemName: "paperplane.fill").font(.system(size: 9)).foregroundStyle(.teal)
+                        Text(req.guildName).font(.system(size: 11)).lineLimit(1)
+                        Text("· 대기중").font(.system(size: 9)).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("취소", role: .destructive) { performCancelJoinRequest(req.requestId) }
+                            .font(.system(size: 10)).controlSize(.mini).disabled(actionBusy)
+                    }
+                }
+                Divider().padding(.vertical, 2)
+            }
+
+            if browseGuilds.isEmpty {
+                if !browseLoading {
+                    Text("아직 둘러볼 길드가 없어요. 직접 창설해보는 건 어때요?")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(browseGuilds) { g in
+                    browseRow(g, alreadyRequested: requestedIds.contains(g.guildId))
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.teal.opacity(0.06)))
+    }
+
+    private func browseRow(_ g: RankingAPI.GuildLeaderboardEntry, alreadyRequested: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text("\(g.rank)")
+                .font(.system(size: 11, weight: g.rank <= 3 ? .bold : .regular))
+                .monospacedDigit().frame(width: 20, alignment: .trailing)
+            Text(g.name).font(.system(size: 11)).lineLimit(1)
+            Text("\(g.memberCount)명").font(.system(size: 9)).foregroundStyle(.secondary)
+            Spacer()
+            Text("\(g.score) VP").font(.system(size: 10, design: .monospaced)).foregroundStyle(.purple)
+            if alreadyRequested {
+                Text("신청됨").font(.system(size: 10)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.15)))
+            } else {
+                Button("신청") { performSendJoinRequest(g.guildId) }
+                    .font(.system(size: 10)).controlSize(.small)
+                    .disabled(actionBusy || isCoolingDown)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     private func cooldownBanner(_ until: Date) -> some View {
@@ -320,6 +395,56 @@ struct GuildView: View {
         inviteNicknameDraft.trimmingCharacters(in: .whitespaces).count >= 3
     }
 
+    // MARK: - 가입신청 수신함 (길드장, 내 길드)
+
+    /// 받은 가입신청 목록 — 신청자 대표펫 + 닉네임 + 수락/거절. 대기중 신청이 없으면 숨김.
+    @ViewBuilder
+    private func requestsSection(_ info: RankingAPI.GuildInfoResponse) -> some View {
+        let requests = info.joinRequests ?? []
+        if !requests.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("가입신청 \(requests.count)건", systemImage: "person.fill.questionmark")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("가입을 신청한 트레이너입니다. 수락하면 바로 멤버가 됩니다.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                ForEach(requests) { req in
+                    HStack(spacing: 8) {
+                        requestAvatar(req)
+                        Text(req.nickname ?? "(알 수 없음)").font(.system(size: 12)).lineLimit(1)
+                        Spacer()
+                        Button("수락") { performApproveRequest(req.requestId) }
+                            .font(.system(size: 10)).controlSize(.small).disabled(actionBusy)
+                        Button("거절", role: .destructive) { performRejectRequest(req.requestId) }
+                            .font(.system(size: 10)).controlSize(.small).disabled(actionBusy)
+                    }
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.orange.opacity(0.07)))
+        }
+    }
+
+    /// 신청자 대표펫 아바타 — 프로필 스냅샷에서 렌더 (없으면 사람 아이콘). 시상대 아바타와 동일 규약.
+    @ViewBuilder
+    private func requestAvatar(_ req: RankingAPI.GuildIncomingRequest) -> some View {
+        if let sel = req.profileJson?.card.avatar,
+           let img = PetSprite.image(for: sel.kind, action: .walk, frameIndex: 0) {
+            Image(nsImage: img)
+                .interpolation(.none)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .hueRotation(.degrees(sel.variant == PetOwnership.prestigeVariant
+                    ? 0 : WalkingCat.hueDegrees(for: sel.variant)))
+                .scaleEffect(x: sel.kind.defaultFacingLeft ? -1 : 1, y: 1)
+                .frame(width: 22, height: 22)
+        } else {
+            Image(systemName: "person.crop.circle")
+                .font(.system(size: 16)).foregroundStyle(.secondary)
+                .frame(width: 22, height: 22)
+        }
+    }
+
     // MARK: - 길드명 변경 (길드장, RP 300)
 
     /// 새 길드명 입력 + 변경 버튼. 서버가 유일성·형식을 검증하고, 성공 시 RP를 차감한다.
@@ -387,6 +512,7 @@ struct GuildView: View {
                 Divider()
                 inviteCodeSection(info.guild)
                 if info.guild.isLeader {
+                    requestsSection(info)
                     inviteSection(info)
                     renameSection(info.guild)
                 }
@@ -560,6 +686,9 @@ struct GuildView: View {
                 info = resp
                 notInGuild = false
                 cooldownUntil = nil
+                // 가입 완료 → 온보딩 둘러보기 데이터는 더 이상 불필요.
+                browseGuilds = []
+                myRequests = []
                 // 표시 캐시 동기화 — 서버가 SSOT.
                 settings.guildID = resp.guild.id
                 settings.guildName = resp.guild.name
@@ -572,6 +701,8 @@ struct GuildView: View {
                     settings.guildName = ""
                     settings.isGuildLeader = false
                 }
+                // 미가입 → 둘러보기 리스트 + 내가 보낸 신청 로드 (가입신청 UI용).
+                await loadOnboardingData(deviceId: deviceId, key: key)
             } catch is CancellationError {
                 return
             } catch {
@@ -580,6 +711,17 @@ struct GuildView: View {
             // 받은 초대는 통합 인박스(쪽지함, DMViewModel)에서 조회·수락/거절한다.
             // 길드 랭킹 리스트는 랭킹 탭 → 길드 스코프로 이동 (RankingView.guildContent).
         }
+    }
+
+    /// 온보딩(미가입) 상태에서 둘러볼 길드 목록 + 내가 보낸 대기중 신청을 병렬 로드.
+    /// 실패는 조용히 무시 — 창설/코드 가입 경로는 이 데이터 없이도 동작한다.
+    private func loadOnboardingData(deviceId: String, key: String) async {
+        browseLoading = true
+        defer { browseLoading = false }
+        async let boardTask = RankingAPI.shared.fetchGuildLeaderboard(deviceId: deviceId)
+        async let reqsTask = RankingAPI.shared.listMyJoinRequests(deviceId: deviceId, hmacKeyBase64: key)
+        if let board = try? await boardTask { browseGuilds = board.entries }
+        if let reqs = try? await reqsTask { myRequests = reqs }
     }
 
     private func performPermitPurchase() {
@@ -625,6 +767,47 @@ struct GuildView: View {
             return "대기 중인 초대가 너무 많습니다."
         default:
             return nil
+        }
+    }
+
+    // MARK: - 가입신청 액션
+
+    /// 신청자 — 리스트에서 고른 길드에 가입신청. 중복/쿨다운 등은 friendly 메시지.
+    private func performSendJoinRequest(_ guildId: String) {
+        runAction {
+            _ = try await RankingAPI.shared.sendJoinRequest(
+                deviceId: settings.rankingDeviceID, guildId: guildId,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            DebugLog.log("Guild: 가입신청 발송 → \(guildId)")
+        }
+    }
+
+    /// 신청자 — 내가 보낸 신청 취소.
+    private func performCancelJoinRequest(_ requestId: String) {
+        runAction {
+            _ = try await RankingAPI.shared.cancelJoinRequest(
+                deviceId: settings.rankingDeviceID, requestId: requestId,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+        }
+    }
+
+    /// 길드장 — 받은 가입신청 수락 → 신청자 편입.
+    private func performApproveRequest(_ requestId: String) {
+        runAction {
+            _ = try await RankingAPI.shared.approveJoinRequest(
+                deviceId: settings.rankingDeviceID, requestId: requestId,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            DebugLog.log("Guild: 가입신청 수락 \(requestId)")
+        }
+    }
+
+    /// 길드장 — 받은 가입신청 거절.
+    private func performRejectRequest(_ requestId: String) {
+        runAction {
+            _ = try await RankingAPI.shared.rejectJoinRequest(
+                deviceId: settings.rankingDeviceID, requestId: requestId,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            DebugLog.log("Guild: 가입신청 거절 \(requestId)")
         }
     }
 

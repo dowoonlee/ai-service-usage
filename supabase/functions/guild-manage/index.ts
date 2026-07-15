@@ -31,9 +31,11 @@ import {
 } from "../_shared/guild_policy.ts";
 
 type ManageAction =
-  | "kick" | "rotate_code" | "disband" | "set_furniture" | "invite" | "cancel_invite" | "rename";
+  | "kick" | "rotate_code" | "disband" | "set_furniture" | "invite" | "cancel_invite" | "rename"
+  | "approve_request" | "reject_request";
 const MANAGE_ACTIONS: ReadonlySet<string> = new Set([
   "kick", "rotate_code", "disband", "set_furniture", "invite", "cancel_invite", "rename",
+  "approve_request", "reject_request",
 ]);
 
 interface ManagePayload {
@@ -46,6 +48,8 @@ interface ManagePayload {
   targetNickname?: string;
   // cancel_invite 전용 — 취소할 초대 id (UUID).
   inviteId?: string;
+  // approve_request/reject_request 전용 — 처리할 가입신청 id (UUID).
+  requestId?: string;
   // rename 전용 — 새 길드명 (2~24자, isValidGuildName).
   newName?: string;
   ts: number;
@@ -85,6 +89,10 @@ Deno.serve(async (req: Request) => {
   }
   if (p.action === "cancel_invite" && !isValidUUID(p.inviteId ?? "")) {
     return errorResponse(400, "invalid_invite_id");
+  }
+  if ((p.action === "approve_request" || p.action === "reject_request") &&
+      !isValidUUID(p.requestId ?? "")) {
+    return errorResponse(400, "invalid_request_id");
   }
   // rename: 새 길드명 형식(2~24자, 제어문자·앞뒤공백·연속공백 금지) — guild-create와 동일 규칙.
   if (p.action === "rename" && !isValidGuildName(p.newName)) {
@@ -182,6 +190,7 @@ Deno.serve(async (req: Request) => {
   // 클라이언트가 액션별로만 키를 직렬화 → canonical 재현도 동일 조건(present-only).
   if (typeof p.targetNickname === "string") verifyObj.targetNickname = p.targetNickname;
   if (typeof p.inviteId === "string") verifyObj.inviteId = p.inviteId;
+  if (typeof p.requestId === "string") verifyObj.requestId = p.requestId;
   if (typeof p.newName === "string") verifyObj.newName = p.newName;
   const ok = await verifyHmac(verifyObj, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
@@ -346,6 +355,99 @@ Deno.serve(async (req: Request) => {
       if (updErr) {
         console.error("guild cancel_invite failed", updErr);
         return errorResponse(500, "cancel_failed");
+      }
+      return jsonResponse({ ok: true });
+    }
+
+    case "approve_request": {
+      // 이 길드로 온 대기중 + 미만료 가입신청만 승인 → 신청자를 멤버로 편입.
+      const { data: reqRow } = await db
+        .from("guild_join_requests")
+        .select("id, guild_id, requester_device_id, status, expires_at")
+        .eq("id", p.requestId!)
+        .maybeSingle();
+      if (!reqRow || reqRow.guild_id !== guild.id || reqRow.status !== "pending") {
+        return errorResponse(404, "request_not_found");
+      }
+      if (new Date(reqRow.expires_at).getTime() <= Date.now()) {
+        return errorResponse(410, "request_expired");
+      }
+      const requester = reqRow.requester_device_id;
+      const nowIso = new Date().toISOString();
+
+      // 신청자 자격 재검사 (신청 후 상태 변화 방어) — 존재·미차단·동일 테넌트.
+      const { data: requesterUser } = await db
+        .from("users")
+        .select("device_id, status, tenant_id")
+        .eq("device_id", requester)
+        .maybeSingle();
+      // 신청자 소멸/차단, 또는 신청 후 타 테넌트로 전환(one-way) → 가입 불가, 신청 정리 후 404.
+      if (!requesterUser || requesterUser.status === "banned" ||
+          requesterUser.tenant_id !== guild.tenant_id) {
+        await db.from("guild_join_requests")
+          .update({ status: "cancelled", responded_at: nowIso })
+          .eq("id", reqRow.id);
+        return errorResponse(404, "request_not_found");
+      }
+
+      // 재가입 쿨다운(탈퇴/추방) 중이면 승인 불가 — 신청은 유지(쿨다운 해제 후 재승인 가능).
+      const { data: cd } = await db
+        .from("guild_join_cooldowns")
+        .select("until")
+        .eq("device_id", requester)
+        .maybeSingle();
+      if (cd && new Date(cd.until).getTime() > Date.now()) {
+        return jsonResponse({ error: "join_cooldown", until: cd.until }, { status: 403 });
+      }
+
+      const { error: insErr } = await db
+        .from("guild_members")
+        .insert({ guild_id: guild.id, device_id: requester });
+      if (insErr) {
+        if (insErr.code === "23505") {
+          // 신청자가 이미 다른 길드 소속 → 이 신청은 무의미, 정리 후 409.
+          await db.from("guild_join_requests")
+            .update({ status: "cancelled", responded_at: nowIso })
+            .eq("id", reqRow.id);
+          return errorResponse(409, "already_in_guild");
+        }
+        console.error("guild approve_request insert failed", insErr);
+        return errorResponse(500, "approve_failed");
+      }
+
+      // 이 신청 accepted, 신청자의 나머지 대기중 신청/받은 초대는 무의미 → 정리.
+      await db.from("guild_join_requests")
+        .update({ status: "accepted", responded_at: nowIso })
+        .eq("id", reqRow.id);
+      await db.from("guild_join_requests")
+        .update({ status: "cancelled", responded_at: nowIso })
+        .eq("requester_device_id", requester)
+        .eq("status", "pending");
+      await db.from("guild_invites")
+        .update({ status: "cancelled", responded_at: nowIso })
+        .eq("invitee_device_id", requester)
+        .eq("status", "pending");
+
+      return jsonResponse({ ok: true });
+    }
+
+    case "reject_request": {
+      // 이 길드로 온 대기중 신청만 거절 (거절 후 이 신청자는 이 길드에 24h 재신청 쿨다운).
+      const { data: reqRow } = await db
+        .from("guild_join_requests")
+        .select("id, guild_id, status")
+        .eq("id", p.requestId!)
+        .maybeSingle();
+      if (!reqRow || reqRow.guild_id !== guild.id || reqRow.status !== "pending") {
+        return errorResponse(404, "request_not_found");
+      }
+      const { error: updErr } = await db
+        .from("guild_join_requests")
+        .update({ status: "declined", responded_at: new Date().toISOString() })
+        .eq("id", reqRow.id);
+      if (updErr) {
+        console.error("guild reject_request failed", updErr);
+        return errorResponse(500, "reject_failed");
       }
       return jsonResponse({ ok: true });
     }
