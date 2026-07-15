@@ -399,6 +399,10 @@ private struct LeaderboardRowView: View {
     let entry: RankingAPI.LeaderboardEntry
     let isMe: Bool
     @State private var hovering: Bool = false
+    /// 화면 우측 창에서 카드가 좌측 잘리지 않도록 hover 시점에 정하는 팝오버 방향.
+    @State private var cardArrowEdge: Edge = .leading
+    /// 행의 창 내부 왼쪽 x (GeometryReader로 추적) — 화면 절대 위치 계산용.
+    @State private var rowWindowMinX: CGFloat = 0
     /// 내 행은 서버 스냅샷 대신 로컬 트레이너 카드를 실시간 반영하기 위해 관찰
     /// (레포트에서 방금 바꾼 아바타·배경·칭호가 서버 submit 왕복 없이 즉시 보이도록).
     @ObservedObject private var settings = Settings.shared
@@ -410,8 +414,16 @@ private struct LeaderboardRowView: View {
             // (popover가 열린 채면 첫 클릭이 '닫기'로 소비되던 문제 해결).
             identityZone
                 .contentShape(Rectangle())
-                .onHover { hovering = $0 }
-                .popover(isPresented: $hovering, arrowEdge: .leading) { cardPopover }
+                .background(GeometryReader { geo in
+                    Color.clear
+                        .onAppear { rowWindowMinX = geo.frame(in: .global).minX }
+                        .onChange(of: geo.frame(in: .global).minX) { _, v in rowWindowMinX = v }
+                })
+                .onHover { isHovering in
+                    if isHovering { cardArrowEdge = adaptiveCardArrowEdge(rowWindowMinX: rowWindowMinX) }
+                    hovering = isHovering
+                }
+                .popover(isPresented: $hovering, arrowEdge: cardArrowEdge) { cardPopover }
             messageButton
                 .frame(width: 30)
             Text(formatVPRow(entry.totalCoins))

@@ -119,6 +119,10 @@ private struct ContributorCardView: View {
     let entry: RankingAPI.LeaderboardEntry?
     @State private var expanded: Bool = false
     @State private var showCard: Bool = false
+    /// 화면 우측 창에서 카드 좌측 잘림 방지 — hover 시 팝오버 방향 결정.
+    @State private var cardArrowEdge: Edge = .leading
+    /// 행의 창 내부 왼쪽 x (GeometryReader로 추적) — 화면 절대 위치 계산용.
+    @State private var rowWindowMinX: CGFloat = 0
 
     private var rarity: Rarity { ContributorRanking.rarity(forRank: rank) }
     /// 대표펫 = 매칭된 트레이너 카드 아바타 펫, 없으면 기본 펫(여우).
@@ -208,8 +212,16 @@ private struct ContributorCardView: View {
         // 대표펫 호버 → 카드 popover (랭킹 행과 동일한 hover→카드 UX).
         // 매칭된 기여자(랭킹 프로필 보유)는 진짜 트레이너 카드, 아니면 기여자 카드(여우) fallback.
         .contentShape(Circle())
-        .onHover { showCard = $0 }
-        .popover(isPresented: $showCard, arrowEdge: .leading) {
+        .background(GeometryReader { geo in
+            Color.clear
+                .onAppear { rowWindowMinX = geo.frame(in: .global).minX }
+                .onChange(of: geo.frame(in: .global).minX) { _, v in rowWindowMinX = v }
+        })
+        .onHover { isHovering in
+            if isHovering { cardArrowEdge = adaptiveCardArrowEdge(rowWindowMinX: rowWindowMinX) }
+            showCard = isHovering
+        }
+        .popover(isPresented: $showCard, arrowEdge: cardArrowEdge) {
             if let entry, let profile = entry.profileJson {
                 TrainerCardView(
                     card: profile.card,
