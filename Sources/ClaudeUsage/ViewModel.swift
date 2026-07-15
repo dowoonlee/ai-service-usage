@@ -165,6 +165,7 @@ final class ViewModel: ObservableObject {
         // 안전. UsageEventBus.register는 dedup이 있어 중복 호출 무해.
         UsageEventBus.shared.register(CoinLedger.shared)
         UsageEventBus.shared.register(VPLedger.shared)
+        UsageEventBus.shared.register(StreakLedger.shared)
 
         let d = UserDefaults.standard
         self.claudeCollapsed = d.bool(forKey: "section.claude.collapsed")
