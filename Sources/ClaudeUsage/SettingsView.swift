@@ -911,7 +911,7 @@ private struct CreditsView: View {
 }
 
 @MainActor
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, SingleWindowPresenting {
     convenience init() {
         let host = NSHostingController(rootView: SettingsView())
         let window = NSWindow(contentViewController: host)
@@ -923,8 +923,6 @@ final class SettingsWindowController: NSWindowController {
     }
 
     func present() {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
     }
 }

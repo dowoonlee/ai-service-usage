@@ -320,7 +320,7 @@ struct GachaView: View {
             hatchInProgress = false
             errorMessage = nil
         } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            errorMessage = error.friendlyDescription
             phase = .idle
         }
     }
@@ -345,7 +345,7 @@ struct GachaView: View {
             hatchInProgress = false
             errorMessage = nil
         } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            errorMessage = error.friendlyDescription
             phase = .idle
         }
     }
@@ -367,7 +367,7 @@ struct GachaView: View {
                 phase = .multiHatched(results)
             }
         } catch {
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            errorMessage = error.friendlyDescription
             phase = .idle
         }
     }
@@ -1844,7 +1844,7 @@ private struct PetPreviewView: View {
 }
 
 @MainActor
-final class GachaWindowController: NSWindowController {
+final class GachaWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = GachaWindowController()
 
     private convenience init() {
@@ -1860,9 +1860,7 @@ final class GachaWindowController: NSWindowController {
     /// 윈도우를 띄우면서 특정 탭으로 전환. `tab=nil`이면 마지막 선택 상태 유지.
     /// 외부(SettingsView 등)가 "보드 열기" 같은 라우팅에 사용.
     func present(tab: GachaView.Tab? = nil) {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
         if let tab {
             NotificationCenter.default.post(name: .gachaSwitchTab, object: tab)
         }

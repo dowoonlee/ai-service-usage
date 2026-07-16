@@ -148,11 +148,7 @@ struct GuildView: View {
     }
 
     private func placeholderView(_ msg: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "shield.lefthalf.filled").font(.system(size: 28)).foregroundStyle(.secondary)
-            Text(msg).font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        GateMessageView(icon: "shield.lefthalf.filled", message: msg)
     }
 
     /// 랭킹 미등록 게이트 — 길드는 랭킹 참여자 전용.

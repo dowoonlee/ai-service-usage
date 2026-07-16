@@ -26,13 +26,8 @@ final class DailyQuizVM: ObservableObject {
     /// 방금 제출한 결과(정답 공개). 재조회로 확인한 기존 제출은 `quiz.submission`이 담당.
     @Published var justSubmitted: RankingAPI.DailyQuizSubmitResponse?
 
-    private static let ymd: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = SajuEngine.kst   // 서버가 KST 오늘로 강제 — 동일 기준.
-        return f
-    }()
-    private func todayString() -> String { Self.ymd.string(from: Date()) }
+    // 서버가 KST 오늘로 강제 — 공용 `SajuEngine.kstDayFormatter`(동일 기준) 사용.
+    private func todayString() -> String { SajuEngine.kstDayFormatter.string(from: Date()) }
 
     func load() async {
         phase = .loading
@@ -342,7 +337,7 @@ private extension Array {
 // MARK: - Window Controller
 
 @MainActor
-final class QuizWindowController: NSWindowController {
+final class QuizWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = QuizWindowController()
 
     private convenience init() {
@@ -358,8 +353,6 @@ final class QuizWindowController: NSWindowController {
     }
 
     func present() {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
     }
 }

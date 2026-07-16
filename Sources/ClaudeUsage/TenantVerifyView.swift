@@ -290,7 +290,7 @@ final class TenantVerifyPromptManager {
 /// 사내 인증 시트를 전용 NSWindow로 띄우는 단일 인스턴스 컨트롤러(`GuideWindowController` 패턴).
 /// LSUIElement 앱이라 표시 직전 `NSApp.activate`로 앞으로 가져온다.
 @MainActor
-final class TenantVerifyWindowController: NSWindowController {
+final class TenantVerifyWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = TenantVerifyWindowController()
 
     convenience init() {
@@ -321,8 +321,6 @@ final class TenantVerifyWindowController: NSWindowController {
         if let frame = window?.frame {
             window?.setFrameOrigin(NSPoint(x: frame.origin.x + 60, y: frame.origin.y - 60))
         }
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
     }
 }

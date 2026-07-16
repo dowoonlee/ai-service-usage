@@ -839,6 +839,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self?.vm.handleClaudeLoggedIn()
             }
         }
+        // 로그인 완료 전 닫기(취소) 경로 — 참조를 놓지 않으면 다음 재로그인이 닫힌 창의
+        // showWindow로 빠져 무반응이 된다.
+        wc.onClosed = { [weak self] in
+            MainActor.assumeIsolated { self?.loginWC = nil }
+        }
         loginWC = wc
         wc.showWindow(nil)
     }

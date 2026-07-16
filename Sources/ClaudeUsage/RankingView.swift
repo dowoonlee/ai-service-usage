@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// 월간 랭킹 보드. 개인/길드 스코프 전환 (개인: Top N + 내 순위, 길드: 길드 순위 + 시상대).
-/// 5분에 한 번 자동 새로고침. `GachaView`의 .ranking 탭에 임베드 — 별도 윈도우 없음.
+/// 탭이 떠 있는 동안 5분 주기 자동 새로고침(startAutoRefresh). `GachaView`의 .ranking 탭에
+/// 임베드 — 별도 윈도우 없음.
 struct RankingView: View {
     @ObservedObject var settings = Settings.shared
     @State private var entries: [RankingAPI.LeaderboardEntry] = []
@@ -58,7 +59,7 @@ struct RankingView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { refresh() }
+        .onAppear { startAutoRefresh() }
         .onDisappear { refreshTask?.cancel() }
         .alert("시상대 한마디", isPresented: $editingPodium) {
             TextField("축하 인사를 남겨보세요", text: $podiumDraft)
@@ -285,7 +286,7 @@ struct RankingView: View {
                     message: msg, hmacKeyBase64: hmacKey)
                 refresh()   // 서버 반영분 재조회 → 말풍선이 등록 메시지로 잠긴다.
             } catch {
-                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                self.error = error.friendlyDescription
             }
         }
     }
@@ -342,20 +343,29 @@ struct RankingView: View {
     }
 
     private func placeholderView(_ msg: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "trophy").font(.system(size: 28)).foregroundStyle(.secondary)
-            Text(msg).font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        GateMessageView(icon: "trophy", message: msg)
+    }
+
+    /// 최초 1회 즉시 갱신 + 5분 주기 자동 갱신 루프 시작. `refreshTask`가 루프를 소유하고,
+    /// `onDisappear`에서 취소된다(GuildView.startAutoRefresh와 동일 패턴 — 임베드 탭 형제 뷰).
+    private func startAutoRefresh() {
+        refresh()
+        refreshTask?.cancel()
+        refreshTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(300))
+                if Task.isCancelled { break }
+                refresh()
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func refresh() {
-        refreshTask?.cancel()
         loading = true
         error = nil
         let deviceId = settings.rankingDeviceID.isEmpty ? nil : settings.rankingDeviceID
         let needGuild = scope == .guild || guildBoard != nil   // 길드 스코프면 항상, 아니면 이미 받아온 경우만 갱신
-        refreshTask = Task { @MainActor in
+        Task { @MainActor in
             defer { loading = false }
             do {
                 let resp = try await RankingAPI.shared.fetchLeaderboard(deviceId: deviceId)
@@ -377,7 +387,7 @@ struct RankingView: View {
             } catch is CancellationError {
                 return
             } catch {
-                self.error = error.localizedDescription
+                self.error = error.friendlyDescription
             }
             if needGuild {
                 // 길드 랭킹은 실패해도 개인 보드를 가리지 않게 조용히 무시.

@@ -412,7 +412,7 @@ enum ContributorRanking {
 }
 
 @MainActor
-final class ContributorsWindowController: NSWindowController {
+final class ContributorsWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = ContributorsWindowController()
 
     convenience init() {
@@ -428,8 +428,6 @@ final class ContributorsWindowController: NSWindowController {
     func present() {
         // 윈도우 열 때마다 캐시 검사 — 24h 지났으면 fetch.
         Task { await Contributors.shared.refreshIfNeeded() }
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
     }
 }
