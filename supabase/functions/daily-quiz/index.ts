@@ -36,7 +36,7 @@ interface QuizRequest {
 const MAX_CLOCK_SKEW_SEC = 3600;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const OPENAI_MODEL = "gpt-4o-mini";
-const PROMPT_VERSION = "quiz-v3";  // v3: brief를 근거로 못박고(요약 밖 출제 금지) 본문 확보 강화
+const PROMPT_VERSION = "quiz-v4";  // v4: 여러 피드 제목 풀 → LLM이 화제성·AI 핵심 기사 1건 선별
 const MODEL_LABEL = `${OPENAI_MODEL}:${PROMPT_VERSION}`;
 const NUM_QUESTIONS = 3;
 const NUM_CHOICES = 4;
@@ -241,12 +241,13 @@ async function ensureTodayQuiz(db: ReturnType<typeof getDb>, date: string): Prom
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) throw new Error("openai_not_configured");
 
-  // 1) RSS에서 후보 확보 → 최신 1건 선택. 문제는 이 기사 하나에서만 출제(출처 링크와 정확히 일치).
-  const articles = await fetchArticles(date);
+  // 1) 여러 AI 피드에서 최신 기사 제목을 모아, LLM이 화제성 높고 AI 핵심인 1건을 고른다.
+  //    (RSS엔 조회수가 없어 실제 인기순 정렬은 불가 — 화제성/중요도 판단을 LLM에 위임.)
+  const articles = await fetchAllArticles();
   if (articles.length === 0) throw new Error("no_articles");
-  const article = articles[0];
+  const article = await selectBestArticle(articles, apiKey);
 
-  // 2) OpenAI로 그 기사 하나에서 브리핑 + 3문항 생성.
+  // 2) OpenAI로 그 기사 하나에서 브리핑 + 3문항 생성. 문제는 이 기사에서만 출제(출처 링크와 일치).
   const generated = await generateQuiz(article, apiKey);
 
   // 3) 정답 분리 저장. questions(클라용)엔 answer 제거.
@@ -283,25 +284,63 @@ async function ensureTodayQuiz(db: ReturnType<typeof getDb>, date: string): Prom
 
 interface Article { title: string; link: string; summary: string; source: string; }
 
-async function fetchArticles(date: string): Promise<Article[]> {
-  // 날짜 문자열 해시로 시작 인덱스 → 매일 다른 소스 우선.
-  const seed = [...date].reduce((a, c) => a + c.charCodeAt(0), 0);
-  const order = FEEDS.map((_, i) => FEEDS[(seed + i) % FEEDS.length]);
-  for (const feed of order) {
+async function fetchAllArticles(): Promise<Article[]> {
+  // 모든 AI 피드를 병렬 fetch → 각 최신 5건을 후보 풀로 합친다 (LLM 선별 입력).
+  const results = await Promise.all(FEEDS.map(async (feed): Promise<Article[]> => {
     try {
       const resp = await fetch(feed.url, {
         headers: { "User-Agent": "AIUsage-DailyQuiz/1.0", "Accept": "application/rss+xml, application/xml, text/xml" },
         signal: AbortSignal.timeout(8000),
       });
-      if (!resp.ok) continue;
+      if (!resp.ok) return [];
       const xml = await resp.text();
-      const items = parseFeed(xml).slice(0, 5).map((it) => ({ ...it, source: feed.name }));
-      if (items.length >= 2) return items;
+      return parseFeed(xml).slice(0, 5).map((it) => ({ ...it, source: feed.name }));
     } catch (e) {
       console.error(`feed fetch failed: ${feed.url}`, e);
+      return [];
     }
+  }));
+  return results.flat();
+}
+
+// 후보 제목 목록을 LLM에 주고 퀴즈 소재로 가장 좋은 AI 기사 1건을 고르게 한다.
+// RSS엔 조회수가 없어 실제 인기순 정렬이 불가하므로, 화제성·중요도·AI 관련성 판단을 LLM에 맡긴다.
+// 실패(네트워크/파싱)하면 첫 기사로 폴백해 퀴즈 생성이 막히지 않게 한다.
+async function selectBestArticle(articles: Article[], apiKey: string): Promise<Article> {
+  if (articles.length <= 1) return articles[0];
+  const list = articles.map((a, i) => `${i}. [${a.source}] ${a.title}`).join("\n");
+  const systemPrompt = [
+    "당신은 개발자용 'AI 뉴스 퀴즈'의 기사 선별자입니다.",
+    "아래는 여러 매체의 최신 기사 제목 목록입니다 (형식: 번호. [매체] 제목).",
+    "이 중 퀴즈 소재로 가장 좋은 기사 하나의 번호를 고르세요.",
+    "기준: (1) AI/머신러닝이 핵심 주제일 것, (2) 화제성·중요도가 높을 것(단순 펀딩·인사·홍보성은 제외), (3) 사실관계가 분명해 문제를 낼 수 있을 것.",
+    "출력은 반드시 JSON: {\"index\": 정수}.",
+  ].join(" ");
+  try {
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: list },
+        ],
+        temperature: 0.2,
+        max_tokens: 20,
+        response_format: { type: "json_object" },
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!resp.ok) throw new Error(`select HTTP ${resp.status}`);
+    const data = await resp.json();
+    const idx = Number(JSON.parse(data?.choices?.[0]?.message?.content).index);
+    if (Number.isInteger(idx) && idx >= 0 && idx < articles.length) return articles[idx];
+    throw new Error(`bad index: ${idx}`);
+  } catch (e) {
+    console.error("selectBestArticle failed — fallback to first", e);
+    return articles[0];
   }
-  return [];
 }
 
 function parseFeed(xml: string): { title: string; link: string; summary: string }[] {
