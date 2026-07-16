@@ -264,20 +264,46 @@ async function ensureTodayQuiz(db: ReturnType<typeof getDb>, date: string): Prom
     model_label: MODEL_LABEL,
   };
 
-  const { error: insErr } = await db.from("daily_quiz").upsert(
-    {
-      quiz_date: date,
-      source_title: row.source_title,
-      source_url: row.source_url,
-      source_name: row.source_name,
-      brief: row.brief,
-      questions: row.questions,
-      answers: row.answers,
-      model_label: MODEL_LABEL,
-    },
-    { onConflict: "quiz_date" },
-  );
-  if (insErr) console.error("daily_quiz upsert failed (serving anyway)", insErr);
+  // 저장은 "선점" 방식 — 하루 첫 캐시미스에 동시 요청이 겹치면 둘 다 생성까지는 하지만,
+  // DB에는 한 버전만 남기고 모두가 그 승자 버전을 서빙해야 한다. 무조건 upsert(last-write-wins)
+  // 였다면 패자 버전을 본 사용자의 이후 submit 채점이 승자의 answers와 어긋난다.
+  const values = {
+    quiz_date: date,
+    source_title: row.source_title,
+    source_url: row.source_url,
+    source_name: row.source_name,
+    brief: row.brief,
+    questions: row.questions,
+    answers: row.answers,
+    model_label: MODEL_LABEL,
+  };
+  let persisted = false;
+  if (!existing) {
+    // 신규 — INSERT로 선점. PK(quiz_date) 충돌(23505)이면 경쟁자가 이미 이겼다는 뜻.
+    const { error: insErr } = await db.from("daily_quiz").insert(values);
+    if (!insErr) persisted = true;
+    else if (insErr.code !== "23505") console.error("daily_quiz insert failed", insErr);
+  } else {
+    // 구 model_label 갱신 — 기대값 조건부 UPDATE. 0행이면 경쟁자가 먼저 갱신한 것.
+    const { data: updRows, error: updErr } = await db
+      .from("daily_quiz")
+      .update(values)
+      .eq("quiz_date", date)
+      .eq("model_label", existing.model_label)
+      .select("quiz_date");
+    if (updErr) console.error("daily_quiz update failed", updErr);
+    else if (updRows && updRows.length > 0) persisted = true;
+  }
+  if (!persisted) {
+    // 레이스 패배 — 승자 버전을 다시 읽어 서빙 (submit 채점과 일치 보장).
+    const { data: winner } = await db
+      .from("daily_quiz")
+      .select("brief, source_name, source_title, source_url, questions, answers, model_label")
+      .eq("quiz_date", date)
+      .maybeSingle();
+    if (winner && winner.model_label === MODEL_LABEL) return winner as QuizRow;
+    // 재조회까지 실패하면 방금 생성본이라도 서빙 (기존 폴백 동작 유지).
+  }
 
   return row;
 }

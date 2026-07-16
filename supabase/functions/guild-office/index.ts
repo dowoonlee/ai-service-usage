@@ -13,12 +13,12 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
-import { OFFICE_SLOT_COUNT } from "../_shared/guild_policy.ts";
-
-// 데코 슬롯 수 / 테마 범위 — 클라 카탈로그(OfficeLayout)와 쌍.
-const DECOR_SLOT_COUNT = 10;
-const FLOOR_THEME_MAX = 8;   // 2dPig floors 0..8
-const WALL_THEME_MAX = 3;    // 틴트 변형 0..3
+import {
+  OFFICE_SLOT_COUNT,
+  DECOR_SLOT_COUNT,
+  FLOOR_THEME_MAX,
+  WALL_THEME_MAX,
+} from "../_shared/guild_policy.ts";
 
 type OfficeAction = "set_spot" | "place_decor" | "remove_decor" | "set_theme";
 

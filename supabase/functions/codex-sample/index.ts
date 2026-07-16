@@ -16,6 +16,7 @@
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
+import { clientIp, ipRateLimited } from "../_shared/ratelimit.ts";
 
 interface SampleRequest {
   id?: string;             // 클라이언트 생성 UUID (GitHub 이슈 역참조용). 누락/무효 시 DB default.
@@ -37,6 +38,12 @@ interface SampleRequest {
 
 // UUID v4 형식만 통과 (위조해도 무가치하지만, GitHub 이슈에 박을 식별자라 형식은 강제).
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// IP rate-limit — 미인증 엔드포인트라 anon 키만으로 65KB 행을 무한 INSERT할 수 있는
+// 스토리지/비용 abuse를 막는다(보안 감사 2026-07-16). 정상 사용자는 하루 몇 건 수준이므로
+// 회사망 NAT 공유를 감안해도 30/24h는 넉넉하다. register와 동일한 1차 방어선 개념.
+const SAMPLE_IP_WINDOW_SEC = 24 * 3600;
+const SAMPLE_IP_MAX = 30;
 
 // 문자열 JSON → jsonb 후보. 길이 cap 초과/파싱 실패 시 null (나머지는 저장 — 진단 가치 유지).
 function parseJsonCapped(v: unknown, maxLen: number): unknown {
@@ -67,8 +74,19 @@ Deno.serve(async (req: Request) => {
     typeof v === "string" ? v.slice(0, max) : null;
 
   const db = getDb();
+
+  // IP rate-limit — window 내 같은 IP의 샘플 수가 한도 이상이면 차단.
+  const ip = clientIp(req);
+  if (await ipRateLimited(db, {
+    table: "codex_usage_samples", ip, ipColumn: "client_ip", tsColumn: "created_at",
+    windowSec: SAMPLE_IP_WINDOW_SEC, max: SAMPLE_IP_MAX,
+  })) {
+    return errorResponse(429, "rate_limited");
+  }
+
   const row: Record<string, unknown> = {
     origin,
+    client_ip: ip,
     category: str(body.category, 32),
     device_id: str(body.deviceId, 64),
     app_version: str(body.appVersion, 32),

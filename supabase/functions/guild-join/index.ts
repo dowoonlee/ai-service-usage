@@ -7,7 +7,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
-import { INVITE_CODE_LEN } from "../_shared/guild_policy.ts";
+import { INVITE_CODE_LEN, checkJoinCooldown } from "../_shared/guild_policy.ts";
 
 interface JoinPayload {
   deviceId: string;
@@ -67,17 +67,8 @@ Deno.serve(async (req: Request) => {
   if (!ok) return errorResponse(401, "bad_signature");
 
   // 쿨다운 검사 — 만료된 row는 무시 (정리는 upsert가 자연히 덮어씀).
-  const { data: cooldown } = await db
-    .from("guild_join_cooldowns")
-    .select("until")
-    .eq("device_id", deviceId)
-    .maybeSingle();
-  if (cooldown && new Date(cooldown.until).getTime() > Date.now()) {
-    return jsonResponse(
-      { error: "join_cooldown", until: cooldown.until },
-      { status: 403 },
-    );
-  }
+  const cooldownResp = await checkJoinCooldown(db, deviceId);
+  if (cooldownResp) return cooldownResp;
 
   // 초대 코드는 대문자 셋으로 발급 — 입력 관용을 위해 대문자로 정규화 후 조회.
   const { data: guild } = await db
