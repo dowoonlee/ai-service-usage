@@ -51,7 +51,7 @@ struct GachaView: View {
     }
 
     enum Tab: String, CaseIterable, Identifiable {
-        case shop, party, gym, report, ranking, guild
+        case shop, party, gym, report, ranking, guild, arena
         var id: String { rawValue }
         var displayName: String {
             switch self {
@@ -61,6 +61,7 @@ struct GachaView: View {
             case .report:  return "레포트"
             case .ranking: return "랭킹"
             case .guild:   return "길드"
+            case .arena:   return "아레나"
             }
         }
     }
@@ -112,6 +113,7 @@ struct GachaView: View {
                 case .report:  ReportView().transition(.opacity)
                 case .ranking: RankingView().transition(.opacity)
                 case .guild:   GuildView().transition(.opacity)
+                case .arena:   ArenaView().transition(.opacity)
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: selectedTab)
