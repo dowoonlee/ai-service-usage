@@ -279,7 +279,7 @@ struct AnnouncementView: View {
 /// 공지 단일 창. `BugReportWindowController`와 동일하게 단일 인스턴스 — 동시에 두 번 열릴 수
 /// 없어 race 없음. LSUIElement 앱이라 표시 직전 `NSApp.activate`로 앞으로 가져온다.
 @MainActor
-final class AnnouncementWindowController: NSWindowController {
+final class AnnouncementWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = AnnouncementWindowController()
 
     convenience init() {
@@ -314,8 +314,6 @@ final class AnnouncementWindowController: NSWindowController {
             self?.window?.close()
         }
         window?.contentViewController = NSHostingController(rootView: root)
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
     }
 }

@@ -427,7 +427,7 @@ struct BugReportView: View {
 }
 
 @MainActor
-final class BugReportWindowController: NSWindowController {
+final class BugReportWindowController: NSWindowController, NSWindowDelegate, SingleWindowPresenting {
     static let shared = BugReportWindowController()
 
     convenience init() {
@@ -438,6 +438,13 @@ final class BugReportWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         window.center()
         self.init(window: window)
+        window.delegate = self
+    }
+
+    /// 타이틀바 닫기 버튼은 dismiss()를 안 거친다 — 여기서도 1Hz 클립보드 폴링을 반드시
+    /// 멈춰야 한다 (안 멈추면 앱 종료까지 계속 돈다).
+    func windowWillClose(_ notification: Notification) {
+        ClipboardWatcher.shared.stop()
     }
 
     func present(crashPrefill: BugReport.CrashSummary? = nil) {
@@ -446,9 +453,7 @@ final class BugReportWindowController: NSWindowController {
         window?.contentViewController = host
         window?.title = crashPrefill != nil ? "크래시 리포트" : "버그 리포트"
         ClipboardWatcher.shared.start()
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
     }
 
     func dismiss() {

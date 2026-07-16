@@ -882,6 +882,12 @@ final class Settings: ObservableObject {
         // 신규 유저가 1번에서 3장 받은 다음 2번 블록에서 또 +2장 받는 이중 지급을 방지.
         let wasExistingUser = d.bool(forKey: Keys.hasCompletedGachaMigration)
 
+        // 아래 1회성 마이그레이션 중 하나라도 무결성 감시 대상 값(coins·티켓·펫 목록 등)을 바꾸면
+        // init 말미 verifyIntegrity의 "저장된 체크섬 vs 현재 값" 비교가 오탐이 된다 — init 중엔
+        // didSet이 안 돌아 recordIntegrityChecksum()이 호출되지 않기 때문. 그런 실행에서는 비교를
+        // 건너뛰고 현재 상태를 신뢰해 체크섬만 재기록(리베이스)하도록 표시한다.
+        var integrityRebaseNeeded = false
+
         // (1) 첫 실행 시 1회만: 가챠권 3장 지급 + 기존 사용 중이던 펫이 있으면 보유 목록에 등록.
         //
         // 등급 가드: legacy default petKind가 Mythic/Legendary/Epic이면 마이그레이션으로 무료 등록하지
@@ -923,6 +929,7 @@ final class Settings: ObservableObject {
             persist(self.ownedPets, forKey: Keys.ownedPets)
             d.set(3, forKey: Keys.gachaTickets)
             d.set(true, forKey: Keys.hasCompletedGachaMigration)
+            integrityRebaseNeeded = true
         }
 
         // (2) 1회성 보너스 마이그레이션 — 신규 보너스를 추가하려면 아래 패턴으로 한 줄씩 늘리면 됨.
@@ -942,6 +949,7 @@ final class Settings: ObservableObject {
                            wasExistingUser: wasExistingUser) {
             self.gachaTickets += 2
             d.set(self.gachaTickets, forKey: Keys.gachaTickets)
+            integrityRebaseNeeded = true
         }
 
         // 5월의 달 기념 — 신규+기존 모든 사용자에게 1회 5,000 coin 지급. v0.7.0 캠페인.
@@ -959,6 +967,7 @@ final class Settings: ObservableObject {
             }
             d.set(self.coins, forKey: Keys.coins)
             d.set(self.coinsTotalEarned, forKey: Keys.coinsTotalEarned)
+            integrityRebaseNeeded = true
         }
 
         // 최근 서버 불안정 이슈 사과 — 모든 사용자 1회 3,000 coin. v0.8.5 캠페인.
@@ -974,6 +983,7 @@ final class Settings: ObservableObject {
             }
             d.set(self.coins, forKey: Keys.coins)
             d.set(self.coinsTotalEarned, forKey: Keys.coinsTotalEarned)
+            integrityRebaseNeeded = true
         }
 
         // 코스메틱 장착 슬롯(타입당 1개) 도입 마이그레이션 — 기존 자유 조합에서 category당
@@ -1000,6 +1010,7 @@ final class Settings: ObservableObject {
                            wasExistingUser: wasExistingUser) {
             self.premiumTickets += 2
             d.set(self.premiumTickets, forKey: Keys.premiumTickets)
+            integrityRebaseNeeded = true
         }
 
         // 구매제 도입 전부터 동적 테마를 override 로 쓰고 있었다면 보유로 인정 (뺏지 않음).
@@ -1039,9 +1050,25 @@ final class Settings: ObservableObject {
         // 도장 마이그레이션은 init 안에서 호출 금지 — `BadgeRegistry.evaluate`가 `Settings.shared`를
         // 재진입해서 lazy init이 깨짐. App 시작 후 `applyGymMigrationIfNeeded()`에서 처리.
 
+        // 무결성 오탐 사면(1회) — 과거 버전의 1회성 보상 마이그레이션들이 체크섬 재기록 없이
+        // 감시 값을 바꿔(init didSet 미동작) 정상 사용자의 integrityViolation이 잘못 켜진 이력이
+        // 있다. 진짜 조작과 구분할 수 없으므로, keychain 지문 리베이스와 동일한 근거(가드는
+        // casual deterrent, 로컬 조작은 타인 피해 없음)로 1회 신뢰 리셋 + 체크섬 리베이스한다.
+        applyOnceMigration(key: Keys.hasResetIntegrityFalsePositive,
+                           onlyExisting: true,
+                           wasExistingUser: wasExistingUser) {
+            if self.integrityViolation {
+                self.integrityViolation = false
+                d.set(false, forKey: Keys.integrityViolation)
+                DebugLog.log("IntegrityGuard: 마이그레이션 오탐 사면 — violation 해제 + 리베이스")
+            }
+            integrityRebaseNeeded = true
+        }
+
         // 무결성 검증은 모든 init 마이그레이션이 끝난 뒤 1회 — migration의 정상 변경을 조작으로
         // 오탐하지 않도록 마지막에 둔다. 탐지만 하고 데이터는 건드리지 않는다.
-        verifyIntegrity()
+        // 이번 실행에서 마이그레이션이 감시 값을 바꿨다면 비교 대신 체크섬을 재기록한다.
+        verifyIntegrity(rebaseAfterMigration: integrityRebaseNeeded)
     }
 
     // MARK: - 무결성 가드 (탐지 전용)
@@ -1069,7 +1096,14 @@ final class Settings: ObservableObject {
     /// 않는다. 최초 실행(체크섬 부재)은 현재 상태를 신뢰하고 기록 → 도입 이전 조작은 소급 불가.
     /// 탐지되면 `integrityViolation`을 영속 set(랭킹 제출 시 서버 보고). 정상 사용자는 didSet이
     /// 항상 체크섬을 갱신하므로 켜지지 않는다.
-    func verifyIntegrity() {
+    func verifyIntegrity(rebaseAfterMigration: Bool = false) {
+        // init 마이그레이션이 감시 값을 정상 변경한 실행에서는 저장된 체크섬과의 비교가 무의미
+        // (정상 지급을 조작으로 오탐) — 현재 상태를 신뢰하고 체크섬만 재기록한다. 조작과
+        // 마이그레이션이 같은 실행에 겹치면 놓치지만, 지문 리베이스와 동일하게 수용한다.
+        if rebaseAfterMigration {
+            recordIntegrityChecksum()
+            return
+        }
         let key = Keychain.loadOrCreateIntegrityKey()
         let serialized = ownedPets.keys.map { $0.rawValue }.sorted().joined(separator: ",")
         guard let current = IntegrityGuard.checksum(
@@ -1541,6 +1575,7 @@ final class Settings: ObservableObject {
         static let hasReceivedV032TicketBonus  = "settings.hasReceivedV032TicketBonus"
         static let hasReceivedMay2026Bonus     = "settings.hasReceivedMay2026Bonus"
         static let hasReceivedServerInstabilityBonus = "settings.hasReceivedServerInstabilityBonus"
+        static let hasResetIntegrityFalsePositive = "settings.hasResetIntegrityFalsePositive"
         // GitHub 기여자 보너스
         static let githubLogin                 = "settings.githubLogin"
         static let githubUserID                = "settings.githubUserID"

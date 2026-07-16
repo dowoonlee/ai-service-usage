@@ -1,8 +1,11 @@
 import AppKit
 import WebKit
 
-final class LoginWindowController: NSWindowController, WKNavigationDelegate {
+final class LoginWindowController: NSWindowController, WKNavigationDelegate, NSWindowDelegate {
     var onCaptured: ((String) -> Void)?
+    /// 창이 닫힐 때(성공/취소 무관) 1회 호출 — 소유자가 참조를 놓아 다음 로그인 시도가
+    /// 새 컨트롤러로 시작되게 한다.
+    var onClosed: (() -> Void)?
     private var webView: WKWebView!
     private var pollTimer: Timer?
     private static let allowedLoginHostSuffixes = [
@@ -27,7 +30,11 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate {
         )
         window.title = "Claude 로그인"
         window.center()
+        // 코드로 생성한 NSWindow의 기본값은 true — 닫히는 순간 release돼 이후 showWindow 재사용
+        // 시 해제된 창을 참조한다. 다른 모든 윈도우 컨트롤러와 동일하게 false로 고정.
+        window.isReleasedWhenClosed = false
         self.init(window: window)
+        window.delegate = self
 
         let cfg = WKWebViewConfiguration()
         // sessionKey는 캡처 즉시 Keychain에 저장하므로 WebView에 영구 쿠키를 남길 필요가 없다.
@@ -125,6 +132,15 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate {
             self?.onCaptured?(key)
             self?.close()
         }
+    }
+
+    /// 성공(capture→close)이든 취소(타이틀바 닫기)든 여기로 수렴 — 2초 쿠키 폴링을 반드시
+    /// 멈추고 소유자에게 참조 해제를 알린다. 취소 시 이 정리가 없으면 타이머가 프로세스
+    /// 종료까지 돌고, 재로그인 시도가 죽은 컨트롤러의 showWindow로 빠진다.
+    func windowWillClose(_ notification: Notification) {
+        pollTimer?.invalidate()
+        pollTimer = nil
+        onClosed?()
     }
 
     deinit {

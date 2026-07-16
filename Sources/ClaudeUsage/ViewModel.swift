@@ -839,7 +839,7 @@ final class ViewModel: ObservableObject {
             Keychain.clear()
             claudePollOutcome = .authError
         } catch {
-            claudeError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            claudeError = error.friendlyDescription
             // 디코딩/4xx(non-auth) → endpoint 변경 의심, 그 외 → transient. 둘 다 backoff 대상.
             claudePollOutcome = Self.isSchemaSuspect(error) ? .apiSchemaSuspect : .transientError
         }
@@ -877,8 +877,9 @@ final class ViewModel: ObservableObject {
             // Ultra의 경우 이벤트 히스토리 증분 fetch (백그라운드)
             if snap.plan == .ultra {
                 await fetchCursorEventsIncrement(periodStart: snap.resetAt.map { resetAt in
-                    // resetAt은 startOfMonth + 1개월이므로 - 1개월로 periodStart 복원
-                    Calendar(identifier: .gregorian).date(byAdding: .month, value: -1, to: resetAt) ?? resetAt.addingTimeInterval(-30 * 86400)
+                    // resetAt은 UTC 기준 startOfMonth + 1개월이므로 같은 UTC 캘린더로 -1개월 복원
+                    // (로컬 캘린더로 빼면 DST 전환 달에 컷오프가 최대 1시간 어긋남)
+                    Calendar.utcGregorian.date(byAdding: .month, value: -1, to: resetAt) ?? resetAt.addingTimeInterval(-30 * 86400)
                 })
             } else {
                 // Pro/Free/Business — snapshot의 request delta 기반 (Ultra는 events 경로).
@@ -897,7 +898,7 @@ final class ViewModel: ObservableObject {
             cursorPollOutcome = .authError
             DebugLog.log("refreshCursor: unauthorized (세션 만료)")
         } catch {
-            cursorError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            cursorError = error.friendlyDescription
             cursorPollOutcome = Self.isSchemaSuspect(error) ? .apiSchemaSuspect : .transientError
             DebugLog.log("refreshCursor failed: \(cursorError ?? error.localizedDescription) (schemaSuspect=\(Self.isSchemaSuspect(error)))")
         }
@@ -932,7 +933,7 @@ final class ViewModel: ObservableObject {
             codexPollOutcome = .authError
             DebugLog.log("refreshCodex: unauthorized (세션 만료)")
         } catch {
-            codexError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            codexError = error.friendlyDescription
             codexPollOutcome = Self.isSchemaSuspect(error) ? .apiSchemaSuspect : .transientError
             DebugLog.log("refreshCodex failed: \(codexError ?? error.localizedDescription) (schemaSuspect=\(Self.isSchemaSuspect(error)))")
         }
@@ -1104,7 +1105,7 @@ final class ViewModel: ObservableObject {
     }
     var cursorPeriodLength: TimeInterval {
         guard let r = cursorCurrent?.resetAt,
-              let start = Calendar(identifier: .gregorian).date(byAdding: .month, value: -1, to: r)
+              let start = Calendar.utcGregorian.date(byAdding: .month, value: -1, to: r)
         else { return 30 * 86400 }
         return r.timeIntervalSince(start)
     }

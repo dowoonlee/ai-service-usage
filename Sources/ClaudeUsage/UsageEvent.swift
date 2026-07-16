@@ -240,9 +240,9 @@ enum UsageEventProducer {
               let maxReq = snap.maxRequests, maxReq > 0 else { return }
         let s = Settings.shared
 
-        // Cursor 측 startOfMonth 복원 (resetAt - 1개월).
+        // Cursor 측 startOfMonth 복원 (resetAt - 1개월) — resetAt이 UTC 기준이므로 UTC 캘린더 사용.
         let cursorMonthStart: Date? = snap.resetAt.flatMap {
-            Calendar(identifier: .gregorian).date(byAdding: .month, value: -1, to: $0)
+            Calendar.utcGregorian.date(byAdding: .month, value: -1, to: $0)
         }
         // 새 월 진입 — baseline만 갱신, 적립 0.
         if let newMonth = cursorMonthStart,

@@ -112,6 +112,16 @@ enum SajuEngine {
     /// 명리학 기준 시간대. GitHub created_at(UTC) 을 KST 로 변환해 사용.
     static let kst = TimeZone(identifier: "Asia/Seoul")!
 
+    /// 서버 KST "오늘"과 동기화되는 `yyyy-MM-dd` 포맷터. 퀴즈/운세 VM이 각자 동일 4줄로
+    /// 정의하던 것을 하나로 모은다. 서버가 콘텐츠 갱신 경계를 KST 자정으로 고정하므로,
+    /// 클라의 today 문자열도 반드시 이 포맷터(로컬 타임존 아님)를 써야 일치한다.
+    static let kstDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = kst
+        return f
+    }()
+
     /// 출생일(또는 GitHub 가입일)로부터 사주팔자 생성.
     static func chart(for birth: Date, in tz: TimeZone = SajuEngine.kst) -> SajuChart {
         var cal = Calendar(identifier: .gregorian)

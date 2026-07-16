@@ -227,6 +227,15 @@ fileprivate func sectionHeader(
 }
 
 struct MainView: View {
+    /// 퀴즈/운세 배지 dot의 "오늘" 판정용 KST 캘린더 — 두 콘텐츠 모두 서버가 KST 자정에
+    /// 갱신되므로(DailyQuizVM/DailyFortuneVM의 todayString과 동일 기준), 로컬 캘린더로
+    /// 판정하면 비-KST 사용자에게 dot이 잘못 뜨거나 안 뜨는 구간이 매일 생긴다.
+    static let kstCalendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = SajuEngine.kst
+        return cal
+    }()
+
     @ObservedObject var vm: ViewModel
     @ObservedObject var settings = Settings.shared
     @ObservedObject var dm = DMViewModel.shared
@@ -323,18 +332,7 @@ struct MainView: View {
                     Image(systemName: "envelope.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.teal)
-                        .overlay(alignment: .topTrailing) {
-                            if dm.badgeCount > 0 {
-                                Text("\(min(dm.badgeCount, 99))")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 3)
-                                    .padding(.vertical, 1)
-                                    .background(Color.red)
-                                    .clipShape(Capsule())
-                                    .offset(x: 6, y: -4)
-                            }
-                        }
+                        .countBadge(dm.badgeCount)
                 }
                 .buttonStyle(.borderless)
                 .help(dm.badgeCount > 0 ? "쪽지·초대 \(dm.badgeCount)건" : "쪽지 열기")
@@ -345,18 +343,7 @@ struct MainView: View {
                     Image(systemName: "bubble.left.and.bubble.right.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.cyan)
-                        .overlay(alignment: .topTrailing) {
-                            if vm.boardUnreadCount > 0 {
-                                Text("\(min(vm.boardUnreadCount, 99))")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 3)
-                                    .padding(.vertical, 1)
-                                    .background(Color.red)
-                                    .clipShape(Capsule())
-                                    .offset(x: 6, y: -4)
-                            }
-                        }
+                        .countBadge(vm.boardUnreadCount)
                 }
                 .buttonStyle(.borderless)
                 .help(vm.boardUnreadCount > 0 ? "게시판 (미확인 \(vm.boardUnreadCount)개)" : "게시판 열기")
@@ -367,14 +354,7 @@ struct MainView: View {
                     Image(systemName: "newspaper.fill")
                         .font(.system(size: 11))
                         .foregroundStyle(Color.orange)
-                        .overlay(alignment: .topTrailing) {
-                            if !Calendar.current.isDateInToday(settings.dailyQuizLastSolvedDate ?? .distantPast) {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 5, height: 5)
-                                    .offset(x: 4, y: -2)
-                            }
-                        }
+                        .dotBadge(!Self.kstCalendar.isDateInToday(settings.dailyQuizLastSolvedDate ?? .distantPast))
                 }
                 .buttonStyle(.borderless)
                 .help("오늘의 AI 퀴즈")
@@ -385,14 +365,7 @@ struct MainView: View {
                     Image(systemName: "sparkles")
                         .font(.system(size: 11))
                         .foregroundStyle(AppColors.gold)
-                        .overlay(alignment: .topTrailing) {
-                            if !Calendar.current.isDateInToday(settings.dailyFortuneLastShownDate ?? .distantPast) {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 5, height: 5)
-                                    .offset(x: 4, y: -2)
-                            }
-                        }
+                        .dotBadge(!Self.kstCalendar.isDateInToday(settings.dailyFortuneLastShownDate ?? .distantPast))
                 }
                 .buttonStyle(.borderless)
                 .help("오늘의 개발 운세")

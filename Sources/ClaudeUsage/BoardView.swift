@@ -7,7 +7,7 @@ import SwiftUI
 //   상단 헤더(제목/새로고침) → 입력란(100자 카운터/전송 버튼) → cooldown 안내(있을 때)
 //   → 글 리스트 (ScrollView + 좋아요 버튼 + 호버 popover) → 푸터(마지막 새로고침/총 N개)
 //
-// 자동 새로고침: 윈도우 열려있는 동안 30초 주기. 백그라운드 폴링은 안 함 (트래픽 절약).
+// 자동 새로고침: 윈도우 열려있는 동안 60초 주기. 백그라운드 폴링은 안 함 (트래픽 절약).
 // 좋아요 연타 방지: in-flight + 1초 cooldown (likingPostIds Set 가드).
 
 struct BoardView: View {
@@ -301,11 +301,7 @@ struct BoardView: View {
     }
 
     private func placeholderView(_ msg: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "bubble.left").font(.system(size: 28)).foregroundStyle(.secondary)
-            Text(msg).font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        GateMessageView(icon: "bubble.left", message: msg)
     }
 
     // MARK: - Actions
@@ -900,7 +896,7 @@ private struct BoardRow: View {
 // MARK: - Window Controller
 
 @MainActor
-final class BoardWindowController: NSWindowController {
+final class BoardWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = BoardWindowController()
 
     private convenience init() {
@@ -916,9 +912,7 @@ final class BoardWindowController: NSWindowController {
     }
 
     func present() {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
     }
 }
 

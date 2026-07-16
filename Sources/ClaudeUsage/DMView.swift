@@ -224,9 +224,12 @@ final class DMViewModel: ObservableObject {
                 senderIdPub: DMCrypto.identityPublicKeyBase64(), hmacKeyBase64: hmac)
             DMStore.shared.recordSent(messageId: resp.id, peer: key.deviceId, text: body,
                                       ts: resp.createdAt.timeIntervalSince1970)
-            // 열린 스레드면 즉시 반영, 아니면 인박스 갱신.
-            if openPeer == key.deviceId { await openThread(peer: key.deviceId) }
-            await refreshInbox(silent: true)
+            // 열린 스레드면 즉시 반영(openThread가 인박스 갱신까지 포함), 아니면 인박스만 갱신.
+            if openPeer == key.deviceId {
+                await openThread(peer: key.deviceId)
+            } else {
+                await refreshInbox(silent: true)
+            }
         } catch {
             self.error = mapError(error)
         }
@@ -271,7 +274,7 @@ final class DMViewModel: ObservableObject {
         if case RankingAPI.RankingError.guildConflict = error {
             return "지금은 이 초대를 처리할 수 없어요 (만료되었거나 이미 처리됨)."
         }
-        return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        return error.friendlyDescription
     }
 
     // MARK: - 수신 정책 · 차단 · 지문
@@ -345,14 +348,14 @@ final class DMViewModel: ObservableObject {
         if case RankingAPI.RankingError.rateLimited = error {
             return "잠시 후 다시 시도해 주세요 (발신 한도)."
         }
-        return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        return error.friendlyDescription
     }
 }
 
 // MARK: - 창
 
 @MainActor
-final class DMWindowController: NSWindowController {
+final class DMWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = DMWindowController()
 
     private convenience init() {
@@ -368,9 +371,7 @@ final class DMWindowController: NSWindowController {
     }
 
     func present() {
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
         Task { await DMViewModel.shared.refreshInbox() }
     }
 
@@ -421,11 +422,7 @@ private struct DMRootView: View {
     }
 
     private func placeholder(_ msg: String) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: "envelope").font(.system(size: 28)).foregroundStyle(.secondary)
-            Text(msg).font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        GateMessageView(icon: "envelope", message: msg)
     }
 }
 

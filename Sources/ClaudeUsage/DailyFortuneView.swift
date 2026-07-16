@@ -108,13 +108,8 @@ final class DailyFortuneVM: ObservableObject {
     }()
     private static func parseISO(_ s: String) -> Date? { isoFormatter.date(from: s) }
 
-    private static let ymdFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = SajuEngine.kst
-        return f
-    }()
-    private static func todayDateString() -> String { ymdFormatter.string(from: Date()) }
+    // 서버 KST 오늘과 동기화 — 공용 `SajuEngine.kstDayFormatter` 사용.
+    private static func todayDateString() -> String { SajuEngine.kstDayFormatter.string(from: Date()) }
 }
 
 /// 사용자 에러 표현 — 메시지 + 권장 후속 액션 (설정 열기 vs 다시 시도).
@@ -435,7 +430,7 @@ struct WizardSprite: View {
 }
 
 @MainActor
-final class DailyFortuneWindowController: NSWindowController {
+final class DailyFortuneWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = DailyFortuneWindowController()
 
     convenience init() {
@@ -453,9 +448,7 @@ final class DailyFortuneWindowController: NSWindowController {
     func present() {
         let host = NSHostingController(rootView: DailyFortuneView())
         window?.contentViewController = host
-        NSApp.activate(ignoringOtherApps: true)
-        showWindow(nil)
-        window?.makeKeyAndOrderFront(nil)
+        bringToFront()
     }
 
     func dismiss() {

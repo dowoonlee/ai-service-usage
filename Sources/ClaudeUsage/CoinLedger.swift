@@ -222,10 +222,8 @@ final class CoinLedger: UsageConsumer {
     func purchaseTheme(_ theme: PetTheme) -> Bool {
         let s = Settings.shared
         guard !theme.isFree, !s.ownedThemes.contains(theme.rawValue) else { return false }
-        guard s.coins >= theme.price else { return false }
-        s.coins -= theme.price
+        guard spend(theme.price, reason: "맵 [\(theme.displayName)]") else { return false }
         s.ownedThemes.insert(theme.rawValue)
-        DebugLog.log("CoinLedger: 맵 구매 [\(theme.displayName)] -\(theme.price) coin (total=\(s.coins))")
         return true
     }
 
@@ -233,11 +231,8 @@ final class CoinLedger: UsageConsumer {
     /// 성공 시 코인 차감 + 구매 슬롯 카운터 증가 → `maxPartyPresets`가 1 늘어난다.
     func purchasePartyPresetSlot() -> Bool {
         let s = Settings.shared
-        let cost = s.nextPartyPresetSlotCost
-        guard s.coins >= cost else { return false }
-        s.coins -= cost
+        guard spend(s.nextPartyPresetSlotCost, reason: "파티 프리셋 슬롯") else { return false }
         s.purchasedPartyPresetSlots += 1
-        DebugLog.log("CoinLedger: 파티 프리셋 슬롯 구매 -\(cost) coin (slots=\(s.purchasedPartyPresetSlots), total=\(s.coins))")
         return true
     }
 
@@ -256,14 +251,25 @@ final class CoinLedger: UsageConsumer {
     /// 서버 실패 시 생성권이 보존되도록 (가챠 roll/commit 분리와 동일한 사용자 우선 원칙).
     func purchaseGuildPermit() -> Bool {
         let s = Settings.shared
-        guard s.coins >= Self.guildPermitCost else { return false }
-        s.coins -= Self.guildPermitCost
+        guard spend(Self.guildPermitCost, reason: "길드 생성권") else { return false }
         s.guildPermits += 1
-        DebugLog.log("CoinLedger: 길드 생성권 구매 -\(Self.guildPermitCost) coin (permits=\(s.guildPermits), total=\(s.coins))")
         return true
     }
 
     // MARK: - 내부 helpers
+
+    /// 코인 차감 (구매 공통). 잔액 부족이면 차감하지 않고 false. `RankPointLedger.spend`와 동형 —
+    /// 누적 `coinsTotalEarned`는 불변(소비라 `credit`과 대칭). 각 구매 메서드는 이 헬퍼로 잔액을
+    /// 깎은 뒤 자기 부수효과(테마 보유·슬롯/생성권 카운터)만 처리한다.
+    @discardableResult
+    private func spend(_ amount: Int, reason: String) -> Bool {
+        guard amount > 0 else { return false }
+        let s = Settings.shared
+        guard s.coins >= amount else { return false }
+        s.coins -= amount
+        DebugLog.log("CoinLedger: -\(amount) coin (\(reason)) (total=\(s.coins))")
+        return true
+    }
 
     private enum CoinSource { case claude, cursor, codex }
 

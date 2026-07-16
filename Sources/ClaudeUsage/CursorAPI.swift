@@ -235,9 +235,8 @@ actor CursorAPI {
         var resetAt: Date?
         if let som = obj["startOfMonth"] as? String,
            let start = Date.parseISO8601(som) {
-            var cal = Calendar(identifier: .gregorian)
-            cal.timeZone = TimeZone(identifier: "UTC")!
-            resetAt = cal.date(byAdding: .month, value: 1, to: start)
+            // resetAt 역산(-1개월)하는 쪽들과 반드시 같은 UTC 캘린더를 공유해야 한다.
+            resetAt = Calendar.utcGregorian.date(byAdding: .month, value: 1, to: start)
         }
 
         return CursorSnapshot(
