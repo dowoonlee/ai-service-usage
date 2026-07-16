@@ -10,7 +10,9 @@
 //
 // 트랜잭션: users.total_coins 갱신 + submissions insert가 한 atomic 작업이어야 race-free.
 // PostgREST는 단일 트랜잭션 명령이 없으므로 RPC 함수로 묶거나 두 호출 후 일관성 점검.
-// 50명 규모 + 같은 device가 같은 시점에 2회 호출할 가능성 0이라 두 호출 + dedupe 정도면 충분.
+// total_coins 갱신은 기대값 조건부 UPDATE + 재시도(#140 패턴)로 동시 submit 유실을 방어한다
+// — 유실되면 캐시가 낮게 고정돼 이후 정상 submit이 prev_total_mismatch로 거부되기 때문.
+// submissions insert 자체는 append-only 감사 로그라 레이스 무관.
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
@@ -137,7 +139,7 @@ Deno.serve(async (req: Request) => {
 
   // submissions append (audit log) — accepted=false도 기록.
   // shadow_banned 사용자: accept처럼 처리하되 total_coins는 갱신 안 함.
-  const writeTotal = user.status === "shadow_banned" ? user.total_coins : user.total_coins + accepted;
+  let writeTotal = user.status === "shadow_banned" ? user.total_coins : user.total_coins + accepted;
 
   const { error: insertErr } = await db.from("submissions").insert({
     device_id: p.deviceId,
@@ -200,7 +202,43 @@ Deno.serve(async (req: Request) => {
   const osVersion = sanitizeVersion(body.osVersion);
   if (appVersion !== undefined) updates.app_version = appVersion;
   if (osVersion !== undefined) updates.os_version = osVersion;
-  if (Object.keys(updates).length > 0) {
+  if (updates.total_coins !== undefined) {
+    // total_coins는 read-modify-write라 같은 device의 동시 submit(클라 재시도 등)이 겹치면
+    // 한쪽 증분이 유실된다 — 랭킹 자체는 submissions SUM이라 무관하지만, 이 캐시가 낮게
+    // 고정되면 이후 정상 submit이 caps의 prev_total_mismatch로 스퓨리어스 거부된다.
+    // claim-reward(#140)와 동일한 기대값 조건부 UPDATE로 원자화하되, 레이스 패배 시
+    // 최신 총액을 다시 읽어 증분을 재적용한다(감사 로그인 submissions는 이미 기록됨).
+    let expected = user.total_coins;
+    let credited = false;
+    for (let attempt = 0; attempt < 3 && !credited; attempt++) {
+      updates.total_coins = expected + accepted;
+      const { data: updatedRows, error: updErr } = await db
+        .from("users")
+        .update(updates)
+        .eq("device_id", p.deviceId)
+        .eq("total_coins", expected)
+        .select("device_id");
+      if (updErr) {
+        console.error("submit total_coins update failed", updErr);
+        break;
+      }
+      if (updatedRows && updatedRows.length > 0) {
+        credited = true;
+        writeTotal = expected + accepted;
+        break;
+      }
+      const { data: fresh } = await db
+        .from("users")
+        .select("total_coins")
+        .eq("device_id", p.deviceId)
+        .single();
+      if (!fresh) break;
+      expected = fresh.total_coins;
+    }
+    if (!credited) {
+      console.error("submit total_coins conditional update lost race after retries", p.deviceId);
+    }
+  } else if (Object.keys(updates).length > 0) {
     await db.from("users").update(updates).eq("device_id", p.deviceId);
   }
 

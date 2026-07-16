@@ -28,6 +28,7 @@ import {
   FURNITURE_MAX_INSTANCES,
   FURNITURE_TEXT_MAX,
   isValidGuildName,
+  checkJoinCooldown,
 } from "../_shared/guild_policy.ts";
 
 type ManageAction =
@@ -391,14 +392,8 @@ Deno.serve(async (req: Request) => {
       }
 
       // 재가입 쿨다운(탈퇴/추방) 중이면 승인 불가 — 신청은 유지(쿨다운 해제 후 재승인 가능).
-      const { data: cd } = await db
-        .from("guild_join_cooldowns")
-        .select("until")
-        .eq("device_id", requester)
-        .maybeSingle();
-      if (cd && new Date(cd.until).getTime() > Date.now()) {
-        return jsonResponse({ error: "join_cooldown", until: cd.until }, { status: 403 });
-      }
+      const cooldownResp = await checkJoinCooldown(db, requester);
+      if (cooldownResp) return cooldownResp;
 
       const { error: insErr } = await db
         .from("guild_members")
@@ -416,17 +411,22 @@ Deno.serve(async (req: Request) => {
       }
 
       // 이 신청 accepted, 신청자의 나머지 대기중 신청/받은 초대는 무의미 → 정리.
-      await db.from("guild_join_requests")
+      // 멤버십(guild_members INSERT)은 이미 확정 — 여기 UPDATE가 일시 실패하면 가입은 됐는데
+      // pending 신청/초대가 본인 목록에 계속 노출되므로, 최소한 로그로 남겨 추적 가능하게 한다.
+      const { error: acceptErr } = await db.from("guild_join_requests")
         .update({ status: "accepted", responded_at: nowIso })
         .eq("id", reqRow.id);
-      await db.from("guild_join_requests")
+      if (acceptErr) console.error("guild approve_request: mark accepted failed", acceptErr);
+      const { error: cancelReqErr } = await db.from("guild_join_requests")
         .update({ status: "cancelled", responded_at: nowIso })
         .eq("requester_device_id", requester)
         .eq("status", "pending");
-      await db.from("guild_invites")
+      if (cancelReqErr) console.error("guild approve_request: cancel other requests failed", cancelReqErr);
+      const { error: cancelInvErr } = await db.from("guild_invites")
         .update({ status: "cancelled", responded_at: nowIso })
         .eq("invitee_device_id", requester)
         .eq("status", "pending");
+      if (cancelInvErr) console.error("guild approve_request: cancel invites failed", cancelInvErr);
 
       return jsonResponse({ ok: true });
     }

@@ -12,6 +12,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { checkJoinCooldown } from "../_shared/guild_policy.ts";
 
 type InviteAction = "list" | "accept" | "decline";
 const INVITE_ACTIONS: ReadonlySet<string> = new Set(["list", "accept", "decline"]);
@@ -149,14 +150,8 @@ Deno.serve(async (req: Request) => {
   }
 
   // accept — 가입 자격 재검사(쿨다운/무소속) 후 가입. guild-join과 동일 정책.
-  const { data: cd } = await db
-    .from("guild_join_cooldowns")
-    .select("until")
-    .eq("device_id", deviceId)
-    .maybeSingle();
-  if (cd && new Date(cd.until).getTime() > Date.now()) {
-    return jsonResponse({ error: "join_cooldown", until: cd.until }, { status: 403 });
-  }
+  const cooldownResp = await checkJoinCooldown(db, deviceId);
+  if (cooldownResp) return cooldownResp;
 
   const { data: guild } = await db
     .from("guilds")
@@ -177,13 +172,16 @@ Deno.serve(async (req: Request) => {
   }
 
   // 이 초대는 accepted, 이 유저의 다른 대기중 초대는 무의미 → cancelled로 정리.
-  await db.from("guild_invites")
+  // 멤버십은 위 INSERT로 이미 확정 — 정리 실패는 pending 잔존(UX 불일치)이므로 로그로 추적.
+  const { error: acceptErr } = await db.from("guild_invites")
     .update({ status: "accepted", responded_at: nowIso })
     .eq("id", inv.id);
-  await db.from("guild_invites")
+  if (acceptErr) console.error("guild-invite accept: mark accepted failed", acceptErr);
+  const { error: cancelErr } = await db.from("guild_invites")
     .update({ status: "cancelled", responded_at: nowIso })
     .eq("invitee_device_id", deviceId)
     .eq("status", "pending");
+  if (cancelErr) console.error("guild-invite accept: cancel others failed", cancelErr);
 
   const { count: memberCount } = await db
     .from("guild_members")

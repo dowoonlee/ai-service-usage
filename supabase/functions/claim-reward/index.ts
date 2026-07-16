@@ -28,6 +28,28 @@ interface ClaimRequest {
 
 const MAX_CLOCK_SKEW_SEC = 3600;
 
+/**
+ * 원자적 1회성 claim — `claimColumn`이 여전히 NULL일 때만 `claimedAt`으로 채운다.
+ * select→update 사이에 같은 device의 동시 요청이 끼어도 `WHERE claimColumn IS NULL`이라
+ * 하나만 성공(affected rows>0)하고 나머지는 재크레딧 없이 흘려보낸다(#140 패턴).
+ * grant/rp/coins 3트랙이 각자 복붙하던 이 로직을 한 곳으로 모아, 세 통화가 동일한
+ * race-safety를 보장받는지 한눈에 검증 가능하게 한다. (응답 형태는 트랙별로 다르므로 호출부 유지.)
+ * 반환: won=true면 이 요청이 수령 확정, false면 이미(또는 경쟁자가 먼저) 수령됨.
+ */
+async function claimRow(
+  db: ReturnType<typeof getDb>,
+  opts: { table: string; idColumn: string; id: unknown; claimColumn: string; claimedAt: string },
+): Promise<{ won: boolean; error: unknown }> {
+  const { data, error } = await db
+    .from(opts.table)
+    .update({ [opts.claimColumn]: opts.claimedAt })
+    .eq(opts.idColumn, opts.id)
+    .is(opts.claimColumn, null)
+    .select(opts.idColumn);
+  if (error) return { won: false, error };
+  return { won: !!data && data.length > 0, error: null };
+}
+
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -106,20 +128,15 @@ Deno.serve(async (req: Request) => {
         currency: grant.currency, amount: grant.amount, claimedAt: grant.claimed_at,
       });
     }
-    // 원자적 claim — claimed_at이 여전히 NULL일 때만 갱신. 위 select→update 사이에 같은
-    // device의 동시 요청이 끼어도 UPDATE ... WHERE claimed_at IS NULL 이라 하나만 성공한다
-    // (affected rows=0 → 다른 요청이 먼저 수령 → 이 요청은 재크레딧 방지).
-    const { data: updated, error: gErr } = await db
-      .from("reward_grants")
-      .update({ claimed_at: new Date().toISOString() })
-      .eq("id", grant.id)
-      .is("claimed_at", null)
-      .select("id");
+    const claimedAt = new Date().toISOString();
+    const { won, error: gErr } = await claimRow(db, {
+      table: "reward_grants", idColumn: "id", id: grant.id, claimColumn: "claimed_at", claimedAt,
+    });
     if (gErr) {
       console.error("grant claim update failed", gErr);
       return errorResponse(500, "claim_failed");
     }
-    if (!updated || updated.length === 0) {
+    if (!won) {
       return jsonResponse({
         alreadyClaimed: true, rewardType: "grant",
         currency: grant.currency, amount: grant.amount,
@@ -127,7 +144,7 @@ Deno.serve(async (req: Request) => {
     }
     return jsonResponse({
       alreadyClaimed: false, rewardType: "grant",
-      currency: grant.currency, amount: grant.amount, claimedAt: new Date().toISOString(),
+      currency: grant.currency, amount: grant.amount, claimedAt,
     });
   }
 
@@ -150,20 +167,18 @@ Deno.serve(async (req: Request) => {
     if (row.claimed_at) {
       return jsonResponse({ alreadyClaimed: true, rewardType: "rp", rp: row.rp_amount, claimedAt: row.claimed_at });
     }
-    const { data: rpUpdated, error: rpErr } = await db
-      .from("rp_rewards")
-      .update({ claimed_at: new Date().toISOString() })
-      .eq("id", row.id)
-      .is("claimed_at", null)
-      .select("id");
+    const claimedAt = new Date().toISOString();
+    const { won, error: rpErr } = await claimRow(db, {
+      table: "rp_rewards", idColumn: "id", id: row.id, claimColumn: "claimed_at", claimedAt,
+    });
     if (rpErr) {
       console.error("rp claim update failed", rpErr);
       return errorResponse(500, "claim_failed");
     }
-    if (!rpUpdated || rpUpdated.length === 0) {
+    if (!won) {
       return jsonResponse({ alreadyClaimed: true, rewardType: "rp", rp: row.rp_amount });
     }
-    return jsonResponse({ alreadyClaimed: false, rewardType: "rp", rp: row.rp_amount, claimedAt: new Date().toISOString() });
+    return jsonResponse({ alreadyClaimed: false, rewardType: "rp", rp: row.rp_amount, claimedAt });
   }
 
   // 해당 row 조회 + claim 여부 확인.
@@ -187,17 +202,16 @@ Deno.serve(async (req: Request) => {
   }
 
   // claim 완료 처리.
-  const { data: coinUpdated, error } = await db
-    .from("monthly_winners")
-    .update({ reward_claimed_at: new Date().toISOString() })
-    .eq("id", winner.id)
-    .is("reward_claimed_at", null)
-    .select("id");
+  const claimedAt = new Date().toISOString();
+  const { won, error } = await claimRow(db, {
+    table: "monthly_winners", idColumn: "id", id: winner.id,
+    claimColumn: "reward_claimed_at", claimedAt,
+  });
   if (error) {
     console.error("claim update failed", error);
     return errorResponse(500, "claim_failed");
   }
-  if (!coinUpdated || coinUpdated.length === 0) {
+  if (!won) {
     return jsonResponse({
       alreadyClaimed: true, rewardType: "coins", rewardCoins: winner.reward_coins,
     });
@@ -207,6 +221,6 @@ Deno.serve(async (req: Request) => {
     alreadyClaimed: false,
     rewardType: "coins",
     rewardCoins: winner.reward_coins,
-    claimedAt: new Date().toISOString(),
+    claimedAt,
   });
 });

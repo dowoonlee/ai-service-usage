@@ -13,11 +13,11 @@ import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import {
-  JOIN_COOLDOWN_SEC,
   REQUEST_EXPIRE_SEC,
   REQUEST_REDECLINE_COOLDOWN_SEC,
   REQUEST_MAX_PENDING_PER_GUILD,
   REQUEST_MAX_PENDING_PER_USER,
+  checkJoinCooldown,
 } from "../_shared/guild_policy.ts";
 
 type RequestAction = "create" | "cancel" | "list";
@@ -155,14 +155,8 @@ Deno.serve(async (req: Request) => {
   if (existingMember) return errorResponse(409, "already_in_guild");
 
   // 재가입 쿨다운(탈퇴/추방 7일) 중이면 신청 불가.
-  const { data: cd } = await db
-    .from("guild_join_cooldowns")
-    .select("until")
-    .eq("device_id", deviceId)
-    .maybeSingle();
-  if (cd && new Date(cd.until).getTime() > Date.now()) {
-    return jsonResponse({ error: "join_cooldown", until: cd.until }, { status: 403 });
-  }
+  const cooldownResp = await checkJoinCooldown(db, deviceId);
+  if (cooldownResp) return cooldownResp;
 
   // 대상 길드 존재 + 같은 테넌트 (타 테넌트 길드는 "존재하지 않음"으로 뭉갠다).
   const { data: guild } = await db

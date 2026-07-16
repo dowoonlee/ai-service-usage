@@ -9,6 +9,7 @@
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
+import { clientIp, ipRateLimited } from "../_shared/ratelimit.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import {
@@ -16,6 +17,7 @@ import {
   CREATE_IP_WINDOW_SEC,
   generateInviteCode,
   isValidGuildName,
+  checkJoinCooldown,
 } from "../_shared/guild_policy.ts";
 
 interface CreatePayload {
@@ -30,14 +32,6 @@ interface CreateRequest {
 
 const MAX_CLOCK_SKEW_SEC = 3600;
 
-function clientIp(req: Request): string | null {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) {
-    const first = xff.split(",")[0].trim();
-    if (first) return first;
-  }
-  return req.headers.get("x-real-ip");
-}
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -91,30 +85,16 @@ Deno.serve(async (req: Request) => {
   if (existingMembership) return errorResponse(409, "already_in_guild");
 
   // 가입 쿨다운 — create에도 적용 (헤더 주석 참조).
-  const { data: cooldown } = await db
-    .from("guild_join_cooldowns")
-    .select("until")
-    .eq("device_id", deviceId)
-    .maybeSingle();
-  if (cooldown && new Date(cooldown.until).getTime() > Date.now()) {
-    return jsonResponse(
-      { error: "join_cooldown", until: cooldown.until },
-      { status: 403 },
-    );
-  }
+  const cooldownResp = await checkJoinCooldown(db, deviceId);
+  if (cooldownResp) return cooldownResp;
 
   // IP rate-limit.
   const ip = clientIp(req);
-  if (ip) {
-    const since = new Date(Date.now() - CREATE_IP_WINDOW_SEC * 1000).toISOString();
-    const { count } = await db
-      .from("guild_create_attempts")
-      .select("id", { count: "exact", head: true })
-      .eq("ip", ip)
-      .gte("attempted_at", since);
-    if ((count ?? 0) >= CREATE_IP_MAX) {
-      return errorResponse(429, "rate_limited");
-    }
+  if (await ipRateLimited(db, {
+    table: "guild_create_attempts", ip,
+    windowSec: CREATE_IP_WINDOW_SEC, max: CREATE_IP_MAX,
+  })) {
+    return errorResponse(429, "rate_limited");
   }
 
   // 길드명 충돌 선검사 — 테넌트 내에서만. UNIQUE(tenant_id, name_normalized)가 race 최종 방어.

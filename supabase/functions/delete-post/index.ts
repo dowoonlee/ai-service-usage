@@ -72,7 +72,10 @@ Deno.serve(async (req: Request) => {
     .eq("id", p.postId)
     .maybeSingle();
   if (!post) return errorResponse(404, "post_not_found");
-  if (post.device_id !== p.deviceId) return errorResponse(403, "not_post_owner");
+  // UUID 대소문자 정규화 비교 (클라 Swift UUID는 대문자, DB는 소문자 — delete-comment와 동일 패턴).
+  if (String(post.device_id).toLowerCase() !== p.deviceId.toLowerCase()) {
+    return errorResponse(403, "not_post_owner");
+  }
   // 현재 테넌트에서만 행위 — 전환(one-way) 후 옛 테넌트 글은 건드리지 못한다(§2-4).
   if (post.tenant_id !== user.tenant_id) return errorResponse(403, "cross_tenant");
 

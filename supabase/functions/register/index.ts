@@ -9,6 +9,7 @@
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
+import { clientIp, ipRateLimited } from "../_shared/ratelimit.ts";
 import { generateHmacKeyB64 } from "../_shared/hmac.ts";
 import {
   generateRecoveryCode,
@@ -34,16 +35,6 @@ interface RegisterRequest {
 const REGISTER_IP_WINDOW_SEC = 24 * 3600;
 const REGISTER_IP_MAX = 10;
 
-// 클라이언트 IP — Supabase Edge runtime이 x-forwarded-for에 실제 IP를 넣는다(첫 항목).
-function clientIp(req: Request): string | null {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) {
-    const first = xff.split(",")[0].trim();
-    if (first) return first;
-  }
-  return req.headers.get("x-real-ip");
-}
-
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
   if (preflight) return preflight;
@@ -64,16 +55,11 @@ Deno.serve(async (req: Request) => {
 
   // 0) IP rate-limit — 같은 IP의 최근 window 성공 등록 수가 한도 이상이면 차단.
   const ip = clientIp(req);
-  if (ip) {
-    const since = new Date(Date.now() - REGISTER_IP_WINDOW_SEC * 1000).toISOString();
-    const { count } = await db
-      .from("register_attempts")
-      .select("id", { count: "exact", head: true })
-      .eq("ip", ip)
-      .gte("attempted_at", since);
-    if ((count ?? 0) >= REGISTER_IP_MAX) {
-      return errorResponse(429, "rate_limited");
-    }
+  if (await ipRateLimited(db, {
+    table: "register_attempts", ip,
+    windowSec: REGISTER_IP_WINDOW_SEC, max: REGISTER_IP_MAX,
+  })) {
+    return errorResponse(429, "rate_limited");
   }
 
   // 1) device_id 선검사 — 이미 등록된 device면 즉시 명시적 에러. 멱등 처리 안 함 (recovery
@@ -92,19 +78,23 @@ Deno.serve(async (req: Request) => {
       ? body.githubUserId
       : null;
 
-  // 2) nickname + github_user_id 충돌 검사 — 한 번에 select로 처리해 race 줄임.
-  const conflictFilters = [`nickname_normalized.eq.${normalized}`];
-  if (githubUserId !== null) conflictFilters.push(`github_user_id.eq.${githubUserId}`);
-  const { data: conflicts } = await db
+  // 2) nickname + github_user_id 충돌 검사.
+  //    .or() 문자열 보간은 닉네임에 콤마/점(isValidNickname이 허용)이 섞이면 필터 인젝션이
+  //    된다 — 위 githubUserId 정수 방어와 달리 문자열 쪽이 뚫려 있었으므로, 보간 없는
+  //    .eq() 두 개로 분리한다. 유일성의 최종 방어는 여전히 DB UNIQUE 인덱스.
+  const { data: nameClash } = await db
     .from("users")
-    .select("nickname_normalized, github_user_id")
-    .or(conflictFilters.join(","));
-
-  if (conflicts && conflicts.length > 0) {
-    const nameClash = conflicts.find((c) => c.nickname_normalized === normalized);
-    if (nameClash) return errorResponse(409, "nickname_taken");
-    const ghClash = conflicts.find((c) => c.github_user_id === githubUserId);
-    if (ghClash) return errorResponse(409, "github_already_bound");
+    .select("device_id")
+    .eq("nickname_normalized", normalized)
+    .limit(1);
+  if (nameClash && nameClash.length > 0) return errorResponse(409, "nickname_taken");
+  if (githubUserId !== null) {
+    const { data: ghClash } = await db
+      .from("users")
+      .select("device_id")
+      .eq("github_user_id", githubUserId)
+      .limit(1);
+    if (ghClash && ghClash.length > 0) return errorResponse(409, "github_already_bound");
   }
 
   const hmacKey = generateHmacKeyB64();
