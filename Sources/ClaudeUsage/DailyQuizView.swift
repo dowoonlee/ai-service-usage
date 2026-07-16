@@ -132,7 +132,7 @@ struct DailyQuizView: View {
         case .quiz(let quiz):
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    briefCard(quiz.brief)
+                    briefCard(quiz)
                     if let result = resultFor(quiz) {
                         resultBanner(result)
                         questionList(quiz, result: result)
@@ -140,7 +140,6 @@ struct DailyQuizView: View {
                         questionList(quiz, result: nil)
                         submitButton(quiz)
                     }
-                    sourceFooter(quiz)
                 }
                 .padding(16)
             }
@@ -173,14 +172,16 @@ struct DailyQuizView: View {
 
     // MARK: - 조각들
 
-    private func briefCard(_ brief: String) -> some View {
+    private func briefCard(_ quiz: RankingAPI.DailyQuizResponse) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("오늘의 AI 근황")
                 .font(.caption.bold())
                 .foregroundColor(.secondary)
-            Text(brief)
+            Text(quiz.brief)
                 .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
+            // 지문 바로 아래 원문 링크 — 맨 아래 footer 대신 여기에 둔다.
+            sourceLink(quiz)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -308,22 +309,39 @@ struct DailyQuizView: View {
         .help(allAnswered ? "답안을 제출합니다" : "모든 문항에 답해 주세요")
     }
 
-    private func sourceFooter(_ quiz: RankingAPI.DailyQuizResponse) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "link")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            if let url = URL(string: quiz.sourceUrl) {
-                Link(quiz.sourceName.isEmpty ? "출처 기사" : quiz.sourceName, destination: url)
-                    .font(.caption)
-            } else {
-                Text(quiz.sourceName)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+    /// 지문(brief) 하단 원문 링크. URL이 유효하면 "본문으로 가기" 링크 + 출처명,
+    /// 없으면 출처명만 텍스트로.
+    @ViewBuilder
+    private func sourceLink(_ quiz: RankingAPI.DailyQuizResponse) -> some View {
+        if !quiz.sourceUrl.isEmpty, let url = URL(string: quiz.sourceUrl) {
+            HStack(spacing: 5) {
+                Image(systemName: "arrow.up.right.square")
+                    .font(.caption2)
+                    .foregroundColor(.accentColor)
+                Link("본문으로 가기", destination: url)
+                    .font(.caption.bold())
+                if !quiz.sourceName.isEmpty {
+                    Text("· \(quiz.sourceName)")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer()
+            .padding(.top, 4)
+        } else if !quiz.sourceName.isEmpty {
+            HStack(spacing: 5) {
+                Image(systemName: "link")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text("출처: \(quiz.sourceName)")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 4)
         }
-        .padding(.top, 4)
     }
 }
 
