@@ -258,7 +258,9 @@ struct ArenaView: View {
     // MARK: 랭크전 (서버 시뮬·Elo)
 
     @ViewBuilder private var rankedSection: some View {
-        if canServerEnhance { rankedBody } else { rankedGate }
+        if canServerEnhance { rankedBody }
+        else if needsKeyRecovery { keyRecoveryGate }
+        else { rankedGate }
     }
 
     private var rankedGate: some View {
@@ -946,7 +948,9 @@ struct ArenaView: View {
     // MARK: 강화소 (펫 반응 이펙트)
 
     @ViewBuilder private var enhanceSection: some View {
-        if canServerEnhance { enhanceBody } else { enhanceGate }
+        if canServerEnhance { enhanceBody }
+        else if needsKeyRecovery { keyRecoveryGate }
+        else { enhanceGate }
     }
 
     // VP 강화는 서버 authoritative라 랭킹 참여자 전용. 미등록이면 안내.
@@ -1202,6 +1206,30 @@ struct ArenaView: View {
     private var canServerEnhance: Bool {
         RankingAPI.isConfigured && settings.rankingRegistered
             && !settings.rankingDeviceID.isEmpty && Keychain.loadRankingHmacKey() != nil
+    }
+
+    /// 랭킹엔 등록·참여 중이지만 keychain 인증 키(HMAC)만 유실된 상태.
+    /// vault 마이그레이션이 항목을 못 읽거나(ad-hoc ACL 재승인 거부), 재설치로 서버 발급 키가
+    /// 로컬에 없을 때 발생. 이 경우 서버 인증 랭킹 쓰기(제출·강화·랭크전)가 모두 no-op 되므로
+    /// "참여자 전용"이 아니라 "계정 복구 필요"로 정확히 안내하고 self-heal 경로를 준다.
+    private var needsKeyRecovery: Bool {
+        RankingAPI.isConfigured && settings.rankingRegistered
+            && !settings.rankingDeviceID.isEmpty && Keychain.loadRankingHmacKey() == nil
+    }
+
+    /// 키 유실 시 안내 + 복구 유도 게이트(랭크전·강화 공용). 설정→랭킹으로 라우팅한다.
+    private var keyRecoveryGate: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "key.slash").font(.system(size: 34)).foregroundStyle(.orange)
+            Text("계정 인증 키를 복구해야 합니다.").font(.system(size: 12, weight: .medium))
+            Text("랭킹엔 참여 중이지만 이 기기의 인증 키가 유실됐습니다. 서버의 레이팅·강화 기록은 그대로이며, 계정 복구로 키를 다시 받으면 아레나가 열립니다.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            Button("설정에서 계정 복구…") {
+                NotificationCenter.default.post(name: .openRankingSettings, object: nil)
+            }.controlSize(.small).padding(.top, 2)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 32).padding(.horizontal, 20)
     }
 
     /// 서버에서 강화 레벨 + 가용 VP 로드. 미등록/미구성이면 no-op.

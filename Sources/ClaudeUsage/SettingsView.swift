@@ -375,6 +375,23 @@ private struct RankingSectionView: View {
                 Toggle("", isOn: pauseBinding).labelsHidden().toggleStyle(.switch)
             }
 
+            // 등록 상태인데 이 기기의 HMAC 인증 키가 유실된 경우(vault 마이그레이션/ACL 재승인 거부·재설치).
+            // 서버 동기화·아레나·강화가 전부 조용히 no-op 되므로, 계정 삭제 없이 GitHub 재인증으로 키를
+            // 재발급받는 경로를 노출한다. 정상 등록 사용자에겐 이 배너가 뜨지 않는다.
+            if Keychain.loadRankingHmacKey() == nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("인증 키 유실 — 서버 동기화가 중단됐습니다.", systemImage: "key.slash")
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.orange)
+                    Text("이 기기의 랭킹 인증 키가 유실됐습니다. 아래로 복구하면 레이팅·강화 기록을 그대로 이어받습니다(계정 삭제 아님).")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("GitHub으로 계정 복구…") { showRecoveryEntry = true }
+                        .controlSize(.small).padding(.top, 2)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+            }
+
             HStack {
                 Text("닉네임").font(.system(size: 11)).frame(width: 56, alignment: .leading)
                 if editingNickname {
@@ -436,6 +453,8 @@ private struct RankingSectionView: View {
         } message: {
             Text("서버의 모든 데이터가 영구 삭제됩니다. 누적 코인은 복구되지 않습니다.")
         }
+        // 키 유실 복구 배너의 진입점 — 등록 상태에서도 복구 시트를 띄울 수 있게 붙인다.
+        .sheet(isPresented: $showRecoveryEntry) { recoveryEntrySheet }
     }
 
     private var pauseBinding: Binding<Bool> {
