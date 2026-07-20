@@ -95,9 +95,14 @@ Deno.serve(async (req: Request) => {
   const oppRating = oppRatingRow.data ? Number(oppRatingRow.data.rating) : 1000;
   const expectedMe = 1 / (1 + Math.pow(10, (oppRating - myRating) / 400));
   const scoreMe = winSide === "a" ? 1 : (winSide === null ? 0.5 : 0);
-  const deltaMe = Math.round(RATING_K * (scoreMe - expectedMe));
-  const myNew = Math.max(0, myRating + deltaMe);
-  const oppNew = Math.max(0, oppRating - deltaMe);
+  const nominalDelta = Math.round(RATING_K * (scoreMe - expectedMe));
+  // 제로섬: 실제 이동량 = 패자가 실제로 내놓을 수 있는 만큼(0 바닥에 걸리면 그만큼만). 승자 획득 =
+  // 패자 손실이라 총점이 보존된다 — 0 클램프로 승자만 전액 받던 기존 인플레(점수 순주입)를 봉합.
+  const deltaMe = nominalDelta >= 0
+    ? Math.min(nominalDelta, oppRating)     // opp → me (패자가 0 아래로는 못 내려감)
+    : -Math.min(-nominalDelta, myRating);   // me → opp (내가 0 아래로는 못 내려감)
+  const myNew = myRating + deltaMe;
+  const oppNew = oppRating - deltaMe;
 
   const myWins = (myRatingRow.data ? Number(myRatingRow.data.wins) : 0) + (winSide === "a" ? 1 : 0);
   const myLosses = (myRatingRow.data ? Number(myRatingRow.data.losses) : 0) + (winSide === "b" ? 1 : 0);
