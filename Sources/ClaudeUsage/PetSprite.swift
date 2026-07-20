@@ -1206,6 +1206,15 @@ enum PetSprite {
         return .module
     }()
 
+    /// 단일 아이콘 PNG(basename)를 번들에서 로드. 정적 UI 아이콘(시너지 배지 등)용. 캐시됨.
+    static func icon(named name: String) -> NSImage? {
+        if let c = imageCache.object(forKey: name as NSString) { return c }
+        guard let url = resourceBundle.url(forResource: name, withExtension: "png"),
+              let img = NSImage(contentsOf: url) else { return nil }
+        imageCache.setObject(img, forKey: name as NSString)
+        return img
+    }
+
     /// 동물+동작에 해당하는 strip을 잘라 frame 배열로 반환. 캐시됨.
     static func frames(for kind: PetKind, action: PetController.Action) -> [NSImage] {
         let key = "\(kind.rawValue)/\(action)" as NSString

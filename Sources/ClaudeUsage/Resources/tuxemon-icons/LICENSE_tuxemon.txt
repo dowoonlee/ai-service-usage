@@ -1,0 +1,19 @@
+Tuxemon UI icons — element type & bond icons (arena team-synergy badges)
+
+Source:  https://github.com/Tuxemon/Tuxemon
+         (mods/tuxemon/gfx/ui/icons — element/ and bond/)
+Author:  Tuxemon project contributors (see repo ATTRIBUTIONS.md)
+License: CC BY-SA 4.0  (https://creativecommons.org/licenses/by-sa/4.0/)
+
+These icons are used, unmodified except for file renaming, as team-synergy
+badges in the AIUsage arena. Per the ShareAlike term, these icons and any
+adaptations of them (e.g. recolor/resize) remain licensed under CC BY-SA 4.0.
+
+Mapping (original file -> bundled name):
+  element/wood_type.png    -> syn_beast.png    (Beast 타입 시너지)
+  element/heroic_type.png  -> syn_warrior.png  (Warrior 타입 시너지)
+  element/fire_type.png    -> syn_chaos.png    (Chaos 타입 시너지)
+  element/cosmic_type.png  -> syn_arcane.png   (Arcane 타입 시너지)
+  element/metal_type.png   -> syn_machine.png  (Machine 타입 시너지)
+  element/sky_type.png     -> syn_mascot.png   (Mascot 타입 시너지)
+  bond/bond1.png           -> syn_bond.png     (같은 컬렉션 동족 시너지)

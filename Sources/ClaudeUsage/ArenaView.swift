@@ -146,16 +146,16 @@ struct ArenaView: View {
             Text("내 배틀 팀").font(.system(size: 12, weight: .semibold))
             Text("(탭해서 편성)").font(.system(size: 9)).foregroundStyle(.tertiary)
             Spacer()
-            // 팀 시너지 — 종류별 아이콘. 호버하면 효과 툴팁(팝오버).
+            // 팀 시너지 — 종류별 픽셀 아이콘(Tuxemon). 호버하면 효과 툴팁(팝오버).
             HStack(spacing: 5) {
                 if let c = collectionSynergy {
-                    synergyBadge("person.3.sequence.fill", .accentColor, collTip(c), $collTipShown)
+                    synergyBadge("syn_bond", collTip(c), $collTipShown)
                 }
                 if let t = typeSynergy {
-                    synergyBadge("hexagon.fill", typeColor(t.type), typeTip(t), $typeTipShown)
+                    synergyBadge(typeSynergyResource(t.type), typeTip(t), $typeTipShown)
                 }
                 if collectionSynergy == nil && typeSynergy == nil {
-                    synergyBadge("person.3.sequence", .secondary, noneSynergyTip, $noneTipShown)
+                    synergyBadge("syn_bond", noneSynergyTip, $noneTipShown, grayed: true)
                 }
             }
             Button { teamKinds = Array(owned.shuffled().prefix(3)); stopPlayback(); result = nil } label: {
@@ -733,18 +733,36 @@ struct ArenaView: View {
         "팀 시너지 없음\n같은 컬렉션이나 타입을 2마리 이상 모으면\n팀 전원 스탯이 오릅니다."
     }
 
-    // 시너지 배지 — 호버 시 팝오버로 효과 툴팁(.help가 이 창에선 안 떠서 onHover+popover 사용).
-    private func synergyBadge(_ icon: String, _ color: Color, _ tip: String, _ shown: Binding<Bool>) -> some View {
-        Image(systemName: icon)
-            .font(.system(size: 13))
-            .foregroundStyle(color)
-            .onHover { shown.wrappedValue = $0 }
-            .popover(isPresented: shown, arrowEdge: .bottom) {
-                Text(tip)
-                    .font(.system(size: 11)).multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(width: 220).padding(10)
+    // 배틀 타입 → Tuxemon element 아이콘 리소스명.
+    private func typeSynergyResource(_ t: BattleType) -> String {
+        switch t {
+        case .beast:   return "syn_beast"     // wood(잎)
+        case .warrior: return "syn_warrior"   // heroic(별)
+        case .chaos:   return "syn_chaos"     // fire(불꽃)
+        case .arcane:  return "syn_arcane"    // cosmic(크리스탈)
+        case .machine: return "syn_machine"   // metal(금속별)
+        case .mascot:  return "syn_mascot"    // sky(깃털)
+        }
+    }
+
+    // 시너지 배지 — Tuxemon 픽셀 아이콘. 호버 시 팝오버 툴팁(.help가 이 창에선 안 떠서 onHover+popover).
+    private func synergyBadge(_ resource: String, _ tip: String, _ shown: Binding<Bool>, grayed: Bool = false) -> some View {
+        Group {
+            if let img = PetSprite.icon(named: resource) {
+                Image(nsImage: img).resizable().interpolation(.none)
+                    .frame(width: 20, height: 20)
+                    .grayscale(grayed ? 1 : 0).opacity(grayed ? 0.55 : 1)
+            } else {
+                Image(systemName: "sparkles").font(.system(size: 12)).foregroundStyle(.secondary)
             }
+        }
+        .onHover { shown.wrappedValue = $0 }
+        .popover(isPresented: shown, arrowEdge: .bottom) {
+            Text(tip)
+                .font(.system(size: 11)).multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 220).padding(10)
+        }
     }
 
     private func fight() {
