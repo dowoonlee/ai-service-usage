@@ -55,8 +55,21 @@ struct ArenaView: View {
     @State private var enhanceSort: TargetSort = .recent
     @State private var recentEnhanced: [PetKind] = []
 
+    // 랭크전 (서버 authoritative)
+    @State private var pvpRating: Int?
+    @State private var pvpWins = 0
+    @State private var pvpLosses = 0
+    @State private var pvpDailyUsed = 0
+    @State private var pvpDailyLimit = 10
+    @State private var rankedError: String?
+    @State private var rankedResult: RankedResult?     // 마지막 랭크전 결과(배틀 재생 아래 카드)
+    @State private var rankedBusy = false              // 등록+매칭+시뮬 요청 진행 중
+    @State private var rankedTask: Task<Void, Never>?
+
+    struct RankedResult { let winner: String; let ratingDelta: Int; let coinReward: Int; let opponentNickname: String }
+
     enum Mode: String, CaseIterable, Identifiable {
-        case practice = "연습전", enhance = "강화소"
+        case practice = "연습전", ranked = "랭크전", enhance = "강화소"
         var id: String { rawValue }
     }
     enum EnhancePhase: Equatable { case idle, charging, result(EnhanceOutcome) }
@@ -81,7 +94,12 @@ struct ArenaView: View {
                         ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented).labelsHidden()
-                    if mode == .practice { practiceSection } else { enhanceSection }
+                    .onChange(of: mode) { _, _ in stopPlayback(); result = nil; rankedResult = nil; rankedError = nil }
+                    switch mode {
+                    case .practice: practiceSection
+                    case .ranked:   rankedSection
+                    case .enhance:  enhanceSection
+                    }
                 }
             }
             .padding(16)
@@ -91,7 +109,7 @@ struct ArenaView: View {
             if enhanceKind == nil { enhanceKind = owned.first }
         }
         .task { await loadEnhanceState() }   // 서버에서 강화 레벨·가용 VP 로드(등록 사용자)
-        .onDisappear { playbackTask?.cancel(); enhanceTask?.cancel() }
+        .onDisappear { playbackTask?.cancel(); enhanceTask?.cancel(); rankedTask?.cancel() }
     }
 
     // MARK: 헤더 / 게이트
@@ -115,23 +133,28 @@ struct ArenaView: View {
 
     // MARK: 연습전
 
+    // 팀 편성 UI — 연습전·랭크전 공유.
+    @ViewBuilder private var teamEditor: some View {
+        HStack {
+            Text("내 배틀 팀").font(.system(size: 12, weight: .semibold))
+            Text("(탭해서 편성)").font(.system(size: 9)).foregroundStyle(.tertiary)
+            Spacer()
+            Text(String(format: "팀 시너지 ×%.2f", teamSynergy))
+                .font(.system(size: 10, design: .monospaced)).foregroundStyle(.tint)
+            Button { teamKinds = Array(owned.shuffled().prefix(3)); stopPlayback(); result = nil } label: {
+                Label("팀 새로 뽑기", systemImage: "shuffle").font(.system(size: 10))
+            }.buttonStyle(.plain).foregroundStyle(.tint)
+        }
+        HStack(spacing: 8) {
+            ForEach(Array(teamKinds.enumerated()), id: \.offset) { idx, kind in petCard(kind, slot: idx) }
+            if teamKinds.count < 3 && teamKinds.count < owned.count { addSlotCard }
+            if teamKinds.isEmpty { Text("펫 없음").font(.system(size: 11)).foregroundStyle(.secondary) }
+        }
+    }
+
     private var practiceSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("내 배틀 팀").font(.system(size: 12, weight: .semibold))
-                Text("(탭해서 편성)").font(.system(size: 9)).foregroundStyle(.tertiary)
-                Spacer()
-                Text(String(format: "팀 시너지 ×%.2f", teamSynergy))
-                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(.tint)
-                Button { teamKinds = Array(owned.shuffled().prefix(3)); stopPlayback(); result = nil } label: {
-                    Label("팀 새로 뽑기", systemImage: "shuffle").font(.system(size: 10))
-                }.buttonStyle(.plain).foregroundStyle(.tint)
-            }
-            HStack(spacing: 8) {
-                ForEach(Array(teamKinds.enumerated()), id: \.offset) { idx, kind in petCard(kind, slot: idx) }
-                if teamKinds.count < 3 && teamKinds.count < owned.count { addSlotCard }
-                if teamKinds.isEmpty { Text("펫 없음").font(.system(size: 11)).foregroundStyle(.secondary) }
-            }
+            teamEditor
             Button { fight() } label: {
                 Text("⚔️ 연습전 시작").font(.system(size: 13, weight: .semibold))
                     .frame(maxWidth: .infinity).padding(.vertical, 9)
@@ -142,6 +165,96 @@ struct ArenaView: View {
             if result != nil { battleArena }
         }
         .popover(item: $editingSlot, arrowEdge: .bottom) { sel in teamSlotPicker(slot: sel.id) }
+    }
+
+    // MARK: 랭크전 (서버 시뮬·Elo)
+
+    @ViewBuilder private var rankedSection: some View {
+        if canServerEnhance { rankedBody } else { rankedGate }
+    }
+
+    private var rankedGate: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "trophy.circle").font(.system(size: 34)).foregroundStyle(.secondary)
+            Text("랭크전은 랭킹 참여자 전용입니다.").font(.system(size: 12))
+            Text("승패는 서버가 확정(조작 방지)하고 레이팅이 오릅니다. 설정에서 랭킹을 켜세요.")
+                .font(.system(size: 10)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 40)
+    }
+
+    private var rankedBody: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // 레이팅 · 전적 · 오늘 판수
+            HStack(spacing: 10) {
+                if let r = pvpRating {
+                    Text("레이팅 \(r)").font(.system(size: 13, weight: .bold)).foregroundStyle(.tint)
+                } else {
+                    Text("첫 도전으로 배치").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Text("\(pvpWins)승 \(pvpLosses)패").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                Spacer()
+                Text("오늘 \(pvpDailyUsed)/\(pvpDailyLimit)판").font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(pvpDailyUsed >= pvpDailyLimit ? .red : .secondary)
+            }
+            teamEditor
+            Button { doRankedChallenge() } label: {
+                Text(rankedBusy ? "매칭 중…" : "⚔️ 랭크전 도전")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(maxWidth: .infinity).padding(.vertical, 9)
+                    .background(RoundedRectangle(cornerRadius: AppRadius.md)
+                        .fill(Color.accentColor.opacity(rankedReady ? 1 : 0.5)))
+                    .foregroundStyle(.white)
+            }.buttonStyle(.plain).disabled(!rankedReady)
+            Text("현재 팀이 등록되어 다른 유저의 상대(고스트)가 됩니다. 강화한 상태로 다시 도전하면 재등록됩니다.")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+            if let e = rankedError {
+                Text(e).font(.system(size: 10)).foregroundStyle(.red).multilineTextAlignment(.center)
+            }
+            if result != nil { battleArena }
+        }
+        .popover(item: $editingSlot, arrowEdge: .bottom) { sel in teamSlotPicker(slot: sel.id) }
+    }
+
+    // 도전 가능: 팀 있음 + 진행 중 아님 + 일일 여유.
+    private var rankedReady: Bool {
+        !teamKinds.isEmpty && !rankedBusy && pvpDailyUsed < pvpDailyLimit
+    }
+
+    private func doRankedChallenge() {
+        guard rankedReady, canServerEnhance, let hmac = Keychain.loadRankingHmacKey() else { return }
+        rankedError = nil; rankedResult = nil; stopPlayback(); result = nil
+        let dev = settings.rankingDeviceID
+        let team = teamKinds.map { (kind: $0.rawValue, variant: 0, progressUnits: 0.0) }
+        rankedTask?.cancel()
+        rankedBusy = true
+        rankedTask = Task { @MainActor in
+            defer { rankedBusy = false }
+            do {
+                // 현재 팀을 등록(강화 레벨은 서버 SSOT에서 동결) 후 도전.
+                _ = try await RankingAPI.shared.registerBattleTeam(deviceId: dev, hmacKeyBase64: hmac, team: team)
+                let resp = try await RankingAPI.shared.challengeRanked(deviceId: dev, hmacKeyBase64: hmac)
+                if Task.isCancelled { return }
+                // 서버 팀·로그를 기존 배틀 재생에 먹인다.
+                aSnaps = resp.myTeam
+                bSnaps = resp.oppTeam
+                let w: BattleSide? = resp.winner == "me" ? .a : (resp.winner == "opp" ? .b : nil)
+                result = BattleResult(winner: w, rounds: resp.rounds, log: resp.log)
+                rankedResult = RankedResult(winner: resp.winner, ratingDelta: resp.ratingDelta,
+                                            coinReward: resp.coinReward, opponentNickname: resp.opponentNickname)
+                pvpRating = resp.newRating
+                pvpDailyUsed = resp.dailyUsed
+                pvpDailyLimit = resp.dailyLimit
+                if resp.winner == "me" { pvpWins += 1 } else if resp.winner == "opp" { pvpLosses += 1 }
+                // 승리 코인(로컬 경제) — 서버 금액을 로컬 원장에 크레딧.
+                if resp.coinReward > 0 { CoinLedger.shared.creditBonus(resp.coinReward, reason: "pvp-\(resp.winner)") }
+                showFullLog = false
+                startPlayback(total: resp.log.count)
+            } catch {
+                if Task.isCancelled { return }
+                rankedError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            }
+        }
     }
 
     private func petCard(_ kind: PetKind, slot: Int) -> some View {
@@ -232,9 +345,26 @@ struct ArenaView: View {
             currentActionLine(current)
             controls(total: log.count)
             if showFullLog { fullLog(log) }
+            if done, let rr = rankedResult { rankedResultCard(rr) }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(Color.secondary.opacity(0.06)))
+    }
+
+    // 랭크전 결과 요약 — 레이팅 변화 + 획득 코인 + 상대.
+    private func rankedResultCard(_ rr: RankedResult) -> some View {
+        let color: Color = rr.winner == "me" ? .green : (rr.winner == "opp" ? .red : .secondary)
+        let sign = rr.ratingDelta > 0 ? "+" : ""
+        return VStack(spacing: 3) {
+            Text("vs \(rr.opponentNickname)").font(.system(size: 10)).foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Text("레이팅 \(sign)\(rr.ratingDelta)").font(.system(size: 12, weight: .bold)).foregroundStyle(color)
+                if let r = pvpRating { Text("→ \(r)").font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary) }
+                Text("🪙 +\(rr.coinReward)").font(.system(size: 12, weight: .semibold)).foregroundStyle(.orange)
+            }
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(color.opacity(0.1)))
     }
 
     private func partyRow(hp: (a: [PetKind: Int], b: [PetKind: Int]), aKinds: [PetKind], bKinds: [PetKind], aActive: PetKind?, bActive: PetKind?) -> some View {
