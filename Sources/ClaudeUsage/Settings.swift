@@ -467,6 +467,21 @@ final class Settings: ObservableObject {
     @Published var ownedTitles: Set<String> {
         didSet { persist(ownedTitles, forKey: Keys.ownedTitles) }
     }
+
+    // 아레나 칭호 언락용 통계 캐시(서버 SSOT 미러, 표시/칭호 판정 전용). @Published 불요 — 칭호는
+    // ReportView 열 때 lazy 평가. ArenaView.loadRankedState 가 leaderboard 응답으로 갱신.
+    var pvpBestRating: Int {
+        get { UserDefaults.standard.integer(forKey: "pvp.bestRating") }
+        set { UserDefaults.standard.set(newValue, forKey: "pvp.bestRating") }
+    }
+    var pvpBestRank: Int {
+        get { (UserDefaults.standard.object(forKey: "pvp.bestRank") as? Int) ?? Int.max }
+        set { UserDefaults.standard.set(newValue, forKey: "pvp.bestRank") }
+    }
+    var pvpWinsCache: Int {
+        get { UserDefaults.standard.integer(forKey: "pvp.wins") }
+        set { UserDefaults.standard.set(newValue, forKey: "pvp.wins") }
+    }
     /// 카드를 공유 이미지로 export할 때 GitHub login을 노출할지. 기본 false (privacy first) —
     /// GitHub 연결한 사용자가 명시적 opt-in해야 카드에 username 박힘.
     @Published var showGitHubLoginInCard: Bool {

@@ -1848,10 +1848,16 @@ actor RankingAPI {
     struct PvpLeaderboardEntry: Decodable, Sendable {
         let rank: Int; let nickname: String; let rating: Int; let wins: Int; let losses: Int; let isMe: Bool
     }
+    struct PvpLastSeason: Decodable, Sendable {
+        let period: String
+        let championNickname: String?
+        let myRp: Int
+    }
     struct PvpLeaderboardResponse: Decodable, Sendable {
         let entries: [PvpLeaderboardEntry]
         let myRank: Int?; let myRating: Int?; let myWins: Int; let myLosses: Int
         let dailyUsed: Int; let dailyLimit: Int
+        let lastSeason: PvpLastSeason?
     }
     /// 내 최근 매치 — teamA(도전자)/teamB(방어자)/events 는 배틀 재생에 그대로 먹인다.
     struct PvpMatch: Decodable, Sendable {

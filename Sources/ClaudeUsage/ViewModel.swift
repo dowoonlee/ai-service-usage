@@ -711,7 +711,7 @@ final class ViewModel: ObservableObject {
                             DebugLog.log("Unknown grant currency: \(grant.currency) — skipped")
                         }
                         NotificationManager.shared.rewardGrantEarned(
-                            currency: grant.currency, amount: grant.amount)
+                            currency: grant.currency, amount: grant.amount, grantKey: grant.grantKey)
                         DebugLog.log("Grant reward: \(grant.grantKey) +\(grant.amount) \(grant.currency)")
                     }
                     s.claimedGrants.insert(grant.dedupKey)

@@ -79,6 +79,7 @@ struct ArenaView: View {
     @State private var rankedTask: Task<Void, Never>?
     @State private var leaderboard: [RankingAPI.PvpLeaderboardEntry] = []
     @State private var history: [RankingAPI.PvpMatch] = []
+    @State private var lastSeason: RankingAPI.PvpLastSeason?     // 지난 시즌 시상대
     // 시너지 아이콘 호버(툴팁 팝오버)
     @State private var collTipShown = false
     @State private var typeTipShown = false
@@ -284,6 +285,18 @@ struct ArenaView: View {
                 Text("오늘 \(pvpDailyUsed)/\(pvpDailyLimit)판").font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(pvpDailyUsed >= pvpDailyLimit ? .red : .secondary)
             }
+            if let ls = lastSeason {
+                HStack(spacing: 6) {
+                    Text("🏆 지난 시즌(\(ls.period))").font(.system(size: 10, weight: .semibold)).foregroundStyle(.orange)
+                    if let champ = ls.championNickname {
+                        Text("챔피언 \(champ)").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if ls.myRp > 0 { Text("내 보상 +\(ls.myRp) RP").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tint) }
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.1)))
+            }
             teamEditor
             Button { doRankedChallenge() } label: {
                 Text(rankedBusy ? "매칭 중…" : "⚔️ 랭크전 도전")
@@ -370,6 +383,11 @@ struct ArenaView: View {
             leaderboard = lb.entries
             pvpRating = lb.myRating; pvpWins = lb.myWins; pvpLosses = lb.myLosses
             pvpDailyUsed = lb.dailyUsed; pvpDailyLimit = lb.dailyLimit
+            // 아레나 칭호 언락용 캐시 갱신(최고 기록).
+            settings.pvpWinsCache = max(settings.pvpWinsCache, lb.myWins)
+            if let r = lb.myRating { settings.pvpBestRating = max(settings.pvpBestRating, r) }
+            if let rank = lb.myRank { settings.pvpBestRank = min(settings.pvpBestRank, rank) }
+            lastSeason = lb.lastSeason
         }
         if let hist { history = hist.matches }
     }

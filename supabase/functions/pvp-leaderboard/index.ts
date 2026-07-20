@@ -89,9 +89,30 @@ Deno.serve(async (req: Request) => {
   const { data: dc } = await db
     .from("pvp_daily_counts").select("count").eq("device_id", me).eq("kst_date", todayKst()).maybeSingle();
 
+  // 지난 시즌 시상대 — 가장 최근 정산 period의 챔피언(최고 RP grant) + 내 보상.
+  let lastSeason: { period: string; championNickname: string | null; myRp: number } | null = null;
+  const { data: seasonRow } = await db
+    .from("pvp_seasons").select("period").order("period", { ascending: false }).limit(1).maybeSingle();
+  if (seasonRow) {
+    const period = seasonRow.period as string;
+    const prefix = `pvp-season-${period}-`;
+    const { data: champ } = await db.from("reward_grants")
+      .select("device_id, amount").eq("currency", "rp")
+      .like("grant_key", `${prefix}%`).order("amount", { ascending: false }).limit(1).maybeSingle();
+    let championNickname: string | null = null;
+    if (champ) {
+      const { data: cu } = await db.from("users").select("nickname").eq("device_id", champ.device_id).maybeSingle();
+      championNickname = (cu?.nickname as string) ?? null;
+    }
+    const { data: myG } = await db.from("reward_grants").select("amount")
+      .eq("device_id", me).eq("currency", "rp").like("grant_key", `${prefix}%`).maybeSingle();
+    lastSeason = { period, championNickname, myRp: myG ? Number(myG.amount) : 0 };
+  }
+
   return jsonResponse({
     entries, myRank, myRating, myWins, myLosses,
     dailyUsed: dc ? Number(dc.count) : 0,
     dailyLimit: DAILY_RANK_LIMIT,
+    lastSeason,
   });
 });
