@@ -399,6 +399,24 @@ actor RankingAPI {
         /// → 클라가 현재 VP를 새 baseline으로 잡아야 over-credit 안 남. 구버전 서버는 nil → 레거시
         /// 절대 모드로 처리(안전). 자세한 분기는 SettingsView recover 흐름 참조.
         let usesZeroBaseline: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case deviceId, hmacKey, nickname, totalCoins, profileJson, usesZeroBaseline
+        }
+
+        // 복구는 hmacKey/deviceId 재확보가 본질이다. profileJson(백업)이 미래/이종 스키마라
+        // 디코딩 실패해도 계정·키 복구 자체는 성공해야 하므로 backup 파싱을 필수 경로와 분리한다
+        // — 실패 시 백업 복원만 건너뛰고(nil) 복구는 진행. (근본 원인인 date 비대칭은 위 execute의
+        // date 전략에서 이미 처리하지만, 여기서 미지의 백업 비호환에 대한 방어를 한 겹 더 둔다.)
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            deviceId = try c.decode(String.self, forKey: .deviceId)
+            hmacKey = try c.decode(String.self, forKey: .hmacKey)
+            nickname = try c.decode(String.self, forKey: .nickname)
+            totalCoins = try c.decode(Int.self, forKey: .totalCoins)
+            profileJson = try? c.decodeIfPresent(ProfileState.self, forKey: .profileJson)
+            usesZeroBaseline = try c.decodeIfPresent(Bool.self, forKey: .usesZeroBaseline)
+        }
     }
 
     // MARK: - Guild models
@@ -1992,13 +2010,20 @@ actor RankingAPI {
         // `.iso8601` 기본은 fractional seconds 미지원 → fortune 응답 같은 곳에서 decode 실패.
         // 두 포맷 모두 지원하는 custom strategy 로 둘 다 커버.
         decoder.dateDecodingStrategy = .custom { dec in
-            let s = try dec.singleValueContainer().decode(String.self)
-            if let d = Self.iso8601WithFractional.date(from: s) { return d }
-            if let d = Self.iso8601Basic.date(from: s) { return d }
+            let c = try dec.singleValueContainer()
+            // 서버 생성 날짜(timestamptz / Deno toISOString)는 ISO8601 문자열.
+            if let s = try? c.decode(String.self) {
+                if let d = Self.iso8601WithFractional.date(from: s) { return d }
+                if let d = Self.iso8601Basic.date(from: s) { return d }
+                throw DecodingError.dataCorruptedError(in: c, debugDescription: "Invalid ISO 8601 date: \(s)")
+            }
+            // 클라이언트 백업(ProfileState.backup)의 날짜(firstCreditedAt·dailyFortuneLastShownDate)는
+            // 기본 JSONEncoder(.deferredToDate)로 인코딩돼 timeIntervalSinceReferenceDate(초) '숫자'로
+            // jsonb에 저장되고 recover 응답에 그대로 실려온다. 문자열이 아니면 이 경로로 파싱해
+            // recover 응답 전체 디코딩 실패(→ 복구 불가)를 막는다.
+            if let n = try? c.decode(Double.self) { return Date(timeIntervalSinceReferenceDate: n) }
             throw DecodingError.dataCorruptedError(
-                in: try dec.singleValueContainer(),
-                debugDescription: "Invalid ISO 8601 date: \(s)"
-            )
+                in: c, debugDescription: "Unsupported date value (neither ISO8601 string nor number)")
         }
         do {
             return try decoder.decode(Resp.self, from: data)
