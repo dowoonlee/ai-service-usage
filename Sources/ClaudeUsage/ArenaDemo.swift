@@ -112,6 +112,7 @@ enum ArenaDemo {
             var extras: [String] = []
             if e.effectiveness > 1 { extras.append("타입▲") } else if e.effectiveness < 1 { extras.append("타입▼") }
             if e.collectionMult > 1.01 { extras.append("상성▲") } else if e.collectionMult < 0.99 { extras.append("상성▼") }
+            if e.parried { extras.append("🛡️가드") }
             if e.defenderFainted { extras.append("💀 KO") }
             let tag = extras.isEmpty ? "" : "  [\(extras.joined(separator: " "))]"
             let quip = e.quip.map { "  «\($0)»" } ?? ""

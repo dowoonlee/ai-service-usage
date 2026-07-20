@@ -52,6 +52,20 @@ final class EnhanceEngineTests: XCTestCase {
         }
     }
 
+    // 희귀도별 강화 비용 차등 — 고등급일수록 비쌈.
+    func testRarityCostTiers() {
+        XCTAssertEqual(EnhanceEngine.rarityCostMultiplier(.common), 1.0, accuracy: 1e-9)
+        let order: [Rarity] = [.common, .rare, .epic, .legendary, .mythic]
+        for i in 1..<order.count {
+            XCTAssertGreaterThan(EnhanceEngine.rarityCostMultiplier(order[i]),
+                                 EnhanceEngine.rarityCostMultiplier(order[i - 1]))
+        }
+        // Common은 base와 동일, 고등급은 더 비쌈.
+        XCTAssertEqual(EnhanceEngine.cost(level: 11, rarity: .common), EnhanceEngine.cost(level: 11))
+        XCTAssertGreaterThan(EnhanceEngine.cost(level: 11, rarity: .mythic),
+                             EnhanceEngine.cost(level: 11, rarity: .common))
+    }
+
     // 시드 고정 시 결과 시퀀스 결정적(서버 RNG 재현성).
     func testRollDeterministicWithSeed() {
         func sequence(seed: UInt64) -> [EnhanceOutcome] {

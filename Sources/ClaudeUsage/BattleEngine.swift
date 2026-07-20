@@ -36,10 +36,11 @@ struct BattleEvent: Codable, Equatable {
     var attackerKind: PetKind
     var defenderKind: PetKind
     var move: String            // "basic" | "signature"
-    var damage: Int
+    var damage: Int             // 최종 데미지 (패링 반영 후)
     var effectiveness: Double   // 타입 상성 1.6 / 1.0 / 0.625
     var collectionMult: Double  // 컬렉션 상성(밈/상성망) 배수
     var quip: String?           // 밈 라이벌 발동 시 배틀로그 대사
+    var parried: Bool           // 방어자 퍼펙트 가드(패링) 발동 여부
     var defenderFainted: Bool
 }
 
@@ -50,9 +51,27 @@ struct BattleResult: Codable, Equatable {
 }
 
 enum BattleEngine {
-    static let maxRounds = 50
+    /// 최대 행동 수 backstop (ATB라 "라운드"가 아니라 누적 행동 수). 초과 시 잔여 HP 타이브레이크.
+    static let maxRounds = 120
     static let basicPower = 10.0
     static let signaturePower = 14.0
+    /// ATB 행동 주기 = speedBase / SPD. SPD 2배 → 주기 절반 → 2배 자주 행동(연속 공격 가능).
+    static let speedBase = 1000.0
+
+    // MARK: 패링(퍼펙트 가드) — DEF+SPD 조합. 빠른 반응(SPD) + 단단한 가드(DEF)로 피격을 흘린다.
+    static let parryBase = 0.06
+    static let parrySpdWeight = 0.25   // 방어자가 공격자보다 빠를수록 ↑ (반응속도)
+    static let parryDefWeight = 0.12   // 방어자 DEF 비중이 클수록 ↑ (가드력)
+    static let parryMax = 0.40
+    static let parryDamageMult = 0.10  // 패링 성공 시 데미지 대폭 경감(칩 데미지)
+
+    /// 방어자 패링 확률 — SPD 차(반응) + DEF 비중(가드). [0, parryMax]로 클램프.
+    static func parryChance(defSPD: Int, defDEF: Int, atkSPD: Int, atkDEF: Int) -> Double {
+        let sd = Double(defSPD), sa = Double(atkSPD), dd = Double(defDEF), da = Double(atkDEF)
+        let spdTerm = parrySpdWeight * (sd - sa) / max(1, sd + sa)          // -0.25…+0.25
+        let defTerm = parryDefWeight * ((dd / max(1, dd + da)) - 0.5) * 2   // -0.12…+0.12
+        return min(parryMax, max(0, parryBase + spdTerm + defTerm))
+    }
 
     /// 전투용 인스턴스 (스탯 + 현재 HP).
     private struct Combatant {
@@ -82,47 +101,62 @@ enum BattleEngine {
         team.firstIndex(where: { $0.alive })
     }
 
-    /// 두 팀 + 시드 → 결정적 배틀 결과.
+    /// 두 팀 + 시드 → 결정적 배틀 결과. **ATB** — 각 선봉이 SPD에 비례한 주기로 행동한다.
+    /// 두 선봉의 "다음 행동 시각"(nextAt)을 비교해 이른 쪽이 행동하고, 자기 주기(cd=speedBase/SPD)를
+    /// 더해 재스케줄. SPD가 2배면 주기가 절반이라 상대 1회당 2회 행동(연속 공격)이 나온다.
+    /// 동시(nextAt 동률)엔 빠른 쪽 먼저(동속이면 시드) — 정확히 2배도 연속 2회가 나오게.
     static func simulate(teamA: BattleTeam, teamB: BattleTeam, seed: UInt64) -> BattleResult {
         var rng = SeededRNG(seed: seed)
         var a = makeCombatants(teamA)
         var b = makeCombatants(teamB)
         var log: [BattleEvent] = []
-        var round = 0
+        func cd(_ spd: Int) -> Double { speedBase / Double(max(1, spd)) }
 
-        while round < maxRounds {
-            round += 1
+        guard let ai0 = active(a), let bi0 = active(b) else {
+            let w: BattleSide? = active(a) != nil ? .a : (active(b) != nil ? .b : nil)
+            return BattleResult(winner: w, rounds: 0, log: [])
+        }
+        var aNext = cd(a[ai0].stats.spd)
+        var bNext = cd(b[bi0].stats.spd)
+        var actions = 0
+
+        while actions < maxRounds {
             guard let ai = active(a), let bi = active(b) else { break }
-
-            // 선공 결정 — SPD 높은 쪽, 동률은 시드.
-            let spdA = a[ai].stats.spd, spdB = b[bi].stats.spd
-            let aFirst = spdA != spdB ? spdA > spdB : (rng.next() & 1 == 0)
-            let order: [BattleSide] = aFirst ? [.a, .b] : [.b, .a]
-
-            for side in order {
-                guard active(a) != nil, active(b) != nil else { break }
-                if side == .a {
-                    attack(from: &a, to: &b, attackerSide: .a, round: round, log: &log, rng: &rng)
-                } else {
-                    attack(from: &b, to: &a, attackerSide: .b, round: round, log: &log, rng: &rng)
-                }
+            let aSpd = a[ai].stats.spd, bSpd = b[bi].stats.spd
+            let aGoes: Bool
+            if abs(aNext - bNext) < 1e-6 {
+                aGoes = aSpd != bSpd ? aSpd > bSpd : (rng.next() & 1 == 0)
+            } else {
+                aGoes = aNext < bNext
             }
-
-            if active(a) == nil { return BattleResult(winner: .b, rounds: round, log: log) }
-            if active(b) == nil { return BattleResult(winner: .a, rounds: round, log: log) }
+            actions += 1
+            let t = aGoes ? aNext : bNext
+            if aGoes {
+                let fainted = attack(from: &a, to: &b, attackerSide: .a, round: actions, log: &log, rng: &rng)
+                aNext = t + cd(aSpd)
+                if fainted, let nb = active(b) { bNext = t + cd(b[nb].stats.spd) }   // 새 방어자 재스케줄
+            } else {
+                let fainted = attack(from: &b, to: &a, attackerSide: .b, round: actions, log: &log, rng: &rng)
+                bNext = t + cd(bSpd)
+                if fainted, let na = active(a) { aNext = t + cd(a[na].stats.spd) }
+            }
+            if active(a) == nil { return BattleResult(winner: .b, rounds: actions, log: log) }
+            if active(b) == nil { return BattleResult(winner: .a, rounds: actions, log: log) }
         }
 
-        // max round 도달 — 잔여 HP 합으로 타이브레이크.
+        // backstop 도달 — 잔여 HP 합으로 타이브레이크.
         let sumA = a.reduce(0) { $0 + max(0, $1.hp) }
         let sumB = b.reduce(0) { $0 + max(0, $1.hp) }
         let winner: BattleSide? = sumA == sumB ? nil : (sumA > sumB ? .a : .b)
-        return BattleResult(winner: winner, rounds: round, log: log)
+        return BattleResult(winner: winner, rounds: actions, log: log)
     }
 
+    /// 공격 1회 수행. 방어자가 기절하면 true.
+    @discardableResult
     private static func attack(from: inout [Combatant], to: inout [Combatant],
                                attackerSide: BattleSide, round: Int,
-                               log: inout [BattleEvent], rng: inout SeededRNG) {
-        guard let ai = active(from), let di = active(to) else { return }
+                               log: inout [BattleEvent], rng: inout SeededRNG) -> Bool {
+        guard let ai = active(from), let di = active(to) else { return false }
         let attacker = from[ai]
         let defender = to[di]
 
@@ -135,7 +169,13 @@ enum BattleEngine {
 
         let rngFactor = Double.random(in: 0.9...1.0, using: &rng)
         let raw = (Double(attacker.stats.atk) / Double(defender.stats.def)) * power * eff * synergy.mult * rngFactor
-        let dmg = max(1, Int(raw.rounded()))
+        let baseDmg = max(1, Int(raw.rounded()))
+
+        // 패링(퍼펙트 가드) — 방어자 SPD+DEF 조합 확률로 데미지 대폭 경감.
+        let pc = parryChance(defSPD: defender.stats.spd, defDEF: defender.stats.def,
+                             atkSPD: attacker.stats.spd, atkDEF: attacker.stats.def)
+        let parried = Double.random(in: 0..<1, using: &rng) < pc
+        let dmg = parried ? max(1, Int((Double(baseDmg) * parryDamageMult).rounded())) : baseDmg
 
         to[di].hp -= dmg
         let fainted = to[di].hp <= 0
@@ -150,7 +190,9 @@ enum BattleEngine {
             effectiveness: eff,
             collectionMult: synergy.mult,
             quip: synergy.quip,
+            parried: parried,
             defenderFainted: fainted
         ))
+        return fainted
     }
 }

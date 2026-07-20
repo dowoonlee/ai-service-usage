@@ -71,8 +71,25 @@ enum EnhanceEngine {
     /// 시도 가능 여부 (만렙 미만).
     static func canEnhance(level: Int) -> Bool { level >= 0 && level < maxLevel }
 
+    /// 기본(Common 기준) 시도 VP 비용.
     static func cost(level: Int) -> Int {
         vpCost[min(max(0, level), vpCost.count - 1)]
+    }
+
+    /// 희귀도별 강화 비용 배수 — 고등급일수록 스탯이 세니 강화도 비싸다. (튜닝 대상)
+    static func rarityCostMultiplier(_ rarity: Rarity) -> Double {
+        switch rarity {
+        case .common:    return 1.0
+        case .rare:      return 1.4
+        case .epic:      return 2.0
+        case .legendary: return 3.0
+        case .mythic:    return 4.5
+        }
+    }
+
+    /// 희귀도 반영 시도 VP 비용.
+    static func cost(level: Int, rarity: Rarity) -> Int {
+        Int((Double(cost(level: level)) * rarityCostMultiplier(rarity)).rounded())
     }
 
     /// 확률표에 따라 결과를 굴린다. 주입 RNG로 결정적.
