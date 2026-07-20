@@ -10,7 +10,8 @@ import SwiftUI
 //   docs/research/pokemon-gold-battle-ui.md
 // 강화 이펙트: 차지 펄스 → 성공 플래시+팝 / 강등 흔들림 / 파괴 그레이스케일+흔들림 (네이티브).
 //   화려한 도트 VFX(폭발/파편/충격파)는 에셋 확보 후 얹음. docs/research/enhancement-effects.md
-// VP 차감·레이팅·시즌 보상은 서버 연동 후(P1b). 설계: docs/plans/pet-battle.md §2-2 / §2-9 / §5-1.
+// 강화소는 서버(pet-enhance) authoritative — VP 실차감·레벨 영속. 레이팅·랭크전·시즌 보상은 후속(T3+).
+// 설계: docs/plans/pet-battle.md §2-2 / §2-9 / §5-1.
 @MainActor
 struct ArenaView: View {
     @ObservedObject private var settings = Settings.shared
@@ -37,11 +38,12 @@ struct ArenaView: View {
     @State private var defenderText: String?
     @State private var defenderSide: BattleSide?
 
-    // 강화소
+    // 강화소 — 서버 authoritative(pet-enhance). 레벨·가용 VP는 서버 SSOT, 클라는 연출·표시만.
     @State private var enhanceKind: PetKind?
-    @State private var localLevels: [PetKind: Int] = [:]
+    @State private var serverLevels: [PetKind: Int] = [:]   // 서버에서 받은 강화 레벨(SSOT 미러)
+    @State private var availableVp: Int?                    // 서버 가용 VP (nil = 미로딩)
+    @State private var enhanceStateError: String?           // state/enhance 실패 메시지
     @State private var enhanceHistory: [EnhanceLine] = []
-    @State private var enhanceSeed: UInt64 = .random(in: 1...UInt64.max)   // 세션마다 다른 도박 시퀀스
     @State private var enhancePhase: EnhancePhase = .idle
     @State private var enhanceShake: CGFloat = 0
     @State private var enhancePulse = false
@@ -88,6 +90,7 @@ struct ArenaView: View {
             if teamKinds.isEmpty { teamKinds = Array(owned.prefix(3)) }
             if enhanceKind == nil { enhanceKind = owned.first }
         }
+        .task { await loadEnhanceState() }   // 서버에서 강화 레벨·가용 VP 로드(등록 사용자)
         .onDisappear { playbackTask?.cancel(); enhanceTask?.cancel() }
     }
 
@@ -96,7 +99,7 @@ struct ArenaView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("⚔️ 아레나").font(.system(size: 15, weight: .bold))
-            Text("로컬 미리보기 — 레이팅·VP·시즌 보상은 서버 연동 후. 화려한 도트 임팩트는 에셋 확보 후.")
+            Text("강화는 서버 반영(VP 실차감·영속). 레이팅·랭크전·시즌 보상은 준비 중. 도트 임팩트는 에셋 확보 후.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
@@ -142,8 +145,8 @@ struct ArenaView: View {
     }
 
     private func petCard(_ kind: PetKind, slot: Int) -> some View {
-        // 강화소에서 올린 로컬 레벨을 반영해 배틀에 실제로 쓰일 스탯을 미리 보여준다(#3).
-        let level = localLevels[kind] ?? 0
+        // 강화소에서 올린 강화 레벨(서버 SSOT)을 반영해 배틀에 실제로 쓰일 스탯을 미리 보여준다.
+        let level = serverLevels[kind] ?? 0
         let s = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: level, progressUnits: 0)
         return Button { editingSlot = SlotSel(id: slot) } label: {
             VStack(spacing: 3) {
@@ -482,7 +485,7 @@ struct ArenaView: View {
     private func fight() {
         stopPlayback()
         // 내 팀 — 강화소 로컬 레벨 반영(#3).
-        let aS = teamKinds.map { BattlePetSnapshot(kind: $0, enhanceLevel: localLevels[$0] ?? 0) }
+        let aS = teamKinds.map { BattlePetSnapshot(kind: $0, enhanceLevel: serverLevels[$0] ?? 0) }
         let bS = matchmakeOpponent(against: aS)   // Σ스탯 근접 상대 샘플링(#4)
         aSnaps = aS; bSnaps = bS
         let r = BattleEngine.simulate(teamA: BattleTeam(aS), teamB: BattleTeam(bS), seed: .random(in: 1...UInt64.max))
@@ -559,12 +562,29 @@ struct ArenaView: View {
 
     // MARK: 강화소 (펫 반응 이펙트)
 
-    private var enhanceSection: some View {
+    @ViewBuilder private var enhanceSection: some View {
+        if canServerEnhance { enhanceBody } else { enhanceGate }
+    }
+
+    // VP 강화는 서버 authoritative라 랭킹 참여자 전용. 미등록이면 안내.
+    private var enhanceGate: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "hammer.circle").font(.system(size: 34)).foregroundStyle(.secondary)
+            Text("VP 강화는 랭킹 참여자 전용입니다.").font(.system(size: 12))
+            Text("강화 레벨·VP는 서버가 관리(조작 방지)합니다. 설정에서 랭킹을 켜세요.")
+                .font(.system(size: 10)).foregroundStyle(.secondary).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 40)
+    }
+
+    private var enhanceBody: some View {
         let kind = enhanceKind ?? owned.first ?? .fox
-        let level = localLevels[kind] ?? 0
+        let level = serverLevels[kind] ?? 0
         let rarity = PetKind.rarityFor(kind) ?? .common
         let stats = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: level, progressUnits: 0)
         let destroyed = enhancePhase == .result(.destroy)
+        let attemptCost = EnhanceEngine.cost(level: level, rarity: rarity)
+        let insufficient = availableVp.map { $0 < attemptCost } ?? false
         return VStack(spacing: 12) {
             // 중앙 정렬 펫 스테이지 (반응 이펙트)
             VStack(spacing: 6) {
@@ -602,24 +622,34 @@ struct ArenaView: View {
                 oddsBar(level: level)
                 oddsLegend(level: level)   // 정확한 % 항상 표기 (#5 — 12% 등 작은 값도 보이게)
                 HStack(spacing: 6) {
-                    Text("이번 시도 VP \(EnhanceEngine.cost(level: level, rarity: rarity).formatted())")
+                    Text("이번 시도 VP \(attemptCost.formatted())")
                         .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                     Text("(\(rarity.displayName) ×\(String(format: "%.1f", EnhanceEngine.rarityCostMultiplier(rarity))))")
                         .font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
+                    if let vp = availableVp {
+                        Text("가용 \(vp.formatted()) VP")
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(insufficient ? Color.red : Color.accentColor)
+                    }
                     Text(zoneLabel(level)).font(.system(size: 10, weight: .semibold)).foregroundStyle(zoneColor(level))
                 }
                 Button { attemptEnhance(kind) } label: {
-                    Text(enhancePhase == .charging ? "강화 중…" : "⚒️ 강화 시도").font(.system(size: 13, weight: .semibold))
+                    Text(enhancePhase == .charging ? "강화 중…" : (insufficient ? "VP 부족" : "⚒️ 강화 시도"))
+                        .font(.system(size: 13, weight: .semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 9)
-                        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.orange.opacity(enhancePhase == .idle ? 1 : 0.5)))
+                        .background(RoundedRectangle(cornerRadius: AppRadius.md)
+                            .fill(Color.orange.opacity(enhancePhase == .idle && !insufficient ? 1 : 0.5)))
                         .foregroundStyle(.white)
-                }.buttonStyle(.plain).disabled(enhancePhase != .idle)
+                }.buttonStyle(.plain).disabled(enhancePhase != .idle || insufficient)
             } else {
                 Text("★ 만렙 (+\(EnhanceEngine.maxLevel)) 달성").font(.system(size: 12, weight: .bold)).foregroundStyle(.orange)
             }
 
-            Text("로컬 미리보기 — VP 미차감·미저장. +15 도달 기대 VP ≈ \(Int(EnhanceEngine.expectedVP(toReach: 15) * EnhanceEngine.rarityCostMultiplier(rarity)).formatted()) (파괴 리셋 반영, \(rarity.displayName) 기준)")
+            if let err = enhanceStateError {
+                Text(err).font(.system(size: 10)).foregroundStyle(.red).multilineTextAlignment(.center)
+            }
+            Text("서버 반영 — VP 실차감·영속. +15 도달 기대 VP ≈ \(Int(EnhanceEngine.expectedVP(toReach: 15) * EnhanceEngine.rarityCostMultiplier(rarity)).formatted()) (파괴 리셋 반영, \(rarity.displayName) 기준)")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
 
             if !enhanceHistory.isEmpty {
@@ -674,7 +704,7 @@ struct ArenaView: View {
                             Button { if enhancePhase == .idle { enhanceKind = k } } label: {
                                 VStack(spacing: 1) {
                                     thumb(k, h: 26)
-                                    Text("+\(localLevels[k] ?? 0)").font(.system(size: 7, design: .monospaced)).foregroundStyle(.orange)
+                                    Text("+\(serverLevels[k] ?? 0)").font(.system(size: 7, design: .monospaced)).foregroundStyle(.orange)
                                 }
                                 .frame(width: 42, height: 46)
                                 .background(RoundedRectangle(cornerRadius: 6).fill(k == current ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.06)))
@@ -754,23 +784,54 @@ struct ArenaView: View {
         .frame(height: 22).clipShape(RoundedRectangle(cornerRadius: 5))
     }
 
+    /// 서버 강화 가능 조건 — 랭킹 등록 + 빌드 구성 + hmac 키 존재.
+    private var canServerEnhance: Bool {
+        RankingAPI.isConfigured && settings.rankingRegistered
+            && !settings.rankingDeviceID.isEmpty && Keychain.loadRankingHmacKey() != nil
+    }
+
+    /// 서버에서 강화 레벨 + 가용 VP 로드. 미등록/미구성이면 no-op.
+    private func loadEnhanceState() async {
+        guard canServerEnhance, let hmac = Keychain.loadRankingHmacKey() else { return }
+        do {
+            let st = try await RankingAPI.shared.fetchEnhanceState(
+                deviceId: settings.rankingDeviceID, hmacKeyBase64: hmac)
+            var lv: [PetKind: Int] = [:]
+            for (k, v) in st.levels { if let pk = PetKind(rawValue: k) { lv[pk] = v } }
+            serverLevels = lv
+            availableVp = st.availableVp
+            enhanceStateError = nil
+        } catch {
+            enhanceStateError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+        }
+    }
+
     private func attemptEnhance(_ kind: PetKind) {
-        guard enhancePhase == .idle else { return }
+        guard enhancePhase == .idle, canServerEnhance,
+              let hmac = Keychain.loadRankingHmacKey() else { return }
         // 최근 강화 목록 갱신 (맨 앞으로)
         recentEnhanced.removeAll { $0 == kind }
         recentEnhanced.insert(kind, at: 0)
         if recentEnhanced.count > 12 { recentEnhanced.removeLast(recentEnhanced.count - 12) }
-        let level = localLevels[kind] ?? 0
-        var rng = SeededRNG(seed: enhanceSeed)
-        enhanceSeed = enhanceSeed &* 6_364_136_223_846_793_005 &+ 1
-        let outcome = EnhanceEngine.roll(level: level, using: &rng)
+        enhanceStateError = nil
         enhanceTask?.cancel()
         enhanceTask = Task { @MainActor in
-            // 차지 (기대)
+            // 차지 시작 + 서버 롤 요청(동시).
             enhancePhase = .charging
             withAnimation(.easeInOut(duration: 0.2).repeatCount(4, autoreverses: true)) { enhancePulse = true }
             withAnimation(.easeIn(duration: 0.6)) { enhanceBright = 0.18 }
-            try? await Task.sleep(for: .milliseconds(680))
+            let res: RankingAPI.EnhanceResultResponse
+            do {
+                res = try await RankingAPI.shared.enhancePet(
+                    deviceId: settings.rankingDeviceID, hmacKeyBase64: hmac, kind: kind.rawValue)
+            } catch {
+                if Task.isCancelled { return }
+                enhancePulse = false; enhanceBright = 0; enhancePhase = .idle
+                enhanceStateError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                return
+            }
+            guard let outcome = EnhanceOutcome(rawValue: res.outcome) else { enhancePhase = .idle; return }
+            try? await Task.sleep(for: .milliseconds(350))   // 최소 차지 연출 유지
             if Task.isCancelled { return }
             enhancePulse = false; enhanceBright = 0
             enhancePhase = .result(outcome)
@@ -791,9 +852,10 @@ struct ArenaView: View {
             }
             try? await Task.sleep(for: .milliseconds(outcome == .destroy ? 400 : 250))
             if Task.isCancelled { return }
-            let newLevel = EnhanceEngine.apply(level: level, outcome: outcome)
-            withAnimation { localLevels[kind] = newLevel }
-            appendEnhance(level: level, newLevel: newLevel, outcome: outcome)
+            // 서버 SSOT 반영.
+            withAnimation { serverLevels[kind] = res.newLevel }
+            availableVp = res.availableVp
+            appendEnhance(level: res.beforeLevel, newLevel: res.newLevel, outcome: outcome)
             try? await Task.sleep(for: .milliseconds(500))
             enhancePhase = .idle; enhancePop = 1; enhanceShake = 0; enhanceBright = 0
         }
