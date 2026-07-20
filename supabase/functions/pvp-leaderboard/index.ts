@@ -46,6 +46,10 @@ Deno.serve(async (req: Request) => {
   if (!ok) return errorResponse(401, "bad_signature");
   const tenant = (user.tenant_id as string) ?? "public";
 
+  // 시즌 정산 lazy 트리거 — 직전 달 미정산이면 RP·확정권 지급(멱등). leaderboard 조회 때마다 체크.
+  const { error: finErr } = await db.rpc("finalize_previous_month_pvp_if_needed");
+  if (finErr) console.error("season finalize failed (ignored)", finErr);
+
   // Top N 레이팅.
   const { data: top, error: topErr } = await db
     .from("pvp_ratings").select("device_id, rating, wins, losses")
