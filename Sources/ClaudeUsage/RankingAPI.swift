@@ -666,6 +666,11 @@ actor RankingAPI {
         /// 테넌트(skax 등) 편입 관련 서버 거부 — 서버 error 코드 그대로 (domain_not_allowed /
         /// already_gated / bad_code / code_expired / …). 호출 측이 코드로 분기.
         case tenantError(String)
+        /// 펫 강화(pet-enhance) 서버 거부 — 서버 error 코드 그대로 (insufficient_vp / max_level /
+        /// concurrent_modification / invalid_kind). 호출 측이 코드로 분기.
+        case enhanceError(String)
+        /// 아레나 랭크전(pvp-*) 서버 거부 — daily_limit / no_team / no_opponent / invalid_team 등.
+        case pvpError(String)
         case http(Int, String?)
         case decoding(String)
         case network(String)
@@ -723,6 +728,25 @@ actor RankingAPI {
                     return "인증 메일 발송에 실패했습니다. 잠시 후 다시 시도하세요."
                 case "cross_tenant":        return "다른 소속의 콘텐츠에는 접근할 수 없습니다."
                 default:                    return "인증 요청이 거부되었습니다 (\(code))."
+                }
+            case .enhanceError(let code):
+                switch code {
+                case "insufficient_vp":         return "VP가 부족합니다."
+                case "max_level":               return "이미 만렙(+15)입니다."
+                case "concurrent_modification": return "강화 상태가 방금 바뀌었습니다. 다시 시도해 주세요."
+                case "invalid_kind":            return "알 수 없는 펫입니다."
+                case "safe_unavailable":        return "이 레벨에선 안전 강화를 쓸 수 없습니다 (+12 이후)."
+                default:                        return "강화 처리에 실패했습니다 (\(code))."
+                }
+            case .pvpError(let code):
+                switch code {
+                case "daily_limit":       return "오늘 랭크전 횟수를 모두 사용했습니다 (10판)."
+                case "no_team":           return "먼저 배틀 팀을 등록하세요."
+                case "no_opponent":       return "지금은 맞붙을 상대가 없습니다. 잠시 후 다시 시도하세요."
+                case "duplicate_kind":    return "같은 펫을 중복 편성할 수 없습니다."
+                case "invalid_team_size": return "배틀 팀은 1~3마리여야 합니다."
+                case "invalid_team", "invalid_kind": return "배틀 팀 구성이 올바르지 않습니다."
+                default:                  return "랭크전 처리에 실패했습니다 (\(code))."
                 }
             case .http(let code, let msg):
                 return "서버 오류 \(code)\(msg.map { ": \($0)" } ?? "")"
@@ -1662,6 +1686,198 @@ actor RankingAPI {
         return try await post(path: "daily-quiz", body: req)
     }
 
+    // MARK: - 펫 강화 (pet-enhance) — 서버 authoritative RNG·VP
+
+    /// 강화소 진입 상태 — 가용 VP + 강화 레벨 + 완화 아이템 + 진행 중 이벤트.
+    struct EnhanceStateResponse: Decodable, Sendable {
+        let availableVp: Int
+        let totalCoins: Int
+        let grantedVp: Int
+        let spentVp: Int
+        let levels: [String: Int]   // kind rawValue → 강화 레벨
+        let protectCount: Int
+        let guaranteeCount: Int
+        let protectPrice: Int
+        let guaranteePrice: Int
+        let eventActive: Bool
+        let eventDiscount: Double
+        let eventLabel: String
+    }
+    /// 강화 1회 시도 결과 — 서버가 RNG를 굴려 확정. 클라는 연출만 재생.
+    struct EnhanceResultResponse: Decodable, Sendable {
+        let outcome: String         // "success" | "stay" | "downgrade" | "destroy"
+        let beforeLevel: Int
+        let newLevel: Int
+        let cost: Int
+        let availableVp: Int        // 차감 후 잔여
+        let failStreak: Int
+        let protectUsed: Bool
+        let guaranteeUsed: Bool
+        let protectCount: Int
+        let guaranteeCount: Int
+    }
+    /// 완화 아이템 구매 결과.
+    struct BuyEnhanceItemResponse: Decodable, Sendable {
+        let item: String
+        let protectCount: Int
+        let guaranteeCount: Int
+        let availableVp: Int
+    }
+
+    private struct EnhanceStatePayload: Encodable {
+        let action: String
+        let deviceId: String
+        let ts: Int64
+    }
+    private struct EnhancePayload: Encodable {
+        let action: String
+        let deviceId: String
+        let kind: String
+        let safe: Bool
+        let useProtect: Bool
+        let useGuarantee: Bool
+        let ts: Int64
+    }
+    private struct EnhanceStateRequest: Encodable {
+        let payload: EnhanceStatePayload
+        let signature: String
+    }
+    private struct EnhanceRequest: Encodable {
+        let payload: EnhancePayload
+        let signature: String
+    }
+    private struct BuyEnhanceItemPayload: Encodable {
+        let action: String
+        let deviceId: String
+        let item: String
+        let ts: Int64
+    }
+    private struct BuyEnhanceItemRequest: Encodable {
+        let payload: BuyEnhanceItemPayload
+        let signature: String
+    }
+
+    /// 가용 VP + 강화 레벨 조회 (강화소 열 때).
+    func fetchEnhanceState(deviceId: String, hmacKeyBase64: String) async throws -> EnhanceStateResponse {
+        let payload = EnhanceStatePayload(
+            action: "state", deviceId: deviceId, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pet-enhance", body: EnhanceStateRequest(payload: payload, signature: sig))
+    }
+
+    /// 강화 1회 시도 — 서버가 가용 VP 검증 → 차감 → RNG 롤 → level 갱신. insufficient_vp/max_level 등은
+    /// `RankingError.enhanceError(code)` 로 throw.
+    func enhancePet(deviceId: String, hmacKeyBase64: String, kind: String,
+                    safe: Bool = false, useProtect: Bool = false, useGuarantee: Bool = false)
+        async throws -> EnhanceResultResponse {
+        let payload = EnhancePayload(
+            action: "enhance", deviceId: deviceId, kind: kind, safe: safe,
+            useProtect: useProtect, useGuarantee: useGuarantee, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pet-enhance", body: EnhanceRequest(payload: payload, signature: sig))
+    }
+
+    /// 완화 아이템 VP 구매 — item = "protect" | "guarantee".
+    func buyEnhanceItem(deviceId: String, hmacKeyBase64: String, item: String) async throws -> BuyEnhanceItemResponse {
+        let payload = BuyEnhanceItemPayload(
+            action: "buy", deviceId: deviceId, item: item, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pet-enhance", body: BuyEnhanceItemRequest(payload: payload, signature: sig))
+    }
+
+    // MARK: - 아레나 랭크전 (pvp-register-team / pvp-challenge)
+
+    /// 배틀 팀 등록 결과 — 서버가 강화 반영해 재계산한 전투력·현재 레이팅.
+    struct RegisterTeamResponse: Decodable, Sendable {
+        let power: Int
+        let rating: Int
+        let teamSize: Int
+    }
+    /// 랭크전 결과 — 서버 authoritative. myTeam/oppTeam/log 를 기존 배틀 재생에 그대로 먹인다.
+    struct ChallengeResponse: Decodable, Sendable {
+        let winner: String            // "me" | "opp" | "draw"
+        let ratingDelta: Int
+        let newRating: Int
+        let coinReward: Int
+        let opponentNickname: String
+        let myTeam: [BattlePetSnapshot]
+        let oppTeam: [BattlePetSnapshot]
+        let log: [BattleEvent]
+        let rounds: Int
+        let dailyUsed: Int
+        let dailyLimit: Int
+    }
+
+    private struct PvPTeamMember: Encodable { let kind: String; let variant: Int; let progressUnits: Double }
+    private struct PvPRegisterPayload: Encodable {
+        let action: String
+        let deviceId: String
+        let teamJson: String
+        let ts: Int64
+    }
+    private struct PvPChallengePayload: Encodable {
+        let action: String
+        let deviceId: String
+        let ts: Int64
+    }
+    private struct PvPRegisterRequest: Encodable { let payload: PvPRegisterPayload; let signature: String }
+    private struct PvPChallengeRequest: Encodable { let payload: PvPChallengePayload; let signature: String }
+
+    /// 배틀 팀 스냅샷 등록/갱신. 강화 레벨은 서버가 pet_enhancements에서 동결하므로 여기선 안 보냄.
+    func registerBattleTeam(deviceId: String, hmacKeyBase64: String,
+                            team: [(kind: String, variant: Int, progressUnits: Double)]) async throws -> RegisterTeamResponse {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let members = team.map { PvPTeamMember(kind: $0.kind, variant: $0.variant, progressUnits: $0.progressUnits) }
+        let teamJson = String(data: try enc.encode(members), encoding: .utf8) ?? "[]"
+        let payload = PvPRegisterPayload(
+            action: "register", deviceId: deviceId, teamJson: teamJson, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pvp-register-team", body: PvPRegisterRequest(payload: payload, signature: sig))
+    }
+
+    /// 랭크전 도전 — 서버가 상대 매칭 + 시뮬 + Elo 갱신. daily_limit/no_team/no_opponent 는
+    /// `RankingError.pvpError(code)` 로 throw.
+    func challengeRanked(deviceId: String, hmacKeyBase64: String) async throws -> ChallengeResponse {
+        let payload = PvPChallengePayload(action: "challenge", deviceId: deviceId, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pvp-challenge", body: PvPChallengeRequest(payload: payload, signature: sig))
+    }
+
+    // 아레나 레이팅 랭킹 + 내 순위·전적.
+    struct PvpLeaderboardEntry: Decodable, Sendable {
+        let rank: Int; let nickname: String; let rating: Int; let wins: Int; let losses: Int; let isMe: Bool
+    }
+    struct PvpLastSeason: Decodable, Sendable {
+        let period: String
+        let championNickname: String?
+        let myRp: Int
+    }
+    struct PvpLeaderboardResponse: Decodable, Sendable {
+        let entries: [PvpLeaderboardEntry]
+        let myRank: Int?; let myRating: Int?; let myWins: Int; let myLosses: Int
+        let dailyUsed: Int; let dailyLimit: Int
+        let lastSeason: PvpLastSeason?
+    }
+    /// 내 최근 매치 — teamA(도전자)/teamB(방어자)/events 는 배틀 재생에 그대로 먹인다.
+    struct PvpMatch: Decodable, Sendable {
+        let id: String; let createdAt: String; let iAmChallenger: Bool
+        let opponentNickname: String; let result: String; let ratingDelta: Int
+        let teamA: [BattlePetSnapshot]; let teamB: [BattlePetSnapshot]; let events: [BattleEvent]
+    }
+    struct PvpHistoryResponse: Decodable, Sendable { let matches: [PvpMatch] }
+
+    func fetchPvpLeaderboard(deviceId: String, hmacKeyBase64: String) async throws -> PvpLeaderboardResponse {
+        let payload = PvPChallengePayload(action: "leaderboard", deviceId: deviceId, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pvp-leaderboard", body: PvPChallengeRequest(payload: payload, signature: sig))
+    }
+    func fetchPvpHistory(deviceId: String, hmacKeyBase64: String) async throws -> PvpHistoryResponse {
+        let payload = PvPChallengePayload(action: "history", deviceId: deviceId, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pvp-history", body: PvPChallengeRequest(payload: payload, signature: sig))
+    }
+
     /// 응답 statusline + body 만 검증. 본문 디코드가 없는 endpoint(`executeVoid`)와
     /// 공유하기 위해 추출. 404는 호출 측이 body 메시지로 분기 매핑하므로 여기선
     /// generic `.http(404, body)`만 throw — 사용자에게 정확한 메시지 노출.
@@ -1700,6 +1916,17 @@ actor RankingAPI {
         "cross_tenant",
     ]
 
+    /// 펫 강화(pet-enhance) 전용 error 코드 — 전역 409→nicknameTaken 오매핑 방지(강화 409는 의미가 다름).
+    private static let enhanceErrorCodes: Set<String> = [
+        "insufficient_vp", "max_level", "concurrent_modification", "invalid_kind", "safe_unavailable",
+    ]
+
+    /// 아레나 랭크전(pvp-*) 전용 error 코드 — 전역 409 오매핑 방지.
+    private static let pvpErrorCodes: Set<String> = [
+        "daily_limit", "no_team", "no_opponent", "duplicate_kind",
+        "invalid_team", "invalid_team_size",
+    ]
+
     private func validateHTTPStatus(data: Data, response: URLResponse) throws {
         let http = response as? HTTPURLResponse
         let code = http?.statusCode ?? 0
@@ -1719,6 +1946,12 @@ actor RankingAPI {
             }
             if Self.tenantErrorCodes.contains(errCode) {
                 throw RankingError.tenantError(errCode)
+            }
+            if Self.enhanceErrorCodes.contains(errCode) {
+                throw RankingError.enhanceError(errCode)
+            }
+            if Self.pvpErrorCodes.contains(errCode) {
+                throw RankingError.pvpError(errCode)
             }
         }
 

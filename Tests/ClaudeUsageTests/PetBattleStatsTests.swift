@@ -1,0 +1,94 @@
+import XCTest
+@testable import ClaudeUsage
+
+/// 아레나 배틀 스탯 파생 + 타입 상성 검증 (P0 순수 로직).
+final class PetBattleStatsTests: XCTestCase {
+
+    // 19개 컬렉션이 모두 타입에 매핑되고, 6타입 전부 사용된다.
+    func testAllCollectionsMapAndAllTypesUsed() {
+        var used = Set<BattleType>()
+        for c in PetCollection.allCases { used.insert(c.battleType) }
+        XCTAssertEqual(used.count, BattleType.allCases.count, "6타입 전부 최소 1개 컬렉션에 매핑돼야 함")
+    }
+
+    // 펫 → 타입은 컬렉션 경로와 일치.
+    func testPetKindTypeMatchesCollection() {
+        XCTAssertEqual(PetKind.fox.battleType, PetKind.fox.collection.battleType)
+        XCTAssertEqual(PetKind.scrapBot.battleType, .machine)   // ciRunners
+        XCTAssertEqual(PetKind.fox.battleType, .beast)          // mainframe
+    }
+
+    // 6-사이클 상성: 각 타입은 정확히 하나를 이기고(1.6) 하나에 진다(0.625), 그 외 1.0.
+    func testEffectivenessCycle() {
+        for t in BattleType.allCases {
+            let win = t.beats
+            XCTAssertEqual(BattleType.effectiveness(t, vs: win), 1.6, accuracy: 1e-9)
+            XCTAssertEqual(BattleType.effectiveness(win, vs: t), 0.625, accuracy: 1e-9)
+            XCTAssertEqual(BattleType.effectiveness(t, vs: t), 1.0, accuracy: 1e-9)
+
+            // 정확히 하나만 이기고 하나만 진다.
+            let beatsCount = BattleType.allCases.filter { BattleType.effectiveness(t, vs: $0) > 1.0 }.count
+            let losesCount = BattleType.allCases.filter { BattleType.effectiveness(t, vs: $0) < 1.0 }.count
+            XCTAssertEqual(beatsCount, 1)
+            XCTAssertEqual(losesCount, 1)
+        }
+        // 사이클 폐합.
+        XCTAssertEqual(BattleType.machine.beats, .beast)
+        XCTAssertEqual(BattleType.beast.beats, .chaos)
+        XCTAssertEqual(BattleType.chaos.beats, .arcane)
+        XCTAssertEqual(BattleType.arcane.beats, .mascot)
+        XCTAssertEqual(BattleType.mascot.beats, .warrior)
+        XCTAssertEqual(BattleType.warrior.beats, .machine)
+    }
+
+    // 등급 기본치는 단조 증가 (압축 곡선).
+    func testRarityBaseMonotonic() {
+        let order: [Rarity] = [.common, .rare, .epic, .legendary, .mythic]
+        for i in 1..<order.count {
+            XCTAssertGreaterThan(PetBattleStats.rarityBase(order[i]), PetBattleStats.rarityBase(order[i-1]))
+        }
+        // 압축 — Mythic/Common ≈ 2배 (25~50배 아님).
+        let ratio = PetBattleStats.rarityBase(.mythic) / PetBattleStats.rarityBase(.common)
+        XCTAssertLessThan(ratio, 2.2)
+        XCTAssertGreaterThan(ratio, 1.7)
+    }
+
+    // 성장 배수: 강화·숙련도에 대해 단조 증가, 상한 준수, 무투자면 1.0.
+    func testGrowthMultiplier() {
+        XCTAssertEqual(PetBattleStats.growthMultiplier(enhanceLevel: 0, progressUnits: 0), 1.0, accuracy: 1e-9)
+        let g5 = PetBattleStats.growthMultiplier(enhanceLevel: 5, progressUnits: 0)
+        let g10 = PetBattleStats.growthMultiplier(enhanceLevel: 10, progressUnits: 0)
+        let g15 = PetBattleStats.growthMultiplier(enhanceLevel: 15, progressUnits: 0)
+        XCTAssertLessThan(g5, g10)
+        XCTAssertLessThan(g10, g15)
+        // 숙련도가 더해지면 증가.
+        XCTAssertGreaterThan(PetBattleStats.growthMultiplier(enhanceLevel: 5, progressUnits: 8),
+                             PetBattleStats.growthMultiplier(enhanceLevel: 5, progressUnits: 0))
+        // 상한 준수.
+        XCTAssertLessThanOrEqual(PetBattleStats.growthMultiplier(enhanceLevel: 15, progressUnits: 999),
+                                 PetBattleStats.statCapMult)
+        // 숙련도 상한.
+        XCTAssertEqual(PetBattleStats.masteryBonus(progressUnits: 999), PetBattleStats.masteryMax, accuracy: 1e-9)
+    }
+
+    // 최종 스탯: 강화가 오르면 총합 증가, 모든 스탯 ≥ 1.
+    func testComputeStatsMonotonicInEnhance() {
+        let k = PetKind.fox
+        let s0 = PetBattleStats.compute(kind: k, variant: 0, enhanceLevel: 0, progressUnits: 0)
+        let s10 = PetBattleStats.compute(kind: k, variant: 0, enhanceLevel: 10, progressUnits: 0)
+        XCTAssertGreaterThan(s10.total, s0.total)
+        XCTAssertGreaterThanOrEqual(min(s0.hp, s0.atk, s0.def, s0.spd), 1)
+    }
+
+    // 밸런스 의도: 풀강 커먼의 스탯 총합이 무강 에픽을 넘어설 수 있다(등급이 전부가 아님).
+    func testBalanceEnhancedCommonRivalsEpic() {
+        // fox=common(mainframe). 무강 에픽 표본을 찾아 비교.
+        guard let epicKind = PetKind.allCases.first(where: { PetKind.rarityFor($0) == .epic }) else {
+            return XCTFail("에픽 표본 없음")
+        }
+        let commonMaxed = PetBattleStats.compute(kind: .fox, variant: 0, enhanceLevel: 15, progressUnits: 8)
+        let epicBase = PetBattleStats.compute(kind: epicKind, variant: 0, enhanceLevel: 0, progressUnits: 0)
+        XCTAssertGreaterThan(commonMaxed.total, epicBase.total,
+                             "풀강 커먼이 무강 에픽을 총합으로 넘어설 수 있어야 함(강화가 경쟁 경로)")
+    }
+}

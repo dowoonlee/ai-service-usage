@@ -204,6 +204,11 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     case veteran                   // 30일+
     case longHauler                // 90일+
 
+    // ── 자동 unlock — 아레나 ──
+    case arenaRookie               // 아레나 첫 승리
+    case arenaChallenger           // 레이팅 1200 도달
+    case arenaChampion             // 아레나 랭킹 1위 도달
+
     // ── 자동 unlock — Vibe / OSS ──
     case vibeCoder                 // Claude+Cursor 5,000
     case vibeMaster                // Claude+Cursor 25,000
@@ -254,6 +259,9 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .dayOneBeliever:        return "Day One"
         case .veteran:               return "Veteran"
         case .longHauler:            return "Long Hauler"
+        case .arenaRookie:           return "아레나 루키"
+        case .arenaChallenger:       return "아레나 도전자"
+        case .arenaChampion:         return "아레나 챔피언"
         case .vibeCoder:             return "Vibe Coder"
         case .vibeMaster:            return "Vibe Master"
         case .openSourceContributor: return "Open Source"
@@ -304,6 +312,9 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .dayOneBeliever:        return "첫 적립 후 7일 경과"
         case .veteran:               return "첫 적립 후 30일 경과"
         case .longHauler:            return "첫 적립 후 90일 경과"
+        case .arenaRookie:           return "아레나 첫 승리"
+        case .arenaChallenger:       return "아레나 레이팅 1200 도달"
+        case .arenaChampion:         return "아레나 랭킹 1위 도달"
         case .vibeCoder:             return "Claude+Cursor 누적 코인 5,000"
         case .vibeMaster:            return "Claude+Cursor 누적 코인 25,000"
         case .openSourceContributor: return "GitHub 머지 PR 1개 이상"
@@ -397,6 +408,11 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
             if days >= 30 { set.insert(.veteran) }
             if days >= 90 { set.insert(.longHauler) }
         }
+
+        // ── 아레나 ──
+        if s.pvpWinsCache >= 1     { set.insert(.arenaRookie) }
+        if s.pvpBestRating >= 1200 { set.insert(.arenaChallenger) }
+        if s.pvpBestRank == 1      { set.insert(.arenaChampion) }
 
         // ── Vibe / OSS ──
         let vibe = s.claudeCoinsEarned + s.cursorCoinsEarned

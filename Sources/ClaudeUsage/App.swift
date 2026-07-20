@@ -20,6 +20,11 @@ struct ClaudeUsageApp {
             RunLoop.main.run()  // exit() 호출될 때까지 main thread 유지
             return
         }
+        // 아레나 엔진 데모: UI/서버 없이 컴파일된 배틀/강화/상성 엔진을 실행해 stdout 출력.
+        if CommandLine.arguments.contains("--arena-demo") {
+            ArenaDemo.run()
+            return
+        }
         MainActor.assumeIsolated {
             let app = NSApplication.shared
             let delegate = AppDelegate()
