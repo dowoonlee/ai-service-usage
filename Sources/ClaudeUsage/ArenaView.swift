@@ -43,6 +43,16 @@ struct ArenaView: View {
     @State private var serverLevels: [PetKind: Int] = [:]   // 서버에서 받은 강화 레벨(SSOT 미러)
     @State private var availableVp: Int?                    // 서버 가용 VP (nil = 미로딩)
     @State private var safeMode = false                     // 안전 강화 모드(파괴 없음 + soft-pity)
+    // 완화 아이템(보호권·확정권) + 강화 이벤트
+    @State private var protectCount = 0
+    @State private var guaranteeCount = 0
+    @State private var protectPrice = 0
+    @State private var guaranteePrice = 0
+    @State private var eventLabel: String?                  // nil = 이벤트 없음
+    @State private var eventDiscount: Double = 0
+    @State private var useProtect = false
+    @State private var useGuarantee = false
+    @State private var buyBusy = false
     @State private var enhanceStateError: String?           // state/enhance 실패 메시지
     @State private var enhanceHistory: [EnhanceLine] = []
     @State private var enhancePhase: EnhancePhase = .idle
@@ -872,8 +882,12 @@ struct ArenaView: View {
         let safeAllowed = EnhanceEngine.canSafeEnhance(level: level)
         let useSafe = safeMode && safeAllowed
         let oddsRow = useSafe ? EnhanceEngine.safeOdds(level: level, failStreak: 0) : EnhanceEngine.odds[level]
-        let attemptCost = useSafe ? EnhanceEngine.safeCost(level: level, rarity: rarity)
-                                  : EnhanceEngine.cost(level: level, rarity: rarity)
+        let baseCost = useSafe ? EnhanceEngine.safeCost(level: level, rarity: rarity)
+                               : EnhanceEngine.cost(level: level, rarity: rarity)
+        let attemptCost = Int((Double(baseCost) * (1 - eventDiscount)).rounded())   // 이벤트 VP 할인
+        let effGuarantee = useGuarantee && guaranteeCount > 0
+        let effProtect = useProtect && protectCount > 0 && !effGuarantee
+        let inDestroyZone = EnhanceEngine.zone(level: level) == .destroy && !useSafe
         let insufficient = availableVp.map { $0 < attemptCost } ?? false
         return VStack(spacing: 12) {
             // 중앙 정렬 펫 스테이지 (반응 이펙트)
@@ -908,6 +922,15 @@ struct ArenaView: View {
 
             targetPicker(current: kind)
 
+            if let ev = eventLabel {
+                HStack(spacing: 4) {
+                    Text("🎉").font(.system(size: 11))
+                    Text(ev).font(.system(size: 10, weight: .semibold)).foregroundStyle(.pink)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.pink.opacity(0.12)))
+            }
+
             if level < EnhanceEngine.maxLevel {
                 // 안전 강화 토글 — 파괴 없음 + soft-pity(연속 실패 시 성공률↑), VP 1.5배. +12부터는 불가.
                 if safeAllowed {
@@ -918,8 +941,9 @@ struct ArenaView: View {
                         }
                     }
                     .toggleStyle(.switch).controlSize(.mini).tint(.green)
-                    .disabled(enhancePhase != .idle)
+                    .disabled(enhancePhase != .idle || effGuarantee)
                 }
+                enhanceItemBar(effProtect: effProtect, effGuarantee: effGuarantee, inDestroyZone: inDestroyZone)
                 oddsBar(oddsRow)
                 oddsLegend(oddsRow)   // 안전 모드면 파괴 없는 확률행 표시
                 HStack(spacing: 6) {
@@ -936,12 +960,15 @@ struct ArenaView: View {
                     Text(useSafe ? "안전 구간" : zoneLabel(level))
                         .font(.system(size: 10, weight: .semibold)).foregroundStyle(useSafe ? .green : zoneColor(level))
                 }
-                Button { attemptEnhance(kind, safe: useSafe) } label: {
-                    Text(enhancePhase == .charging ? "강화 중…" : (insufficient ? "VP 부족" : (useSafe ? "🛡️ 안전 강화" : "⚒️ 강화 시도")))
-                        .font(.system(size: 13, weight: .semibold))
+                let btnLabel = enhancePhase == .charging ? "강화 중…"
+                    : (insufficient ? "VP 부족"
+                    : (effGuarantee ? "🎫 확정 강화" : (useSafe ? "🛡️ 안전 강화" : "⚒️ 강화 시도")))
+                let btnColor: Color = effGuarantee ? .blue : (useSafe ? .green : .orange)
+                Button { attemptEnhance(kind, safe: useSafe, useProtect: effProtect, useGuarantee: effGuarantee) } label: {
+                    Text(btnLabel).font(.system(size: 13, weight: .semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 9)
                         .background(RoundedRectangle(cornerRadius: AppRadius.md)
-                            .fill((useSafe ? Color.green : Color.orange).opacity(enhancePhase == .idle && !insufficient ? 1 : 0.5)))
+                            .fill(btnColor.opacity(enhancePhase == .idle && !insufficient ? 1 : 0.5)))
                         .foregroundStyle(.white)
                 }.buttonStyle(.plain).disabled(enhancePhase != .idle || insufficient)
             } else {
@@ -1100,13 +1127,64 @@ struct ArenaView: View {
             for (k, v) in st.levels { if let pk = PetKind(rawValue: k) { lv[pk] = v } }
             serverLevels = lv
             availableVp = st.availableVp
+            protectCount = st.protectCount; guaranteeCount = st.guaranteeCount
+            protectPrice = st.protectPrice; guaranteePrice = st.guaranteePrice
+            eventLabel = st.eventActive ? st.eventLabel : nil
+            eventDiscount = st.eventActive ? st.eventDiscount : 0
             enhanceStateError = nil
         } catch {
             enhanceStateError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
         }
     }
 
-    private func attemptEnhance(_ kind: PetKind, safe: Bool) {
+    // 완화 아이템 바 — 보유 수·구매·사용 토글.
+    private func enhanceItemBar(effProtect: Bool, effGuarantee: Bool, inDestroyZone: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                itemBuy("🛡️ 보호권", protectCount, protectPrice, "protect")
+                itemBuy("🎫 확정권", guaranteeCount, guaranteePrice, "guarantee")
+                Spacer()
+            }
+            HStack(spacing: 14) {
+                if guaranteeCount > 0 {
+                    Toggle(isOn: $useGuarantee) { Text("확정권 사용 (무조건 성공)").font(.system(size: 9)) }
+                        .toggleStyle(.switch).controlSize(.mini).tint(.blue).disabled(enhancePhase != .idle)
+                }
+                if protectCount > 0 && inDestroyZone && !effGuarantee {
+                    Toggle(isOn: $useProtect) { Text("보호권 사용 (파괴 방지)").font(.system(size: 9)) }
+                        .toggleStyle(.switch).controlSize(.mini).tint(.green).disabled(enhancePhase != .idle)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private func itemBuy(_ label: String, _ count: Int, _ price: Int, _ item: String) -> some View {
+        HStack(spacing: 3) {
+            Text("\(label) \(count)").font(.system(size: 10))
+            Button { buyItem(item) } label: {
+                Text("＋\(price.formatted())VP").font(.system(size: 9))
+            }.buttonStyle(.plain).foregroundStyle(.tint).disabled(buyBusy || enhancePhase != .idle)
+        }
+    }
+
+    private func buyItem(_ item: String) {
+        guard canServerEnhance, !buyBusy, enhancePhase == .idle,
+              let hmac = Keychain.loadRankingHmacKey() else { return }
+        buyBusy = true; enhanceStateError = nil
+        Task { @MainActor in
+            defer { buyBusy = false }
+            do {
+                let r = try await RankingAPI.shared.buyEnhanceItem(
+                    deviceId: settings.rankingDeviceID, hmacKeyBase64: hmac, item: item)
+                protectCount = r.protectCount; guaranteeCount = r.guaranteeCount; availableVp = r.availableVp
+            } catch {
+                enhanceStateError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+            }
+        }
+    }
+
+    private func attemptEnhance(_ kind: PetKind, safe: Bool, useProtect: Bool, useGuarantee: Bool) {
         guard enhancePhase == .idle, canServerEnhance,
               let hmac = Keychain.loadRankingHmacKey() else { return }
         // 최근 강화 목록 갱신 (맨 앞으로)
@@ -1123,7 +1201,8 @@ struct ArenaView: View {
             let res: RankingAPI.EnhanceResultResponse
             do {
                 res = try await RankingAPI.shared.enhancePet(
-                    deviceId: settings.rankingDeviceID, hmacKeyBase64: hmac, kind: kind.rawValue, safe: safe)
+                    deviceId: settings.rankingDeviceID, hmacKeyBase64: hmac, kind: kind.rawValue,
+                    safe: safe, useProtect: useProtect, useGuarantee: useGuarantee)
             } catch {
                 if Task.isCancelled { return }
                 enhancePulse = false; enhanceBright = 0; enhancePhase = .idle
@@ -1155,7 +1234,9 @@ struct ArenaView: View {
             // 서버 SSOT 반영.
             withAnimation { serverLevels[kind] = res.newLevel }
             availableVp = res.availableVp
-            appendEnhance(level: res.beforeLevel, newLevel: res.newLevel, outcome: outcome)
+            protectCount = res.protectCount; guaranteeCount = res.guaranteeCount
+            appendEnhance(level: res.beforeLevel, newLevel: res.newLevel, outcome: outcome,
+                          protectUsed: res.protectUsed, guaranteeUsed: res.guaranteeUsed)
             try? await Task.sleep(for: .milliseconds(500))
             enhancePhase = .idle; enhancePop = 1; enhanceShake = 0; enhanceBright = 0
         }
@@ -1169,14 +1250,17 @@ struct ArenaView: View {
         }
     }
 
-    private func appendEnhance(level: Int, newLevel: Int, outcome: EnhanceOutcome) {
-        let text: String, color: Color
+    private func appendEnhance(level: Int, newLevel: Int, outcome: EnhanceOutcome,
+                               protectUsed: Bool = false, guaranteeUsed: Bool = false) {
+        var text: String, color: Color
         switch outcome {
         case .success:   text = "+\(level) → +\(newLevel)  ✅ 성공"; color = .green
         case .stay:      text = "+\(level)  · 유지";               color = .secondary
         case .downgrade: text = "+\(level) → +\(newLevel)  🔻 강등"; color = .orange
         case .destroy:   text = "+\(level) → +0  💥 파괴!";         color = .red
         }
+        if guaranteeUsed { text += "  🎫 확정권"; color = .green }
+        if protectUsed { text += "  🛡️ 보호권(파괴 방지)"; color = .blue }
         enhanceHistory.append(EnhanceLine(text: text, color: color))
         if enhanceHistory.count > 40 { enhanceHistory.removeFirst(enhanceHistory.count - 40) }
     }

@@ -85,6 +85,10 @@ export const PITY_CAP = 0.20;
 export function canSafeEnhance(level: number): boolean {
   return level >= 0 && level <= SAFE_MAX_LEVEL;
 }
+
+// 완화 아이템 VP 가격 (T5 슬라이스 2). 확정권은 도박 우회라 비싸게.
+export const PROTECT_PRICE_VP = 400;      // 강화 보호권 — 1회 파괴 방지
+export const GUARANTEE_PRICE_VP = 6000;   // 확정 강화권 — 확정 +1
 export function safeOdds(level: number, failStreak: number): number[] {
   const o = [...ODDS[Math.min(Math.max(0, level), ODDS.length - 1)]];
   o[1] += o[3]; o[3] = 0;                                  // 파괴 → 유지

@@ -1688,13 +1688,20 @@ actor RankingAPI {
 
     // MARK: - 펫 강화 (pet-enhance) — 서버 authoritative RNG·VP
 
-    /// 강화소 진입 상태 — 가용 VP + 내 모든 펫 강화 레벨(서버 SSOT).
+    /// 강화소 진입 상태 — 가용 VP + 강화 레벨 + 완화 아이템 + 진행 중 이벤트.
     struct EnhanceStateResponse: Decodable, Sendable {
         let availableVp: Int
         let totalCoins: Int
         let grantedVp: Int
         let spentVp: Int
         let levels: [String: Int]   // kind rawValue → 강화 레벨
+        let protectCount: Int
+        let guaranteeCount: Int
+        let protectPrice: Int
+        let guaranteePrice: Int
+        let eventActive: Bool
+        let eventDiscount: Double
+        let eventLabel: String
     }
     /// 강화 1회 시도 결과 — 서버가 RNG를 굴려 확정. 클라는 연출만 재생.
     struct EnhanceResultResponse: Decodable, Sendable {
@@ -1704,6 +1711,17 @@ actor RankingAPI {
         let cost: Int
         let availableVp: Int        // 차감 후 잔여
         let failStreak: Int
+        let protectUsed: Bool
+        let guaranteeUsed: Bool
+        let protectCount: Int
+        let guaranteeCount: Int
+    }
+    /// 완화 아이템 구매 결과.
+    struct BuyEnhanceItemResponse: Decodable, Sendable {
+        let item: String
+        let protectCount: Int
+        let guaranteeCount: Int
+        let availableVp: Int
     }
 
     private struct EnhanceStatePayload: Encodable {
@@ -1716,6 +1734,8 @@ actor RankingAPI {
         let deviceId: String
         let kind: String
         let safe: Bool
+        let useProtect: Bool
+        let useGuarantee: Bool
         let ts: Int64
     }
     private struct EnhanceStateRequest: Encodable {
@@ -1724,6 +1744,16 @@ actor RankingAPI {
     }
     private struct EnhanceRequest: Encodable {
         let payload: EnhancePayload
+        let signature: String
+    }
+    private struct BuyEnhanceItemPayload: Encodable {
+        let action: String
+        let deviceId: String
+        let item: String
+        let ts: Int64
+    }
+    private struct BuyEnhanceItemRequest: Encodable {
+        let payload: BuyEnhanceItemPayload
         let signature: String
     }
 
@@ -1738,12 +1768,21 @@ actor RankingAPI {
     /// 강화 1회 시도 — 서버가 가용 VP 검증 → 차감 → RNG 롤 → level 갱신. insufficient_vp/max_level 등은
     /// `RankingError.enhanceError(code)` 로 throw.
     func enhancePet(deviceId: String, hmacKeyBase64: String, kind: String,
-                    safe: Bool = false) async throws -> EnhanceResultResponse {
+                    safe: Bool = false, useProtect: Bool = false, useGuarantee: Bool = false)
+        async throws -> EnhanceResultResponse {
         let payload = EnhancePayload(
             action: "enhance", deviceId: deviceId, kind: kind, safe: safe,
-            ts: Int64(Date().timeIntervalSince1970))
+            useProtect: useProtect, useGuarantee: useGuarantee, ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         return try await post(path: "pet-enhance", body: EnhanceRequest(payload: payload, signature: sig))
+    }
+
+    /// 완화 아이템 VP 구매 — item = "protect" | "guarantee".
+    func buyEnhanceItem(deviceId: String, hmacKeyBase64: String, item: String) async throws -> BuyEnhanceItemResponse {
+        let payload = BuyEnhanceItemPayload(
+            action: "buy", deviceId: deviceId, item: item, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pet-enhance", body: BuyEnhanceItemRequest(payload: payload, signature: sig))
     }
 
     // MARK: - 아레나 랭크전 (pvp-register-team / pvp-challenge)
