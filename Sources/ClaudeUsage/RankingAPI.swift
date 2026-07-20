@@ -1801,6 +1801,34 @@ actor RankingAPI {
         return try await post(path: "pvp-challenge", body: PvPChallengeRequest(payload: payload, signature: sig))
     }
 
+    // 아레나 레이팅 랭킹 + 내 순위·전적.
+    struct PvpLeaderboardEntry: Decodable, Sendable {
+        let rank: Int; let nickname: String; let rating: Int; let wins: Int; let losses: Int; let isMe: Bool
+    }
+    struct PvpLeaderboardResponse: Decodable, Sendable {
+        let entries: [PvpLeaderboardEntry]
+        let myRank: Int?; let myRating: Int?; let myWins: Int; let myLosses: Int
+        let dailyUsed: Int; let dailyLimit: Int
+    }
+    /// 내 최근 매치 — teamA(도전자)/teamB(방어자)/events 는 배틀 재생에 그대로 먹인다.
+    struct PvpMatch: Decodable, Sendable {
+        let id: String; let createdAt: String; let iAmChallenger: Bool
+        let opponentNickname: String; let result: String; let ratingDelta: Int
+        let teamA: [BattlePetSnapshot]; let teamB: [BattlePetSnapshot]; let events: [BattleEvent]
+    }
+    struct PvpHistoryResponse: Decodable, Sendable { let matches: [PvpMatch] }
+
+    func fetchPvpLeaderboard(deviceId: String, hmacKeyBase64: String) async throws -> PvpLeaderboardResponse {
+        let payload = PvPChallengePayload(action: "leaderboard", deviceId: deviceId, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pvp-leaderboard", body: PvPChallengeRequest(payload: payload, signature: sig))
+    }
+    func fetchPvpHistory(deviceId: String, hmacKeyBase64: String) async throws -> PvpHistoryResponse {
+        let payload = PvPChallengePayload(action: "history", deviceId: deviceId, ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "pvp-history", body: PvPChallengeRequest(payload: payload, signature: sig))
+    }
+
     /// 응답 statusline + body 만 검증. 본문 디코드가 없는 endpoint(`executeVoid`)와
     /// 공유하기 위해 추출. 404는 호출 측이 body 메시지로 분기 매핑하므로 여기선
     /// generic `.http(404, body)`만 throw — 사용자에게 정확한 메시지 노출.

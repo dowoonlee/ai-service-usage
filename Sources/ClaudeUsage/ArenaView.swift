@@ -65,6 +65,8 @@ struct ArenaView: View {
     @State private var rankedResult: RankedResult?     // 마지막 랭크전 결과(배틀 재생 아래 카드)
     @State private var rankedBusy = false              // 등록+매칭+시뮬 요청 진행 중
     @State private var rankedTask: Task<Void, Never>?
+    @State private var leaderboard: [RankingAPI.PvpLeaderboardEntry] = []
+    @State private var history: [RankingAPI.PvpMatch] = []
 
     struct RankedResult { let winner: String; let ratingDelta: Int; let coinReward: Int; let opponentNickname: String }
 
@@ -109,6 +111,7 @@ struct ArenaView: View {
             if enhanceKind == nil { enhanceKind = owned.first }
         }
         .task { await loadEnhanceState() }   // 서버에서 강화 레벨·가용 VP 로드(등록 사용자)
+        .task(id: mode) { if mode == .ranked { await loadRankedState() } }   // 랭크전 진입 시 랭킹·전적
         .onDisappear { playbackTask?.cancel(); enhanceTask?.cancel(); rankedTask?.cancel() }
     }
 
@@ -212,13 +215,89 @@ struct ArenaView: View {
                 Text(e).font(.system(size: 10)).foregroundStyle(.red).multilineTextAlignment(.center)
             }
             if result != nil { battleArena }
+            if !leaderboard.isEmpty { rankedLeaderboardView }
+            if !history.isEmpty { rankedHistoryView }
         }
         .popover(item: $editingSlot, arrowEdge: .bottom) { sel in teamSlotPicker(slot: sel.id) }
+    }
+
+    private var rankedLeaderboardView: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("🏆 아레나 랭킹").font(.system(size: 12, weight: .semibold))
+            VStack(spacing: 1) {
+                ForEach(Array(leaderboard.prefix(20).enumerated()), id: \.offset) { _, e in
+                    HStack(spacing: 8) {
+                        Text("\(e.rank)").font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .frame(width: 22, alignment: .trailing).foregroundStyle(e.rank <= 3 ? .orange : .secondary)
+                        Text(e.nickname).font(.system(size: 11, weight: e.isMe ? .bold : .regular)).lineLimit(1)
+                        Spacer()
+                        Text("\(e.wins)승 \(e.losses)패").font(.system(size: 9, design: .monospaced)).foregroundStyle(.tertiary)
+                        Text("\(e.rating)").font(.system(size: 11, weight: .semibold, design: .monospaced)).foregroundStyle(.tint)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(e.isMe ? Color.accentColor.opacity(0.15) : Color.clear))
+                }
+            }
+            .padding(6)
+            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.06)))
+        }
+    }
+
+    private var rankedHistoryView: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("최근 전적").font(.system(size: 12, weight: .semibold))
+            VStack(spacing: 1) {
+                ForEach(Array(history.prefix(10).enumerated()), id: \.offset) { _, m in
+                    let icon = m.result == "me" ? "✅" : (m.result == "opp" ? "❌" : "🤝")
+                    let dcolor: Color = m.ratingDelta > 0 ? .green : (m.ratingDelta < 0 ? .red : .secondary)
+                    Button { replayHistory(m) } label: {
+                        HStack(spacing: 8) {
+                            Text(icon).font(.system(size: 11))
+                            Text("vs \(m.opponentNickname)").font(.system(size: 11)).lineLimit(1)
+                            Spacer()
+                            Text("\(m.ratingDelta > 0 ? "+" : "")\(m.ratingDelta)")
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced)).foregroundStyle(dcolor)
+                            Image(systemName: "play.circle").font(.system(size: 11)).foregroundStyle(.tint)
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(6)
+            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.06)))
+        }
     }
 
     // 도전 가능: 팀 있음 + 진행 중 아님 + 일일 여유.
     private var rankedReady: Bool {
         !teamKinds.isEmpty && !rankedBusy && pvpDailyUsed < pvpDailyLimit
+    }
+
+    /// 랭킹 + 전적 로드(진입·도전 후). 미등록이면 no-op.
+    private func loadRankedState() async {
+        guard canServerEnhance, let hmac = Keychain.loadRankingHmacKey() else { return }
+        let dev = settings.rankingDeviceID
+        async let lbCall = RankingAPI.shared.fetchPvpLeaderboard(deviceId: dev, hmacKeyBase64: hmac)
+        async let histCall = RankingAPI.shared.fetchPvpHistory(deviceId: dev, hmacKeyBase64: hmac)
+        let lb = try? await lbCall
+        let hist = try? await histCall
+        if let lb {
+            leaderboard = lb.entries
+            pvpRating = lb.myRating; pvpWins = lb.myWins; pvpLosses = lb.myLosses
+            pvpDailyUsed = lb.dailyUsed; pvpDailyLimit = lb.dailyLimit
+        }
+        if let hist { history = hist.matches }
+    }
+
+    /// 전적 항목 재생 — teamA=도전자(a), teamB=방어자(b). 승자 side는 내 관점(result)에서 역산.
+    private func replayHistory(_ m: RankingAPI.PvpMatch) {
+        stopPlayback(); rankedResult = nil; rankedError = nil
+        aSnaps = m.teamA; bSnaps = m.teamB
+        let w: BattleSide? = m.result == "draw" ? nil : ((m.result == "me") == m.iAmChallenger ? .a : .b)
+        result = BattleResult(winner: w, rounds: m.events.count, log: m.events)
+        showFullLog = false
+        startPlayback(total: m.events.count)
     }
 
     private func doRankedChallenge() {
@@ -250,6 +329,7 @@ struct ArenaView: View {
                 if resp.coinReward > 0 { CoinLedger.shared.creditBonus(resp.coinReward, reason: "pvp-\(resp.winner)") }
                 showFullLog = false
                 startPlayback(total: resp.log.count)
+                await loadRankedState()   // 랭킹·전적 갱신(새 매치 반영)
             } catch {
                 if Task.isCancelled { return }
                 rankedError = (error as? LocalizedError)?.errorDescription ?? "\(error)"
