@@ -55,7 +55,9 @@ enum ArenaDemo {
     private static func synergySection() {
         print("\n[ 펫간 상성 3층 ]")
         let mono = [BattlePetSnapshot(kind: .fox), BattlePetSnapshot(kind: .wolf), BattlePetSnapshot(kind: .bear)]
-        print(String(format: "  A. 팀 시너지: [fox,wolf,bear] 모노 mainframe → 팀 스탯 ×%.2f", TeamSynergy.multiplier(for: mono)))
+        let bonus = TeamSynergy.bonus(for: mono)
+        print(String(format: "  A. 팀 시너지: [fox,wolf,bear] 모노 mainframe(beast) → 전 스탯 ×%.2f + 속도 추가 ×%.2f",
+                     bonus.collectionMult, bonus.collectionMult + bonus.typeAdd))
         let m1 = PetSynergy.matchup(.noVerify, vs: .ciRunners)
         print(String(format: "  B. 밈 라이벌: noVerify ▶ ciRunners ×%.2f  \"%@\"", m1.mult, m1.quip ?? ""))
         let m2 = PetSynergy.matchup(.mainframe, vs: .deprecated)

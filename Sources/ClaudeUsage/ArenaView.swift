@@ -704,8 +704,6 @@ struct ArenaView: View {
         }
         return (a, b)
     }
-    private var teamSynergy: Double { TeamSynergy.multiplier(for: teamKinds.map { BattlePetSnapshot(kind: $0) }) }
-
     // 활성 시너지 감지 — 동족(컬렉션) / 동타입. (버프 배수가 실제로 붙는 경우만.)
     private var collectionSynergy: (name: String, count: Int)? {
         guard teamKinds.count >= 2,
@@ -727,7 +725,11 @@ struct ArenaView: View {
         "같은 컬렉션 ‘\(c.name)’ \(c.count)마리 동족\n강한 유대 — 팀 전원 스탯이 오릅니다."
     }
     private func typeTip(_ t: (type: BattleType, count: Int)) -> String {
-        "같은 타입 ‘\(t.type.displayName)’ \(t.count)마리\n느슨한 유대 — 팀 전원 스탯이 소폭 오릅니다."
+        let stat = statName(TeamSynergy.signatureStat(of: t.type))
+        return "같은 타입 ‘\(t.type.displayName)’ \(t.count)마리\n느슨한 유대 — 팀 전원 \(stat)이(가) 오릅니다."
+    }
+    private func statName(_ s: StatKind) -> String {
+        switch s { case .hp: return "체력"; case .atk: return "공격"; case .def: return "방어"; case .spd: return "속도" }
     }
     private var noneSynergyTip: String {
         "팀 시너지 없음\n같은 컬렉션이나 타입을 2마리 이상 모으면\n팀 전원 스탯이 오릅니다."

@@ -23,9 +23,9 @@ const GOLD_ENHANCE_OUTCOMES = [
 ];
 const GOLD_ENHANCE_TOTAL_VP = 9295;
 const GOLD_ENHANCE_FINAL = 7;
-const GOLD_BATTLE_DMG = [31, 4, 32, 4, 32, 31, 4, 29, 4, 30, 9, 15, 9, 15, 9, 14, 9, 14, 9, 15];
+const GOLD_BATTLE_DMG = [31, 4, 32, 4, 32, 31, 4, 29, 4, 29, 14, 9, 15, 9, 15, 8, 15, 8, 15];
 const GOLD_BATTLE_WINNER = "a";
-const GOLD_BATTLE_ROUNDS = 20;
+const GOLD_BATTLE_ROUNDS = 19;
 
 Deno.test("강화 도박 파리티 — seed 20260716, +10 시작", () => {
   const rng = new SeededRNG(20260716n);

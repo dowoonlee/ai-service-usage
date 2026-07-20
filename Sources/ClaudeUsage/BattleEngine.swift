@@ -101,13 +101,13 @@ enum BattleEngine {
     /// (팀 시너지 배수를 UI가 빠뜨리면 3~15% 먼저 0 HP에 도달 → 파티 아이콘/활성 펫 desync)
     /// 엔진과 UI가 공유하는 단일 소스. makeCombatants와 ArenaView가 이 함수만 호출한다.
     static func finalStats(for member: BattlePetSnapshot, in team: BattleTeam) -> BattleStats {
-        let syn = TeamSynergy.multiplier(for: team.members)
+        let syn = TeamSynergy.bonus(for: team.members)   // 동족=전 스탯 / 동타입=대표 스탯 방향성
         let base = PetBattleStats.compute(kind: member.kind, variant: member.variant,
                                           enhanceLevel: member.enhanceLevel, progressUnits: member.progressUnits)
-        return BattleStats(hp:  max(1, Int((Double(base.hp)  * syn).rounded())),
-                           atk: max(1, Int((Double(base.atk) * syn).rounded())),
-                           def: max(1, Int((Double(base.def) * syn).rounded())),
-                           spd: max(1, Int((Double(base.spd) * syn).rounded())))
+        func s(_ v: Int, _ k: StatKind) -> Int {
+            max(1, Int((Double(v) * TeamSynergy.statMultiplier(syn, k)).rounded()))
+        }
+        return BattleStats(hp: s(base.hp, .hp), atk: s(base.atk, .atk), def: s(base.def, .def), spd: s(base.spd, .spd))
     }
 
     private static func makeCombatants(_ team: BattleTeam) -> [Combatant] {

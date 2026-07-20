@@ -4,7 +4,7 @@
 // 동일 (두 팀 스냅샷 + 시드) → 동일 로그·승자. RNG·반올림은 pvp_policy/enhance_engine 명세를 따른다.
 
 import {
-  BattleStats, BattleType, computeStats, teamSynergyMultiplier,
+  BattleStats, BattleType, StatKind, computeStats, teamSynergyBonus, synergyStatMultiplier,
   effectiveness, matchup, collectionOf, battleTypeOf, roundAway,
 } from "./pvp_policy.ts";
 import { SeededRNG } from "./enhance_engine.ts";
@@ -67,10 +67,10 @@ interface Combatant { kind: string; type: BattleType; stats: BattleStats; hp: nu
 
 // 팀 시너지까지 반영한 최종 전투 스탯. Swift finalStats 와 동일 소스.
 export function finalStats(member: BattlePetSnapshot, team: BattleTeam): BattleStats {
-  const syn = teamSynergyMultiplier(team.map((m) => m.kind));
+  const b = teamSynergyBonus(team.map((m) => m.kind));   // 동족=전 스탯 / 동타입=대표 스탯 방향성
   const base = computeStats(member.kind, member.variant, member.enhanceLevel, member.progressUnits);
-  const s = (v: number) => Math.max(1, roundAway(v * syn));
-  return { hp: s(base.hp), atk: s(base.atk), def: s(base.def), spd: s(base.spd) };
+  const s = (v: number, k: StatKind) => Math.max(1, roundAway(v * synergyStatMultiplier(b, k)));
+  return { hp: s(base.hp, "hp"), atk: s(base.atk, "atk"), def: s(base.def, "def"), spd: s(base.spd, "spd") };
 }
 
 function makeCombatants(team: BattleTeam): Combatant[] {

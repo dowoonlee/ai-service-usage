@@ -156,19 +156,46 @@ export function matchup(attacker: string, defender: string): Matchup {
   return { mult: 1.0, quip: null };
 }
 
-// A. 팀 시너지 — 같은 컬렉션/타입 최대 동족 수 → 팀 전체 스탯 배수.
+// A. 팀 시너지 — 동족(컬렉션)=전 스탯 곱 / 동타입=그 타입 대표 스탯만 방향성 버프. Swift TeamSynergy 1:1.
 const TEAM_COLLECTION_BONUS: Record<number, number> = { 2: 0.05, 3: 0.10 };
 const TEAM_TYPE_BONUS: Record<number, number> = { 2: 0.03, 3: 0.05 };
-export function teamSynergyMultiplier(kinds: string[]): number {
-  if (kinds.length < 2) return 1.0;
-  const count = (vals: string[]) => {
+
+export type StatKind = "hp" | "atk" | "def" | "spd";
+// 각 타입 시너지가 강화하는 대표 스탯(아키타입 성향).
+export function signatureStat(type: BattleType): StatKind {
+  switch (type) {
+    case "beast": return "spd";
+    case "warrior": return "atk";
+    case "arcane": return "atk";
+    case "chaos": return "spd";
+    case "machine": return "def";
+    case "mascot": return "hp";
+  }
+}
+export interface SynergyBonus { collectionMult: number; typeStat: StatKind | null; typeAdd: number; }
+
+export function teamSynergyBonus(kinds: string[]): SynergyBonus {
+  if (kinds.length < 2) return { collectionMult: 1.0, typeStat: null, typeAdd: 0 };
+  const counts = (vals: string[]) => {
     const m = new Map<string, number>();
     for (const v of vals) m.set(v, (m.get(v) ?? 0) + 1);
-    return Math.max(...m.values());
+    return m;
   };
-  const maxColl = count(kinds.map(collectionOf));
-  const maxType = count(kinds.map(battleTypeOf));
-  return 1.0 + (TEAM_COLLECTION_BONUS[maxColl] ?? 0) + (TEAM_TYPE_BONUS[maxType] ?? 0);
+  const maxColl = Math.max(...counts(kinds.map(collectionOf)).values());
+  const collectionMult = 1.0 + (TEAM_COLLECTION_BONUS[maxColl] ?? 0);
+  // 최다 타입 그룹 → 그 타입 대표 스탯 강화. (3마리 팀에서 count≥2 타입은 유일 — 결정적.)
+  let topType: BattleType | null = null, topCount = 0;
+  for (const [t, c] of counts(kinds.map(battleTypeOf))) {
+    if (c > topCount) { topCount = c; topType = t as BattleType; }
+  }
+  const add = TEAM_TYPE_BONUS[topCount] ?? 0;
+  if (topType && add > 0) return { collectionMult, typeStat: signatureStat(topType), typeAdd: add };
+  return { collectionMult, typeStat: null, typeAdd: 0 };
+}
+
+// 특정 스탯의 최종 시너지 배수.
+export function synergyStatMultiplier(b: SynergyBonus, stat: StatKind): number {
+  return b.collectionMult + (b.typeStat === stat ? b.typeAdd : 0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -12,20 +12,53 @@ import Foundation
 
 // MARK: - A. 팀 시너지
 
+/// 스탯 선택자 — 방향성 타입 시너지가 어느 스탯을 강화하는지.
+enum StatKind: Equatable { case hp, atk, def, spd }
+
 enum TeamSynergy {
-    /// 같은 컬렉션(dev-밈 그룹) 최대 동족 수 → 버프. 강한 유대라 크게.
+    /// 같은 컬렉션(동족) 최대 수 → **전 스탯** 버프(강한 유대라 크게).
     static let collectionBonus: [Int: Double] = [2: 0.05, 3: 0.10]
-    /// 같은 배틀 타입 최대 동속 수 → 버프. 느슨한 유대라 작게. (동족은 자동으로 동속이라 소폭 중첩 = 의도)
+    /// 같은 배틀 타입 최대 동속 수 → **그 타입 대표 스탯만** 버프(방향성).
     static let typeBonus: [Int: Double] = [2: 0.03, 3: 0.05]
 
-    /// 팀 전체에 곱해질 스탯 배수. 종 유니크 전제라 컬렉션/타입 그룹 크기로 판정.
-    static func multiplier(for members: [BattlePetSnapshot]) -> Double {
-        guard members.count >= 2 else { return 1.0 }
+    /// 각 타입 시너지가 강화하는 대표 스탯(아키타입 성향). 타입 정체성 강화·팀빌딩 다양화.
+    static func signatureStat(of type: BattleType) -> StatKind {
+        switch type {
+        case .beast:   return .spd   // 짐승 = 민첩
+        case .warrior: return .atk   // 전사 = 공격
+        case .arcane:  return .atk   // 비전 = 유리대포(공격)
+        case .chaos:   return .spd   // 혼돈 = 난동(속도)
+        case .machine: return .def   // 기계 = 장갑(방어)
+        case .mascot:  return .hp    // 마스코트 = 탱커(체력)
+        }
+    }
+
+    /// 팀 시너지 결과 — 동족(전 스탯 곱) + 동타입(대표 스탯만 추가 곱).
+    struct Bonus: Equatable {
+        var collectionMult: Double   // 전 스탯에 곱(≥1.0)
+        var typeStat: StatKind?      // 방향성 버프 대상 스탯(없으면 nil)
+        var typeAdd: Double          // 그 스탯에 추가로 더해질 배수분
+        static let none = Bonus(collectionMult: 1.0, typeStat: nil, typeAdd: 0)
+    }
+
+    /// 팀 구성에서 시너지 산출. 종 유니크 전제라 컬렉션/타입 그룹 크기로 판정.
+    /// (3마리 팀에서 타입이 2 이상 겹치는 그룹은 최대 하나뿐이라 대표 타입은 유일 — 결정적.)
+    static func bonus(for members: [BattlePetSnapshot]) -> Bonus {
+        guard members.count >= 2 else { return .none }
         let maxCollection = Dictionary(grouping: members, by: { $0.kind.collection })
             .values.map(\.count).max() ?? 1
-        let maxType = Dictionary(grouping: members, by: { $0.kind.battleType })
-            .values.map(\.count).max() ?? 1
-        return 1.0 + (collectionBonus[maxCollection] ?? 0) + (typeBonus[maxType] ?? 0)
+        let collMult = 1.0 + (collectionBonus[maxCollection] ?? 0)
+        let topType = Dictionary(grouping: members, by: { $0.kind.battleType })
+            .max { $0.value.count < $1.value.count }
+        if let topType, let add = typeBonus[topType.value.count] {
+            return Bonus(collectionMult: collMult, typeStat: signatureStat(of: topType.key), typeAdd: add)
+        }
+        return Bonus(collectionMult: collMult, typeStat: nil, typeAdd: 0)
+    }
+
+    /// 특정 스탯의 최종 시너지 배수. finalStats·서버 파리티에서 사용.
+    static func statMultiplier(_ b: Bonus, _ stat: StatKind) -> Double {
+        b.collectionMult + (b.typeStat == stat ? b.typeAdd : 0)
     }
 }
 

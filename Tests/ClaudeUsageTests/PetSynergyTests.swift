@@ -8,29 +8,52 @@ final class PetSynergyTests: XCTestCase {
 
     // ── A. 팀 시너지 ──
 
-    // 모노 컬렉션 팀(전원 mainframe=beast): 컬렉션 3(+0.10) + 타입 3(+0.05) = ×1.15.
+    // 모노 컬렉션 팀(전원 mainframe=beast): 컬렉션 3(전 스탯 ×1.10) + 타입 3(속도 +0.05).
+    // → 속도 ×1.15, 나머지 ×1.10 (방향성).
     func testMonoCollectionTeamSynergy() {
-        let team = [snap(.fox), snap(.wolf), snap(.bear)]   // 전부 mainframe / beast
-        XCTAssertEqual(TeamSynergy.multiplier(for: team), 1.15, accuracy: 1e-9)
+        let b = TeamSynergy.bonus(for: [snap(.fox), snap(.wolf), snap(.bear)])
+        XCTAssertEqual(b.collectionMult, 1.10, accuracy: 1e-9)
+        XCTAssertEqual(b.typeStat, .spd)   // beast 대표 스탯
+        XCTAssertEqual(TeamSynergy.statMultiplier(b, .spd), 1.15, accuracy: 1e-9)
+        XCTAssertEqual(TeamSynergy.statMultiplier(b, .hp), 1.10, accuracy: 1e-9)
+        XCTAssertEqual(TeamSynergy.statMultiplier(b, .atk), 1.10, accuracy: 1e-9)
     }
 
-    // 같은 타입(beast) 다른 컬렉션 3: 컬렉션 0 + 타입 3(+0.05) = ×1.05.
+    // 같은 타입(beast) 다른 컬렉션 3: 컬렉션 없음(×1.0) + 타입 3(속도 +0.05).
     func testSameTypeDifferentCollection() {
         let team = [snap(.fox), snap(.bat), snap(.tRex)]    // mainframe / dns / deprecated — 전부 beast
         XCTAssertEqual(team.map { $0.kind.battleType }, [.beast, .beast, .beast])
-        XCTAssertEqual(TeamSynergy.multiplier(for: team), 1.05, accuracy: 1e-9)
+        let b = TeamSynergy.bonus(for: team)
+        XCTAssertEqual(b.collectionMult, 1.0, accuracy: 1e-9)
+        XCTAssertEqual(b.typeStat, .spd)
+        XCTAssertEqual(TeamSynergy.statMultiplier(b, .spd), 1.05, accuracy: 1e-9)
+        XCTAssertEqual(TeamSynergy.statMultiplier(b, .atk), 1.0, accuracy: 1e-9)
     }
 
-    // 전원 다른 컬렉션·타입: 시너지 없음 ×1.0.
+    // 전원 다른 컬렉션·타입: 시너지 없음.
     func testNoSynergy() {
-        let team = [snap(.fox), snap(.warrior), snap(.scrapBot)]  // mainframe/beast, onCall/warrior, ciRunners/machine
-        XCTAssertEqual(TeamSynergy.multiplier(for: team), 1.0, accuracy: 1e-9)
+        let b = TeamSynergy.bonus(for: [snap(.fox), snap(.warrior), snap(.scrapBot)])
+        XCTAssertEqual(b, .none)
+        for s in [StatKind.hp, .atk, .def, .spd] {
+            XCTAssertEqual(TeamSynergy.statMultiplier(b, s), 1.0, accuracy: 1e-9)
+        }
     }
 
-    // 2마리 동족: 컬렉션 2(+0.05) + 타입 2(+0.03) = ×1.08.
+    // 2마리 동족(mainframe/beast): 컬렉션 2(전 스탯 ×1.05) + 타입 2(속도 +0.03).
     func testPairCollectionSynergy() {
-        let team = [snap(.fox), snap(.wolf), snap(.scrapBot)]  // mainframe×2 + ciRunners
-        XCTAssertEqual(TeamSynergy.multiplier(for: team), 1.08, accuracy: 1e-9)
+        let b = TeamSynergy.bonus(for: [snap(.fox), snap(.wolf), snap(.scrapBot)])  // mainframe×2 + ciRunners
+        XCTAssertEqual(b.collectionMult, 1.05, accuracy: 1e-9)
+        XCTAssertEqual(b.typeStat, .spd)
+        XCTAssertEqual(TeamSynergy.statMultiplier(b, .spd), 1.08, accuracy: 1e-9)
+        XCTAssertEqual(TeamSynergy.statMultiplier(b, .def), 1.05, accuracy: 1e-9)
+    }
+
+    // 타입별 대표 스탯 매핑 — 아키타입 성향.
+    func testSignatureStats() {
+        XCTAssertEqual(TeamSynergy.signatureStat(of: .beast), .spd)
+        XCTAssertEqual(TeamSynergy.signatureStat(of: .warrior), .atk)
+        XCTAssertEqual(TeamSynergy.signatureStat(of: .machine), .def)
+        XCTAssertEqual(TeamSynergy.signatureStat(of: .mascot), .hp)
     }
 
     // ── B. 밈 라이벌 ──
@@ -89,17 +112,18 @@ final class PetSynergyTests: XCTestCase {
     // ── 통합: 팀 시너지가 실제 스탯을 올려 승률에 반영된다 ──
 
     func testTeamSynergyAffectsBattle() {
-        // 동일 kind 구성이지만 한쪽은 모노 컬렉션(시너지 ↑) — 시너지 팀이 우세해야.
-        // A: 모노 mainframe(시너지 ×1.15) / B: 혼합(시너지 낮음)
-        let synTeam = BattleTeam([snap(.fox), snap(.wolf), snap(.bear)])            // ×1.15
-        let mixTeam = BattleTeam([snap(.fox), snap(.warrior), snap(.scrapBot)])     // 혼합
-        // 혼합팀은 mythic(warrior) 포함이라 시너지만으론 못 이길 수 있음 → 시너지의 "존재"만 검증:
-        // 같은 혼합 kind를 양쪽에 두되 A만 시너지 있는 구성은 kind가 달라져 불공정하므로,
-        // 여기서는 makeCombatants 경로가 시너지를 반영하는지 스탯 비교로 확인.
-        let solo = TeamSynergy.multiplier(for: [snap(.fox)])                        // 1마리 = 1.0
-        XCTAssertEqual(solo, 1.0, accuracy: 1e-9)
-        XCTAssertGreaterThan(TeamSynergy.multiplier(for: synTeam.members), 1.0)
-        XCTAssertLessThanOrEqual(TeamSynergy.multiplier(for: mixTeam.members),
-                                 TeamSynergy.multiplier(for: synTeam.members))
+        // 1마리 = 시너지 없음.
+        XCTAssertEqual(TeamSynergy.bonus(for: [snap(.fox)]), .none)
+        // 모노 mainframe(beast): 전 스탯 ×1.10, 속도 ×1.15.
+        let syn = TeamSynergy.bonus(for: [snap(.fox), snap(.wolf), snap(.bear)])
+        XCTAssertGreaterThan(syn.collectionMult, 1.0)
+        XCTAssertEqual(syn.typeStat, .spd)
+        // finalStats가 방향성 시너지를 반영: 모노 팀 fox의 속도가 시너지 없는 fox보다 높다.
+        let mono = BattleTeam([snap(.fox), snap(.wolf), snap(.bear)])
+        let alone = BattleTeam([snap(.fox), snap(.warrior), snap(.scrapBot)])  // fox엔 시너지 없음
+        let sMono = BattleEngine.finalStats(for: snap(.fox), in: mono)
+        let sAlone = BattleEngine.finalStats(for: snap(.fox), in: alone)
+        XCTAssertGreaterThan(sMono.spd, sAlone.spd, "모노 beast 팀은 속도 시너지로 SPD가 더 높아야")
+        XCTAssertGreaterThan(sMono.hp, sAlone.hp, "동족 컬렉션 시너지로 HP도 소폭 더 높아야")
     }
 }
