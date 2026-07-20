@@ -18,12 +18,16 @@ import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { RARITY } from "../_shared/pet_meta_gen.ts";
 import { rarityOf } from "../_shared/pvp_policy.ts";
-import { SeededRNG, canEnhance, cost, roll, apply } from "../_shared/enhance_engine.ts";
+import {
+  SeededRNG, canEnhance, cost, roll, apply,
+  canSafeEnhance, safeCost, rollSafe,
+} from "../_shared/enhance_engine.ts";
 
 interface EnhancePayload {
   action: string;      // "state" | "enhance"
   deviceId: string;
   kind?: string;       // enhance 전용: PetKind rawValue
+  safe?: boolean;      // enhance 전용: 안전 강화 모드
   ts: number;
 }
 interface EnhanceRequest {
@@ -65,6 +69,7 @@ Deno.serve(async (req: Request) => {
 
   if (p.action === "enhance") {
     if (typeof p.kind !== "string" || !(p.kind in RARITY)) return errorResponse(400, "invalid_kind");
+    if (p.safe !== undefined && typeof p.safe !== "boolean") return errorResponse(400, "invalid_payload_types");
   }
 
   const db = getDb();
@@ -79,7 +84,7 @@ Deno.serve(async (req: Request) => {
   if (user.status === "banned") return errorResponse(403, "banned");
 
   const hmacPayload: Record<string, unknown> = p.action === "enhance"
-    ? { action: p.action, deviceId: p.deviceId, kind: p.kind, ts: p.ts }
+    ? { action: p.action, deviceId: p.deviceId, kind: p.kind, safe: p.safe === true, ts: p.ts }
     : { action: p.action, deviceId: p.deviceId, ts: p.ts };
   const ok = await verifyHmac(hmacPayload, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
@@ -113,13 +118,15 @@ Deno.serve(async (req: Request) => {
   const beforeStreak = cur ? Number(cur.fail_streak ?? 0) : 0;
 
   if (!canEnhance(beforeLevel)) return errorResponse(409, "max_level");
+  const safe = p.safe === true;
+  if (safe && !canSafeEnhance(beforeLevel)) return errorResponse(409, "safe_unavailable");
   const rarity = rarityOf(kind);
-  const attemptCost = cost(beforeLevel, rarity);
+  const attemptCost = safe ? safeCost(beforeLevel, rarity) : cost(beforeLevel, rarity);
   if (availableVp < attemptCost) return errorResponse(409, "insufficient_vp");
 
-  // 서버 crypto RNG 롤 → 결과 확정. 확률·적용은 enhance_engine(클라 미러) 규칙.
+  // 서버 crypto RNG 롤 → 결과 확정. 안전 모드면 파괴 없음 + soft-pity(fail_streak).
   const rng = new SeededRNG(cryptoU64());
-  const outcome = roll(beforeLevel, rng);
+  const outcome = safe ? rollSafe(beforeLevel, beforeStreak, rng) : roll(beforeLevel, rng);
   const newLevel = apply(beforeLevel, outcome);
   const newSpent = beforeSpent + attemptCost;
   const newStreak = outcome === "success" ? 0 : beforeStreak + 1;  // soft-pity 카운터(T5)

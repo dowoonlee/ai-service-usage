@@ -76,14 +76,40 @@ export function cost(level: number, rarity: string): number {
   return Math.round(baseCost(level) * rarityCostMultiplier(rarity));
 }
 
-// 확률표에 따라 결과를 굴린다. 주입 RNG로 결정적. (Swift roll 과 draw 소비 1회 동일.)
-export function roll(level: number, rng: SeededRNG): EnhanceOutcome {
-  const o = ODDS[Math.min(Math.max(0, level), ODDS.length - 1)];
+// 안전 강화 모드 — 파괴 없음 + soft-pity. Swift EnhanceEngine 1:1.
+export const SAFE_MAX_LEVEL = 11;
+export const SAFE_VP_MULTIPLIER = 1.5;
+export const PITY_STEP = 0.02;
+export const PITY_CAP = 0.20;
+
+export function canSafeEnhance(level: number): boolean {
+  return level >= 0 && level <= SAFE_MAX_LEVEL;
+}
+export function safeOdds(level: number, failStreak: number): number[] {
+  const o = [...ODDS[Math.min(Math.max(0, level), ODDS.length - 1)]];
+  o[1] += o[3]; o[3] = 0;                                  // 파괴 → 유지
+  const boost = Math.min(PITY_CAP, Math.max(0, failStreak) * PITY_STEP);
+  const applied = Math.min(boost, o[1]);
+  o[0] += applied; o[1] -= applied;
+  return o;
+}
+export function safeCost(level: number, rarity: string): number {
+  return Math.round(cost(level, rarity) * SAFE_VP_MULTIPLIER);
+}
+
+// 확률행에 따라 굴린다. 주입 RNG로 결정적. (Swift rollRow 과 draw 소비 1회 동일.)
+function rollRow(o: number[], rng: SeededRNG): EnhanceOutcome {
   const r = rng.uniform01();
   if (r < o[0]) return "success";
   if (r < o[0] + o[1]) return "stay";
   if (o[2] > 0 && r < o[0] + o[1] + o[2]) return "downgrade";
   return o[3] > 0 ? "destroy" : "stay";
+}
+export function roll(level: number, rng: SeededRNG): EnhanceOutcome {
+  return rollRow(ODDS[Math.min(Math.max(0, level), ODDS.length - 1)], rng);
+}
+export function rollSafe(level: number, failStreak: number, rng: SeededRNG): EnhanceOutcome {
+  return rollRow(safeOdds(level, failStreak), rng);
 }
 
 export function apply(level: number, outcome: EnhanceOutcome): number {

@@ -42,6 +42,7 @@ struct ArenaView: View {
     @State private var enhanceKind: PetKind?
     @State private var serverLevels: [PetKind: Int] = [:]   // 서버에서 받은 강화 레벨(SSOT 미러)
     @State private var availableVp: Int?                    // 서버 가용 VP (nil = 미로딩)
+    @State private var safeMode = false                     // 안전 강화 모드(파괴 없음 + soft-pity)
     @State private var enhanceStateError: String?           // state/enhance 실패 메시지
     @State private var enhanceHistory: [EnhanceLine] = []
     @State private var enhancePhase: EnhancePhase = .idle
@@ -868,7 +869,11 @@ struct ArenaView: View {
         let rarity = PetKind.rarityFor(kind) ?? .common
         let stats = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: level, progressUnits: 0)
         let destroyed = enhancePhase == .result(.destroy)
-        let attemptCost = EnhanceEngine.cost(level: level, rarity: rarity)
+        let safeAllowed = EnhanceEngine.canSafeEnhance(level: level)
+        let useSafe = safeMode && safeAllowed
+        let oddsRow = useSafe ? EnhanceEngine.safeOdds(level: level, failStreak: 0) : EnhanceEngine.odds[level]
+        let attemptCost = useSafe ? EnhanceEngine.safeCost(level: level, rarity: rarity)
+                                  : EnhanceEngine.cost(level: level, rarity: rarity)
         let insufficient = availableVp.map { $0 < attemptCost } ?? false
         return VStack(spacing: 12) {
             // 중앙 정렬 펫 스테이지 (반응 이펙트)
@@ -904,12 +909,23 @@ struct ArenaView: View {
             targetPicker(current: kind)
 
             if level < EnhanceEngine.maxLevel {
-                oddsBar(level: level)
-                oddsLegend(level: level)   // 정확한 % 항상 표기 (#5 — 12% 등 작은 값도 보이게)
+                // 안전 강화 토글 — 파괴 없음 + soft-pity(연속 실패 시 성공률↑), VP 1.5배. +12부터는 불가.
+                if safeAllowed {
+                    Toggle(isOn: $safeMode) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "shield.lefthalf.filled").font(.system(size: 10))
+                            Text("안전 강화 (파괴 없음 · 연속 실패 시 성공률↑ · VP 1.5배)").font(.system(size: 10))
+                        }
+                    }
+                    .toggleStyle(.switch).controlSize(.mini).tint(.green)
+                    .disabled(enhancePhase != .idle)
+                }
+                oddsBar(oddsRow)
+                oddsLegend(oddsRow)   // 안전 모드면 파괴 없는 확률행 표시
                 HStack(spacing: 6) {
                     Text("이번 시도 VP \(attemptCost.formatted())")
                         .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
-                    Text("(\(rarity.displayName) ×\(String(format: "%.1f", EnhanceEngine.rarityCostMultiplier(rarity))))")
+                    Text(useSafe ? "(안전 ×1.5)" : "(\(rarity.displayName) ×\(String(format: "%.1f", EnhanceEngine.rarityCostMultiplier(rarity))))")
                         .font(.system(size: 9)).foregroundStyle(.tertiary)
                     Spacer()
                     if let vp = availableVp {
@@ -917,14 +933,15 @@ struct ArenaView: View {
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .foregroundStyle(insufficient ? Color.red : Color.accentColor)
                     }
-                    Text(zoneLabel(level)).font(.system(size: 10, weight: .semibold)).foregroundStyle(zoneColor(level))
+                    Text(useSafe ? "안전 구간" : zoneLabel(level))
+                        .font(.system(size: 10, weight: .semibold)).foregroundStyle(useSafe ? .green : zoneColor(level))
                 }
-                Button { attemptEnhance(kind) } label: {
-                    Text(enhancePhase == .charging ? "강화 중…" : (insufficient ? "VP 부족" : "⚒️ 강화 시도"))
+                Button { attemptEnhance(kind, safe: useSafe) } label: {
+                    Text(enhancePhase == .charging ? "강화 중…" : (insufficient ? "VP 부족" : (useSafe ? "🛡️ 안전 강화" : "⚒️ 강화 시도")))
                         .font(.system(size: 13, weight: .semibold))
                         .frame(maxWidth: .infinity).padding(.vertical, 9)
                         .background(RoundedRectangle(cornerRadius: AppRadius.md)
-                            .fill(Color.orange.opacity(enhancePhase == .idle && !insufficient ? 1 : 0.5)))
+                            .fill((useSafe ? Color.green : Color.orange).opacity(enhancePhase == .idle && !insufficient ? 1 : 0.5)))
                         .foregroundStyle(.white)
                 }.buttonStyle(.plain).disabled(enhancePhase != .idle || insufficient)
             } else {
@@ -1036,8 +1053,7 @@ struct ArenaView: View {
     }
 
     // 확률 범례 — 정확한 % 항상 표기 (#5)
-    private func oddsLegend(level: Int) -> some View {
-        let o = EnhanceEngine.odds[level]
+    private func oddsLegend(_ o: [Double]) -> some View {
         let items: [(String, Double, Color)] = [("성공", o[0], .green), ("유지", o[1], .gray),
                                                  ("강등", o[2], .orange), ("파괴", o[3], .red)].filter { $0.1 > 0 }
         return HStack(spacing: 12) {
@@ -1052,8 +1068,7 @@ struct ArenaView: View {
         }
     }
 
-    private func oddsBar(level: Int) -> some View {
-        let o = EnhanceEngine.odds[level]
+    private func oddsBar(_ o: [Double]) -> some View {
         let segs: [(Double, Color)] = [(o[0], .green), (o[1], .gray), (o[2], .orange), (o[3], .red)].filter { $0.0 > 0 }
         return GeometryReader { geo in
             HStack(spacing: 1) {
@@ -1091,7 +1106,7 @@ struct ArenaView: View {
         }
     }
 
-    private func attemptEnhance(_ kind: PetKind) {
+    private func attemptEnhance(_ kind: PetKind, safe: Bool) {
         guard enhancePhase == .idle, canServerEnhance,
               let hmac = Keychain.loadRankingHmacKey() else { return }
         // 최근 강화 목록 갱신 (맨 앞으로)
@@ -1108,7 +1123,7 @@ struct ArenaView: View {
             let res: RankingAPI.EnhanceResultResponse
             do {
                 res = try await RankingAPI.shared.enhancePet(
-                    deviceId: settings.rankingDeviceID, hmacKeyBase64: hmac, kind: kind.rawValue)
+                    deviceId: settings.rankingDeviceID, hmacKeyBase64: hmac, kind: kind.rawValue, safe: safe)
             } catch {
                 if Task.isCancelled { return }
                 enhancePulse = false; enhanceBright = 0; enhancePhase = .idle

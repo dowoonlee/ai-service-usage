@@ -95,6 +95,31 @@ final class EnhanceEngineTests: XCTestCase {
         XCTAssertEqual(pDestroy, 0.20, accuracy: 0.02)
     }
 
+    // 안전 강화 — 파괴→유지 이동 + soft-pity + VP 할증. (T5 완화장치)
+    func testSafeEnhance() {
+        // 파괴 구간(+10) 안전: destroy(0.18)→stay. 파괴 확률 0.
+        let s0 = EnhanceEngine.safeOdds(level: 10, failStreak: 0)
+        XCTAssertEqual(s0[3], 0, "안전 모드는 파괴 없음")
+        XCTAssertEqual(s0[0], 0.22, accuracy: 1e-9)
+        XCTAssertEqual(s0.reduce(0, +), 1.0, accuracy: 1e-9)
+        // soft-pity: 연속 실패 5 → 성공 +0.10 (유지에서 이전).
+        let s5 = EnhanceEngine.safeOdds(level: 10, failStreak: 5)
+        XCTAssertEqual(s5[0], 0.32, accuracy: 1e-9)
+        XCTAssertEqual(s5.reduce(0, +), 1.0, accuracy: 1e-9)
+        // 상한 0.20.
+        XCTAssertEqual(EnhanceEngine.safeOdds(level: 10, failStreak: 50)[0], 0.42, accuracy: 1e-9)
+        // 레벨 제한 + VP 할증.
+        XCTAssertTrue(EnhanceEngine.canSafeEnhance(level: 11))
+        XCTAssertFalse(EnhanceEngine.canSafeEnhance(level: 12), "+12부터 안전 불가")
+        XCTAssertGreaterThan(EnhanceEngine.safeCost(level: 10, rarity: .common),
+                             EnhanceEngine.cost(level: 10, rarity: .common))
+        // rollSafe는 절대 파괴를 반환하지 않는다(대량 시드).
+        for i in 0..<2000 {
+            var rng = SeededRNG(seed: UInt64(i) &* 2_654_435_761 &+ 7)
+            XCTAssertNotEqual(EnhanceEngine.rollSafe(level: 14, failStreak: 0, using: &rng), .destroy)
+        }
+    }
+
     // uniform01 — [0, 1) 범위 준수(서버 포팅 명세 가드).
     func testUniform01Range() {
         var rng = SeededRNG(seed: 999)

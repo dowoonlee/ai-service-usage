@@ -735,6 +735,7 @@ actor RankingAPI {
                 case "max_level":               return "이미 만렙(+15)입니다."
                 case "concurrent_modification": return "강화 상태가 방금 바뀌었습니다. 다시 시도해 주세요."
                 case "invalid_kind":            return "알 수 없는 펫입니다."
+                case "safe_unavailable":        return "이 레벨에선 안전 강화를 쓸 수 없습니다 (+12 이후)."
                 default:                        return "강화 처리에 실패했습니다 (\(code))."
                 }
             case .pvpError(let code):
@@ -1714,6 +1715,7 @@ actor RankingAPI {
         let action: String
         let deviceId: String
         let kind: String
+        let safe: Bool
         let ts: Int64
     }
     private struct EnhanceStateRequest: Encodable {
@@ -1735,9 +1737,11 @@ actor RankingAPI {
 
     /// 강화 1회 시도 — 서버가 가용 VP 검증 → 차감 → RNG 롤 → level 갱신. insufficient_vp/max_level 등은
     /// `RankingError.enhanceError(code)` 로 throw.
-    func enhancePet(deviceId: String, hmacKeyBase64: String, kind: String) async throws -> EnhanceResultResponse {
+    func enhancePet(deviceId: String, hmacKeyBase64: String, kind: String,
+                    safe: Bool = false) async throws -> EnhanceResultResponse {
         let payload = EnhancePayload(
-            action: "enhance", deviceId: deviceId, kind: kind, ts: Int64(Date().timeIntervalSince1970))
+            action: "enhance", deviceId: deviceId, kind: kind, safe: safe,
+            ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         return try await post(path: "pet-enhance", body: EnhanceRequest(payload: payload, signature: sig))
     }
@@ -1869,7 +1873,7 @@ actor RankingAPI {
 
     /// 펫 강화(pet-enhance) 전용 error 코드 — 전역 409→nicknameTaken 오매핑 방지(강화 409는 의미가 다름).
     private static let enhanceErrorCodes: Set<String> = [
-        "insufficient_vp", "max_level", "concurrent_modification", "invalid_kind",
+        "insufficient_vp", "max_level", "concurrent_modification", "invalid_kind", "safe_unavailable",
     ]
 
     /// 아레나 랭크전(pvp-*) 전용 error 코드 — 전역 409 오매핑 방지.

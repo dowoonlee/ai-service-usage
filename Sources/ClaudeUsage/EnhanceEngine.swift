@@ -102,14 +102,47 @@ enum EnhanceEngine {
         Int((Double(cost(level: level)) * rarityCostMultiplier(rarity)).rounded())
     }
 
-    /// 확률표에 따라 결과를 굴린다. 주입 RNG로 결정적.
-    static func roll<G: RandomNumberGenerator>(level: Int, using rng: inout G) -> EnhanceOutcome {
-        let o = odds[min(max(0, level), odds.count - 1)]
+    // MARK: 안전 강화 모드 (완화장치) — 파괴 없음 + soft-pity. 재원: VP 더 비쌈.
+    static let safeMaxLevel = 11        // 안전 강화는 +11→+12 까지(level ≤ 11). 이후는 일반(도박)만.
+    static let safeVpMultiplier = 1.5   // 안전 강화 VP 할증.
+    static let pityStep = 0.02          // 연속 실패 1회당 성공률 보정.
+    static let pityCap  = 0.20          // soft-pity 상한.
+
+    /// 안전 강화 가능 레벨.
+    static func canSafeEnhance(level: Int) -> Bool { level >= 0 && level <= safeMaxLevel }
+
+    /// 안전 강화 확률행 — 파괴→유지 이동 + soft-pity(연속 실패 보정). 합 = 1.
+    static func safeOdds(level: Int, failStreak: Int) -> [Double] {
+        var o = odds[min(max(0, level), odds.count - 1)]
+        o[1] += o[3]; o[3] = 0                                    // 파괴 → 유지(파괴 없음)
+        let boost = min(pityCap, Double(max(0, failStreak)) * pityStep)
+        let applied = min(boost, o[1])                            // 유지에서 성공으로 이전
+        o[0] += applied; o[1] -= applied
+        return o
+    }
+
+    /// 안전 강화 시도 VP 비용(할증).
+    static func safeCost(level: Int, rarity: Rarity) -> Int {
+        Int((Double(cost(level: level, rarity: rarity)) * safeVpMultiplier).rounded())
+    }
+
+    /// 확률행에 따라 결과를 굴린다. 주입 RNG로 결정적.
+    private static func rollRow<G: RandomNumberGenerator>(_ o: [Double], using rng: inout G) -> EnhanceOutcome {
         let r = rng.uniform01()
         if r < o[0] { return .success }
         if r < o[0] + o[1] { return .stay }
         if o[2] > 0, r < o[0] + o[1] + o[2] { return .downgrade }
         return o[3] > 0 ? .destroy : .stay
+    }
+
+    /// 일반(도박) 강화 굴림.
+    static func roll<G: RandomNumberGenerator>(level: Int, using rng: inout G) -> EnhanceOutcome {
+        rollRow(odds[min(max(0, level), odds.count - 1)], using: &rng)
+    }
+
+    /// 안전 강화 굴림 — 파괴 없음 + soft-pity.
+    static func rollSafe<G: RandomNumberGenerator>(level: Int, failStreak: Int, using rng: inout G) -> EnhanceOutcome {
+        rollRow(safeOdds(level: level, failStreak: failStreak), using: &rng)
     }
 
     /// 결과를 현재 레벨에 적용.

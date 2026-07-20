@@ -7,7 +7,7 @@
 // 실행:  deno test supabase/functions/_shared/pvp_engine.parity.test.ts
 // (외부 의존 없음 — std/assert 미사용, 자체 assert.)
 
-import { SeededRNG, roll, apply, baseCost, expectedVP } from "./enhance_engine.ts";
+import { SeededRNG, roll, apply, baseCost, expectedVP, safeOdds, safeCost, cost, canSafeEnhance, rollSafe } from "./enhance_engine.ts";
 import { simulate, BattleTeam } from "./battle_engine.ts";
 
 function assertEq(name: string, got: unknown, exp: unknown) {
@@ -58,6 +58,22 @@ Deno.test("결정성 — 동일 (팀+시드) → 동일 로그", () => {
   const r1 = simulate(t, [{ kind: "warrior", variant: 0, enhanceLevel: 0, progressUnits: 0 }], 12345n);
   const r2 = simulate(t, [{ kind: "warrior", variant: 0, enhanceLevel: 0, progressUnits: 0 }], 12345n);
   assertEq("동일", r1, r2);
+});
+
+Deno.test("안전 강화 파리티 — 파괴→유지 + soft-pity + 할증 (Swift EnhanceEngineTests와 동일 값)", () => {
+  const s0 = safeOdds(10, 0);
+  if (s0[3] !== 0) throw new Error("안전 모드 파괴 0 아님");
+  if (Math.abs(s0[0] - 0.22) > 1e-9) throw new Error(`s0[0]=${s0[0]}`);
+  if (Math.abs(s0.reduce((a, b) => a + b, 0) - 1) > 1e-9) throw new Error("합≠1");
+  if (Math.abs(safeOdds(10, 5)[0] - 0.32) > 1e-9) throw new Error("pity 5 불일치");
+  if (Math.abs(safeOdds(10, 50)[0] - 0.42) > 1e-9) throw new Error("pity cap 불일치");
+  if (canSafeEnhance(12)) throw new Error("+12 안전 가능하면 안 됨");
+  if (!(safeCost(10, "common") > cost(10, "common"))) throw new Error("할증 아님");
+  // rollSafe는 파괴를 안 냄.
+  for (let i = 0; i < 2000; i++) {
+    const rng = new SeededRNG(BigInt(i) * 2654435761n + 7n);
+    if (rollSafe(14, 0, rng) === "destroy") throw new Error("안전 모드에서 파괴 발생");
+  }
 });
 
 Deno.test("기대 VP — 파괴 리셋 반영(+15 ≈ 5.3M)", () => {
