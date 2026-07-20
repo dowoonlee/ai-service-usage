@@ -16,6 +16,7 @@ import SwiftUI
 struct ArenaView: View {
     @ObservedObject private var settings = Settings.shared
     @State private var mode: Mode = .practice
+    @State private var showTypeHelp = false        // 6타입 상성 도움말 시트
 
     // 연습전
     @State private var teamKinds: [PetKind] = []          // 편성 가능한 내 팀(전투 전 편집)
@@ -125,6 +126,7 @@ struct ArenaView: View {
             if teamKinds.isEmpty { teamKinds = Array(owned.prefix(3)) }
             if enhanceKind == nil { enhanceKind = owned.first }
         }
+        .sheet(isPresented: $showTypeHelp) { typeHelpSheet }
         .task { await loadEnhanceState() }   // 서버에서 강화 레벨·가용 VP 로드(등록 사용자)
         .task(id: mode) { if mode == .ranked { await loadRankedState() } }   // 랭크전 진입 시 랭킹·전적
         .onDisappear { playbackTask?.cancel(); enhanceTask?.cancel(); rankedTask?.cancel() }
@@ -134,10 +136,58 @@ struct ArenaView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("⚔️ 아레나").font(.system(size: 15, weight: .bold))
+            HStack {
+                Text("⚔️ 아레나").font(.system(size: 15, weight: .bold))
+                Spacer()
+                Button { showTypeHelp = true } label: {
+                    Label("타입 상성", systemImage: "hexagon").font(.system(size: 10))
+                }.buttonStyle(.plain).foregroundStyle(.tint)
+            }
             Text("강화는 서버 반영(VP 실차감·영속). 레이팅·랭크전·시즌 보상은 준비 중. 도트 임팩트는 에셋 확보 후.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
+    }
+
+    // 6타입 상성 도움말 시트 (포켓몬 타입표 감성).
+    private var typeHelpSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("타입 상성").font(.system(size: 15, weight: .bold))
+                Spacer()
+                Button("닫기") { showTypeHelp = false }.font(.system(size: 12))
+            }
+            Text("각 타입은 하나를 강하게 이기고(×1.6) 하나에 약하게 진다(×0.625). 6타입 순환.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+            VStack(spacing: 6) {
+                ForEach(BattleType.allCases, id: \.self) { t in
+                    HStack(spacing: 8) {
+                        typeChip(t)
+                        Image(systemName: "arrow.right").font(.system(size: 9)).foregroundStyle(.secondary)
+                        typeChip(t.beats)
+                        Text("강함").font(.system(size: 9)).foregroundStyle(.green)
+                        Spacer()
+                        Text("시너지 → \(statName(TeamSynergy.signatureStat(of: t)))")
+                            .font(.system(size: 9)).foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(typeColor(t).opacity(0.08)))
+                }
+            }
+            Text("동타입 3마리를 모으면 그 타입 대표 스탯이 오릅니다(방향성 시너지).")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(16).frame(width: 320, height: 380)
+    }
+
+    private func typeChip(_ t: BattleType) -> some View {
+        HStack(spacing: 4) {
+            if let img = PetSprite.icon(named: typeSynergyResource(t)) {
+                Image(nsImage: img).resizable().interpolation(.none).frame(width: 16, height: 16)
+            }
+            Text(t.displayName).font(.system(size: 10, weight: .semibold)).foregroundStyle(typeColor(t))
+        }
+        .frame(width: 84, alignment: .leading)
     }
 
     private var emptyGate: some View {
@@ -168,6 +218,15 @@ struct ArenaView: View {
                 if collectionSynergy == nil && typeSynergy == nil {
                     synergyBadge("syn_bond", noneSynergyTip, $noneTipShown, grayed: true)
                 }
+            }
+            if !settings.partyPresets.isEmpty {
+                Menu {
+                    ForEach(settings.partyPresets) { preset in
+                        Button(preset.name.isEmpty ? "파티" : preset.name) { importParty(preset) }
+                    }
+                } label: {
+                    Label("파티에서", systemImage: "square.and.arrow.down").font(.system(size: 10))
+                }.menuStyle(.borderlessButton).fixedSize().foregroundStyle(.tint)
             }
             Button { teamKinds = Array(owned.shuffled().prefix(3)); stopPlayback(); result = nil } label: {
                 Label("팀 새로 뽑기", systemImage: "shuffle").font(.system(size: 10))
@@ -398,6 +457,16 @@ struct ArenaView: View {
             .frame(width: 74, height: 68)
             .background(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [3])))
         }.buttonStyle(.plain)
+    }
+
+    // 파티 프리셋 → 배틀 팀 가져오기 (소유·유니크·최대 3마리).
+    private func importParty(_ preset: PartyPreset) {
+        var seen = Set<PetKind>(); var picked: [PetKind] = []
+        for m in preset.members where settings.ownedPets[m.kind] != nil && !seen.contains(m.kind) {
+            seen.insert(m.kind); picked.append(m.kind)
+            if picked.count >= 3 { break }
+        }
+        if !picked.isEmpty { teamKinds = picked; stopPlayback(); result = nil }
     }
 
     private func removeSlot(_ slot: Int) {

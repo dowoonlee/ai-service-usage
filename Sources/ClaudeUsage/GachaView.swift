@@ -1059,6 +1059,16 @@ private struct InventorySlot: View {
                 RoundedRectangle(cornerRadius: AppRadius.md)
                     .stroke(isHighlighted ? Color.yellow : Color.clear, lineWidth: 2)
             )
+            .overlay(alignment: .bottomLeading) {
+                // 배틀 타입 배지(보유 펫만) — 아레나 타입 아이콘 재활용.
+                if ownership != nil, let img = PetSprite.icon(named: Self.typeIconName(kind.battleType)) {
+                    Image(nsImage: img).resizable().interpolation(.none)
+                        .frame(width: 14, height: 14).padding(2)
+                        .background(Circle().fill(Color(nsColor: .windowBackgroundColor).opacity(0.85)))
+                        .padding(2)
+                        .help(kind.battleType.displayName)
+                }
+            }
             .contentShape(Rectangle())
             .onTapGesture {
                 if ownership != nil { onTap?() }
@@ -1091,6 +1101,18 @@ private struct InventorySlot: View {
     }
 
     private func variantDot(_ i: Int) -> Color { WalkingCat.variantDotColor(i) }
+
+    // 배틀 타입 → Tuxemon element 아이콘 리소스명 (아레나와 동일 매핑).
+    static func typeIconName(_ t: BattleType) -> String {
+        switch t {
+        case .beast:   return "syn_beast"
+        case .warrior: return "syn_warrior"
+        case .chaos:   return "syn_chaos"
+        case .arcane:  return "syn_arcane"
+        case .machine: return "syn_machine"
+        case .mascot:  return "syn_mascot"
+        }
+    }
 }
 
 /// 컬렉션 컴플리트 배너 — `.hatched` 진입 시 그 가챠로 셋이 완성됐으면 상단에 노출.
