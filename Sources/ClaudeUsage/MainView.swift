@@ -246,9 +246,17 @@ struct MainView: View {
     var onDailyFortune: () -> Void
     var onQuit: () -> Void
 
+    /// 첫 소개 배너를 닫았는지. 신규 설치 전용이라 @AppStorage 로컬 플래그로 충분(서버 백업 불필요).
+    @AppStorage("intro.dismissed") private var introDismissed = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             topBar
+            // 아무 소스도 연결 안 된 신규 사용자에게만 1회 소개 — "게임만 보고 왔는데 왜 Claude?" 해소.
+            // Claude/Cursor 중 하나라도 연결되면 자동으로 사라지므로 기존 사용자에겐 노출되지 않는다.
+            if !introDismissed, vm.claudeNeedsLogin, vm.cursorNeedsSetup {
+                introBanner
+            }
             Divider().opacity(0.3)
             ClaudeSection(vm: vm, onLogin: onLogin)
             Divider().opacity(0.3)
@@ -275,6 +283,26 @@ struct MainView: View {
                     .allowsHitTesting(false)
             }
         }
+    }
+
+    /// 신규 사용자 1회 소개 배너 — 이 앱의 정체("사용량을 게임으로")를 한 눈에. 우상단 ✕로 닫음.
+    private var introBanner: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text("🐾").font(.system(size: 16))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("사용량이 곧 게임이 됩니다").font(.system(size: 11, weight: .semibold))
+                Text("이 앱은 Claude·Cursor 사용량을 펫·아레나로 바꿔줘요. 아래에서 로그인하면 쓴 만큼 코인·VP가 쌓이고, 그걸로 펫을 뽑고 대전합니다.")
+                    .font(.system(size: 9)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            Button { introDismissed = true } label: {
+                Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.12)))
     }
 
     private var topBar: some View {
@@ -634,6 +662,10 @@ struct ClaudeSection: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("claude.ai 로그인이 필요해요")
                 .font(.system(size: 11))
+            // "왜 Claude 연동?" — 게임만 보고 온 사용자를 위한 이유 안내. 사용량이 곧 게임 재화다.
+            Text("사용량이 곧 펫·아레나의 재화(코인·VP)예요 — 로그인하면 집계가 시작됩니다.")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Button(action: onLogin) {
                 Text("로그인").frame(maxWidth: .infinity)
             }
