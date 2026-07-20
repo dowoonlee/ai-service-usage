@@ -142,8 +142,11 @@ struct ArenaView: View {
             Text("내 배틀 팀").font(.system(size: 12, weight: .semibold))
             Text("(탭해서 편성)").font(.system(size: 9)).foregroundStyle(.tertiary)
             Spacer()
-            Text(String(format: "팀 시너지 ×%.2f", teamSynergy))
-                .font(.system(size: 10, design: .monospaced)).foregroundStyle(.tint)
+            // 팀 시너지 — 아이콘. 호버하면 무슨 시너지·몇 % 버프인지 툴팁.
+            Image(systemName: teamSynergy > 1.0001 ? "person.3.sequence.fill" : "person.3.sequence")
+                .font(.system(size: 13))
+                .foregroundStyle(teamSynergy > 1.0001 ? Color.accentColor : Color.secondary)
+                .help(synergyDescription)
             Button { teamKinds = Array(owned.shuffled().prefix(3)); stopPlayback(); result = nil } label: {
                 Label("팀 새로 뽑기", systemImage: "shuffle").font(.system(size: 10))
             }.buttonStyle(.plain).foregroundStyle(.tint)
@@ -691,6 +694,34 @@ struct ArenaView: View {
         return (a, b)
     }
     private var teamSynergy: Double { TeamSynergy.multiplier(for: teamKinds.map { BattlePetSnapshot(kind: $0) }) }
+
+    // 시너지 툴팁 — 어떤 동족/동타입 묶음이 몇 % 버프인지 설명.
+    private var synergyDescription: String {
+        guard teamKinds.count >= 2 else {
+            return "팀 시너지 없음\n펫 2마리 이상 편성 시 적용됩니다."
+        }
+        let collGroups = Dictionary(grouping: teamKinds, by: { $0.collection })
+        let typeGroups = Dictionary(grouping: teamKinds, by: { $0.battleType })
+        let topColl = collGroups.max { $0.value.count < $1.value.count }
+        let topType = typeGroups.max { $0.value.count < $1.value.count }
+        let collN = topColl?.value.count ?? 1
+        let typeN = topType?.value.count ?? 1
+        let cBonus = TeamSynergy.collectionBonus[collN] ?? 0
+        let tBonus = TeamSynergy.typeBonus[typeN] ?? 0
+        var lines = [String(format: "팀 시너지 ×%.2f", teamSynergy)]
+        if cBonus > 0, let c = topColl?.key {
+            lines.append("• 같은 컬렉션 ‘\(c.displayName)’ \(collN)마리 → 스탯 +\(Int(cBonus * 100))%")
+        }
+        if tBonus > 0, let t = topType?.key {
+            lines.append("• 같은 타입 ‘\(t.displayName)’ \(typeN)마리 → 스탯 +\(Int(tBonus * 100))%")
+        }
+        if cBonus == 0 && tBonus == 0 {
+            lines.append("같은 컬렉션 또는 타입을 2마리 이상 모으면 팀 전원 스탯이 오릅니다.")
+        } else {
+            lines.append("(버프는 팀 전원 스탯에 곱해집니다)")
+        }
+        return lines.joined(separator: "\n")
+    }
 
     private func fight() {
         stopPlayback()
