@@ -107,9 +107,11 @@ Deno.serve(async (req: Request) => {
 
   // 6) 매치 로그.
   const winnerDevice = winSide === "a" ? me : (winSide === "b" ? opp.device_id : null);
+  // log_json에 팀 스냅샷도 저장 → pvp-history 재생 시 HP 바 렌더 가능. teamA=도전자, teamB=방어자.
   await db.from("pvp_matches").insert({
     tenant_id: tenant, challenger: me, defender: opp.device_id, seed: seed.toString(),
-    winner: winnerDevice, challenger_delta: deltaMe, defender_delta: -deltaMe, log_json: result.log,
+    winner: winnerDevice, challenger_delta: deltaMe, defender_delta: -deltaMe,
+    log_json: { events: result.log, teamA: myTeam, teamB: oppTeam },
   });
 
   // 7) 레이팅 갱신(양측) + pvp_teams.rating 캐시.
