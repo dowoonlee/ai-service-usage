@@ -67,6 +67,10 @@ struct ArenaView: View {
     @State private var rankedTask: Task<Void, Never>?
     @State private var leaderboard: [RankingAPI.PvpLeaderboardEntry] = []
     @State private var history: [RankingAPI.PvpMatch] = []
+    // 시너지 아이콘 호버(툴팁 팝오버)
+    @State private var collTipShown = false
+    @State private var typeTipShown = false
+    @State private var noneTipShown = false
 
     struct RankedResult { let winner: String; let ratingDelta: Int; let coinReward: Int; let opponentNickname: String }
 
@@ -142,11 +146,18 @@ struct ArenaView: View {
             Text("내 배틀 팀").font(.system(size: 12, weight: .semibold))
             Text("(탭해서 편성)").font(.system(size: 9)).foregroundStyle(.tertiary)
             Spacer()
-            // 팀 시너지 — 아이콘. 호버하면 무슨 시너지·몇 % 버프인지 툴팁.
-            Image(systemName: teamSynergy > 1.0001 ? "person.3.sequence.fill" : "person.3.sequence")
-                .font(.system(size: 13))
-                .foregroundStyle(teamSynergy > 1.0001 ? Color.accentColor : Color.secondary)
-                .help(synergyDescription)
+            // 팀 시너지 — 종류별 아이콘. 호버하면 효과 툴팁(팝오버).
+            HStack(spacing: 5) {
+                if let c = collectionSynergy {
+                    synergyBadge("person.3.sequence.fill", .accentColor, collTip(c), $collTipShown)
+                }
+                if let t = typeSynergy {
+                    synergyBadge("hexagon.fill", typeColor(t.type), typeTip(t), $typeTipShown)
+                }
+                if collectionSynergy == nil && typeSynergy == nil {
+                    synergyBadge("person.3.sequence", .secondary, noneSynergyTip, $noneTipShown)
+                }
+            }
             Button { teamKinds = Array(owned.shuffled().prefix(3)); stopPlayback(); result = nil } label: {
                 Label("팀 새로 뽑기", systemImage: "shuffle").font(.system(size: 10))
             }.buttonStyle(.plain).foregroundStyle(.tint)
@@ -695,32 +706,45 @@ struct ArenaView: View {
     }
     private var teamSynergy: Double { TeamSynergy.multiplier(for: teamKinds.map { BattlePetSnapshot(kind: $0) }) }
 
-    // 시너지 툴팁 — 어떤 동족/동타입 묶음이 몇 % 버프인지 설명.
-    private var synergyDescription: String {
-        guard teamKinds.count >= 2 else {
-            return "팀 시너지 없음\n펫 2마리 이상 편성 시 적용됩니다."
-        }
-        let collGroups = Dictionary(grouping: teamKinds, by: { $0.collection })
-        let typeGroups = Dictionary(grouping: teamKinds, by: { $0.battleType })
-        let topColl = collGroups.max { $0.value.count < $1.value.count }
-        let topType = typeGroups.max { $0.value.count < $1.value.count }
-        let collN = topColl?.value.count ?? 1
-        let typeN = topType?.value.count ?? 1
-        let cBonus = TeamSynergy.collectionBonus[collN] ?? 0
-        let tBonus = TeamSynergy.typeBonus[typeN] ?? 0
-        var lines = [String(format: "팀 시너지 ×%.2f", teamSynergy)]
-        if cBonus > 0, let c = topColl?.key {
-            lines.append("• 같은 컬렉션 ‘\(c.displayName)’ \(collN)마리 → 스탯 +\(Int(cBonus * 100))%")
-        }
-        if tBonus > 0, let t = topType?.key {
-            lines.append("• 같은 타입 ‘\(t.displayName)’ \(typeN)마리 → 스탯 +\(Int(tBonus * 100))%")
-        }
-        if cBonus == 0 && tBonus == 0 {
-            lines.append("같은 컬렉션 또는 타입을 2마리 이상 모으면 팀 전원 스탯이 오릅니다.")
-        } else {
-            lines.append("(버프는 팀 전원 스탯에 곱해집니다)")
-        }
-        return lines.joined(separator: "\n")
+    // 활성 시너지 감지 — 동족(컬렉션) / 동타입. (버프 배수가 실제로 붙는 경우만.)
+    private var collectionSynergy: (name: String, count: Int)? {
+        guard teamKinds.count >= 2,
+              let top = Dictionary(grouping: teamKinds, by: { $0.collection })
+                .max(by: { $0.value.count < $1.value.count }),
+              (TeamSynergy.collectionBonus[top.value.count] ?? 0) > 0 else { return nil }
+        return (top.key.displayName, top.value.count)
+    }
+    private var typeSynergy: (type: BattleType, count: Int)? {
+        guard teamKinds.count >= 2,
+              let top = Dictionary(grouping: teamKinds, by: { $0.battleType })
+                .max(by: { $0.value.count < $1.value.count }),
+              (TeamSynergy.typeBonus[top.value.count] ?? 0) > 0 else { return nil }
+        return (top.key, top.value.count)
+    }
+
+    // 툴팁 문구 — 효과만 서술(버프 수치·배수 미표기).
+    private func collTip(_ c: (name: String, count: Int)) -> String {
+        "같은 컬렉션 ‘\(c.name)’ \(c.count)마리 동족\n강한 유대 — 팀 전원 스탯이 오릅니다."
+    }
+    private func typeTip(_ t: (type: BattleType, count: Int)) -> String {
+        "같은 타입 ‘\(t.type.displayName)’ \(t.count)마리\n느슨한 유대 — 팀 전원 스탯이 소폭 오릅니다."
+    }
+    private var noneSynergyTip: String {
+        "팀 시너지 없음\n같은 컬렉션이나 타입을 2마리 이상 모으면\n팀 전원 스탯이 오릅니다."
+    }
+
+    // 시너지 배지 — 호버 시 팝오버로 효과 툴팁(.help가 이 창에선 안 떠서 onHover+popover 사용).
+    private func synergyBadge(_ icon: String, _ color: Color, _ tip: String, _ shown: Binding<Bool>) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: 13))
+            .foregroundStyle(color)
+            .onHover { shown.wrappedValue = $0 }
+            .popover(isPresented: shown, arrowEdge: .bottom) {
+                Text(tip)
+                    .font(.system(size: 11)).multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 220).padding(10)
+            }
     }
 
     private func fight() {
