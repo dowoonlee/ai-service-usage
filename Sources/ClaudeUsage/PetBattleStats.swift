@@ -94,7 +94,7 @@ struct BattleStats: Equatable, Codable, Hashable {
     var total: Int { hp + atk + def + spd }
 }
 
-/// 스탯 파생 상수 + 계산기. 전부 pure/static — 서버 `_shared/pvp_policy.ts`와 값 1:1.
+/// 스탯 파생 상수 + 계산기. 전부 pure/static — 서버 `_shared/pvp_policy.ts`(P1b 이식 예정)와 값 1:1이 목표.
 enum PetBattleStats {
     /// 등급 기본치 (압축 곡선 — Common↔Mythic ≈ 2배, coinValue 곡선과 달리 완만).
     static func rarityBase(_ rarity: Rarity) -> Double {

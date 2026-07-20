@@ -17,12 +17,15 @@ struct ArenaView: View {
     @State private var mode: Mode = .practice
 
     // 연습전
-    @State private var teamKinds: [PetKind] = []
-    @State private var opponentKinds: [PetKind] = []
+    @State private var teamKinds: [PetKind] = []          // 편성 가능한 내 팀(전투 전 편집)
+    @State private var aSnaps: [BattlePetSnapshot] = []   // 실제 시뮬에 쓰인 내 팀 스냅샷(강화 반영)
+    @State private var bSnaps: [BattlePetSnapshot] = []   // 상대 팀 스냅샷(매치메이킹 결과)
     @State private var result: BattleResult?
     @State private var playbackStep = 0
     @State private var playbackTask: Task<Void, Never>?
     @State private var showFullLog = false
+    @State private var speed: Double = 1                  // 재생 속도 1×/2×/4×
+    @State private var editingSlot: SlotSel?              // 팀 슬롯 편성 팝오버
     // 배틀 연출 상태
     @State private var lungeSide: BattleSide?
     @State private var lungeAmount: CGFloat = 0
@@ -38,7 +41,7 @@ struct ArenaView: View {
     @State private var enhanceKind: PetKind?
     @State private var localLevels: [PetKind: Int] = [:]
     @State private var enhanceHistory: [EnhanceLine] = []
-    @State private var enhanceSeed: UInt64 = 1
+    @State private var enhanceSeed: UInt64 = .random(in: 1...UInt64.max)   // 세션마다 다른 도박 시퀀스
     @State private var enhancePhase: EnhancePhase = .idle
     @State private var enhanceShake: CGFloat = 0
     @State private var enhancePulse = false
@@ -60,6 +63,8 @@ struct ArenaView: View {
         case recent = "최근", dex = "도감", rarity = "희귀도", name = "이름"
         var id: String { rawValue }
     }
+    /// 팀 슬롯 편성 팝오버 대상 (id = 슬롯 인덱스; teamKinds.count면 새 슬롯 추가).
+    struct SlotSel: Identifiable { let id: Int }
 
     private var owned: [PetKind] { PetKind.allCases.filter { settings.ownedPets[$0] != nil } }
 
@@ -111,6 +116,7 @@ struct ArenaView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("내 배틀 팀").font(.system(size: 12, weight: .semibold))
+                Text("(탭해서 편성)").font(.system(size: 9)).foregroundStyle(.tertiary)
                 Spacer()
                 Text(String(format: "팀 시너지 ×%.2f", teamSynergy))
                     .font(.system(size: 10, design: .monospaced)).foregroundStyle(.tint)
@@ -119,7 +125,8 @@ struct ArenaView: View {
                 }.buttonStyle(.plain).foregroundStyle(.tint)
             }
             HStack(spacing: 8) {
-                ForEach(teamKinds, id: \.self) { petCard($0) }
+                ForEach(Array(teamKinds.enumerated()), id: \.offset) { idx, kind in petCard(kind, slot: idx) }
+                if teamKinds.count < 3 && teamKinds.count < owned.count { addSlotCard }
                 if teamKinds.isEmpty { Text("펫 없음").font(.system(size: 11)).foregroundStyle(.secondary) }
             }
             Button { fight() } label: {
@@ -131,18 +138,77 @@ struct ArenaView: View {
 
             if result != nil { battleArena }
         }
+        .popover(item: $editingSlot, arrowEdge: .bottom) { sel in teamSlotPicker(slot: sel.id) }
     }
 
-    private func petCard(_ kind: PetKind) -> some View {
-        let s = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: 0, progressUnits: 0)
-        return VStack(spacing: 3) {
-            thumb(kind, h: 30)
-            Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 8)).lineLimit(1)
-            typeBadge(kind.battleType)
-            Text("Σ\(s.total)").font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
+    private func petCard(_ kind: PetKind, slot: Int) -> some View {
+        // 강화소에서 올린 로컬 레벨을 반영해 배틀에 실제로 쓰일 스탯을 미리 보여준다(#3).
+        let level = localLevels[kind] ?? 0
+        let s = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: level, progressUnits: 0)
+        return Button { editingSlot = SlotSel(id: slot) } label: {
+            VStack(spacing: 3) {
+                thumb(kind, h: 30)
+                Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 8)).lineLimit(1)
+                typeBadge(kind.battleType)
+                HStack(spacing: 3) {
+                    Text("Σ\(s.total)").font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
+                    if level > 0 { Text("+\(level)").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.orange) }
+                }
+            }
+            .frame(width: 74).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.08)))
+            .overlay(alignment: .topTrailing) {
+                if teamKinds.count > 1 {
+                    Button { removeSlot(slot) } label: {
+                        Image(systemName: "xmark.circle.fill").font(.system(size: 12))
+                            .foregroundStyle(.secondary).background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
+                    }.buttonStyle(.plain).offset(x: 4, y: -4)
+                }
+            }
+        }.buttonStyle(.plain)
+    }
+
+    private var addSlotCard: some View {
+        Button { editingSlot = SlotSel(id: teamKinds.count) } label: {
+            VStack(spacing: 3) {
+                Image(systemName: "plus").font(.system(size: 18)).foregroundStyle(.secondary)
+                Text("추가").font(.system(size: 8)).foregroundStyle(.secondary)
+            }
+            .frame(width: 74, height: 68)
+            .background(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [3])))
+        }.buttonStyle(.plain)
+    }
+
+    private func removeSlot(_ slot: Int) {
+        guard teamKinds.count > 1, slot < teamKinds.count else { return }
+        teamKinds.remove(at: slot); stopPlayback(); result = nil
+    }
+
+    // 슬롯 편성 팝오버 — 소유 펫 그리드에서 골라 교체/추가. 중복 kind 방지(HP 딕셔너리 유니크 불변식).
+    private func teamSlotPicker(slot: Int) -> some View {
+        let currentKind = slot < teamKinds.count ? teamKinds[slot] : nil
+        let inTeam = Set(teamKinds.enumerated().filter { $0.offset != slot }.map(\.element))
+        let choices = owned.filter { !inTeam.contains($0) }
+        return ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 58), spacing: 6)], spacing: 6) {
+                ForEach(choices, id: \.self) { k in
+                    Button {
+                        if slot < teamKinds.count { teamKinds[slot] = k } else { teamKinds.append(k) }
+                        stopPlayback(); result = nil; editingSlot = nil
+                    } label: {
+                        VStack(spacing: 2) {
+                            thumb(k, h: 26)
+                            Text(PetMetaStore.shared.displayName(for: k)).font(.system(size: 7)).lineLimit(1)
+                            typeBadge(k.battleType)
+                        }
+                        .frame(width: 62).padding(.vertical, 4)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(k == currentKind ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.06)))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(k == currentKind ? Color.accentColor : .clear, lineWidth: 1.5))
+                    }.buttonStyle(.plain)
+                }
+            }.padding(8)
         }
-        .frame(width: 74).padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.08)))
+        .frame(width: 264, height: 288)
     }
 
     // MARK: 배틀 관전 (공유 스테이지 + 파티 아이콘 + lunge/flash)
@@ -152,10 +218,12 @@ struct ArenaView: View {
         let done = playbackStep >= log.count
         let hp = hpDicts(step: playbackStep)
         let current: BattleEvent? = (playbackStep > 0 && playbackStep <= log.count) ? log[playbackStep - 1] : nil
-        let aActive = teamKinds.first { (hp.a[$0] ?? 0) > 0 }
-        let bActive = opponentKinds.first { (hp.b[$0] ?? 0) > 0 }
+        // 배틀 표시는 시뮬에 쓰인 스냅샷 기준(편성 편집과 무관하게 고정).
+        let aKinds = aSnaps.map(\.kind), bKinds = bSnaps.map(\.kind)
+        let aActive = aKinds.first { (hp.a[$0] ?? 0) > 0 }
+        let bActive = bKinds.first { (hp.b[$0] ?? 0) > 0 }
         return VStack(spacing: 8) {
-            partyRow(hp: hp, aActive: aActive, bActive: bActive)
+            partyRow(hp: hp, aKinds: aKinds, bKinds: bKinds, aActive: aActive, bActive: bActive)
             battleStage(hp: hp, aActive: aActive, bActive: bActive, current: current)
                 .overlay { if done { resultBanner(result?.winner) } }
             currentActionLine(current)
@@ -166,16 +234,16 @@ struct ArenaView: View {
         .background(RoundedRectangle(cornerRadius: AppRadius.lg).fill(Color.secondary.opacity(0.06)))
     }
 
-    private func partyRow(hp: (a: [PetKind: Int], b: [PetKind: Int]), aActive: PetKind?, bActive: PetKind?) -> some View {
+    private func partyRow(hp: (a: [PetKind: Int], b: [PetKind: Int]), aKinds: [PetKind], bKinds: [PetKind], aActive: PetKind?, bActive: PetKind?) -> some View {
         HStack(spacing: 6) {
             HStack(spacing: 3) {
-                ForEach(teamKinds, id: \.self) { partyIcon($0, fainted: (hp.a[$0] ?? 0) <= 0, active: $0 == aActive) }
+                ForEach(aKinds, id: \.self) { partyIcon($0, fainted: (hp.a[$0] ?? 0) <= 0, active: $0 == aActive) }
             }
             Spacer()
             Text("VS").font(.system(size: 10, weight: .heavy)).foregroundStyle(.secondary)
             Spacer()
             HStack(spacing: 3) {
-                ForEach(opponentKinds, id: \.self) { partyIcon($0, fainted: (hp.b[$0] ?? 0) <= 0, active: $0 == bActive) }
+                ForEach(bKinds, id: \.self) { partyIcon($0, fainted: (hp.b[$0] ?? 0) <= 0, active: $0 == bActive) }
             }
         }
     }
@@ -214,10 +282,10 @@ struct ArenaView: View {
                 }
             }
             .overlay(alignment: .topLeading) {
-                if let k = bActive { hpBox(k, cur: hp.b[k] ?? 0, showNumbers: false).padding(6) }
+                if let k = bActive { hpBox(k, cur: hp.b[k] ?? 0, showNumbers: false, snaps: bSnaps).padding(6) }
             }
             .overlay(alignment: .bottomTrailing) {
-                if let k = aActive { hpBox(k, cur: hp.a[k] ?? 0, showNumbers: true).padding(6) }
+                if let k = aActive { hpBox(k, cur: hp.a[k] ?? 0, showNumbers: true, snaps: aSnaps).padding(6) }
             }
         }
         .frame(height: 176)
@@ -255,8 +323,8 @@ struct ArenaView: View {
             .transition(.opacity)
     }
 
-    private func hpBox(_ kind: PetKind, cur: Int, showNumbers: Bool) -> some View {
-        let maxv = maxHP(kind)
+    private func hpBox(_ kind: PetKind, cur: Int, showNumbers: Bool, snaps: [BattlePetSnapshot]) -> some View {
+        let maxv = maxHP(kind, in: snaps)
         let frac = maxv > 0 ? Double(max(0, cur)) / Double(maxv) : 0
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
@@ -296,6 +364,13 @@ struct ArenaView: View {
                 Button { replay() } label: { Label("다시 재생", systemImage: "arrow.counterclockwise").font(.system(size: 10)) }
                     .buttonStyle(.plain).foregroundStyle(.tint)
             }
+            // 재생 속도 — 진행 중 변경 시 남은 로그를 새 속도로 이어 재생.
+            Picker("", selection: $speed) {
+                Text("1×").tag(1.0); Text("2×").tag(2.0); Text("4×").tag(4.0)
+            }.pickerStyle(.segmented).labelsHidden().frame(width: 108)
+            .onChange(of: speed) { _, _ in
+                if playbackStep < total { resumePlayback(from: playbackStep, total: total) }
+            }
             Spacer()
             Text("\(min(playbackStep, total))/\(total)").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
             Button { showFullLog.toggle() } label: {
@@ -316,10 +391,16 @@ struct ArenaView: View {
     @ViewBuilder
     private func currentActionLine(_ e: BattleEvent?) -> some View {
         if let e {
+            let move = BattleLines.moveName(collection: e.attackerKind.collection, signature: e.move == "signature")
             VStack(spacing: 2) {
-                Text("\(PetMetaStore.shared.displayName(for: e.attackerKind)) ▶ \(PetMetaStore.shared.displayName(for: e.defenderKind))  −\(e.damage)  \(tagString(e))")
+                Text("\(PetMetaStore.shared.displayName(for: e.attackerKind)) «\(move)» ▶ \(PetMetaStore.shared.displayName(for: e.defenderKind))  −\(e.damage)  \(tagString(e))")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .contentTransition(.numericText())
+                if e.effectiveness > 1.0 {
+                    Text("효과가 굉장했다!").font(.system(size: 11, weight: .heavy)).foregroundStyle(.green)
+                } else if e.effectiveness < 1.0 {
+                    Text("효과가 별로였다…").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                }
                 if let q = e.quip {
                     Text("«\(q)»").font(.system(size: 10)).italic().foregroundStyle(.tint)
                 }
@@ -335,7 +416,7 @@ struct ArenaView: View {
         let title = w == .a ? "승리!" : (w == .b ? "패배…" : "무승부")
         let icon = w == .a ? "🏆" : (w == .b ? "💀" : "🤝")
         let color: Color = w == .a ? .green : (w == .b ? .red : .secondary)
-        return TimelineView(.animation) { ctx in
+        return TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { ctx in   // 30fps로 제한(방치 시 상시 리렌더 완화)
             let t = ctx.date.timeIntervalSinceReferenceDate
             let pulse = 0.9 + 0.1 * sin(t * 3)
             ZStack {
@@ -367,7 +448,8 @@ struct ArenaView: View {
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(Array(log.enumerated()), id: \.offset) { _, e in
                     let side = e.attacker == .a ? "A" : "B"
-                    Text("R\(e.round) \(side) \(PetMetaStore.shared.displayName(for: e.attackerKind)) ▶ \(PetMetaStore.shared.displayName(for: e.defenderKind)) −\(e.damage)\(e.quip != nil ? " «\(e.quip!)»" : "")")
+                    let move = BattleLines.moveName(collection: e.attackerKind.collection, signature: e.move == "signature")
+                    Text("R\(e.round) \(side) \(PetMetaStore.shared.displayName(for: e.attackerKind)) «\(move)» ▶ \(PetMetaStore.shared.displayName(for: e.defenderKind)) −\(e.damage)\(e.quip != nil ? " «\(e.quip!)»" : "")")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(e.attacker == .a ? Color.primary : Color.secondary)
                 }
@@ -379,12 +461,16 @@ struct ArenaView: View {
 
     // MARK: 배틀 상태 재구성 + 재생
 
-    private func maxHP(_ kind: PetKind) -> Int {
-        PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: 0, progressUnits: 0).hp
+    /// 팀 시너지 + 강화까지 반영한 최대 HP — 엔진 makeCombatants와 동일 소스(BattleEngine.finalStats)를
+    /// 써서 관전 HP 바가 엔진 실제 HP와 정확히 일치하게 한다.
+    private func maxHP(_ kind: PetKind, in snaps: [BattlePetSnapshot]) -> Int {
+        guard let m = snaps.first(where: { $0.kind == kind }) else { return 1 }
+        return BattleEngine.finalStats(for: m, in: BattleTeam(snaps)).hp
     }
     private func hpDicts(step: Int) -> (a: [PetKind: Int], b: [PetKind: Int]) {
-        var a = Dictionary(uniqueKeysWithValues: teamKinds.map { ($0, maxHP($0)) })
-        var b = Dictionary(uniqueKeysWithValues: opponentKinds.map { ($0, maxHP($0)) })
+        // 유니크 kind 전제지만 방어적으로 uniquing(미래에 동일 kind 편성 허용돼도 크래시 없게).
+        var a = Dictionary(aSnaps.map { ($0.kind, maxHP($0.kind, in: aSnaps)) }, uniquingKeysWith: { x, _ in x })
+        var b = Dictionary(bSnaps.map { ($0.kind, maxHP($0.kind, in: bSnaps)) }, uniquingKeysWith: { x, _ in x })
         for e in (result?.log ?? []).prefix(step) {
             if e.attacker == .a { b[e.defenderKind] = max(0, (b[e.defenderKind] ?? 0) - e.damage) }
             else { a[e.defenderKind] = max(0, (a[e.defenderKind] ?? 0) - e.damage) }
@@ -395,29 +481,53 @@ struct ArenaView: View {
 
     private func fight() {
         stopPlayback()
-        opponentKinds = Array(PetKind.allCases.shuffled().prefix(min(3, max(1, teamKinds.count))))
-        let a = BattleTeam(teamKinds.map { BattlePetSnapshot(kind: $0) })
-        let b = BattleTeam(opponentKinds.map { BattlePetSnapshot(kind: $0) })
-        let r = BattleEngine.simulate(teamA: a, teamB: b, seed: UInt64.random(in: 1...UInt64.max))
+        // 내 팀 — 강화소 로컬 레벨 반영(#3).
+        let aS = teamKinds.map { BattlePetSnapshot(kind: $0, enhanceLevel: localLevels[$0] ?? 0) }
+        let bS = matchmakeOpponent(against: aS)   // Σ스탯 근접 상대 샘플링(#4)
+        aSnaps = aS; bSnaps = bS
+        let r = BattleEngine.simulate(teamA: BattleTeam(aS), teamB: BattleTeam(bS), seed: .random(in: 1...UInt64.max))
         result = r
         showFullLog = false
         startPlayback(total: r.log.count)
     }
 
-    private func startPlayback(total: Int) {
-        playbackStep = 0; lungeAmount = 0; flashBrightness = 0
+    /// 팀 총 전투력(시너지·강화 반영).
+    private func teamPower(_ snaps: [BattlePetSnapshot]) -> Int {
+        let team = BattleTeam(snaps)
+        return snaps.reduce(0) { $0 + BattleEngine.finalStats(for: $1, in: team).total }
+    }
+    /// 내 팀 전투력에 가장 근접한 상대 팀을 무작위 후보 중에서 고른다(일방적 매치 방지).
+    private func matchmakeOpponent(against aS: [BattlePetSnapshot]) -> [BattlePetSnapshot] {
+        let size = max(1, min(3, aS.count))
+        let target = teamPower(aS)
+        var best: [BattlePetSnapshot] = []
+        var bestDiff = Int.max
+        for _ in 0..<48 {
+            let snaps = Array(PetKind.allCases.shuffled().prefix(size)).map { BattlePetSnapshot(kind: $0) }
+            let diff = abs(teamPower(snaps) - target)
+            if diff < bestDiff { bestDiff = diff; best = snaps }
+        }
+        return best
+    }
+
+    private func startPlayback(total: Int, from start: Int = 0) {
+        playbackStep = start
+        if start == 0 { lungeAmount = 0; flashBrightness = 0 }
+        let sp = max(1, speed)
+        func ms(_ base: Double) -> Duration { .milliseconds(Int(base / sp)) }
         playbackTask = Task { @MainActor in
-            for i in 1...max(1, total) {
-                try? await Task.sleep(for: .milliseconds(360))
+            for i in (start + 1)...max(1, total) {
+                try? await Task.sleep(for: ms(360))
                 if Task.isCancelled { return }
                 withAnimation(.easeInOut(duration: 0.15)) { playbackStep = i }
                 guard let log = result?.log, i - 1 < log.count else { continue }
                 let e = log[i - 1]
+                let superEff = e.effectiveness > 1.0, weakEff = e.effectiveness < 1.0
                 lungeSide = e.attacker
-                withAnimation(.easeOut(duration: 0.1)) { lungeAmount = 1 }
+                withAnimation(.easeOut(duration: 0.1)) { lungeAmount = superEff ? 1.3 : 1 }   // 효과 굉장 → 크게 파고듦
                 let defSide: BattleSide = (e.attacker == .a) ? .b : .a
                 flashSide = defSide
-                flashBrightness = 0.9
+                flashBrightness = superEff ? 1.25 : (weakEff ? 0.45 : 0.9)                     // 상성별 피격 섬광 강약
                 withAnimation(.easeOut(duration: 0.35)) { flashBrightness = 0 }
                 // 대사: 공격자 ~30% + 방어자 반응(패링/리타이어)
                 speechSide = e.attacker
@@ -425,14 +535,22 @@ struct ArenaView: View {
                 if e.parried { defenderSide = defSide; defenderText = BattleLines.parryLine() }
                 else if e.defenderFainted { defenderSide = defSide; defenderText = BattleLines.faintLine() }
                 else { defenderText = nil; defenderSide = nil }
-                try? await Task.sleep(for: .milliseconds(130))
+                try? await Task.sleep(for: ms(130))
                 if Task.isCancelled { return }
                 withAnimation(.easeIn(duration: 0.12)) { lungeAmount = 0 }
+                if e.defenderFainted { try? await Task.sleep(for: ms(300)) }   // KO 순간 잠깐 멈춤(강조)
+                if Task.isCancelled { return }
             }
         }
     }
     private func skipToEnd() { stopPlayback(); withAnimation { playbackStep = result?.log.count ?? 0 } }
     private func replay() { stopPlayback(); startPlayback(total: result?.log.count ?? 0) }
+    /// 속도 변경 시 현재 스텝부터 새 속도로 이어 재생(리셋하지 않음).
+    private func resumePlayback(from step: Int, total: Int) {
+        playbackTask?.cancel()
+        guard step < total else { return }
+        startPlayback(total: total, from: step)
+    }
     private func stopPlayback() {
         playbackTask?.cancel(); playbackTask = nil
         lungeAmount = 0; flashBrightness = 0
@@ -501,7 +619,7 @@ struct ArenaView: View {
                 Text("★ 만렙 (+\(EnhanceEngine.maxLevel)) 달성").font(.system(size: 12, weight: .bold)).foregroundStyle(.orange)
             }
 
-            Text("로컬 미리보기 — VP 미차감·미저장. +15 도달 기대 VP ≈ \(Int(EnhanceEngine.expectedVP(toReach: 15)).formatted()) (파괴 리셋 반영, Common 기준)")
+            Text("로컬 미리보기 — VP 미차감·미저장. +15 도달 기대 VP ≈ \(Int(EnhanceEngine.expectedVP(toReach: 15) * EnhanceEngine.rarityCostMultiplier(rarity)).formatted()) (파괴 리셋 반영, \(rarity.displayName) 기준)")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
 
             if !enhanceHistory.isEmpty {

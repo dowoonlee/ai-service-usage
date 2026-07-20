@@ -4,7 +4,9 @@ import Foundation
 // 설계 SSOT: docs/plans/pet-battle.md §2-5 / §10.
 //
 // 랭크전은 서버가 이 규칙으로 시뮬레이션해 승패를 확정하고(authoritative), 클라는 로그를 재생만 한다.
-// 서버 `_shared/battle_engine.ts`와 규칙 1:1. 동일 (두 팀 스냅샷 + 시드) → 동일 로그·승자.
+// 서버 `_shared/battle_engine.ts`(P1b 이식 예정)와 규칙 1:1을 목표 — 동일 (두 팀 스냅샷 + 시드) →
+// 동일 로그·승자. 이식 시 `rng.uniform01()`(EnhanceEngine.swift)과 `.rounded()`(away-from-zero,
+// JS `Math.round`와 다름)를 명세대로 재현해야 비트 단위로 일치한다.
 
 /// 배틀 팀 멤버 스냅샷 — 서버가 보관하는 고스트 방어 팀의 한 마리.
 struct BattlePetSnapshot: Codable, Equatable, Hashable {
@@ -58,6 +60,19 @@ enum BattleEngine {
     /// ATB 행동 주기 = speedBase / SPD. SPD 2배 → 주기 절반 → 2배 자주 행동(연속 공격 가능).
     static let speedBase = 1000.0
 
+    // MARK: 격노 램프 — 데미지식은 성장이 atk/def에 동시 곱해져 비율 불변이라 TTK가 HP(성장 비례)만큼
+    // 선형으로 늘어난다. 풀강 탱커 미러전은 maxRounds를 상시 초과해 "KO 없는 HP 총량 타이브레이크"로
+    // 메타가 수렴 → 막타/역전이 사라진다. 일정 액션 이후 데미지를 점증시켜 리플레이 길이에 자연 상한을
+    // 두고, 결판이 KO로 나게 한다. (오토배틀러 표준 해법.) rageStart 이전엔 배수 1.0이라 결정적
+    // 매치(강 vs 약, ~수십 액션 내 종결)엔 영향 없음.
+    static let rageStart = 40
+    static let rageStep = 0.07
+
+    /// 누적 액션 수 → 데미지 배수. rageStart까지 1.0, 이후 액션당 rageStep 선형 가산.
+    static func rageMultiplier(action: Int) -> Double {
+        1.0 + Double(max(0, action - rageStart)) * rageStep
+    }
+
     // MARK: 패링(퍼펙트 가드) — DEF+SPD 조합. 빠른 반응(SPD) + 단단한 가드(DEF)로 피격을 흘린다.
     static let parryBase = 0.06
     static let parrySpdWeight = 0.25   // 방어자가 공격자보다 빠를수록 ↑ (반응속도)
@@ -82,16 +97,23 @@ enum BattleEngine {
         var alive: Bool { hp > 0 }
     }
 
+    /// 팀 시너지까지 반영한 한 마리의 최종 전투 스탯. **관전 UI의 HP 바가 엔진과 어긋나지 않도록**
+    /// (팀 시너지 배수를 UI가 빠뜨리면 3~15% 먼저 0 HP에 도달 → 파티 아이콘/활성 펫 desync)
+    /// 엔진과 UI가 공유하는 단일 소스. makeCombatants와 ArenaView가 이 함수만 호출한다.
+    static func finalStats(for member: BattlePetSnapshot, in team: BattleTeam) -> BattleStats {
+        let syn = TeamSynergy.multiplier(for: team.members)
+        let base = PetBattleStats.compute(kind: member.kind, variant: member.variant,
+                                          enhanceLevel: member.enhanceLevel, progressUnits: member.progressUnits)
+        return BattleStats(hp:  max(1, Int((Double(base.hp)  * syn).rounded())),
+                           atk: max(1, Int((Double(base.atk) * syn).rounded())),
+                           def: max(1, Int((Double(base.def) * syn).rounded())),
+                           spd: max(1, Int((Double(base.spd) * syn).rounded())))
+    }
+
     private static func makeCombatants(_ team: BattleTeam) -> [Combatant] {
         // A. 팀 시너지 — 같은 컬렉션/타입 팀원 버프를 팀 전체 스탯에 곱한다.
-        let syn = TeamSynergy.multiplier(for: team.members)
-        return team.members.map { m in
-            let base = PetBattleStats.compute(kind: m.kind, variant: m.variant,
-                                              enhanceLevel: m.enhanceLevel, progressUnits: m.progressUnits)
-            let s = BattleStats(hp:  max(1, Int((Double(base.hp)  * syn).rounded())),
-                                atk: max(1, Int((Double(base.atk) * syn).rounded())),
-                                def: max(1, Int((Double(base.def) * syn).rounded())),
-                                spd: max(1, Int((Double(base.spd) * syn).rounded())))
+        team.members.map { m in
+            let s = finalStats(for: m, in: team)
             return Combatant(kind: m.kind, type: m.kind.battleType, stats: s, hp: s.hp)
         }
     }
@@ -167,14 +189,15 @@ enum BattleEngine {
         let useSignature = eff > 1.0 || synergy.mult > 1.0
         let power = useSignature ? signaturePower : basicPower
 
-        let rngFactor = Double.random(in: 0.9...1.0, using: &rng)
-        let raw = (Double(attacker.stats.atk) / Double(defender.stats.def)) * power * eff * synergy.mult * rngFactor
+        let rngFactor = 0.9 + 0.1 * rng.uniform01()   // [0.9, 1.0)
+        let rage = rageMultiplier(action: round)      // 장기전 데미지 점증(격노)
+        let raw = (Double(attacker.stats.atk) / Double(defender.stats.def)) * power * eff * synergy.mult * rngFactor * rage
         let baseDmg = max(1, Int(raw.rounded()))
 
         // 패링(퍼펙트 가드) — 방어자 SPD+DEF 조합 확률로 데미지 대폭 경감.
         let pc = parryChance(defSPD: defender.stats.spd, defDEF: defender.stats.def,
                              atkSPD: attacker.stats.spd, atkDEF: attacker.stats.def)
-        let parried = Double.random(in: 0..<1, using: &rng) < pc
+        let parried = rng.uniform01() < pc
         let dmg = parried ? max(1, Int((Double(baseDmg) * parryDamageMult).rounded())) : baseDmg
 
         to[di].hp -= dmg

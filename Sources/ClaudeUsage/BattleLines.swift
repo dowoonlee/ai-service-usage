@@ -47,4 +47,32 @@ enum BattleLines {
     static func attackLine() -> String { attack.randomElement() ?? "받아라!" }
     static func faintLine() -> String { faint.randomElement() ?? "다운…" }
     static func parryLine() -> String { parry.randomElement() ?? "막았다!" }
+
+    /// 컬렉션별 시그니처 기술명 (dev-밈 톤). basic은 무미건조한 "기본 공격" 대신 짧은 플레이버.
+    static let signatureMove: [PetCollection: String] = [
+        .mainframe:        "메인프레임 강타",
+        .dns:              "DNS 전파 지연",
+        .npmInstall:       "의존성 폭탄",
+        .nodeModules:      "node_modules 낙하",
+        .todoSince2019:    "기술부채 청구서",
+        .wontfix:          "won't fix",
+        .fridayDeploy:     "금요일 5시 배포",
+        .vibeCoders:       "바이브 코딩",
+        .tokenBurners:     "토큰 올인",
+        .rustEvangelists:  "rewrite it in Rust",
+        .noVerify:         "--no-verify",
+        .happyPath:        "해피 패스",
+        .onCall:           "온콜 호출",
+        .ciRunners:        "CI 파이프라인",
+        .helloWorld:       "Hello, World!",
+        .oomKilled:        "OOM Kill",
+        .deprecated:       "deprecated 태그",
+        .tenXEngineer:     "10x 리팩터",
+        .emotionalSupport: "정서적 지지",
+    ]
+
+    /// 이벤트 무브 표시명. signature면 컬렉션 기술명, basic이면 짧은 기본 공격명.
+    static func moveName(collection: PetCollection, signature: Bool) -> String {
+        signature ? (signatureMove[collection] ?? "시그니처") : "기본 공격"
+    }
 }

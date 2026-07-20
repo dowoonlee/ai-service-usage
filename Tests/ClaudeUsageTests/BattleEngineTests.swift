@@ -113,4 +113,27 @@ final class BattleEngineTests: XCTestCase {
             XCTAssertTrue([0.625, 1.0, 1.6].contains(e.effectiveness))
         }
     }
+
+    // 격노 램프: rageStart까지 배수 1.0, 이후 단조 증가.
+    func testRageMultiplierRamp() {
+        XCTAssertEqual(BattleEngine.rageMultiplier(action: 1), 1.0, accuracy: 1e-9)
+        XCTAssertEqual(BattleEngine.rageMultiplier(action: BattleEngine.rageStart), 1.0, accuracy: 1e-9)
+        XCTAssertGreaterThan(BattleEngine.rageMultiplier(action: BattleEngine.rageStart + 10),
+                             BattleEngine.rageMultiplier(action: BattleEngine.rageStart + 5))
+    }
+
+    // R1 회귀 가드: 데미지식은 성장이 atk/def에 동시 곱해져 비율 불변 → TTK가 HP만큼 선형 증가.
+    // 격노 램프가 없으면 풀강 탱커(mascot=최고 HP archetype) 미러전이 maxRounds를 상시 초과해
+    // "KO 없는 HP 총량 타이브레이크"로 수렴한다. 램프가 있으면 backstop 전에 KO로 결판나야 한다.
+    func testEnhancedTankMirrorTerminatesByKO() {
+        let tanks: [PetKind] = [.mrMan, .bumpyBot, .princessSera]   // helloWorld / mascot 모노(시너지 ×1.15)
+        let a = team(tanks, enh: 15, pu: 8)                          // 이론상 최대 성장
+        let b = team(tanks, enh: 15, pu: 8)
+        for seed in 0..<80 {
+            let r = BattleEngine.simulate(teamA: a, teamB: b, seed: UInt64(seed))
+            XCTAssertLessThan(r.rounds, BattleEngine.maxRounds,
+                              "풀강 탱커 미러는 격노 램프로 backstop 전에 종결돼야(seed \(seed), rounds \(r.rounds))")
+            XCTAssertNotNil(r.winner, "KO 종결이면 승자 존재(seed \(seed))")
+        }
+    }
 }

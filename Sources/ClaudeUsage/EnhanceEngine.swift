@@ -4,8 +4,9 @@ import Foundation
 // 설계 SSOT: docs/plans/pet-battle.md §2-9 / §10.
 //
 // 실제 랭크전에선 서버가 이 로직으로 RNG를 굴리고 결과를 확정한다(daily-quiz 원리).
-// 여기 Swift 구현은 (a) 서버 `_shared/enhance_engine.ts`와 규칙 1:1, (b) 확률/기대값 UI 표시,
-// (c) 순수 로직 테스트용. `roll`은 주입된 RNG로 결정적 — 서버는 crypto RNG, 테스트는 SeededRNG.
+// 여기 Swift 구현은 (a) 서버 `_shared/enhance_engine.ts`(P1b 이식 예정)와 규칙 1:1을 목표,
+// (b) 확률/기대값 UI 표시, (c) 순수 로직 테스트용. `roll`은 주입된 RNG로 결정적 —
+// 서버는 crypto RNG, 테스트는 SeededRNG.
 
 /// 결정적 시드 RNG (SplitMix64). 서버-클라 재현·테스트용. 서버는 crypto random 사용.
 struct SeededRNG: RandomNumberGenerator {
@@ -17,6 +18,15 @@ struct SeededRNG: RandomNumberGenerator {
         z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
         z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
         return z ^ (z >> 31)
+    }
+}
+
+extension RandomNumberGenerator {
+    /// [0, 1) 균등 난수 — 상위 53비트 추출(2^53 분해능). `Double.random(in:using:)`은 Swift
+    /// 버전 간 알고리즘 안정성이 보장되지 않고 TS 이식이 까다로워, 서버(`_shared`) 포팅 시
+    /// 비트 단위로 동일 재현되도록 명세를 고정한다: `(next() >> 11) / 2^53`.
+    mutating func uniform01() -> Double {
+        Double(next() >> 11) * (1.0 / 9_007_199_254_740_992.0)   // 2^53
     }
 }
 
@@ -95,7 +105,7 @@ enum EnhanceEngine {
     /// 확률표에 따라 결과를 굴린다. 주입 RNG로 결정적.
     static func roll<G: RandomNumberGenerator>(level: Int, using rng: inout G) -> EnhanceOutcome {
         let o = odds[min(max(0, level), odds.count - 1)]
-        let r = Double.random(in: 0..<1, using: &rng)
+        let r = rng.uniform01()
         if r < o[0] { return .success }
         if r < o[0] + o[1] { return .stay }
         if o[2] > 0, r < o[0] + o[1] + o[2] { return .downgrade }

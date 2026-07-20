@@ -95,6 +95,16 @@ final class EnhanceEngineTests: XCTestCase {
         XCTAssertEqual(pDestroy, 0.20, accuracy: 0.02)
     }
 
+    // uniform01 — [0, 1) 범위 준수(서버 포팅 명세 가드).
+    func testUniform01Range() {
+        var rng = SeededRNG(seed: 999)
+        for _ in 0..<10_000 {
+            let u = rng.uniform01()
+            XCTAssertGreaterThanOrEqual(u, 0)
+            XCTAssertLessThan(u, 1)
+        }
+    }
+
     // 마르코프 기대 VP — 파괴 리셋 반영. 아티팩트 곡선 회귀 가드.
     func testExpectedVP() {
         XCTAssertEqual(EnhanceEngine.expectedVP(toReach: 1), 20, accuracy: 3, "+1은 안전(성공95%)이라 ≈비용")
