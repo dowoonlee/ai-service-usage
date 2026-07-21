@@ -143,11 +143,39 @@ enum PetBattleStats {
         min(statCapMult, 1.0 + masteryBonus(progressUnits: progressUnits) + enhanceMultiplier(level: enhanceLevel))
     }
 
-    /// 최종 배틀 스탯. rarity/type은 kind에서 파생, 성장/variant는 계정 상태에서.
+    /// 개체별 스탯 프로필 spread(±). 클수록 같은 rarity·type 펫 간 분배 차이가 커진다(총량은 유지).
+    static let profileSpread: Double = 0.25
+
+    /// FNV-1a 32비트 — kind rawValue(ASCII) 결정적 해시. 서버 pvp_policy.fnv1a32 와 bit-identical
+    /// (UInt32 오버플로 곱 `&*` = JS `Math.imul(...)>>>0`, XOR는 비트연산이라 부호 무관). rawValue는 전부 ASCII.
+    static func fnv1a32(_ s: String) -> UInt32 {
+        var h: UInt32 = 2166136261
+        for b in s.utf8 { h = (h ^ UInt32(b)) &* 16777619 }
+        return h
+    }
+
+    /// 타입 archetype에 kind별 결정적 tilt를 곱하고 **합을 원래 archetype 합으로 정규화** → 총 전투력은
+    /// rarity로 고정(밸런스 중립), 같은 rarity·type이라도 개체마다 분배(profile)만 달라진다. 자동·결정적이라
+    /// 같은 kind는 항상 같은 프로필. 서버 pvp_policy.kindArchetype 와 1:1 (동일 해시·spread·정규화·연산 순서).
+    static func profileArchetype(_ kind: PetKind) -> (hp: Double, atk: Double, def: Double, spd: Double) {
+        let a = kind.battleType.archetype
+        let raw = kind.rawValue
+        func tilt(_ i: Int) -> Double {
+            let n = Double(fnv1a32("\(raw)#\(i)")) / 4294967296.0 * 2.0 - 1.0   // [-1, 1)
+            return 1.0 + profileSpread * n
+        }
+        let e0 = a.hp * tilt(0), e1 = a.atk * tilt(1), e2 = a.def * tilt(2), e3 = a.spd * tilt(3)
+        let archSum = a.hp + a.atk + a.def + a.spd
+        let effSum = e0 + e1 + e2 + e3
+        let norm = effSum > 0 ? archSum / effSum : 1.0
+        return (e0 * norm, e1 * norm, e2 * norm, e3 * norm)
+    }
+
+    /// 최종 배틀 스탯. rarity=base, type+kind=archetype 프로필, 성장/variant는 계정 상태에서.
     static func compute(kind: PetKind, variant: Int, enhanceLevel: Int, progressUnits: Double) -> BattleStats {
         let rarity = PetKind.rarityFor(kind) ?? .common
         let base = rarityBase(rarity)
-        let a = kind.battleType.archetype
+        let a = profileArchetype(kind)
         let growth = growthMultiplier(enhanceLevel: enhanceLevel, progressUnits: progressUnits)
         let vb = 1.0 + variantMultiplier(variant: variant)
         func stat(_ arch: Double) -> Int { max(1, Int((base * arch * growth * vb).rounded())) }

@@ -104,11 +104,30 @@ export function growthMultiplier(enhanceLevel: number, progressUnits: number): n
   return Math.min(STAT_CAP_MULT, 1.0 + masteryBonus(progressUnits) + enhanceMultiplier(enhanceLevel));
 }
 
+export const PROFILE_SPREAD = 0.25;   // 개체별 스탯 프로필 spread(±). Swift PetBattleStats.profileSpread 와 동일.
+
+// FNV-1a 32비트 — kind(ASCII) 결정적 해시. Swift PetBattleStats.fnv1a32 와 bit-identical.
+function fnv1a32(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
+  return h >>> 0;
+}
+// 타입 archetype에 kind별 결정적 tilt → 합 보존 정규화(총 전투력 유지, 분배만 차등). Swift profileArchetype 1:1.
+function kindArchetype(kind: string): [number, number, number, number] {
+  const a = ARCHETYPE[battleTypeOf(kind)];
+  const tilt = (i: number) => 1.0 + PROFILE_SPREAD * (fnv1a32(`${kind}#${i}`) / 4294967296.0 * 2.0 - 1.0);
+  const e0 = a[0] * tilt(0), e1 = a[1] * tilt(1), e2 = a[2] * tilt(2), e3 = a[3] * tilt(3);
+  const archSum = a[0] + a[1] + a[2] + a[3];
+  const effSum = e0 + e1 + e2 + e3;
+  const norm = effSum > 0 ? archSum / effSum : 1.0;
+  return [e0 * norm, e1 * norm, e2 * norm, e3 * norm];
+}
+
 export function computeStats(
   kind: string, variant: number, enhanceLevel: number, progressUnits: number,
 ): BattleStats {
   const base = RARITY_BASE[rarityOf(kind)];
-  const a = ARCHETYPE[battleTypeOf(kind)];
+  const a = kindArchetype(kind);
   const growth = growthMultiplier(enhanceLevel, progressUnits);
   const vb = 1.0 + variantMultiplier(variant);
   const stat = (arch: number) => Math.max(1, roundAway(base * arch * growth * vb));
