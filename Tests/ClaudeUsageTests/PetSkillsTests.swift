@@ -91,4 +91,46 @@ final class PetSkillsTests: XCTestCase {
         // beast 스킬 vs machine(=beast가 짐) : 11 × 0.5 × 1.5 = 8.25
         XCTAssertEqual(SkillCatalog.score(s, attackerType: .beast, defenderType: .machine), 8.25, accuracy: 1e-9)
     }
+
+    // ── collectionShared (Phase B1) ──────────────────────────────────────────
+
+    // 19 컬렉션 전부 collectionShared 정의 · power 12 · 표시명 존재.
+    func testCollectionSharedTableComplete() {
+        XCTAssertEqual(SkillCatalog.collectionSharedTable.count, 19)
+        for (collection, e) in SkillCatalog.collectionSharedTable {
+            let skill = SkillCatalog.collectionShared(for: collection)
+            XCTAssertEqual(skill.id, e.id)
+            XCTAssertEqual(skill.power, 12.0, accuracy: 1e-9)
+            XCTAssertNotNil(SkillCatalog.displayName(id: e.id))
+        }
+    }
+
+    // **핵심 불변식**: 모든 collectionShared는 컬렉션의 자기 배틀타입과 다른 타입(오프타입) — 커버리지 활성화 근거.
+    func testCollectionSharedIsOffType() {
+        for (collection, e) in SkillCatalog.collectionSharedTable {
+            XCTAssertNotEqual(e.type, collection.battleType,
+                              "\(collection) collectionShared는 오프타입이어야(자기타입=\(collection.battleType))")
+            XCTAssertEqual(SkillCatalog.collectionShared(for: collection).tier, .collectionShared)
+        }
+    }
+
+    // variant 2 해금: [generic, typeShared, collectionShared] 3슬롯, 슬롯2가 collectionShared.
+    func testVariant2UnlocksCollectionShared() {
+        let s = SkillCatalog.skills(kind: .fox, variant: 2)   // fox = mainframe/beast
+        XCTAssertEqual(s.count, 3)
+        XCTAssertEqual(s[2].tier, .collectionShared)
+        XCTAssertEqual(s[2].id, "mainframe_overload")
+        XCTAssertEqual(s[2].type, .machine)   // 오프타입
+    }
+
+    // 커버리지: variant2 beast가 machine 방어자 상대로 약한 자기타입 대신 오프타입 collectionShared 선택.
+    func testCoveragePicksOffTypeVsResistantDefender() {
+        let s = SkillCatalog.skills(kind: .fox, variant: 2)
+        // vs machine: 자기타입(beast) ×0.5라 typeShared 손해 → 오프타입 machine 무브(중립) 채택.
+        let vsMachine = SkillCatalog.select(from: s, attackerType: .beast, defenderType: .machine)
+        XCTAssertEqual(vsMachine.id, "mainframe_overload")
+        // vs chaos: 자기타입 super(×2.0)+STAB라 typeShared가 오프타입을 이김 → 커버리지 안 씀.
+        let vsChaos = SkillCatalog.select(from: s, attackerType: .beast, defenderType: .chaos)
+        XCTAssertEqual(vsChaos.id, "mem_leak")
+    }
 }
