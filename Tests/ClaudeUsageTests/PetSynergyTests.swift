@@ -163,4 +163,33 @@ final class PetSynergyTests: XCTestCase {
             XCTAssertEqual(TeamSynergy.bonus(for: [snap(.fox), snap(.wolf), snap(.warrior), snap(.lancer), snap(.scrapBot)]).typeStat, .spd)
         }
     }
+
+    // ── 컬렉션별·타입별 배수 차등 ──
+
+    // 가중치 맵 값 (서버 pvp_policy 와 1:1).
+    func testSynergyWeightsDifferentiated() {
+        XCTAssertEqual(TeamSynergy.typeWeight[.arcane], 1.25)
+        XCTAssertEqual(TeamSynergy.typeWeight[.mascot], 0.80)
+        XCTAssertEqual(TeamSynergy.collectionWeight[.ciRunners], 1.20)   // S
+        XCTAssertEqual(TeamSynergy.collectionWeight[.vibeCoders], 0.85)  // B
+        XCTAssertNil(TeamSynergy.collectionWeight[.mainframe])           // A = default(미등록 → 1.0)
+    }
+
+    // 타입 가중치: 같은 count라도 warrior(1.10)가 beast(1.00)보다 대표 스탯 시너지가 크다.
+    func testTypeWeightAppliesToBonus() {
+        let warrior = TeamSynergy.bonus(for: [snap(.warrior), snap(.lancer)])   // warrior×2, ×1.10
+        let beast = TeamSynergy.bonus(for: [snap(.fox), snap(.wolf)])           // beast×2, ×1.00
+        XCTAssertGreaterThan(warrior.typeAdd, beast.typeAdd)
+        XCTAssertEqual(warrior.typeAdd, 0.03 * 1.10, accuracy: 1e-9)
+        XCTAssertEqual(beast.typeAdd, 0.03 * 1.00, accuracy: 1e-9)
+    }
+
+    // 컬렉션 가중치: 같은 count라도 S티어(ciRunners 1.20)가 A티어(mainframe 1.00)보다 collMult가 크다.
+    func testCollectionWeightAppliesToBonus() {
+        let sTier = TeamSynergy.bonus(for: [snap(.scrapBot), snap(.antennaBot)])  // ciRunners×2 (S)
+        let aTier = TeamSynergy.bonus(for: [snap(.fox), snap(.wolf)])             // mainframe×2 (A)
+        XCTAssertGreaterThan(sTier.collectionMult, aTier.collectionMult)
+        XCTAssertEqual(sTier.collectionMult, 1.0 + 0.05 * 1.20, accuracy: 1e-9)
+        XCTAssertEqual(aTier.collectionMult, 1.0 + 0.05 * 1.00, accuracy: 1e-9)
+    }
 }

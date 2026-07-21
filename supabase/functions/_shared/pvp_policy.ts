@@ -160,6 +160,18 @@ export function matchup(attacker: string, defender: string): Matchup {
 const TEAM_COLLECTION_BONUS: Record<number, number> = { 2: 0.05, 3: 0.10, 4: 0.17, 5: 0.26 };
 const TEAM_TYPE_BONUS: Record<number, number> = { 2: 0.03, 3: 0.06, 4: 0.10, 5: 0.15 };
 
+// 타입/컬렉션별 시너지 "크기" 가중치(정체성). 최종 = base[count] × weight. Swift TeamSynergy 와 1:1.
+const TYPE_WEIGHT: Record<BattleType, number> = {
+  arcane: 1.25, chaos: 1.15, warrior: 1.10, beast: 1.00, machine: 0.85, mascot: 0.80,
+};
+// 컬렉션 테마 3티어 S/A/B = 1.20/1.00/0.85. 미등록(=A) 은 1.0.
+const COLLECTION_WEIGHT: Record<string, number> = {
+  tenXEngineer: 1.20, onCall: 1.20, rustEvangelists: 1.20, tokenBurners: 1.20, ciRunners: 1.20,   // S
+  deprecated: 0.85, todoSince2019: 0.85, oomKilled: 0.85, happyPath: 0.85, helloWorld: 0.85, vibeCoders: 0.85,  // B
+};
+const SYN_WEIGHT_MIN = 0.80, SYN_WEIGHT_MAX = 1.30, SIG_STAT_CAP = 1.55;   // 가드레일(clamp + 대표 스탯 상한)
+function clampW(w: number): number { return Math.min(SYN_WEIGHT_MAX, Math.max(SYN_WEIGHT_MIN, w)); }
+
 export type StatKind = "hp" | "atk" | "def" | "spd";
 // 각 타입 시너지가 강화하는 대표 스탯(아키타입 성향).
 export function signatureStat(type: BattleType): StatKind {
@@ -176,21 +188,29 @@ export interface SynergyBonus { collectionMult: number; typeStat: StatKind | nul
 
 export function teamSynergyBonus(kinds: string[]): SynergyBonus {
   if (kinds.length < 2) return { collectionMult: 1.0, typeStat: null, typeAdd: 0 };
-  const counts = (vals: string[]) => {
-    const m = new Map<string, number>();
-    for (const v of vals) m.set(v, (m.get(v) ?? 0) + 1);
-    return m;
-  };
-  const maxColl = Math.max(...counts(kinds.map(collectionOf)).values());
-  const collectionMult = 1.0 + (TEAM_COLLECTION_BONUS[maxColl] ?? 0);
-  // 최다 타입 그룹 → 그 타입 대표 스탯 강화. tie(5마리 2+2+1 등)는 아래 strict > 로 팀 순서
-  // 먼저 등장한 타입 채택 — 결정적, Swift TeamSynergy.bonus 와 1:1.
-  let topType: BattleType | null = null, topCount = 0;
-  for (const [t, c] of counts(kinds.map(battleTypeOf))) {
-    if (c > topCount) { topCount = c; topType = t as BattleType; }
+  // 최다 컬렉션 (배열 순서 first-max) → count + 정체성(가중치). tie는 strict > 로 먼저 등장한 것 채택.
+  const collCounts = new Map<string, number>();
+  for (const k of kinds) { const c = collectionOf(k); collCounts.set(c, (collCounts.get(c) ?? 0) + 1); }
+  let topColl: string | null = null, topCollCount = 0;
+  for (const k of kinds) {
+    const c = collCounts.get(collectionOf(k)) ?? 0;
+    if (c > topCollCount) { topCollCount = c; topColl = collectionOf(k); }
   }
-  const add = TEAM_TYPE_BONUS[topCount] ?? 0;
-  if (topType && add > 0) return { collectionMult, typeStat: signatureStat(topType), typeAdd: add };
+  const collW = topColl ? clampW(COLLECTION_WEIGHT[topColl] ?? 1.0) : 1.0;
+  const collectionMult = 1.0 + (TEAM_COLLECTION_BONUS[topCollCount] ?? 0) * collW;
+  // 최다 타입 (배열 순서 first-max) → count + 정체성. Swift TeamSynergy.bonus 와 1:1.
+  const typeCounts = new Map<BattleType, number>();
+  for (const k of kinds) { const t = battleTypeOf(k); typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1); }
+  let topType: BattleType | null = null, topTypeCount = 0;
+  for (const k of kinds) {
+    const t = battleTypeOf(k);
+    const c = typeCounts.get(t) ?? 0;
+    if (c > topTypeCount) { topTypeCount = c; topType = t; }
+  }
+  const typeW = topType ? clampW(TYPE_WEIGHT[topType] ?? 1.0) : 1.0;
+  let typeAdd = (TEAM_TYPE_BONUS[topTypeCount] ?? 0) * typeW;
+  typeAdd = Math.max(0, Math.min(typeAdd, SIG_STAT_CAP - collectionMult));   // 대표 스탯 총 시너지 상한
+  if (topType && typeAdd > 0) return { collectionMult, typeStat: signatureStat(topType), typeAdd };
   return { collectionMult, typeStat: null, typeAdd: 0 };
 }
 

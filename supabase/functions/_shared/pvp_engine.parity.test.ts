@@ -23,7 +23,7 @@ const GOLD_ENHANCE_OUTCOMES = [
 ];
 const GOLD_ENHANCE_TOTAL_VP = 9295;
 const GOLD_ENHANCE_FINAL = 7;
-const GOLD_BATTLE_DMG = [31, 4, 32, 4, 32, 31, 4, 29, 4, 29, 14, 9, 15, 9, 15, 8, 15, 8, 15];
+const GOLD_BATTLE_DMG = [30, 4, 31, 4, 31, 30, 4, 28, 4, 29, 9, 14, 9, 15, 14, 9, 9, 15, 14];
 const GOLD_BATTLE_WINNER = "a";
 const GOLD_BATTLE_ROUNDS = 19;
 
@@ -62,9 +62,9 @@ Deno.test("5v5 배틀 파리티 (누진 시너지 4/5 티어 + 타입 tie-break)
   const teamB: BattleTeam = [snap("fox"), snap("wolf"), snap("scrapBot"), snap("antennaBot"), snap("warrior")];
   const r = simulate(teamA, teamB, 5555555n);
   assertEq("winner", r.winner, "a");
-  assertEq("rounds", r.rounds, 23);
+  assertEq("rounds", r.rounds, 20);
   assertEq("dmg sequence", r.log.map((e) => e.damage),
-    [31, 4, 32, 32, 5, 32, 49, 51, 49, 52, 17, 10, 17, 11, 17, 11, 18, 10, 16, 11, 17, 1, 16]);
+    [33, 4, 34, 33, 4, 33, 51, 53, 51, 54, 18, 10, 18, 10, 18, 11, 18, 10, 17, 18]);
 });
 
 Deno.test("결정성 — 동일 (팀+시드) → 동일 로그", () => {
