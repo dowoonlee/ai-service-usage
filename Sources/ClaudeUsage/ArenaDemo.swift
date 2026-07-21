@@ -26,6 +26,8 @@ enum ArenaDemo {
         battleSection(seed: 7_251_990)
         battleSection5v5(seed: 5_555_555)
         battleSectionRainbow(seed: 9_999_999)
+        battleSectionCoverage(seed: 2_468_013)
+        skillCatalogSection()
 
         print("\n\(bar)\n  끝 — 위 전부 컴파일된 엔진의 실제 출력입니다.\n\(bar)\n")
     }
@@ -172,5 +174,46 @@ enum ArenaDemo {
         let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
         let crits = r.log.filter { $0.crit == true }.count
         print("  PARITYRAINBOW winner=\(winner) rounds=\(r.rounds) crits=\(crits) dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
+    }
+
+    // MARK: 커버리지 배틀 (variant 2 오프타입 collectionShared 선택 파리티용 골든)
+    private static func battleSectionCoverage(seed: UInt64) {
+        // A: variant2 mainframe(beast) 3마리 — 자기타입 beast는 machine에 약(×0.5)이라 오프타입
+        //    collectionShared(mainframe_overload=machine)를 선택 AI가 골라 커버리지 발동.
+        // B: variant0 machine 3마리(스킬 hotfix만).
+        let teamA = BattleTeam([
+            BattlePetSnapshot(kind: .fox, variant: 2, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .wolf, variant: 2, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .bear, variant: 2, enhanceLevel: 5, progressUnits: 2),
+        ])
+        let teamB = BattleTeam([
+            BattlePetSnapshot(kind: .scrapBot, variant: 0, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .antennaBot, variant: 0, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .pixelBot, variant: 0, enhanceLevel: 5, progressUnits: 2),
+        ])
+        print("\n[ 커버리지 배틀 ]  seed=\(seed)  (variant2 오프타입 collectionShared)")
+        let r = BattleEngine.simulate(teamA: teamA, teamB: teamB, seed: seed)
+        let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
+        let aMoves = Set(r.log.filter { $0.attacker == .a }.map { $0.move }).sorted().joined(separator: ",")
+        print("  PARITYCOVERAGE winner=\(winner) rounds=\(r.rounds) aMoves=[\(aMoves)] "
+            + "dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
+    }
+
+    // MARK: 스킬 카탈로그 파리티 (전체 카탈로그 결정적 덤프 — TS와 대조)
+    // collectionShared의 type은 **데이터로 지정**돼 데미지를 좌우하는데(파리티-크리티컬), 배틀 골든은
+    // mainframe 경로 하나만 운동시킨다(18/19 무커버). 이 덤프로 6 generic·6 typeShared·19 collectionShared의
+    // id/type/power를 통째로 잠가, 어느 컬렉션 엔트리가 Swift↔TS에서 갈라져도 deno 파리티가 잡게 한다.
+    private static func skillCatalogSection() {
+        var parts: [String] = []
+        for t in BattleType.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let g = SkillCatalog.generic(for: t), ts = SkillCatalog.typeShared(for: t)
+            parts.append("\(t.rawValue):g=\(g.id)/\(g.type.rawValue)/\(Int(g.power)),ts=\(ts.id)/\(ts.type.rawValue)/\(Int(ts.power))")
+        }
+        for c in PetCollection.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let cs = SkillCatalog.collectionShared(for: c)
+            parts.append("\(c.rawValue):cs=\(cs.id)/\(cs.type.rawValue)/\(Int(cs.power))")
+        }
+        print("\n[ 스킬 카탈로그 파리티 ]")
+        print("  PARITYSKILLCAT \(parts.joined(separator: " "))")
     }
 }

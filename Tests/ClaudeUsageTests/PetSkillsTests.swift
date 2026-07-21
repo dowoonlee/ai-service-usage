@@ -43,8 +43,8 @@ final class PetSkillsTests: XCTestCase {
         XCTAssertEqual(s1[1].type, .beast)
         XCTAssertEqual(s1[1].tier, .typeShared)
 
-        // 레인보우(4)도 Phase A에선 typeShared까지만.
-        XCTAssertEqual(SkillCatalog.skills(kind: .fox, variant: 4).count, 2)
+        // 레인보우(4)는 하위 슬롯 누적 → generic+typeShared+collectionShared 3개(Phase B1 기준).
+        XCTAssertEqual(SkillCatalog.skills(kind: .fox, variant: 4).count, 3)
     }
 
     // 6타입 전부 typeShared가 정의돼 있고 self-type·power 11.
@@ -90,5 +90,47 @@ final class PetSkillsTests: XCTestCase {
         XCTAssertEqual(SkillCatalog.score(s, attackerType: .beast, defenderType: .chaos), 33.0, accuracy: 1e-9)
         // beast 스킬 vs machine(=beast가 짐) : 11 × 0.5 × 1.5 = 8.25
         XCTAssertEqual(SkillCatalog.score(s, attackerType: .beast, defenderType: .machine), 8.25, accuracy: 1e-9)
+    }
+
+    // ── collectionShared (Phase B1) ──────────────────────────────────────────
+
+    // **모든** PetCollection 케이스가 collectionShared 매핑을 가진다(소진성). count 매직넘버가 아니라
+    // allCases를 순회 → 향후 컬렉션 추가 시 테이블 갱신을 깜빡하면 여기서 fail-closed(강제언랩 크래시 예방).
+    func testCollectionSharedCoversAllCollections() {
+        for c in PetCollection.allCases {
+            XCTAssertNotNil(SkillCatalog.collectionSharedTable[c], "\(c) collectionShared 매핑 누락")
+            let skill = SkillCatalog.collectionShared(for: c)   // 매핑 없으면 강제언랩 크래시 → 테스트가 먼저 잡음
+            XCTAssertEqual(skill.power, 12.0, accuracy: 1e-9)
+            XCTAssertNotNil(SkillCatalog.displayName(id: skill.id))
+        }
+    }
+
+    // **핵심 불변식**: 모든 collectionShared는 컬렉션의 자기 배틀타입과 다른 타입(오프타입) — 커버리지 활성화 근거.
+    func testCollectionSharedIsOffType() {
+        for (collection, e) in SkillCatalog.collectionSharedTable {
+            XCTAssertNotEqual(e.type, collection.battleType,
+                              "\(collection) collectionShared는 오프타입이어야(자기타입=\(collection.battleType))")
+            XCTAssertEqual(SkillCatalog.collectionShared(for: collection).tier, .collectionShared)
+        }
+    }
+
+    // variant 2 해금: [generic, typeShared, collectionShared] 3슬롯, 슬롯2가 collectionShared.
+    func testVariant2UnlocksCollectionShared() {
+        let s = SkillCatalog.skills(kind: .fox, variant: 2)   // fox = mainframe/beast
+        XCTAssertEqual(s.count, 3)
+        XCTAssertEqual(s[2].tier, .collectionShared)
+        XCTAssertEqual(s[2].id, "mainframe_overload")
+        XCTAssertEqual(s[2].type, .machine)   // 오프타입
+    }
+
+    // 커버리지: variant2 beast가 machine 방어자 상대로 약한 자기타입 대신 오프타입 collectionShared 선택.
+    func testCoveragePicksOffTypeVsResistantDefender() {
+        let s = SkillCatalog.skills(kind: .fox, variant: 2)
+        // vs machine: 자기타입(beast) ×0.5라 typeShared 손해 → 오프타입 machine 무브(중립) 채택.
+        let vsMachine = SkillCatalog.select(from: s, attackerType: .beast, defenderType: .machine)
+        XCTAssertEqual(vsMachine.id, "mainframe_overload")
+        // vs chaos: 자기타입 super(×2.0)+STAB라 typeShared가 오프타입을 이김 → 커버리지 안 씀.
+        let vsChaos = SkillCatalog.select(from: s, attackerType: .beast, defenderType: .chaos)
+        XCTAssertEqual(vsChaos.id, "mem_leak")
     }
 }

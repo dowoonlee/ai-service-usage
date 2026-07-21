@@ -53,6 +53,8 @@ const BEATS: Record<BattleType, BattleType> = {
   machine: "beast", beast: "chaos", chaos: "arcane",
   arcane: "mascot", mascot: "warrior", warrior: "machine",
 };
+// [레거시 — 배틀 미사용] 패시브 타입 상성. 스킬 전환(Phase A) 이후 배틀은 skillEffectiveness(×2.0/×0.5)를
+// 쓴다. 사이클(BEATS) 자체는 skillEffectiveness가 재사용하는 SSOT라 상수/함수는 남겨둔다.
 export const TYPE_SUPER = 1.6;
 export const TYPE_WEAK = 0.625;   // = 1 / 1.6
 export function effectiveness(attacker: BattleType, defender: BattleType): number {
@@ -100,17 +102,54 @@ export function typeSharedSkill(type: BattleType): Skill {
   const [id, name] = TYPE_SHARED_SKILL[type];
   return { id, name, type, power: TYPE_SHARED_POWER, tier: "typeShared" };
 }
+
+export const COLLECTION_SHARED_POWER = 12.0;
+// collectionShared — 컬렉션 밈 스킬(variant 2). **오프타입**(각 컬렉션 자기 배틀타입과 다름)이라
+// variant 2부터 커버리지 선택이 생긴다. Swift SkillCatalog.collectionSharedTable 와 id/name/type 1:1.
+const COLLECTION_SHARED_SKILL: Record<string, [string, string, BattleType]> = {
+  mainframe: ["mainframe_overload", "메인프레임 과부하", "machine"],
+  emotionalSupport: ["emotional_support", "정서적 지지", "mascot"],
+  npmInstall: ["dependency_hell", "의존성 지옥", "chaos"],
+  nodeModules: ["node_modules_summon", "node_modules 소환", "arcane"],
+  dns: ["dns_propagation", "DNS 전파 지연", "arcane"],
+  deprecated: ["deprecated_strike", "@deprecated", "warrior"],
+  vibeCoders: ["vibe_coding", "바이브 코딩", "chaos"],
+  tenXEngineer: ["tenx_refactor", "10x 리팩터", "beast"],
+  onCall: ["oncall_page", "온콜 호출", "beast"],
+  rustEvangelists: ["rewrite_in_rust", "Rust로 재작성", "machine"],
+  noVerify: ["no_verify", "--no-verify", "chaos"],
+  wontfix: ["wontfix_close", "won't fix", "mascot"],
+  oomKilled: ["oom_kill", "OOM 킬러", "machine"],
+  fridayDeploy: ["friday_5pm", "금요일 5시 배포", "warrior"],
+  tokenBurners: ["token_burn", "토큰 소각", "chaos"],
+  todoSince2019: ["tech_debt_invoice", "기술부채 청구서", "warrior"],
+  ciRunners: ["pipeline_stall", "파이프라인 병목", "arcane"],
+  happyPath: ["happy_path", "해피 패스", "beast"],
+  helloWorld: ["hello_world", "Hello, World!", "arcane"],
+};
+export function collectionSharedSkill(collection: string): Skill {
+  // fail-closed: 미매핑 컬렉션은 조용히 잘못된 타입으로 대체하지 않고 던진다(Swift 강제언랩과 대칭).
+  // 조용한 폴백은 authoritative 랭크 결과를 틀린 스킬타입으로 오염시키는데, 던지면 배포/테스트에서 잡힌다.
+  const e = COLLECTION_SHARED_SKILL[collection];
+  if (!e) throw new Error(`collectionSharedSkill: 미매핑 컬렉션 "${collection}" (Swift collectionSharedTable와 동기화 필요)`);
+  const [id, name, type] = e;
+  return { id, name, type, power: COLLECTION_SHARED_POWER, tier: "collectionShared" };
+}
+
 // variant까지 해금한 정규 스킬(슬롯 순). Swift SkillCatalog.skills 1:1.
 export function skillsFor(kind: string, variant: number): Skill[] {
   const t = battleTypeOf(kind);
   const out = [genericSkill(t)];                    // 슬롯0 — 항상 보유
-  if (variant >= 1) out.push(typeSharedSkill(t));   // 슬롯1 — 이로치1 해금
+  if (variant >= 1) out.push(typeSharedSkill(t));   // 슬롯1 — 이로치1
+  if (variant >= 2) out.push(collectionSharedSkill(collectionOf(kind)));   // 슬롯2 — 이로치2(오프타입 커버리지)
   return out;
 }
 export function skillScore(s: Skill, attackerType: BattleType, defenderType: BattleType): number {
   return s.power * skillEffectiveness(s.type, defenderType) * stabMult(s.type, attackerType);
 }
 // 결정적 선택 AI — 점수 최대, 동점이면 슬롯 인덱스 낮은 것(strict >). Swift SkillCatalog.select 1:1.
+// 전제: skills 비지 않음(skillsFor가 generic을 항상 첫 슬롯에 둠). 파리티: score가 A/B1에선 dyadic이라
+// Swift↔JS 비트동일 — B2에서 비-dyadic power/배수 도입 시 tie-break 드리프트 주의(dyadic 유지).
 export function selectSkill(skills: Skill[], attackerType: BattleType, defenderType: BattleType): Skill {
   let best = skills[0];
   let bestScore = skillScore(best, attackerType, defenderType);

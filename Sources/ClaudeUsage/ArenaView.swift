@@ -173,7 +173,7 @@ struct ArenaView: View {
                 Spacer()
                 Button("닫기") { showTypeHelp = false }.font(.system(size: 12))
             }
-            Text("화살표가 가리키는 쪽이 지는 상대 (×1.6 우위 / 역방향 ×0.625). 나머지는 중립인 6타입 순환.")
+            Text("화살표가 가리키는 쪽이 지는 상대 (스킬 상성 ×2.0 우위 / 역방향 ×0.5, 자기 타입 스킬은 ×1.5). 나머지는 중립인 6타입 순환.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             typeWheel.frame(maxWidth: .infinity).frame(height: 258)
             Text("같은 타입·컬렉션을 많이 모을수록 시너지가 점점 강해집니다(최대 5마리).")

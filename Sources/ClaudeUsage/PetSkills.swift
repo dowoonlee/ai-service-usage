@@ -61,13 +61,51 @@ enum SkillCatalog {
         return Skill(id: e.id, name: e.name, type: type, power: typeSharedPower, tier: .typeShared)
     }
 
+    static let collectionSharedPower = 12.0
+
+    /// collectionShared — 컬렉션 밈 스킬(variant 2). **오프타입**: 각 컬렉션의 자기 배틀타입과 다른 타입을
+    /// 부여해 "자기타입 STAB 무브 vs 오프타입 상성 무브" 커버리지 선택을 만든다(스킬 타입 시스템의 본래 목적).
+    /// power 12. 타입은 밸런스 레버 — 6타입에 고르게 분산. Swift 유닛테스트가 "자기타입 아님"을 회귀 가드.
+    static let collectionSharedTable: [PetCollection: (id: String, name: String, type: BattleType)] = [
+        // beast 컬렉션(자기타입 beast → 오프타입 부여)
+        .mainframe:        ("mainframe_overload", "메인프레임 과부하", .machine),
+        .emotionalSupport: ("emotional_support", "정서적 지지", .mascot),
+        .npmInstall:       ("dependency_hell", "의존성 지옥", .chaos),
+        .nodeModules:      ("node_modules_summon", "node_modules 소환", .arcane),
+        .dns:              ("dns_propagation", "DNS 전파 지연", .arcane),
+        .deprecated:       ("deprecated_strike", "@deprecated", .warrior),
+        // warrior 컬렉션
+        .vibeCoders:       ("vibe_coding", "바이브 코딩", .chaos),
+        .tenXEngineer:     ("tenx_refactor", "10x 리팩터", .beast),
+        .onCall:           ("oncall_page", "온콜 호출", .beast),
+        .rustEvangelists:  ("rewrite_in_rust", "Rust로 재작성", .machine),
+        .noVerify:         ("no_verify", "--no-verify", .chaos),
+        // chaos 컬렉션
+        .wontfix:          ("wontfix_close", "won't fix", .mascot),
+        .oomKilled:        ("oom_kill", "OOM 킬러", .machine),
+        .fridayDeploy:     ("friday_5pm", "금요일 5시 배포", .warrior),
+        // arcane 컬렉션
+        .tokenBurners:     ("token_burn", "토큰 소각", .chaos),
+        .todoSince2019:    ("tech_debt_invoice", "기술부채 청구서", .warrior),
+        // machine 컬렉션
+        .ciRunners:        ("pipeline_stall", "파이프라인 병목", .arcane),
+        // mascot 컬렉션
+        .happyPath:        ("happy_path", "해피 패스", .beast),
+        .helloWorld:       ("hello_world", "Hello, World!", .arcane),
+    ]
+    static func collectionShared(for collection: PetCollection) -> Skill {
+        let e = collectionSharedTable[collection]!   // 19컬렉션 전부 정의 — 강제 언랩 안전.
+        return Skill(id: e.id, name: e.name, type: e.type, power: collectionSharedPower, tier: .collectionShared)
+    }
+
     /// 이 펫이 variant까지 해금한 정규 스킬 목록. 슬롯 인덱스 순(선택 AI tie-break 기준).
     /// 서버 pvp_policy.skillsFor 1:1.
     static func skills(kind: PetKind, variant: Int) -> [Skill] {
         let t = kind.battleType
-        var out = [generic(for: t)]                         // 슬롯0 — 항상 보유
-        if variant >= 1 { out.append(typeShared(for: t)) }  // 슬롯1 — 이로치1 해금
-        // Phase B: variant>=2 collectionShared, variant>=3 unique, variant>=4 ultimate
+        var out = [generic(for: t)]                                      // 슬롯0 — 항상 보유
+        if variant >= 1 { out.append(typeShared(for: t)) }              // 슬롯1 — 이로치1
+        if variant >= 2 { out.append(collectionShared(for: kind.collection)) }  // 슬롯2 — 이로치2(오프타입 커버리지)
+        // Phase B2: variant>=3 unique(고레어)/shared 추가, variant>=4 ultimate
         return out
     }
 
@@ -77,6 +115,10 @@ enum SkillCatalog {
     }
 
     /// 결정적 선택 AI — 점수 최대, 동점이면 슬롯 인덱스 낮은 것(strict >). 서버 selectSkill 1:1.
+    /// 전제: `skills`는 비지 않음(`skills(kind:variant:)`가 generic을 항상 첫 슬롯에 넣음).
+    /// ⚠️ 파리티: score(power×eff×stab)가 Phase A/B1에선 전부 dyadic rational(power 8/11/12, 배수
+    /// 0.5/1.0/1.5/2.0)이라 Swift Double·JS number가 비트동일 → tie-break 결과 일치. B2에서 비-dyadic
+    /// power/배수(예: 13, ×1.3)를 도입하면 반올림이 갈려 동점 tie-break가 어긋날 수 있으니 dyadic 유지.
     static func select(from skills: [Skill], attackerType: BattleType, defenderType: BattleType) -> Skill {
         var best = skills[0]
         var bestScore = score(best, attackerType: attackerType, defenderType: defenderType)
@@ -91,6 +133,7 @@ enum SkillCatalog {
     static let nameById: [String: String] = {
         var m: [String: String] = ["hotfix": "핫픽스"]
         for (_, e) in typeSharedTable { m[e.id] = e.name }
+        for (_, e) in collectionSharedTable { m[e.id] = e.name }
         return m
     }()
     static func displayName(id: String) -> String? { nameById[id] }
