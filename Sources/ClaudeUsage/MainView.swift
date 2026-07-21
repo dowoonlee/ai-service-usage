@@ -1125,10 +1125,14 @@ struct CodexSection: View {
 
     private var summary: String {
         guard vm.codexCurrent != nil else { return "–" }
-        if vm.codexUsesFiveHour {
+        switch vm.codexPrimaryWindow {
+        case .fiveHour:
             return "5h \(SectionFormat.pct(vm.codexCurrent?.fiveHourPct)) · 주간 \(SectionFormat.pct(vm.codexCurrent?.sevenDayPct))"
+        case .weekly:
+            return "주간 \(SectionFormat.pct(vm.codexCurrent?.sevenDayPct))"
+        case .monthly, .none:
+            return "월간 \(SectionFormat.pct(vm.codexCurrent?.monthlyPct))"
         }
-        return "월간 \(SectionFormat.pct(vm.codexCurrent?.monthlyPct))"
     }
 
     private var collapsedPct: Double? {

@@ -482,6 +482,15 @@ final class Settings: ObservableObject {
         get { UserDefaults.standard.integer(forKey: "pvp.wins") }
         set { UserDefaults.standard.set(newValue, forKey: "pvp.wins") }
     }
+    /// 아레나 배틀 팀(순서 = 선봉 순서). 탭 전환·재실행에도 유지 (#156 T3). 소유하지 않은 kind는
+    /// 로드 시 ArenaView 에서 필터. @Published 불요 — ArenaView 가 로컬 @State teamKinds 로 미러한다.
+    var battleTeam: [PetKind] {
+        get {
+            (UserDefaults.standard.data(forKey: Keys.battleTeam)
+                .flatMap { try? JSONDecoder().decode([PetKind].self, from: $0) }) ?? []
+        }
+        set { persist(newValue, forKey: Keys.battleTeam) }
+    }
     /// 카드를 공유 이미지로 export할 때 GitHub login을 노출할지. 기본 false (privacy first) —
     /// GitHub 연결한 사용자가 명시적 opt-in해야 카드에 username 박힘.
     @Published var showGitHubLoginInCard: Bool {
@@ -1551,6 +1560,7 @@ final class Settings: ObservableObject {
         static let petCodexParty               = "settings.petCodexParty"
         // 파티 프리셋 (라이브러리 + 소스별 할당).
         static let partyPresets                = "settings.partyPresets"
+        static let battleTeam                  = "settings.battleTeam"
         static let claudePresetID              = "settings.claudePresetID"
         static let cursorPresetID              = "settings.cursorPresetID"
         static let codexPresetID               = "settings.codexPresetID"
