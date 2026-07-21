@@ -133,4 +133,44 @@ final class PetSkillsTests: XCTestCase {
         let vsChaos = SkillCatalog.select(from: s, attackerType: .beast, defenderType: .chaos)
         XCTAssertEqual(vsChaos.id, "mem_leak")
     }
+
+    // ── unique (Phase B2) ────────────────────────────────────────────────────
+
+    // **불변식(양방향)**: 모든 Epic+ 펫이 고유기를 갖고, 저레어(Common/Rare)는 갖지 않는다.
+    // gen_pet_meta.py의 Epic+ 검증과 대칭 — 여기가 클라 쪽 fail-closed 가드.
+    func testUniqueTableCoversExactlyEpicPlus() {
+        let epicPlus: Set<Rarity> = [.epic, .legendary, .mythic]
+        for k in PetKind.allCases {
+            let rarity = PetKind.rarityFor(k) ?? .common
+            let hasUnique = SkillCatalog.uniqueTable[k] != nil
+            XCTAssertEqual(hasUnique, epicPlus.contains(rarity),
+                           "\(k) rarity=\(rarity): unique 보유(\(hasUnique)) ≠ Epic+(\(epicPlus.contains(rarity)))")
+        }
+    }
+
+    // 고유기는 자기타입 시그니처 · power 14 · 표시명 존재.
+    func testUniqueIsSelfTypeSignature() {
+        for (kind, _) in SkillCatalog.uniqueTable {
+            let u = SkillCatalog.unique(for: kind)!
+            XCTAssertEqual(u.type, kind.battleType, "\(kind) 고유기는 자기타입이어야")
+            XCTAssertEqual(u.power, 14.0, accuracy: 1e-9)
+            XCTAssertEqual(u.tier, .unique)
+            XCTAssertNotNil(SkillCatalog.displayName(id: u.id))
+        }
+    }
+
+    // variant 3 해금: Epic+는 4슬롯(고유기 추가), 저레어는 3슬롯 유지.
+    func testVariant3UniqueSlotGating() {
+        // fox = common → variant3도 3슬롯(고유기 없음)
+        XCTAssertNil(SkillCatalog.unique(for: .fox))
+        XCTAssertEqual(SkillCatalog.skills(kind: .fox, variant: 3).count, 3)
+        // warrior = mythic → variant3에서 4번째 슬롯 = 고유기(자기타입, power14)
+        let w = SkillCatalog.skills(kind: .warrior, variant: 3)
+        XCTAssertEqual(w.count, 4)
+        XCTAssertEqual(w[3].tier, .unique)
+        XCTAssertEqual(w[3].id, "fullstack_smash")
+        XCTAssertEqual(w[3].type, .warrior)
+        // variant2에선 Epic+도 아직 3슬롯(고유기 미해금)
+        XCTAssertEqual(SkillCatalog.skills(kind: .warrior, variant: 2).count, 3)
+    }
 }

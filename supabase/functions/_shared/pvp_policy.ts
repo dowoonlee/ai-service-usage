@@ -7,7 +7,7 @@
 // 반올림 규약: Swift `Int(x.rounded())` = round-half-away-from-zero. 입력이 전부 양수라 JS
 // `Math.round`와 동일하지만, 명세 고정을 위해 `roundAway`를 쓴다(음수 안전).
 
-import { RARITY, COLLECTION } from "./pet_meta_gen.ts";
+import { RARITY, COLLECTION, UNIQUE_SKILL } from "./pet_meta_gen.ts";
 
 // round half away from zero (Swift .rounded() 기본 규약).
 export function roundAway(x: number): number {
@@ -136,12 +136,23 @@ export function collectionSharedSkill(collection: string): Skill {
   return { id, name, type, power: COLLECTION_SHARED_POWER, tier: "collectionShared" };
 }
 
+export const UNIQUE_POWER = 14.0;
+// unique — Epic+ per-kind 고유기(variant 3). **자기타입 시그니처**. id/name은 pet_meta_gen.UNIQUE_SKILL
+// (Swift uniqueTable에서 gen), type은 battleTypeOf 파생, power 상수. Swift SkillCatalog.unique 1:1.
+// 저레어(Common/Rare)는 매핑 없음 → null(variant 3에서도 슬롯 추가 안 됨).
+export function uniqueSkill(kind: string): Skill | null {
+  const u = UNIQUE_SKILL[kind];
+  if (!u) return null;
+  return { id: u[0], name: u[1], type: battleTypeOf(kind), power: UNIQUE_POWER, tier: "unique" };
+}
+
 // variant까지 해금한 정규 스킬(슬롯 순). Swift SkillCatalog.skills 1:1.
 export function skillsFor(kind: string, variant: number): Skill[] {
   const t = battleTypeOf(kind);
   const out = [genericSkill(t)];                    // 슬롯0 — 항상 보유
   if (variant >= 1) out.push(typeSharedSkill(t));   // 슬롯1 — 이로치1
   if (variant >= 2) out.push(collectionSharedSkill(collectionOf(kind)));   // 슬롯2 — 이로치2(오프타입 커버리지)
+  if (variant >= 3) { const u = uniqueSkill(kind); if (u) out.push(u); }   // 슬롯3 — 이로치3, Epic+ 고유기
   return out;
 }
 export function skillScore(s: Skill, attackerType: BattleType, defenderType: BattleType): number {

@@ -50,6 +50,14 @@ def main():
     pc = read("PetCollection.swift")
     kind_coll = {k: c for c, ks in parse_groups(pc, r"case \.(\w+):\s*return\s*\[(.*?)\]").items() for k in ks}
 
+    # unique 고유기(Epic+ per-kind) — PetSkills.uniqueTable 블록에서 .kind: ("id", "name") 파싱.
+    sk = read("PetSkills.swift")
+    ublock = re.search(r"static let uniqueTable[^=]*=\s*\[(.*?)\n\s*\]", sk, re.S)
+    kind_unique = {}
+    if ublock:
+        for m in re.finditer(r'\.(\w+):\s*\("([^"]+)",\s*"([^"]+)"\)', ublock.group(1)):
+            kind_unique[m.group(1)] = [m.group(2), m.group(3)]
+
     kset = set(kinds)
     errs = []
     if len(kinds) != len(kset):
@@ -65,6 +73,12 @@ def main():
     for k in kind_coll:
         if k not in kset:
             errs.append(f"collection 여분: {k}")
+    EPIC_PLUS = {"epic", "legendary", "mythic"}
+    for k in kind_unique:
+        if k not in kset:
+            errs.append(f"unique 여분(allCases 없음): {k}")
+        elif kind_rarity.get(k) not in EPIC_PLUS:
+            errs.append(f"unique는 Epic+ 전용인데 {k}={kind_rarity.get(k)}")
     if errs:
         print("생성 실패 — 불일치:", *errs, sep="\n  ", file=sys.stderr)
         sys.exit(1)
@@ -72,15 +86,20 @@ def main():
     def ts_map(d):
         return "{\n" + "".join(f'  {k}: "{v}",\n' for k, v in sorted(d.items())) + "}"
 
+    def ts_pair_map(d):
+        return "{\n" + "".join(f'  {k}: ["{v[0]}", "{v[1]}"],\n' for k, v in sorted(d.items())) + "}"
+
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(
-            "// AUTO-GENERATED — Swift 소스(Gacha.pool · PetCollection.members)에서 파싱. 직접 편집 금지.\n"
-            f"// 재생성: scripts/gen_pet_meta.py (펫 추가/등급변경 시). {len(kinds)} kinds.\n"
-            "// 서버 authoritative 스탯 계산에 필요(클라는 rarity를 하드코딩하지만 서버엔 없어서 포팅).\n\n"
+            "// AUTO-GENERATED — Swift 소스(Gacha.pool · PetCollection.members · PetSkills.uniqueTable)에서 파싱. 직접 편집 금지.\n"
+            f"// 재생성: scripts/gen_pet_meta.py (펫 추가/등급변경/고유기 추가 시). {len(kinds)} kinds, {len(kind_unique)} unique.\n"
+            "// 서버 authoritative 스탯/스킬 계산에 필요(클라는 하드코딩하지만 서버엔 없어서 포팅).\n\n"
             f"export const RARITY: Record<string,string> = {ts_map(kind_rarity)};\n\n"
-            f"export const COLLECTION: Record<string,string> = {ts_map(kind_coll)};\n"
+            f"export const COLLECTION: Record<string,string> = {ts_map(kind_coll)};\n\n"
+            f"// Epic+ per-kind 고유기(id, name). 타입은 서버가 battleTypeOf로 파생, power는 상수(pvp_policy).\n"
+            f"export const UNIQUE_SKILL: Record<string,[string,string]> = {ts_pair_map(kind_unique)};\n"
         )
-    print(f"생성 완료: {OUT} ({len(kinds)} kinds)")
+    print(f"생성 완료: {OUT} ({len(kinds)} kinds, {len(kind_unique)} unique)")
 
 
 if __name__ == "__main__":

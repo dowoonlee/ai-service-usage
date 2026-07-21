@@ -1,6 +1,6 @@
-// AUTO-GENERATED — Swift 소스(Gacha.pool · PetCollection.members)에서 파싱. 직접 편집 금지.
-// 재생성: scripts/gen_pet_meta.py (펫 추가/등급변경 시). 195 kinds.
-// 서버 authoritative 스탯 계산에 필요(클라는 rarity를 하드코딩하지만 서버엔 없어서 포팅).
+// AUTO-GENERATED — Swift 소스(Gacha.pool · PetCollection.members · PetSkills.uniqueTable)에서 파싱. 직접 편집 금지.
+// 재생성: scripts/gen_pet_meta.py (펫 추가/등급변경/고유기 추가 시). 195 kinds, 34 unique.
+// 서버 authoritative 스탯/스킬 계산에 필요(클라는 하드코딩하지만 서버엔 없어서 포팅).
 
 export const RARITY: Record<string,string> = {
   agentMike: "common",
@@ -396,4 +396,42 @@ export const COLLECTION: Record<string,string> = {
   wogol: "fridayDeploy",
   wolf: "mainframe",
   zombie: "wontfix",
+};
+
+// Epic+ per-kind 고유기(id, name). 타입은 서버가 battleTypeOf로 파생, power는 상수(pvp_policy).
+export const UNIQUE_SKILL: Record<string,[string,string]> = {
+  archer: ["remote_exec", "원격 실행"],
+  bigDemon: ["prod_outage", "프로덕션 장애"],
+  clownCaptain: ["clown_deploy", "광대 배포"],
+  dinoDragon: ["dino_stack", "공룡 스택"],
+  fairy: ["pixie_patch", "픽시 패치"],
+  geralt: ["prompt_injection", "프롬프트 인젝션"],
+  ghost: ["zombie_process", "좀비 프로세스"],
+  gordon: ["crunch_mode", "크런치 모드"],
+  heroKnight: ["full_refactor", "풀 리팩터"],
+  huntress: ["pinpoint_debug", "핀포인트 디버그"],
+  kingHuman: ["legacy_monarch", "레거시 군주"],
+  knightF: ["blue_green", "블루-그린 배포"],
+  knightM: ["zero_downtime", "무중단 배포"],
+  lancer: ["zero_day", "제로데이"],
+  maskDude: ["anon_commit", "익명 커밋"],
+  medievalKing: ["feudal_arch", "봉건 아키텍처"],
+  monk: ["zen_mode", "젠 모드"],
+  mrMochi: ["infinite_scroll", "무한 스크롤"],
+  ninjaFrog: ["stealth_deploy", "은신 배포"],
+  ogre: ["monolith", "모놀리스"],
+  orc: ["brute_merge", "강제 머지"],
+  pawn: ["merge_conflict", "머지 컨플릭트"],
+  pirateCaptain: ["code_plunder", "코드 약탈"],
+  plant: ["dependency_tree", "의존성 트리"],
+  princessSera: ["graceful_shutdown", "우아한 종료"],
+  pterodactyl: ["race_condition", "레이스 컨디션"],
+  roboRetro: ["quantization", "양자화"],
+  skeletonLord: ["dead_code", "데드 코드"],
+  skull: ["segfault", "세그폴트"],
+  tRex: ["extinction_event", "레거시 멸종"],
+  visorBot: ["gradient_explosion", "그래디언트 폭발"],
+  warrior: ["fullstack_smash", "풀스택 강타"],
+  whale: ["docker_whale", "도커 웨일"],
+  wizardM: ["hallucination", "환각 시전"],
 };
