@@ -91,4 +91,39 @@ final class PetBattleStatsTests: XCTestCase {
         XCTAssertGreaterThan(commonMaxed.total, epicBase.total,
                              "풀강 커먼이 무강 에픽을 총합으로 넘어설 수 있어야 함(강화가 경쟁 경로)")
     }
+
+    // 개체별 스탯 프로필 — 결정적 + 같은 타입이라도 kind마다 분배 상이.
+    func testPerKindProfileDeterministicAndDistinct() {
+        let a1 = PetBattleStats.compute(kind: .scrapBot, variant: 0, enhanceLevel: 10, progressUnits: 4)
+        let a2 = PetBattleStats.compute(kind: .scrapBot, variant: 0, enhanceLevel: 10, progressUnits: 4)
+        XCTAssertEqual(a1, a2, "같은 kind는 항상 같은 스탯(결정적)")
+        let beasts: [PetKind] = [.fox, .wolf, .bear, .bat, .tRex]   // 전부 beast
+        let profiles = Set(beasts.map { k -> String in
+            let s = PetBattleStats.compute(kind: k, variant: 0, enhanceLevel: 15, progressUnits: 8)
+            return "\(s.hp),\(s.atk),\(s.def),\(s.spd)"
+        })
+        XCTAssertGreaterThan(profiles.count, 1, "같은 rarity·type이라도 개체마다 스탯 프로필이 달라야")
+    }
+
+    // 밸런스 중립 — 프로필은 분배만 바꾸고 총량(=base×성장×archetype합)은 보존(반올림 오차만).
+    func testPerKindProfileSumPreserving() {
+        for kind in [PetKind.fox, .scrapBot, .warrior] {
+            let s = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: 12, progressUnits: 6)
+            let base = PetBattleStats.rarityBase(PetKind.rarityFor(kind) ?? .common)
+            let growth = PetBattleStats.growthMultiplier(enhanceLevel: 12, progressUnits: 6)
+            let a = kind.battleType.archetype
+            let pureTotal = base * growth * (a.hp + a.atk + a.def + a.spd)   // variant 0 → vb 1
+            XCTAssertLessThanOrEqual(abs(Double(s.total) - pureTotal), 3.0,
+                                     "\(kind): 프로필 총합은 순수 archetype 총합을 보존해야(밸런스 중립)")
+        }
+    }
+
+    // 이로치 버프 — 단계가 높을수록 전 스탯↑. 레인보우(4)>이로치3(3)>기본(0).
+    func testVariantBuffMonotonic() {
+        let v0 = PetBattleStats.compute(kind: .fox, variant: 0, enhanceLevel: 5, progressUnits: 0)
+        let v3 = PetBattleStats.compute(kind: .fox, variant: 3, enhanceLevel: 5, progressUnits: 0)
+        let v4 = PetBattleStats.compute(kind: .fox, variant: 4, enhanceLevel: 5, progressUnits: 0)
+        XCTAssertGreaterThan(v3.total, v0.total)
+        XCTAssertGreaterThan(v4.total, v3.total, "레인보우(+18%)가 이로치3(+10%)보다 총합 높아야")
+    }
 }

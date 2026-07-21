@@ -103,6 +103,11 @@ struct ArenaView: View {
 
     private var owned: [PetKind] { PetKind.allCases.filter { settings.ownedPets[$0] != nil } }
 
+    // 배틀에 반영할 이로치 단계 — 보유한 최고 해금 variant(0=기본 … 4=레인보우). 미보유 시 0.
+    private func battleVariant(_ kind: PetKind) -> Int {
+        settings.ownedPets[kind]?.unlockedVariants.max() ?? 0
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -126,9 +131,14 @@ struct ArenaView: View {
         }
         .onAppear {
             if teamKinds.isEmpty {
-                // 저장된 배틀 팀(순서 유지) 복원 — 소유 중인 kind만, 최대 3. 없으면 소유 상위 3으로 시드.
-                let saved = settings.battleTeam.filter { settings.ownedPets[$0] != nil }
-                teamKinds = saved.isEmpty ? Array(owned.prefix(3)) : Array(saved.prefix(3))
+                // 저장된 배틀 팀(순서 유지) 복원 — 소유 중인 kind만, 최대 5. 5칸 미만(미설정·레거시 3마리
+                // 팀)이면 소유 펫 중 미포함분을 랜덤으로 채워 5마리로(부족하면 전부). 최초 1회만 —
+                // onChange가 즉시 저장해 이후 고정(매번 랜덤 아님).
+                var seed = Array(settings.battleTeam.filter { settings.ownedPets[$0] != nil }.prefix(5))
+                if seed.count < 5 {
+                    seed.append(contentsOf: owned.filter { !seed.contains($0) }.shuffled().prefix(5 - seed.count))
+                }
+                teamKinds = seed
             }
             if enhanceKind == nil { enhanceKind = owned.first }
         }
@@ -163,38 +173,77 @@ struct ArenaView: View {
                 Spacer()
                 Button("닫기") { showTypeHelp = false }.font(.system(size: 12))
             }
-            Text("각 타입은 하나를 강하게 이기고(×1.6) 하나에 약하게 진다(×0.625). 6타입 순환.")
+            Text("화살표가 가리키는 쪽이 지는 상대 (×1.6 우위 / 역방향 ×0.625). 나머지는 중립인 6타입 순환.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
-            VStack(spacing: 6) {
-                ForEach(BattleType.allCases, id: \.self) { t in
-                    HStack(spacing: 8) {
-                        typeChip(t)
-                        Image(systemName: "arrow.right").font(.system(size: 9)).foregroundStyle(.secondary)
-                        typeChip(t.beats)
-                        Text("강함").font(.system(size: 9)).foregroundStyle(.green)
-                        Spacer()
-                        Text("시너지 → \(statName(TeamSynergy.signatureStat(of: t)))")
-                            .font(.system(size: 9)).foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(typeColor(t).opacity(0.08)))
-                }
-            }
-            Text("동타입 3마리를 모으면 그 타입 대표 스탯이 오릅니다(방향성 시너지).")
+            typeWheel.frame(maxWidth: .infinity).frame(height: 258)
+            Text("같은 타입·컬렉션을 많이 모을수록 시너지가 점점 강해집니다(최대 5마리).")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(16).frame(width: 320, height: 380)
+        .padding(16).frame(width: 320, height: 430)
     }
 
-    private func typeChip(_ t: BattleType) -> some View {
-        HStack(spacing: 4) {
-            if let img = PetSprite.icon(named: typeSynergyResource(t)) {
-                Image(nsImage: img).resizable().interpolation(.none).frame(width: 16, height: 16)
+    // 6타입 상성 순환 — 각 타입이 이기는 상대로 .beats 6회(단일 6-순환). 원형 배치 순서.
+    private var typeCycle: [BattleType] {
+        var out: [BattleType] = []
+        var t = BattleType.machine
+        for _ in 0..<6 { out.append(t); t = t.beats }
+        return out
+    }
+
+    // 원형 상성표 노드(컴팩트) — 컬러 아이콘 원 + 이름.
+    private func typeWheelNode(_ t: BattleType) -> some View {
+        VStack(spacing: 2) {
+            ZStack {
+                Circle().fill(typeColor(t).opacity(0.18))
+                Circle().strokeBorder(typeColor(t), lineWidth: 1.5)
+                if let img = PetSprite.icon(named: typeSynergyResource(t)) {
+                    Image(nsImage: img).resizable().interpolation(.none).frame(width: 18, height: 18)
+                }
             }
-            Text(t.displayName).font(.system(size: 10, weight: .semibold)).foregroundStyle(typeColor(t))
+            .frame(width: 34, height: 34)
+            Text(t.displayName).font(.system(size: 8, weight: .semibold)).foregroundStyle(typeColor(t))
         }
-        .frame(width: 84, alignment: .leading)
+        .frame(width: 52)
+    }
+
+    // 원형(육각) 상성 다이어그램 — 화살표 A▶B = A가 B를 이김(×1.6). 6-순환이라 링 형태로 흐른다.
+    private var typeWheel: some View {
+        let cycle = typeCycle
+        return GeometryReader { geo in
+            let cx = geo.size.width / 2, cy = geo.size.height / 2
+            let r = min(geo.size.width, geo.size.height) / 2 - 30
+            let pts: [CGPoint] = (0..<6).map { i in
+                let a = -Double.pi / 2 + Double(i) * (Double.pi / 3)   // 상단 시작, 시계방향 60°
+                return CGPoint(x: cx + r * CGFloat(cos(a)), y: cy + r * CGFloat(sin(a)))
+            }
+            let cols = cycle.map { typeColor($0) }
+            ZStack {
+                Canvas { ctx, _ in
+                    for i in 0..<6 {
+                        let p0 = pts[i], p1 = pts[(i + 1) % 6]
+                        let dx = p1.x - p0.x, dy = p1.y - p0.y
+                        let len = max(1, (dx * dx + dy * dy).squareRoot())
+                        let ux = dx / len, uy = dy / len
+                        let inset: CGFloat = 26
+                        let s = CGPoint(x: p0.x + ux * inset, y: p0.y + uy * inset)
+                        let e = CGPoint(x: p1.x - ux * inset, y: p1.y - uy * inset)
+                        var line = Path(); line.move(to: s); line.addLine(to: e)
+                        ctx.stroke(line, with: .color(cols[i].opacity(0.75)), lineWidth: 1.8)
+                        // 화살촉(끝점 e에서 뒤로 barb 2개).
+                        let ah: CGFloat = 7, side: CGFloat = 4
+                        let back = CGPoint(x: e.x - ux * ah, y: e.y - uy * ah)
+                        let left = CGPoint(x: back.x - uy * side, y: back.y + ux * side)
+                        let right = CGPoint(x: back.x + uy * side, y: back.y - ux * side)
+                        var head = Path(); head.move(to: left); head.addLine(to: e); head.addLine(to: right)
+                        ctx.stroke(head, with: .color(cols[i].opacity(0.9)), lineWidth: 1.8)
+                    }
+                }
+                ForEach(0..<6, id: \.self) { i in
+                    typeWheelNode(cycle[i]).position(pts[i])
+                }
+            }
+        }
     }
 
     private var emptyGate: some View {
@@ -235,13 +284,13 @@ struct ArenaView: View {
                     Label("파티에서", systemImage: "square.and.arrow.down").font(.system(size: 10))
                 }.menuStyle(.borderlessButton).fixedSize().foregroundStyle(.tint)
             }
-            Button { teamKinds = Array(owned.shuffled().prefix(3)); stopPlayback(); result = nil } label: {
+            Button { teamKinds = Array(owned.shuffled().prefix(5)); stopPlayback(); result = nil } label: {
                 Label("팀 새로 뽑기", systemImage: "shuffle").font(.system(size: 10))
             }.buttonStyle(.plain).foregroundStyle(.tint)
         }
         HStack(spacing: 8) {
             ForEach(Array(teamKinds.enumerated()), id: \.offset) { idx, kind in petCard(kind, slot: idx) }
-            if teamKinds.count < 3 && teamKinds.count < owned.count { addSlotCard }
+            if teamKinds.count < 5 && teamKinds.count < owned.count { addSlotCard }
             if teamKinds.isEmpty { Text("펫 없음").font(.system(size: 11)).foregroundStyle(.secondary) }
         }
     }
@@ -320,8 +369,8 @@ struct ArenaView: View {
                 } message: {
                     Text("도전하면 오늘 랭크전 1판이 소모되고(현재 \(pvpDailyUsed)/\(pvpDailyLimit)판), 승패에 따라 레이팅이 변동됩니다.")
                 }
-            if teamKinds.count < 3 {
-                Text("랭크전은 3마리 풀팀이 필요합니다 (현재 \(teamKinds.count)/3). 팀을 채워주세요.")
+            if teamKinds.count < 5 {
+                Text("랭크전은 5마리 풀팀이 필요합니다 (현재 \(teamKinds.count)/5). 팀을 채워주세요.")
                     .font(.system(size: 9)).foregroundStyle(.orange)
             }
             Text("현재 팀이 등록되어 다른 유저의 상대(고스트)가 됩니다. 강화한 상태로 다시 도전하면 재등록됩니다.")
@@ -384,9 +433,9 @@ struct ArenaView: View {
         }
     }
 
-    // 도전 가능: 3마리 풀팀 + 진행 중 아님 + 일일 여유. (1~2마리 비대칭 3v3 방지 — #156)
+    // 도전 가능: 5마리 풀팀 + 진행 중 아님 + 일일 여유. (미달 팀의 비대칭 5v5 방지)
     private var rankedReady: Bool {
-        teamKinds.count == 3 && !rankedBusy && pvpDailyUsed < pvpDailyLimit
+        teamKinds.count == 5 && !rankedBusy && pvpDailyUsed < pvpDailyLimit
     }
 
     /// 랭킹 + 전적 로드(진입·도전 후). 미등록이면 no-op.
@@ -424,7 +473,7 @@ struct ArenaView: View {
         guard rankedReady, canServerEnhance, let hmac = Keychain.loadRankingHmacKey() else { return }
         rankedError = nil; rankedResult = nil; stopPlayback(); result = nil
         let dev = settings.rankingDeviceID
-        let team = teamKinds.map { (kind: $0.rawValue, variant: 0, progressUnits: 0.0) }
+        let team = teamKinds.map { (kind: $0.rawValue, variant: battleVariant($0), progressUnits: 0.0) }
         rankedTask?.cancel()
         rankedBusy = true
         rankedTask = Task { @MainActor in
@@ -458,9 +507,9 @@ struct ArenaView: View {
     }
 
     private func petCard(_ kind: PetKind, slot: Int) -> some View {
-        // 강화소에서 올린 강화 레벨(서버 SSOT)을 반영해 배틀에 실제로 쓰일 스탯을 미리 보여준다.
+        // 강화소에서 올린 강화 레벨(서버 SSOT)+보유 이로치를 반영해 배틀에 실제로 쓰일 스탯을 미리 보여준다.
         let level = serverLevels[kind] ?? 0
-        let s = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: level, progressUnits: 0)
+        let s = PetBattleStats.compute(kind: kind, variant: battleVariant(kind), enhanceLevel: level, progressUnits: 0)
         return Button { editingSlot = SlotSel(id: slot) } label: {
             VStack(spacing: 3) {
                 thumb(kind, h: 30)
@@ -503,12 +552,12 @@ struct ArenaView: View {
         }.buttonStyle(.plain)
     }
 
-    // 파티 프리셋 → 배틀 팀 가져오기 (소유·유니크·최대 3마리).
+    // 파티 프리셋 → 배틀 팀 가져오기 (소유·유니크·최대 5마리).
     private func importParty(_ preset: PartyPreset) {
         var seen = Set<PetKind>(); var picked: [PetKind] = []
         for m in preset.members where settings.ownedPets[m.kind] != nil && !seen.contains(m.kind) {
             seen.insert(m.kind); picked.append(m.kind)
-            if picked.count >= 3 { break }
+            if picked.count >= 5 { break }
         }
         if !picked.isEmpty { teamKinds = picked; stopPlayback(); result = nil }
     }
@@ -561,7 +610,7 @@ struct ArenaView: View {
                 ForEach(choices, id: \.self) { k in
                     Button {
                         if slot < teamKinds.count { teamKinds[slot] = k }
-                        else if teamKinds.count < 3 { teamKinds.append(k) }   // 3마리 상한 방어(리뷰 m2)
+                        else if teamKinds.count < 5 { teamKinds.append(k) }   // 5마리 상한 방어
                         stopPlayback(); result = nil; editingSlot = nil
                     } label: {
                         VStack(spacing: 2) {
@@ -767,6 +816,7 @@ struct ArenaView: View {
 
     private func tagString(_ e: BattleEvent) -> String {
         var tags: [String] = []
+        if e.crit == true { tags.append("🌈 크리!") }
         if e.effectiveness > 1 { tags.append("타입▲") } else if e.effectiveness < 1 { tags.append("타입▼") }
         if e.collectionMult > 1.01 { tags.append("상성▲") } else if e.collectionMult < 0.99 { tags.append("상성▼") }
         if e.parried { tags.append("🛡️ 가드") }
@@ -863,20 +913,30 @@ struct ArenaView: View {
         }
         return (a, b)
     }
-    // 활성 시너지 감지 — 동족(컬렉션) / 동타입. (버프 배수가 실제로 붙는 경우만.)
+    // 활성 시너지 감지 — 동족(컬렉션) / 동타입. tie-break는 TeamSynergy.bonus 와 동일한 팀 순서
+    // first-max(strict >)로 결정 — 뱃지가 가리키는 타입/스탯이 실제 전투 엔진과 항상 일치(Dictionary
+    // 비결정 순서로 5마리 동수에서 엔진과 어긋나던 것 수정).
     private var collectionSynergy: (name: String, count: Int)? {
-        guard teamKinds.count >= 2,
-              let top = Dictionary(grouping: teamKinds, by: { $0.collection })
-                .max(by: { $0.value.count < $1.value.count }),
-              (TeamSynergy.collectionBonus[top.value.count] ?? 0) > 0 else { return nil }
-        return (top.key.displayName, top.value.count)
+        guard teamKinds.count >= 2 else { return nil }
+        var counts: [PetCollection: Int] = [:]
+        for k in teamKinds { counts[k.collection, default: 0] += 1 }
+        var top: PetCollection? = nil, topCount = 0
+        for k in teamKinds where (counts[k.collection] ?? 0) > topCount {
+            topCount = counts[k.collection] ?? 0; top = k.collection
+        }
+        guard let top, (TeamSynergy.collectionBonus[topCount] ?? 0) > 0 else { return nil }
+        return (top.displayName, topCount)
     }
     private var typeSynergy: (type: BattleType, count: Int)? {
-        guard teamKinds.count >= 2,
-              let top = Dictionary(grouping: teamKinds, by: { $0.battleType })
-                .max(by: { $0.value.count < $1.value.count }),
-              (TeamSynergy.typeBonus[top.value.count] ?? 0) > 0 else { return nil }
-        return (top.key, top.value.count)
+        guard teamKinds.count >= 2 else { return nil }
+        var counts: [BattleType: Int] = [:]
+        for k in teamKinds { counts[k.battleType, default: 0] += 1 }
+        var top: BattleType? = nil, topCount = 0
+        for k in teamKinds where (counts[k.battleType] ?? 0) > topCount {
+            topCount = counts[k.battleType] ?? 0; top = k.battleType
+        }
+        guard let top, (TeamSynergy.typeBonus[topCount] ?? 0) > 0 else { return nil }
+        return (top, topCount)
     }
 
     // 툴팁 문구 — 효과만 서술(버프 수치·배수 미표기).
@@ -928,8 +988,8 @@ struct ArenaView: View {
 
     private func fight() {
         stopPlayback()
-        // 내 팀 — 강화소 로컬 레벨 반영(#3).
-        let aS = teamKinds.map { BattlePetSnapshot(kind: $0, enhanceLevel: serverLevels[$0] ?? 0) }
+        // 내 팀 — 강화소 로컬 레벨 + 보유 이로치 반영.
+        let aS = teamKinds.map { BattlePetSnapshot(kind: $0, variant: battleVariant($0), enhanceLevel: serverLevels[$0] ?? 0) }
         let bS = matchmakeOpponent(against: aS)   // Σ스탯 근접 상대 샘플링(#4)
         aSnaps = aS; bSnaps = bS
         let r = BattleEngine.simulate(teamA: BattleTeam(aS), teamB: BattleTeam(bS), seed: .random(in: 1...UInt64.max))
@@ -945,7 +1005,7 @@ struct ArenaView: View {
     }
     /// 내 팀 전투력에 가장 근접한 상대 팀을 무작위 후보 중에서 고른다(일방적 매치 방지).
     private func matchmakeOpponent(against aS: [BattlePetSnapshot]) -> [BattlePetSnapshot] {
-        let size = max(1, min(3, aS.count))
+        let size = max(1, min(5, aS.count))
         let target = teamPower(aS)
         var best: [BattlePetSnapshot] = []
         var bestDiff = Int.max

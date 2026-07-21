@@ -16,10 +16,30 @@ import Foundation
 enum StatKind: Equatable { case hp, atk, def, spd }
 
 enum TeamSynergy {
-    /// 같은 컬렉션(동족) 최대 수 → **전 스탯** 버프(강한 유대라 크게).
-    static let collectionBonus: [Int: Double] = [2: 0.05, 3: 0.10]
-    /// 같은 배틀 타입 최대 동속 수 → **그 타입 대표 스탯만** 버프(방향성).
-    static let typeBonus: [Int: Double] = [2: 0.03, 3: 0.05]
+    /// 같은 컬렉션(동족) 최대 수 → **전 스탯** 버프(강한 유대라 크게). 5마리까지 가속 누진.
+    /// 최종 배수 = collectionBonus[count] × collectionWeight[컬렉션].
+    static let collectionBonus: [Int: Double] = [2: 0.05, 3: 0.10, 4: 0.17, 5: 0.26]
+    /// 같은 배틀 타입 최대 동속 수 → **그 타입 대표 스탯만** 버프(방향성). 5마리까지 가속 누진.
+    /// 최종 배수 = typeBonus[count] × typeWeight[타입].
+    static let typeBonus: [Int: Double] = [2: 0.03, 3: 0.06, 4: 0.10, 5: 0.15]
+
+    /// 타입별 시너지 "크기" 가중치(정체성). 대표 스탯 "대상"은 signatureStat이 정하고 여기선 크기만 차등.
+    /// 공격 성향(ATK/SPD)↑ / 방어 성향(DEF/HP)↓ (이미 탱키 + 패링 백스톱). 서버 pvp_policy.TYPE_WEIGHT 와 1:1.
+    static let typeWeight: [BattleType: Double] = [
+        .arcane: 1.25, .chaos: 1.15, .warrior: 1.10, .beast: 1.00, .machine: 0.85, .mascot: 0.80,
+    ]
+    /// 컬렉션별 시너지 "크기" 가중치(테마 3티어 S/A/B = 1.20/1.00/0.85). 미등록은 A(1.0).
+    /// 서버 pvp_policy.COLLECTION_WEIGHT 와 1:1.
+    static let collectionWeight: [PetCollection: Double] = {
+        var w: [PetCollection: Double] = [:]
+        for c in [PetCollection.tenXEngineer, .onCall, .rustEvangelists, .tokenBurners, .ciRunners] { w[c] = 1.20 }   // S
+        for c in [PetCollection.deprecated, .todoSince2019, .oomKilled, .happyPath, .helloWorld, .vibeCoders] { w[c] = 0.85 }  // B
+        return w   // 나머지(A)는 default 1.0
+    }()
+
+    // 밸런스 가드레일 — 가중치 clamp + 대표 스탯 총 시너지 배수 상한(mono-5 폭주 방지). 서버와 1:1.
+    static let weightMin = 0.80, weightMax = 1.30, sigStatCap = 1.55
+    private static func clampW(_ w: Double) -> Double { min(weightMax, max(weightMin, w)) }
 
     /// 각 타입 시너지가 강화하는 대표 스탯(아키타입 성향). 타입 정체성 강화·팀빌딩 다양화.
     static func signatureStat(of type: BattleType) -> StatKind {
@@ -42,16 +62,31 @@ enum TeamSynergy {
     }
 
     /// 팀 구성에서 시너지 산출. 종 유니크 전제라 컬렉션/타입 그룹 크기로 판정.
-    /// (3마리 팀에서 타입이 2 이상 겹치는 그룹은 최대 하나뿐이라 대표 타입은 유일 — 결정적.)
+    /// 대표 컬렉션·타입 tie-break 모두 **팀 순서 first-max(strict >)** — 서버 pvp_policy.teamSynergyBonus 와 1:1.
+    /// (5마리 팀은 동수로 갈릴 수 있어, Dictionary 비결정 순서 대신 팀 순서로 확정.) 각 배수에 가중치 곱.
     static func bonus(for members: [BattlePetSnapshot]) -> Bonus {
         guard members.count >= 2 else { return .none }
-        let maxCollection = Dictionary(grouping: members, by: { $0.kind.collection })
-            .values.map(\.count).max() ?? 1
-        let collMult = 1.0 + (collectionBonus[maxCollection] ?? 0)
-        let topType = Dictionary(grouping: members, by: { $0.kind.battleType })
-            .max { $0.value.count < $1.value.count }
-        if let topType, let add = typeBonus[topType.value.count] {
-            return Bonus(collectionMult: collMult, typeStat: signatureStat(of: topType.key), typeAdd: add)
+        // 최다 컬렉션 (팀 순서 first-max) → count + 정체성(가중치 룩업).
+        var collCounts: [PetCollection: Int] = [:]
+        for m in members { collCounts[m.kind.collection, default: 0] += 1 }
+        var topColl: PetCollection? = nil, topCollCount = 0
+        for m in members where (collCounts[m.kind.collection] ?? 0) > topCollCount {
+            topCollCount = collCounts[m.kind.collection] ?? 0; topColl = m.kind.collection
+        }
+        let collW = topColl.map { clampW(collectionWeight[$0] ?? 1.0) } ?? 1.0
+        let collMult = 1.0 + (collectionBonus[topCollCount] ?? 0) * collW
+        // 최다 타입 (팀 순서 first-max) → count + 정체성.
+        var typeCounts: [BattleType: Int] = [:]
+        for m in members { typeCounts[m.kind.battleType, default: 0] += 1 }
+        var topType: BattleType? = nil, topTypeCount = 0
+        for m in members where (typeCounts[m.kind.battleType] ?? 0) > topTypeCount {
+            topTypeCount = typeCounts[m.kind.battleType] ?? 0; topType = m.kind.battleType
+        }
+        let typeW = topType.map { clampW(typeWeight[$0] ?? 1.0) } ?? 1.0
+        var typeAdd = (typeBonus[topTypeCount] ?? 0) * typeW
+        typeAdd = max(0, min(typeAdd, sigStatCap - collMult))   // 대표 스탯 총 시너지 상한
+        if let topType, typeAdd > 0 {
+            return Bonus(collectionMult: collMult, typeStat: signatureStat(of: topType), typeAdd: typeAdd)
         }
         return Bonus(collectionMult: collMult, typeStat: nil, typeAdd: 0)
     }

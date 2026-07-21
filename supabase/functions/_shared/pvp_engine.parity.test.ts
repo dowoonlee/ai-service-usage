@@ -23,7 +23,7 @@ const GOLD_ENHANCE_OUTCOMES = [
 ];
 const GOLD_ENHANCE_TOTAL_VP = 9295;
 const GOLD_ENHANCE_FINAL = 7;
-const GOLD_BATTLE_DMG = [31, 4, 32, 4, 32, 31, 4, 29, 4, 29, 14, 9, 15, 9, 15, 8, 15, 8, 15];
+const GOLD_BATTLE_DMG = [31, 4, 32, 4, 32, 31, 4, 29, 4, 29, 9, 14, 9, 15, 14, 9, 9, 15, 14];
 const GOLD_BATTLE_WINNER = "a";
 const GOLD_BATTLE_ROUNDS = 19;
 
@@ -51,6 +51,42 @@ Deno.test("3v3 배틀 파리티 — seed 7251990", () => {
   assertEq("winner", r.winner, GOLD_BATTLE_WINNER);
   assertEq("rounds", r.rounds, GOLD_BATTLE_ROUNDS);
   assertEq("dmg sequence", r.log.map((e) => e.damage), GOLD_BATTLE_DMG);
+});
+
+Deno.test("5v5 배틀 파리티 (누진 시너지 4/5 티어 + 타입 tie-break) — seed 5555555", () => {
+  // A: warrior 5동족(컬렉션5=+0.26·타입5=+0.15 atk) / B: 타입 동수 2+2+1(tie는 팀 순서 first=beast).
+  // 골든은 Swift --arena-demo 의 PARITY5V5 라인에서 캡처. TS teamSynergyBonus 의 tie-break·4/5 티어가
+  // Swift 와 드리프트하면 데미지 시퀀스가 어긋나 여기서 잡힌다.
+  const snap = (kind: string) => ({ kind, variant: 0, enhanceLevel: 5, progressUnits: 2 });
+  const teamA: BattleTeam = [snap("warrior"), snap("lancer"), snap("monk"), snap("archer"), snap("pawn")];
+  const teamB: BattleTeam = [snap("fox"), snap("wolf"), snap("scrapBot"), snap("antennaBot"), snap("warrior")];
+  const r = simulate(teamA, teamB, 5555555n);
+  assertEq("winner", r.winner, "a");
+  assertEq("rounds", r.rounds, 20);
+  assertEq("dmg sequence", r.log.map((e) => e.damage),
+    [33, 4, 34, 33, 4, 33, 51, 53, 52, 56, 18, 10, 18, 10, 18, 11, 18, 10, 17, 18]);
+});
+
+Deno.test("레인보우 배틀 파리티 (이로치 +18% 버프 + 레인보우 크리) — seed 9999999", () => {
+  // A: 레인보우(variant 4) — 이로치 버프 + 크리 / B: 기본(variant 0). 크리는 공격자가 레인보우일 때만
+  // 조건부 rng draw(비-레인보우 배틀 불변). Swift --arena-demo PARITYRAINBOW 골든과 대조 — TS 크리·
+  // variant 버프가 Swift와 드리프트하면 데미지 시퀀스/크리 수가 어긋나 여기서 잡힌다.
+  const teamA: BattleTeam = [
+    { kind: "fox", variant: 4, enhanceLevel: 5, progressUnits: 2 },
+    { kind: "wolf", variant: 4, enhanceLevel: 5, progressUnits: 2 },
+    { kind: "bear", variant: 4, enhanceLevel: 5, progressUnits: 2 },
+  ];
+  const teamB: BattleTeam = [
+    { kind: "scrapBot", variant: 0, enhanceLevel: 5, progressUnits: 2 },
+    { kind: "antennaBot", variant: 0, enhanceLevel: 5, progressUnits: 2 },
+    { kind: "warrior", variant: 0, enhanceLevel: 5, progressUnits: 2 },
+  ];
+  const r = simulate(teamA, teamB, 9999999n);
+  assertEq("winner", r.winner, "b");
+  assertEq("rounds", r.rounds, 40);
+  assertEq("crit count", r.log.filter((e) => e.crit).length, 6);
+  assertEq("dmg sequence", r.log.map((e) => e.damage),
+    [9, 2, 6, 8, 2, 5, 6, 17, 5, 6, 18, 8, 5, 8, 18, 5, 5, 17, 5, 2, 6, 6, 17, 5, 5, 17, 5, 6, 2, 8, 19, 6, 21, 20, 1, 21, 6, 19, 6, 20]);
 });
 
 Deno.test("결정성 — 동일 (팀+시드) → 동일 로그", () => {

@@ -1,12 +1,12 @@
 import Foundation
 
-// 3v3 턴제 자동전투 결정적 시뮬레이터 (P0) — 순수 로직.
+// 5v5 ATB 자동전투 결정적 시뮬레이터 (P0) — 순수 로직.
 // 설계 SSOT: docs/plans/pet-battle.md §2-5 / §10.
 //
 // 랭크전은 서버가 이 규칙으로 시뮬레이션해 승패를 확정하고(authoritative), 클라는 로그를 재생만 한다.
-// 서버 `_shared/battle_engine.ts`(P1b 이식 예정)와 규칙 1:1을 목표 — 동일 (두 팀 스냅샷 + 시드) →
-// 동일 로그·승자. 이식 시 `rng.uniform01()`(EnhanceEngine.swift)과 `.rounded()`(away-from-zero,
-// JS `Math.round`와 다름)를 명세대로 재현해야 비트 단위로 일치한다.
+// 서버 `_shared/battle_engine.ts`(이식 완료·운영 중)와 규칙 1:1 — 동일 (두 팀 스냅샷 + 시드) →
+// 동일 로그·승자. `rng.uniform01()`(EnhanceEngine.swift)과 `.rounded()`(away-from-zero,
+// JS `Math.round`와 다름)를 명세대로 재현해 비트 단위로 일치한다.
 
 /// 배틀 팀 멤버 스냅샷 — 서버가 보관하는 고스트 방어 팀의 한 마리.
 struct BattlePetSnapshot: Codable, Equatable, Hashable {
@@ -23,7 +23,7 @@ struct BattlePetSnapshot: Codable, Equatable, Hashable {
     }
 }
 
-/// 배틀 팀 — 최대 3마리, `members[0]`가 리드(선봉).
+/// 배틀 팀 — 최대 5마리, `members[0]`가 리드(선봉).
 struct BattleTeam: Codable, Equatable {
     var members: [BattlePetSnapshot]
     init(_ members: [BattlePetSnapshot]) { self.members = members }
@@ -43,6 +43,7 @@ struct BattleEvent: Codable, Equatable {
     var collectionMult: Double  // 컬렉션 상성(밈/상성망) 배수
     var quip: String?           // 밈 라이벌 발동 시 배틀로그 대사
     var parried: Bool           // 방어자 퍼펙트 가드(패링) 발동 여부
+    var crit: Bool?             // 레인보우 크리 발동(구 로그엔 없어 Optional)
     var defenderFainted: Bool
 }
 
@@ -54,11 +55,16 @@ struct BattleResult: Codable, Equatable {
 
 enum BattleEngine {
     /// 최대 행동 수 backstop (ATB라 "라운드"가 아니라 누적 행동 수). 초과 시 잔여 HP 타이브레이크.
-    static let maxRounds = 120
+    static let maxRounds = 180   // 5v5는 총 HP가 늘어 상향(조기 타이브레이크 방지). rage 램프가 장기전 수렴.
     static let basicPower = 10.0
     static let signaturePower = 14.0
     /// ATB 행동 주기 = speedBase / SPD. SPD 2배 → 주기 절반 → 2배 자주 행동(연속 공격 가능).
     static let speedBase = 1000.0
+
+    /// 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적으로 데미지 ×critMult. 서버 battle_engine 1:1.
+    static let rainbowVariant = 4
+    static let rainbowCritChance = 0.20
+    static let rainbowCritMult = 1.5
 
     // MARK: 격노 램프 — 데미지식은 성장이 atk/def에 동시 곱해져 비율 불변이라 TTK가 HP(성장 비례)만큼
     // 선형으로 늘어난다. 풀강 탱커 미러전은 maxRounds를 상시 초과해 "KO 없는 HP 총량 타이브레이크"로
@@ -94,6 +100,7 @@ enum BattleEngine {
         let type: BattleType
         let stats: BattleStats
         var hp: Int
+        let isRainbow: Bool   // 최종 이로치(레인보우) — 크리 특수효과 대상
         var alive: Bool { hp > 0 }
     }
 
@@ -114,7 +121,8 @@ enum BattleEngine {
         // A. 팀 시너지 — 같은 컬렉션/타입 팀원 버프를 팀 전체 스탯에 곱한다.
         team.members.map { m in
             let s = finalStats(for: m, in: team)
-            return Combatant(kind: m.kind, type: m.kind.battleType, stats: s, hp: s.hp)
+            return Combatant(kind: m.kind, type: m.kind.battleType, stats: s, hp: s.hp,
+                             isRainbow: m.variant >= rainbowVariant)
         }
     }
 
@@ -194,11 +202,20 @@ enum BattleEngine {
         let raw = (Double(attacker.stats.atk) / Double(defender.stats.def)) * power * eff * synergy.mult * rngFactor * rage
         let baseDmg = max(1, Int(raw.rounded()))
 
+        // 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적 ×critMult. 조건부 draw라 비-레인보우
+        // 배틀의 RNG 스트림·기존 골든은 불변. 순서: rngFactor → (레인보우면 크리) → 패링 (서버와 1:1).
+        var critDmg = baseDmg
+        var crit = false
+        if attacker.isRainbow {
+            crit = rng.uniform01() < rainbowCritChance
+            if crit { critDmg = max(1, Int((Double(baseDmg) * rainbowCritMult).rounded())) }
+        }
+
         // 패링(퍼펙트 가드) — 방어자 SPD+DEF 조합 확률로 데미지 대폭 경감.
         let pc = parryChance(defSPD: defender.stats.spd, defDEF: defender.stats.def,
                              atkSPD: attacker.stats.spd, atkDEF: attacker.stats.def)
         let parried = rng.uniform01() < pc
-        let dmg = parried ? max(1, Int((Double(baseDmg) * parryDamageMult).rounded())) : baseDmg
+        let dmg = parried ? max(1, Int((Double(critDmg) * parryDamageMult).rounded())) : critDmg
 
         to[di].hp -= dmg
         let fainted = to[di].hp <= 0
@@ -214,6 +231,7 @@ enum BattleEngine {
             collectionMult: synergy.mult,
             quip: synergy.quip,
             parried: parried,
+            crit: crit,
             defenderFainted: fainted
         ))
         return fainted

@@ -82,7 +82,7 @@ const RARITY_BASE: Record<Rarity, number> = {
 export const ENHANCE_BONUS = [
   0, 0.04, 0.08, 0.13, 0.18, 0.25, 0.30, 0.36, 0.43, 0.51, 0.60, 0.70, 0.82, 0.95, 1.07, 1.20,
 ];
-export const VARIANT_BONUS = [0, 0.02, 0.04, 0.06, 0.10];   // 기본/이로치1·2·3/레인보우
+export const VARIANT_BONUS = [0, 0.03, 0.06, 0.10, 0.18];   // 기본/이로치1·2·3/레인보우 (전 스탯 곱)
 export const MASTERY_MAX = 0.15;
 export const OVERFLOW_START_UNITS = 8.0;   // 숙련도 만렙 유닛 (Swift PetOwnership.overflowStartUnits)
 export const STAT_CAP_MULT = 2.6;
@@ -104,11 +104,30 @@ export function growthMultiplier(enhanceLevel: number, progressUnits: number): n
   return Math.min(STAT_CAP_MULT, 1.0 + masteryBonus(progressUnits) + enhanceMultiplier(enhanceLevel));
 }
 
+export const PROFILE_SPREAD = 0.25;   // 개체별 스탯 프로필 spread(±). Swift PetBattleStats.profileSpread 와 동일.
+
+// FNV-1a 32비트 — kind(ASCII) 결정적 해시. Swift PetBattleStats.fnv1a32 와 bit-identical.
+function fnv1a32(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0;
+  return h >>> 0;
+}
+// 타입 archetype에 kind별 결정적 tilt → 합 보존 정규화(총 전투력 유지, 분배만 차등). Swift profileArchetype 1:1.
+function kindArchetype(kind: string): [number, number, number, number] {
+  const a = ARCHETYPE[battleTypeOf(kind)];
+  const tilt = (i: number) => 1.0 + PROFILE_SPREAD * (fnv1a32(`${kind}#${i}`) / 4294967296.0 * 2.0 - 1.0);
+  const e0 = a[0] * tilt(0), e1 = a[1] * tilt(1), e2 = a[2] * tilt(2), e3 = a[3] * tilt(3);
+  const archSum = a[0] + a[1] + a[2] + a[3];
+  const effSum = e0 + e1 + e2 + e3;
+  const norm = effSum > 0 ? archSum / effSum : 1.0;
+  return [e0 * norm, e1 * norm, e2 * norm, e3 * norm];
+}
+
 export function computeStats(
   kind: string, variant: number, enhanceLevel: number, progressUnits: number,
 ): BattleStats {
   const base = RARITY_BASE[rarityOf(kind)];
-  const a = ARCHETYPE[battleTypeOf(kind)];
+  const a = kindArchetype(kind);
   const growth = growthMultiplier(enhanceLevel, progressUnits);
   const vb = 1.0 + variantMultiplier(variant);
   const stat = (arch: number) => Math.max(1, roundAway(base * arch * growth * vb));
@@ -157,8 +176,20 @@ export function matchup(attacker: string, defender: string): Matchup {
 }
 
 // A. 팀 시너지 — 동족(컬렉션)=전 스탯 곱 / 동타입=그 타입 대표 스탯만 방향성 버프. Swift TeamSynergy 1:1.
-const TEAM_COLLECTION_BONUS: Record<number, number> = { 2: 0.05, 3: 0.10 };
-const TEAM_TYPE_BONUS: Record<number, number> = { 2: 0.03, 3: 0.05 };
+const TEAM_COLLECTION_BONUS: Record<number, number> = { 2: 0.05, 3: 0.10, 4: 0.17, 5: 0.26 };
+const TEAM_TYPE_BONUS: Record<number, number> = { 2: 0.03, 3: 0.06, 4: 0.10, 5: 0.15 };
+
+// 타입/컬렉션별 시너지 "크기" 가중치(정체성). 최종 = base[count] × weight. Swift TeamSynergy 와 1:1.
+const TYPE_WEIGHT: Record<BattleType, number> = {
+  arcane: 1.25, chaos: 1.15, warrior: 1.10, beast: 1.00, machine: 0.85, mascot: 0.80,
+};
+// 컬렉션 테마 3티어 S/A/B = 1.20/1.00/0.85. 미등록(=A) 은 1.0.
+const COLLECTION_WEIGHT: Record<string, number> = {
+  tenXEngineer: 1.20, onCall: 1.20, rustEvangelists: 1.20, tokenBurners: 1.20, ciRunners: 1.20,   // S
+  deprecated: 0.85, todoSince2019: 0.85, oomKilled: 0.85, happyPath: 0.85, helloWorld: 0.85, vibeCoders: 0.85,  // B
+};
+const SYN_WEIGHT_MIN = 0.80, SYN_WEIGHT_MAX = 1.30, SIG_STAT_CAP = 1.55;   // 가드레일(clamp + 대표 스탯 상한)
+function clampW(w: number): number { return Math.min(SYN_WEIGHT_MAX, Math.max(SYN_WEIGHT_MIN, w)); }
 
 export type StatKind = "hp" | "atk" | "def" | "spd";
 // 각 타입 시너지가 강화하는 대표 스탯(아키타입 성향).
@@ -176,20 +207,29 @@ export interface SynergyBonus { collectionMult: number; typeStat: StatKind | nul
 
 export function teamSynergyBonus(kinds: string[]): SynergyBonus {
   if (kinds.length < 2) return { collectionMult: 1.0, typeStat: null, typeAdd: 0 };
-  const counts = (vals: string[]) => {
-    const m = new Map<string, number>();
-    for (const v of vals) m.set(v, (m.get(v) ?? 0) + 1);
-    return m;
-  };
-  const maxColl = Math.max(...counts(kinds.map(collectionOf)).values());
-  const collectionMult = 1.0 + (TEAM_COLLECTION_BONUS[maxColl] ?? 0);
-  // 최다 타입 그룹 → 그 타입 대표 스탯 강화. (3마리 팀에서 count≥2 타입은 유일 — 결정적.)
-  let topType: BattleType | null = null, topCount = 0;
-  for (const [t, c] of counts(kinds.map(battleTypeOf))) {
-    if (c > topCount) { topCount = c; topType = t as BattleType; }
+  // 최다 컬렉션 (배열 순서 first-max) → count + 정체성(가중치). tie는 strict > 로 먼저 등장한 것 채택.
+  const collCounts = new Map<string, number>();
+  for (const k of kinds) { const c = collectionOf(k); collCounts.set(c, (collCounts.get(c) ?? 0) + 1); }
+  let topColl: string | null = null, topCollCount = 0;
+  for (const k of kinds) {
+    const c = collCounts.get(collectionOf(k)) ?? 0;
+    if (c > topCollCount) { topCollCount = c; topColl = collectionOf(k); }
   }
-  const add = TEAM_TYPE_BONUS[topCount] ?? 0;
-  if (topType && add > 0) return { collectionMult, typeStat: signatureStat(topType), typeAdd: add };
+  const collW = topColl ? clampW(COLLECTION_WEIGHT[topColl] ?? 1.0) : 1.0;
+  const collectionMult = 1.0 + (TEAM_COLLECTION_BONUS[topCollCount] ?? 0) * collW;
+  // 최다 타입 (배열 순서 first-max) → count + 정체성. Swift TeamSynergy.bonus 와 1:1.
+  const typeCounts = new Map<BattleType, number>();
+  for (const k of kinds) { const t = battleTypeOf(k); typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1); }
+  let topType: BattleType | null = null, topTypeCount = 0;
+  for (const k of kinds) {
+    const t = battleTypeOf(k);
+    const c = typeCounts.get(t) ?? 0;
+    if (c > topTypeCount) { topTypeCount = c; topType = t; }
+  }
+  const typeW = topType ? clampW(TYPE_WEIGHT[topType] ?? 1.0) : 1.0;
+  let typeAdd = (TEAM_TYPE_BONUS[topTypeCount] ?? 0) * typeW;
+  typeAdd = Math.max(0, Math.min(typeAdd, SIG_STAT_CAP - collectionMult));   // 대표 스탯 총 시너지 상한
+  if (topType && typeAdd > 0) return { collectionMult, typeStat: signatureStat(topType), typeAdd };
   return { collectionMult, typeStat: null, typeAdd: 0 };
 }
 
@@ -205,3 +245,4 @@ export const RATING_START = 1000;
 export const RATING_K = 24;                 // Elo ±K
 export const DAILY_RANK_LIMIT = 10;         // 랭크전 하루 N판
 export const WIN_COIN_BASE = 30;            // 승리 기본 코인 (+상성·상위레이팅 보너스는 서버 산정)
+export const RANKED_TEAM_SIZE = 5;          // 랭크전 5v5 — 도전자·방어자 모두 이 크기 강제(매칭 대칭)

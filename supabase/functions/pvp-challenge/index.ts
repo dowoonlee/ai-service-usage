@@ -11,7 +11,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
-import { RATING_K, DAILY_RANK_LIMIT, WIN_COIN_BASE } from "../_shared/pvp_policy.ts";
+import { RATING_K, DAILY_RANK_LIMIT, WIN_COIN_BASE, RANKED_TEAM_SIZE } from "../_shared/pvp_policy.ts";
 import { simulate, BattleTeam } from "../_shared/battle_engine.ts";
 
 interface ChallengePayload { action: string; deviceId: string; ts: number; }
@@ -67,6 +67,8 @@ Deno.serve(async (req: Request) => {
     .from("pvp_teams").select("team_json").eq("device_id", me).maybeSingle();
   if (!myTeamRow) return errorResponse(409, "no_team");
   const myTeam = myTeamRow.team_json as BattleTeam;
+  // 랭크전은 5v5 대칭 — 도전자도 5마리 풀팀 강제(클라 rankedReady==5 재확인, 서버 authoritative).
+  if (!Array.isArray(myTeam) || myTeam.length !== RANKED_TEAM_SIZE) return errorResponse(409, "team_not_full");
 
   // 3) 상대 추출 — 같은 테넌트, 본인 아님, 유사 레이팅 우선(없으면 확장).
   let pool: { device_id: string; team_json: unknown; rating: number }[] = [];
@@ -74,7 +76,9 @@ Deno.serve(async (req: Request) => {
     const near = await db.from("pvp_teams").select("device_id, team_json, rating")
       .eq("tenant_id", tenant).neq("device_id", me)
       .gte("rating", 0).limit(100);   // 전체 후보 로드 후 JS에서 윈도우/무작위(레이팅 인덱스는 적음).
-    pool = (near.data ?? []) as typeof pool;
+    // 5v5 대칭 강제 — 레거시 <5 등록 팀은 매칭 후보에서 제외(3v5 거저주기 방지). 재등록 시 재편입.
+    pool = ((near.data ?? []) as typeof pool)
+      .filter((o) => Array.isArray(o.team_json) && (o.team_json as unknown[]).length === RANKED_TEAM_SIZE);
   }
   if (pool.length === 0) return errorResponse(409, "no_opponent");
   const myRatingRow = await db.from("pvp_ratings").select("rating, wins, losses").eq("device_id", me).maybeSingle();
