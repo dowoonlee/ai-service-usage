@@ -17,6 +17,7 @@ struct ArenaView: View {
     @ObservedObject private var settings = Settings.shared
     @State private var mode: Mode = .practice
     @State private var showTypeHelp = false        // 6타입 상성 도움말 시트
+    @State private var showSkillDex = false        // 스킬 도감 시트
     @State private var showChallengeConfirm = false // 랭크전 도전 확인 alert(일일 판수 소모)
 
     // 연습전
@@ -148,6 +149,7 @@ struct ArenaView: View {
         }
         .onChange(of: teamKinds) { _, new in settings.battleTeam = new }  // 편성 변경 즉시 영속
         .sheet(isPresented: $showTypeHelp) { typeHelpSheet }
+        .sheet(isPresented: $showSkillDex) { skillDexSheet }
         .task { await loadEnhanceState() }   // 서버에서 강화 레벨·가용 VP 로드(등록 사용자)
         .task(id: mode) { if mode == .ranked { await loadRankedState() } }   // 랭크전 진입 시 랭킹·전적
         .onDisappear { playbackTask?.cancel(); enhanceTask?.cancel(); rankedTask?.cancel() }
@@ -160,6 +162,9 @@ struct ArenaView: View {
             HStack {
                 Text("⚔️ 아레나").font(.system(size: 15, weight: .bold))
                 Spacer()
+                Button { showSkillDex = true } label: {
+                    Label("스킬 도감", systemImage: "book").font(.system(size: 10))
+                }.buttonStyle(.plain).foregroundStyle(.tint)
                 Button { showTypeHelp = true } label: {
                     Label("타입 상성", systemImage: "hexagon").font(.system(size: 10))
                 }.buttonStyle(.plain).foregroundStyle(.tint)
@@ -185,6 +190,88 @@ struct ArenaView: View {
             Spacer(minLength: 0)
         }
         .padding(16).frame(width: 320, height: 430)
+    }
+
+    // MARK: 스킬 도감 — 이로치 단계별 스킬 계층을 티어별로 나열(클라 전용, 파리티 무관).
+
+    private var dexUniques: [PetKind] {
+        SkillCatalog.uniqueTable.keys.sorted { a, b in
+            let ia = Rarity.allCases.firstIndex(of: PetKind.rarityFor(a) ?? .common) ?? 0
+            let ib = Rarity.allCases.firstIndex(of: PetKind.rarityFor(b) ?? .common) ?? 0
+            return ia != ib ? ia > ib : a.rawValue < b.rawValue   // 높은 등급 먼저, 그다음 이름순
+        }
+    }
+
+    private var skillDexSheet: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("스킬 도감").font(.system(size: 15, weight: .bold))
+                Spacer()
+                Button("닫기") { showSkillDex = false }.font(.system(size: 12))
+            }
+            Text("이로치 단계마다 스킬을 얻습니다. 스킬 타입이 상대를 이기면 ×2.0 · 지면 ×0.5 · 자기 타입 스킬은 ×1.5(자속). 오른쪽 숫자는 위력.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    dexSection("기본 · 이로치0", "전 펫 공용") {
+                        skillRow("핫픽스", nil, 8)
+                    }
+                    dexSection("타입 스킬 · 이로치1", "같은 배틀 타입 공유 · 6종") {
+                        ForEach(BattleType.allCases, id: \.self) { t in
+                            let s = SkillCatalog.typeShared(for: t)
+                            skillRow(s.name, t, s.power)
+                        }
+                    }
+                    dexSection("컬렉션 스킬 · 이로치2", "오프타입 커버리지 · 19종") {
+                        ForEach(PetCollection.allCases.sorted { $0.rawValue < $1.rawValue }, id: \.self) { c in
+                            let s = SkillCatalog.collectionShared(for: c)
+                            skillRow(s.name, s.type, s.power)
+                        }
+                    }
+                    dexSection("고유기 · 이로치3", "Epic 이상 전용 · 34종") {
+                        ForEach(dexUniques, id: \.self) { k in
+                            if let s = SkillCatalog.unique(for: k) {
+                                skillRow(s.name, s.type, s.power, note: PetMetaStore.shared.displayName(for: k))
+                            }
+                        }
+                    }
+                    dexSection("궁극기 · 레인보우", "충전 게이지로 발동 · 6종") {
+                        ForEach(BattleType.allCases, id: \.self) { t in
+                            let s = SkillCatalog.ultimate(for: t)
+                            skillRow(s.name, t, s.power)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(16).frame(width: 360, height: 520)
+    }
+
+    @ViewBuilder
+    private func dexSection<C: View>(_ title: String, _ sub: String, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(title).font(.system(size: 11, weight: .bold))
+                Text(sub).font(.system(size: 8)).foregroundStyle(.secondary)
+            }
+            content()
+        }
+    }
+
+    // 스킬 한 줄 — 타입 뱃지(nil이면 "자속") · 이름 · (펫 이름 등 note) · 위력.
+    private func skillRow(_ name: String, _ type: BattleType?, _ power: Double, note: String? = nil) -> some View {
+        let col = type.map { typeColor($0) } ?? Color.gray
+        return HStack(spacing: 6) {
+            Text(type?.displayName ?? "자속")
+                .font(.system(size: 7, weight: .bold)).foregroundStyle(col)
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(col.opacity(0.18), in: Capsule())
+                .frame(width: 56, alignment: .leading)
+            Text(name).font(.system(size: 10))
+            if let note { Text(note).font(.system(size: 8)).foregroundStyle(.secondary).lineLimit(1) }
+            Spacer(minLength: 4)
+            Text("\(Int(power))").font(.system(size: 9, weight: .semibold, design: .monospaced)).foregroundStyle(.orange)
+        }
     }
 
     // 6타입 상성 순환 — 각 타입이 이기는 상대로 .beats 6회(단일 6-순환). 원형 배치 순서.
