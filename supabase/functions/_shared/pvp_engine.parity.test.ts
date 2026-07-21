@@ -9,7 +9,8 @@
 
 import { SeededRNG, roll, apply, baseCost, expectedVP, safeOdds, safeCost, cost, canSafeEnhance, rollSafe } from "./enhance_engine.ts";
 import { simulate, BattleTeam } from "./battle_engine.ts";
-import { genericSkill, typeSharedSkill, collectionSharedSkill, type BattleType } from "./pvp_policy.ts";
+import { genericSkill, typeSharedSkill, collectionSharedSkill, uniqueSkill, skillsFor, type BattleType } from "./pvp_policy.ts";
+import { UNIQUE_SKILL } from "./pet_meta_gen.ts";
 
 function assertEq(name: string, got: unknown, exp: unknown) {
   const g = JSON.stringify(got), e = JSON.stringify(exp);
@@ -114,9 +115,9 @@ Deno.test("커버리지 배틀 파리티 (variant2 오프타입 collectionShared
 // 무커버다. 이 덤프로 6 generic·6 typeShared·19 collectionShared의 id/type/power를 통째로 잠근다.
 // 골든은 Swift --arena-demo PARITYSKILLCAT 라인에서 캡처. 한 엔트리라도 Swift↔TS 드리프트하면 여기서 잡힌다.
 const GOLD_SKILL_CATALOG =
-  "PARITYSKILLCAT arcane:g=hotfix/arcane/8,ts=context_overflow/arcane/11 beast:g=hotfix/beast/8,ts=mem_leak/beast/11 chaos:g=hotfix/chaos/8,ts=friday_deploy/chaos/11 machine:g=hotfix/machine/8,ts=regression_sweep/machine/11 mascot:g=hotfix/mascot/8,ts=onboarding/mascot/11 warrior:g=hotfix/warrior/8,ts=force_push/warrior/11 ciRunners:cs=pipeline_stall/arcane/12 deprecated:cs=deprecated_strike/warrior/12 dns:cs=dns_propagation/arcane/12 emotionalSupport:cs=emotional_support/mascot/12 fridayDeploy:cs=friday_5pm/warrior/12 happyPath:cs=happy_path/beast/12 helloWorld:cs=hello_world/arcane/12 mainframe:cs=mainframe_overload/machine/12 noVerify:cs=no_verify/chaos/12 nodeModules:cs=node_modules_summon/arcane/12 npmInstall:cs=dependency_hell/chaos/12 onCall:cs=oncall_page/beast/12 oomKilled:cs=oom_kill/machine/12 rustEvangelists:cs=rewrite_in_rust/machine/12 tenXEngineer:cs=tenx_refactor/beast/12 todoSince2019:cs=tech_debt_invoice/warrior/12 tokenBurners:cs=token_burn/chaos/12 vibeCoders:cs=vibe_coding/chaos/12 wontfix:cs=wontfix_close/mascot/12";
+  "PARITYSKILLCAT arcane:g=hotfix/arcane/8,ts=context_overflow/arcane/11 beast:g=hotfix/beast/8,ts=mem_leak/beast/11 chaos:g=hotfix/chaos/8,ts=friday_deploy/chaos/11 machine:g=hotfix/machine/8,ts=regression_sweep/machine/11 mascot:g=hotfix/mascot/8,ts=onboarding/mascot/11 warrior:g=hotfix/warrior/8,ts=force_push/warrior/11 ciRunners:cs=pipeline_stall/arcane/12 deprecated:cs=deprecated_strike/warrior/12 dns:cs=dns_propagation/arcane/12 emotionalSupport:cs=emotional_support/mascot/12 fridayDeploy:cs=friday_5pm/warrior/12 happyPath:cs=happy_path/beast/12 helloWorld:cs=hello_world/arcane/12 mainframe:cs=mainframe_overload/machine/12 noVerify:cs=no_verify/chaos/12 nodeModules:cs=node_modules_summon/arcane/12 npmInstall:cs=dependency_hell/chaos/12 onCall:cs=oncall_page/beast/12 oomKilled:cs=oom_kill/machine/12 rustEvangelists:cs=rewrite_in_rust/machine/12 tenXEngineer:cs=tenx_refactor/beast/12 todoSince2019:cs=tech_debt_invoice/warrior/12 tokenBurners:cs=token_burn/chaos/12 vibeCoders:cs=vibe_coding/chaos/12 wontfix:cs=wontfix_close/mascot/12 archer:u=remote_exec/warrior/14 bigDemon:u=prod_outage/chaos/14 clownCaptain:u=clown_deploy/warrior/14 dinoDragon:u=dino_stack/beast/14 fairy:u=pixie_patch/arcane/14 geralt:u=prompt_injection/warrior/14 ghost:u=zombie_process/chaos/14 gordon:u=crunch_mode/warrior/14 heroKnight:u=full_refactor/warrior/14 huntress:u=pinpoint_debug/warrior/14 kingHuman:u=legacy_monarch/arcane/14 knightF:u=blue_green/warrior/14 knightM:u=zero_downtime/warrior/14 lancer:u=zero_day/warrior/14 maskDude:u=anon_commit/warrior/14 medievalKing:u=feudal_arch/warrior/14 monk:u=zen_mode/warrior/14 mrMochi:u=infinite_scroll/mascot/14 ninjaFrog:u=stealth_deploy/warrior/14 ogre:u=monolith/chaos/14 orc:u=brute_merge/warrior/14 pawn:u=merge_conflict/warrior/14 pirateCaptain:u=code_plunder/warrior/14 plant:u=dependency_tree/arcane/14 princessSera:u=graceful_shutdown/mascot/14 pterodactyl:u=race_condition/beast/14 roboRetro:u=quantization/machine/14 skeletonLord:u=dead_code/chaos/14 skull:u=segfault/chaos/14 tRex:u=extinction_event/beast/14 visorBot:u=gradient_explosion/machine/14 warrior:u=fullstack_smash/warrior/14 whale:u=docker_whale/warrior/14 wizardM:u=hallucination/arcane/14";
 
-Deno.test("스킬 카탈로그 파리티 — generic·typeShared·collectionShared(19 type) 전량 Swift와 대조", () => {
+Deno.test("스킬 카탈로그 파리티 — generic·typeShared·collectionShared(19)·unique(34 type) 전량 Swift와 대조", () => {
   const TYPES: BattleType[] = ["beast", "warrior", "chaos", "arcane", "machine", "mascot"];
   const COLLECTIONS = [
     "mainframe", "emotionalSupport", "npmInstall", "nodeModules", "dns", "deprecated",
@@ -132,7 +133,38 @@ Deno.test("스킬 카탈로그 파리티 — generic·typeShared·collectionShar
     const cs = collectionSharedSkill(c);
     parts.push(`${c}:cs=${cs.id}/${cs.type}/${cs.power}`);
   }
+  // unique 34 — pet_meta_gen(Swift uniqueTable에서 gen)에서 재구성. 골든이 stale gen(재생성 누락)을 잡는다.
+  for (const k of Object.keys(UNIQUE_SKILL).sort()) {
+    const u = uniqueSkill(k)!;
+    parts.push(`${k}:u=${u.id}/${u.type}/${u.power}`);
+  }
   assertEq("skill catalog", "PARITYSKILLCAT " + parts.join(" "), GOLD_SKILL_CATALOG);
+});
+
+Deno.test("고유기 배틀 파리티 (variant3 Epic+ per-kind unique 선택) — seed 1357902", () => {
+  // 양측 mythic 전사 variant3(동급·동타입 미러) — warrior vs warrior 중립이라 자기타입 고파워 고유기(21)가
+  // typeShared(16.5)를 이겨 채택. 선봉 교체로 warrior/monk/lancer 각자 고유기가 등장(per-kind 분기).
+  const snap = (kind: string) => ({ kind, variant: 3, enhanceLevel: 5, progressUnits: 2 });
+  const teamA: BattleTeam = [snap("warrior"), snap("lancer"), snap("monk")];
+  const teamB: BattleTeam = [snap("archer"), snap("pawn"), snap("warrior")];
+  const r = simulate(teamA, teamB, 1357902n);
+  assertEq("winner", r.winner, "b");
+  assertEq("rounds", r.rounds, 29);
+  const aMoves = [...new Set(r.log.filter((e) => e.attacker === "a").map((e) => e.move))].sort();
+  const bMoves = [...new Set(r.log.filter((e) => e.attacker === "b").map((e) => e.move))].sort();
+  assertEq("A moves(고유기)", aMoves, ["fullstack_smash", "zen_mode", "zero_day"]);
+  assertEq("B moves(고유기)", bMoves, ["fullstack_smash", "merge_conflict", "remote_exec"]);
+  assertEq("dmg sequence", r.log.map((e) => e.damage),
+    [29, 27, 28, 26, 27, 27, 28, 29, 3, 28, 28, 27, 29, 27, 28, 26, 29, 29, 27, 29, 27, 29, 27, 27, 28, 28, 29, 28, 28]);
+});
+
+Deno.test("저레어 variant3 게이팅 — Common 펫은 고유기 없이 3슬롯(Swift testVariant3UniqueSlotGating 대칭)", () => {
+  // fox = common → variant3에서도 generic+typeShared+collectionShared 3슬롯(고유기 미추가).
+  // skillsFor의 `if (u)` null 가드가 빠지면 여기서 length가 4가 되거나 selectSkill이 크래시.
+  assertEq("fox v3 slots", skillsFor("fox", 3).length, 3);
+  assertEq("fox unique 없음", uniqueSkill("fox"), null);
+  // Epic+는 4슬롯(warrior = mythic).
+  assertEq("warrior v3 slots", skillsFor("warrior", 3).length, 4);
 });
 
 Deno.test("결정성 — 동일 (팀+시드) → 동일 로그", () => {

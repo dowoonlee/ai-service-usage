@@ -1,10 +1,11 @@
 import Foundation
 
-// 펫 스킬 시스템 (Phase A) — 순수 로직. 서버 `_shared/pvp_policy.ts` 스킬 계층과 규칙 1:1.
+// 펫 스킬 시스템 (Phase A/B1/B2) — 순수 로직. 서버 `_shared/pvp_policy.ts` 스킬 계층과 규칙 1:1.
 // 설계 SSOT: docs/plans/pet-skills.md.
 //
-// 이로치(variant) 단계마다 스킬을 얻는다: variant 0 = generic("핫픽스"), variant 1 = typeShared(타입 6종).
-// (Phase B에서 variant 2 collectionShared / variant 3 unique / variant 4 궁극기 추가 예정.)
+// 이로치(variant) 단계마다 스킬을 얻는다: variant 0 = generic("핫픽스") / 1 = typeShared(타입 6종) /
+// 2 = collectionShared(컬렉션 19종·오프타입 커버리지) / 3 = unique(Epic+ per-kind 고유기·자기타입).
+// (Phase C에서 variant 4 궁극기 추가 예정.)
 // 데미지식은 "스킬 타입 vs 방어자 타입" 상성(×2.0/×0.5)과 자속(STAB ×1.5)으로 전환 — 패시브 ×1.6/0.625 대체.
 // generic/typeShared 는 펫 타입에서 **규칙 파생**이라 per-kind 데이터가 없고, 양측 동일 로직으로 재현된다.
 
@@ -98,6 +99,57 @@ enum SkillCatalog {
         return Skill(id: e.id, name: e.name, type: e.type, power: collectionSharedPower, tier: .collectionShared)
     }
 
+    static let uniquePower = 14.0
+
+    /// unique — Epic 이상 per-kind 고유기(variant 3). **자기타입 시그니처**(고파워 STAB) — variant 2
+    /// collectionShared가 오프타입 커버리지를 주므로, variant 3은 "자기타입 한 방" 역할. power 14.
+    /// per-kind 데이터라 서버는 `scripts/gen_pet_meta.py`가 pet_meta_gen.ts `UNIQUE_SKILL`로 포팅.
+    /// **저레어(Common/Rare)는 여기 없음** → variant 3에서도 3슬롯 유지(레어리티 차별화). 톤: 개발 + AI 밈.
+    static let uniqueTable: [PetKind: (id: String, name: String)] = [
+        // Epic (23)
+        .maskDude:      ("anon_commit", "익명 커밋"),
+        .ghost:         ("zombie_process", "좀비 프로세스"),
+        .plant:         ("dependency_tree", "의존성 트리"),
+        .skull:         ("segfault", "세그폴트"),
+        .ogre:          ("monolith", "모놀리스"),
+        .bigDemon:      ("prod_outage", "프로덕션 장애"),
+        .kingHuman:     ("legacy_monarch", "레거시 군주"),
+        .clownCaptain:  ("clown_deploy", "광대 배포"),
+        .wizardM:       ("hallucination", "환각 시전"),
+        .knightF:       ("blue_green", "블루-그린 배포"),
+        .visorBot:      ("gradient_explosion", "그래디언트 폭발"),
+        .princessSera:  ("graceful_shutdown", "우아한 종료"),
+        .mrMochi:       ("infinite_scroll", "무한 스크롤"),
+        .geralt:        ("prompt_injection", "프롬프트 인젝션"),
+        .roboRetro:     ("quantization", "양자화"),
+        .orc:           ("brute_merge", "강제 머지"),
+        .fairy:         ("pixie_patch", "픽시 패치"),
+        .gordon:        ("crunch_mode", "크런치 모드"),
+        .skeletonLord:  ("dead_code", "데드 코드"),
+        .dinoDragon:    ("dino_stack", "공룡 스택"),
+        .pterodactyl:   ("race_condition", "레이스 컨디션"),
+        .heroKnight:    ("full_refactor", "풀 리팩터"),
+        .huntress:      ("pinpoint_debug", "핀포인트 디버그"),
+        // Legendary (6)
+        .ninjaFrog:     ("stealth_deploy", "은신 배포"),
+        .knightM:       ("zero_downtime", "무중단 배포"),
+        .pirateCaptain: ("code_plunder", "코드 약탈"),
+        .whale:         ("docker_whale", "도커 웨일"),
+        .tRex:          ("extinction_event", "레거시 멸종"),
+        .medievalKing:  ("feudal_arch", "봉건 아키텍처"),
+        // Mythic (5)
+        .warrior:       ("fullstack_smash", "풀스택 강타"),
+        .lancer:        ("zero_day", "제로데이"),
+        .monk:          ("zen_mode", "젠 모드"),
+        .archer:        ("remote_exec", "원격 실행"),
+        .pawn:          ("merge_conflict", "머지 컨플릭트"),
+    ]
+    /// Epic+ 고유기(자기타입 시그니처). 저레어는 nil. 서버 pvp_policy.uniqueSkill 1:1.
+    static func unique(for kind: PetKind) -> Skill? {
+        guard let e = uniqueTable[kind] else { return nil }
+        return Skill(id: e.id, name: e.name, type: kind.battleType, power: uniquePower, tier: .unique)
+    }
+
     /// 이 펫이 variant까지 해금한 정규 스킬 목록. 슬롯 인덱스 순(선택 AI tie-break 기준).
     /// 서버 pvp_policy.skillsFor 1:1.
     static func skills(kind: PetKind, variant: Int) -> [Skill] {
@@ -105,7 +157,8 @@ enum SkillCatalog {
         var out = [generic(for: t)]                                      // 슬롯0 — 항상 보유
         if variant >= 1 { out.append(typeShared(for: t)) }              // 슬롯1 — 이로치1
         if variant >= 2 { out.append(collectionShared(for: kind.collection)) }  // 슬롯2 — 이로치2(오프타입 커버리지)
-        // Phase B2: variant>=3 unique(고레어)/shared 추가, variant>=4 ultimate
+        if variant >= 3, let u = unique(for: kind) { out.append(u) }    // 슬롯3 — 이로치3, Epic+ 고유기(자기타입)
+        // Phase C: variant>=4 ultimate(레인보우 궁극기)
         return out
     }
 
@@ -134,6 +187,7 @@ enum SkillCatalog {
         var m: [String: String] = ["hotfix": "핫픽스"]
         for (_, e) in typeSharedTable { m[e.id] = e.name }
         for (_, e) in collectionSharedTable { m[e.id] = e.name }
+        for (_, e) in uniqueTable { m[e.id] = e.name }
         return m
     }()
     static func displayName(id: String) -> String? { nameById[id] }

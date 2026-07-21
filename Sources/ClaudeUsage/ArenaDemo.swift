@@ -27,6 +27,7 @@ enum ArenaDemo {
         battleSection5v5(seed: 5_555_555)
         battleSectionRainbow(seed: 9_999_999)
         battleSectionCoverage(seed: 2_468_013)
+        battleSectionUnique(seed: 1_357_902)
         skillCatalogSection()
 
         print("\n\(bar)\n  끝 — 위 전부 컴파일된 엔진의 실제 출력입니다.\n\(bar)\n")
@@ -213,7 +214,35 @@ enum ArenaDemo {
             let cs = SkillCatalog.collectionShared(for: c)
             parts.append("\(c.rawValue):cs=\(cs.id)/\(cs.type.rawValue)/\(Int(cs.power))")
         }
-        print("\n[ 스킬 카탈로그 파리티 ]")
+        for k in SkillCatalog.uniqueTable.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let u = SkillCatalog.unique(for: k)!   // uniqueTable 키라 non-nil
+            parts.append("\(k.rawValue):u=\(u.id)/\(u.type.rawValue)/\(Int(u.power))")
+        }
+        print("\n[ 스킬 카탈로그 파리티 ]  (generic6 · typeShared6 · collectionShared19 · unique\(SkillCatalog.uniqueTable.count))")
         print("  PARITYSKILLCAT \(parts.joined(separator: " "))")
+    }
+
+    // MARK: 고유기 배틀 (variant 3 Epic+ per-kind unique 선택 파리티용 골든)
+    private static func battleSectionUnique(seed: UInt64) {
+        // 양측 mythic 전사 variant3(동급·동타입 미러) — warrior vs warrior 중립이라 자기타입 고파워
+        //    고유기(21)가 typeShared(16.5)를 이겨 채택. 긴 배틀에서 선봉이 교체되며 per-kind 고유기가
+        //    양측 여러 종류 등장(fullstack_smash/zero_day/zen_mode/remote_exec/merge_conflict) → 분기 확인.
+        let teamA = BattleTeam([
+            BattlePetSnapshot(kind: .warrior, variant: 3, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .lancer, variant: 3, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .monk, variant: 3, enhanceLevel: 5, progressUnits: 2),
+        ])
+        let teamB = BattleTeam([
+            BattlePetSnapshot(kind: .archer, variant: 3, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .pawn, variant: 3, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .warrior, variant: 3, enhanceLevel: 5, progressUnits: 2),
+        ])
+        print("\n[ 고유기 배틀 ]  seed=\(seed)  (variant3 Epic+ unique)")
+        let r = BattleEngine.simulate(teamA: teamA, teamB: teamB, seed: seed)
+        let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
+        let aMoves = Set(r.log.filter { $0.attacker == .a }.map { $0.move }).sorted().joined(separator: ",")
+        let bMoves = Set(r.log.filter { $0.attacker == .b }.map { $0.move }).sorted().joined(separator: ",")
+        print("  PARITYUNIQUE winner=\(winner) rounds=\(r.rounds) aMoves=[\(aMoves)] bMoves=[\(bMoves)] "
+            + "dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
     }
 }
