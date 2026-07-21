@@ -105,16 +105,31 @@ final class PetBattleStatsTests: XCTestCase {
         XCTAssertGreaterThan(profiles.count, 1, "같은 rarity·type이라도 개체마다 스탯 프로필이 달라야")
     }
 
-    // 밸런스 중립 — 프로필은 분배만 바꾸고 총량(=base×성장×archetype합)은 보존(반올림 오차만).
+    // HP 스케일(Phase C) — compute()는 HP만 ×hpScale, atk/def/spd는 스케일 없이 순수 공식 그대로.
+    func testHPScaleOnlyAffectsHP() {
+        let k = PetKind.fox
+        let s = PetBattleStats.compute(kind: k, variant: 0, enhanceLevel: 10, progressUnits: 5)
+        let base = PetBattleStats.rarityBase(PetKind.rarityFor(k) ?? .common)
+        let growth = PetBattleStats.growthMultiplier(enhanceLevel: 10, progressUnits: 5)
+        let p = PetBattleStats.profileArchetype(k)   // variant 0 → vb 1
+        XCTAssertEqual(Double(s.hp),  (base * p.hp  * growth * PetBattleStats.hpScale).rounded(), accuracy: 0.5, "HP는 ×hpScale")
+        XCTAssertEqual(Double(s.atk), (base * p.atk * growth).rounded(), accuracy: 0.5, "ATK는 스케일 없음")
+        XCTAssertEqual(Double(s.def), (base * p.def * growth).rounded(), accuracy: 0.5, "DEF는 스케일 없음")
+        XCTAssertEqual(Double(s.spd), (base * p.spd * growth).rounded(), accuracy: 0.5, "SPD는 스케일 없음")
+        XCTAssertGreaterThan(PetBattleStats.hpScale, 1.0)   // 스케일이 실제로 적용 중
+    }
+
+    // 밸런스 중립 — 프로필(profileArchetype)은 분배만 바꾸고 archetype 합은 보존한다.
+    // (compute()의 총합은 HP ×1.5 스케일이 별도로 곱해져 보존되지 않음 — 그건 의도된 TTK 조정이므로
+    //  balance-neutral 불변식은 스케일 전 단계인 profileArchetype에서 검증한다.)
     func testPerKindProfileSumPreserving() {
         for kind in [PetKind.fox, .scrapBot, .warrior] {
-            let s = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: 12, progressUnits: 6)
-            let base = PetBattleStats.rarityBase(PetKind.rarityFor(kind) ?? .common)
-            let growth = PetBattleStats.growthMultiplier(enhanceLevel: 12, progressUnits: 6)
             let a = kind.battleType.archetype
-            let pureTotal = base * growth * (a.hp + a.atk + a.def + a.spd)   // variant 0 → vb 1
-            XCTAssertLessThanOrEqual(abs(Double(s.total) - pureTotal), 3.0,
-                                     "\(kind): 프로필 총합은 순수 archetype 총합을 보존해야(밸런스 중립)")
+            let p = PetBattleStats.profileArchetype(kind)
+            let pureSum = a.hp + a.atk + a.def + a.spd
+            let profSum = p.hp + p.atk + p.def + p.spd
+            XCTAssertEqual(profSum, pureSum, accuracy: 1e-9,
+                           "\(kind): 프로필 합은 순수 archetype 합을 보존해야(밸런스 중립)")
         }
     }
 

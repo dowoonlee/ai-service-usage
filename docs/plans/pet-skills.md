@@ -77,10 +77,11 @@ collectionShared가 오프타입 커버리지를 주므로 variant 3 unique는 "
 | 4 레인보우(히든) | **궁극기** (+ 기존 레인보우 크리 유지) | +궁극기 |
 - 미해금 펫은 하위 슬롯만 사용. 배틀엔 `battleVariant(kind)=max(unlockedVariants)` 반영(이로치 버프와 동일 경로).
 
-## 5. 궁극기 메커닉 — 충전 게이지
-- 펫이 행동할 때마다 게이지 +1. `ULT_CHARGE_ACTIONS`(예: 6) 도달 시 **다음 행동에서 궁극기 발동**(정규 스킬 대체), 게이지 리셋 → 장기전에선 여러 번 발동 가능.
-- **RNG 불필요·행동수 기반 → 완전 결정적**(파리티 안전).
-- 레인보우 미해금 펫은 게이지가 차도 궁극기 없음(발동 조건 = variant 4).
+## 5. 궁극기 메커닉 — 충전 게이지 (Phase C 구현)
+- 펫이 행동할 때마다 게이지 +1. **`ultChargeActions=6`** 도달 시 그 행동이 궁극기(정규 스킬 대체), 게이지 리셋 → 장기전에선 여러 번 발동 가능. **RNG 불필요·행동수 기반 → 완전 결정적**(파리티 안전).
+- 레인보우 미해금 펫은 게이지가 차도 궁극기 없음(발동 조건 = variant 4, 엔진 isRainbow 게이팅).
+- 궁극기 = **타입별 6종**(규칙 파생), 자기타입 시그니처 **power 24**, 효과는 effects 페이즈로 분리. `kernel_panic`/`rm_rf`/`total_outage`/`context_window_exceeded`/`blue_screen`/`full_rollback`.
+- **HP ×1.5 스케일(Phase C)**: 스킬 전환으로 오른 데미지를 HP만 스케일해 상쇄 — TTK가 늘어 대전당 궁극기가 ~1회 차고(실측: 5v5 선봉 행동 ~7회 · N=6), 스윙도 완화. 데미지식이 atk/def 비율 기반이라 **HP만** 올려야 TTK가 바뀐다(전 스탯 균등 스케일=무효). tank 미러도 backstop(180) 전 종료(실측 max 97R).
 
 ## 6. 스킬 선택 AI (결정적)
 매 행동: 보유 정규 스킬 중 **기대 데미지 최대**(`power × skillEff(type, defender) × stab`)를 선택. 동점이면
@@ -96,7 +97,7 @@ collectionShared가 오프타입 커버리지를 주므로 variant 3 unique는 "
 ## 8. 페이즈
 - **Phase A** ✅(#170) — 프레임 + 엔진 전환: Skill 모델·카탈로그, skillEff/STAB로 데미지식 교체, generic+typeShared, 선택 AI. 골든 전면 재캡처.
 - **Phase B1** ✅(#172) — collectionShared 19(오프타입 커버리지) + 이로치 해금. **B2** ✅(#173) — unique per-kind(Epic+ 34, gen 포팅).
-- **Phase C** — 궁극기(게이지·효과) + 로그/연출("스킬명!" 태그).
+- **Phase C** ✅ — 레인보우 궁극기(타입 6종·충전 게이지 N=6) + HP ×1.5 스케일(궁극기 ~1회/대전 튜닝) + "⚡️궁극기!" 로그 태그.
 - **Phase D**(선택) — 스킬 도감 UI(타입 상성표 원형 옆에), 밸런스 튜닝(승률 실측).
 
 ## 9. 리스크·미결

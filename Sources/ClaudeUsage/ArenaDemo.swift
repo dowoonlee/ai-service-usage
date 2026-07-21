@@ -28,6 +28,7 @@ enum ArenaDemo {
         battleSectionRainbow(seed: 9_999_999)
         battleSectionCoverage(seed: 2_468_013)
         battleSectionUnique(seed: 1_357_902)
+        battleSectionUltimate(seed: 8_642_097)
         skillCatalogSection()
 
         print("\n\(bar)\n  끝 — 위 전부 컴파일된 엔진의 실제 출력입니다.\n\(bar)\n")
@@ -207,8 +208,9 @@ enum ArenaDemo {
     private static func skillCatalogSection() {
         var parts: [String] = []
         for t in BattleType.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
-            let g = SkillCatalog.generic(for: t), ts = SkillCatalog.typeShared(for: t)
-            parts.append("\(t.rawValue):g=\(g.id)/\(g.type.rawValue)/\(Int(g.power)),ts=\(ts.id)/\(ts.type.rawValue)/\(Int(ts.power))")
+            let g = SkillCatalog.generic(for: t), ts = SkillCatalog.typeShared(for: t), ult = SkillCatalog.ultimate(for: t)
+            parts.append("\(t.rawValue):g=\(g.id)/\(g.type.rawValue)/\(Int(g.power)),ts=\(ts.id)/\(ts.type.rawValue)/\(Int(ts.power))"
+                + ",ult=\(ult.id)/\(ult.type.rawValue)/\(Int(ult.power))")
         }
         for c in PetCollection.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
             let cs = SkillCatalog.collectionShared(for: c)
@@ -218,8 +220,25 @@ enum ArenaDemo {
             let u = SkillCatalog.unique(for: k)!   // uniqueTable 키라 non-nil
             parts.append("\(k.rawValue):u=\(u.id)/\(u.type.rawValue)/\(Int(u.power))")
         }
-        print("\n[ 스킬 카탈로그 파리티 ]  (generic6 · typeShared6 · collectionShared19 · unique\(SkillCatalog.uniqueTable.count))")
+        print("\n[ 스킬 카탈로그 파리티 ]  (generic6 · typeShared6 · ultimate6 · collectionShared19 · unique\(SkillCatalog.uniqueTable.count))")
         print("  PARITYSKILLCAT \(parts.joined(separator: " "))")
+    }
+
+    // MARK: 궁극기 배틀 (variant4 충전 게이지 발동 파리티용 골든)
+    private static func battleSectionUltimate(seed: UInt64) {
+        // 레인보우(variant4) 혼합 미러 — HP×1.5로 배틀이 길어 선봉이 6행동 도달 시 궁극기(타입별) 발동.
+        func t4(_ ks: [PetKind]) -> BattleTeam {
+            BattleTeam(ks.map { BattlePetSnapshot(kind: $0, variant: 4, enhanceLevel: 5, progressUnits: 2) })
+        }
+        let teamA = t4([.fox, .warrior, .scrapBot])       // beast/warrior/machine — 궁극기 kernel_panic/rm_rf/blue_screen
+        let teamB = t4([.wolf, .lancer, .antennaBot])
+        print("\n[ 궁극기 배틀 ]  seed=\(seed)  (variant4 충전 N=\(BattleEngine.ultChargeActions))")
+        let r = BattleEngine.simulate(teamA: teamA, teamB: teamB, seed: seed)
+        let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
+        let ults = r.log.filter { SkillCatalog.isUltimate($0.move) }.count
+        let ultMoves = Set(r.log.filter { SkillCatalog.isUltimate($0.move) }.map { $0.move }).sorted().joined(separator: ",")
+        print("  PARITYULT winner=\(winner) rounds=\(r.rounds) ults=\(ults) ultMoves=[\(ultMoves)] "
+            + "dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
     }
 
     // MARK: 고유기 배틀 (variant 3 Epic+ per-kind unique 선택 파리티용 골든)

@@ -9,7 +9,7 @@
 
 import { SeededRNG, roll, apply, baseCost, expectedVP, safeOdds, safeCost, cost, canSafeEnhance, rollSafe } from "./enhance_engine.ts";
 import { simulate, BattleTeam } from "./battle_engine.ts";
-import { genericSkill, typeSharedSkill, collectionSharedSkill, uniqueSkill, skillsFor, type BattleType } from "./pvp_policy.ts";
+import { genericSkill, typeSharedSkill, collectionSharedSkill, uniqueSkill, ultimateSkill, skillsFor, type BattleType } from "./pvp_policy.ts";
 import { UNIQUE_SKILL } from "./pet_meta_gen.ts";
 
 function assertEq(name: string, got: unknown, exp: unknown) {
@@ -25,10 +25,10 @@ const GOLD_ENHANCE_OUTCOMES = [
 ];
 const GOLD_ENHANCE_TOTAL_VP = 9295;
 const GOLD_ENHANCE_FINAL = 7;
-// 스킬 전환(Phase A) 후 재캡처 — 스킬 상성 ×2.0/×0.5 + 자속 STAB ×1.5, generic "hotfix"(power 8).
-const GOLD_BATTLE_DMG = [33, 4, 34, 32, 4, 33, 4, 31, 11, 18, 11, 18, 11, 18, 11, 17];
+// Phase C 재캡처 — HP ×1.5 스케일(TTK↑)로 라운드/데미지 시퀀스 변동. 스킬 상성 ×2.0/×0.5 + STAB ×1.5.
+const GOLD_BATTLE_DMG = [33, 4, 34, 4, 34, 33, 4, 31, 4, 31, 32, 17, 11, 18, 10, 11, 18, 18, 10, 11, 17, 11, 18];
 const GOLD_BATTLE_WINNER = "a";
-const GOLD_BATTLE_ROUNDS = 16;
+const GOLD_BATTLE_ROUNDS = 23;
 
 Deno.test("강화 도박 파리티 — seed 20260716, +10 시작", () => {
   const rng = new SeededRNG(20260716n);
@@ -65,9 +65,9 @@ Deno.test("5v5 배틀 파리티 (누진 시너지 4/5 티어 + 타입 tie-break)
   const teamB: BattleTeam = [snap("fox"), snap("wolf"), snap("scrapBot"), snap("antennaBot"), snap("warrior")];
   const r = simulate(teamA, teamB, 5555555n);
   assertEq("winner", r.winner, "a");
-  assertEq("rounds", r.rounds, 19);
+  assertEq("rounds", r.rounds, 25);
   assertEq("dmg sequence", r.log.map((e) => e.damage),
-    [39, 5, 40, 40, 5, 40, 54, 57, 56, 60, 21, 12, 21, 12, 22, 13, 22, 12, 21]);
+    [39, 5, 40, 40, 42, 5, 39, 57, 55, 60, 59, 21, 12, 21, 12, 22, 12, 21, 12, 22, 21, 1, 20, 12, 21]);
 });
 
 Deno.test("레인보우 배틀 파리티 (이로치 버프 + 레인보우 크리 + variant4 스킬셋) — seed 9999999", () => {
@@ -87,10 +87,10 @@ Deno.test("레인보우 배틀 파리티 (이로치 버프 + 레인보우 크리
   ];
   const r = simulate(teamA, teamB, 9999999n);
   assertEq("winner", r.winner, "b");
-  assertEq("rounds", r.rounds, 27);
-  assertEq("crit count", r.log.filter((e) => e.crit).length, 4);
+  assertEq("rounds", r.rounds, 39);
+  assertEq("crit count", r.log.filter((e) => e.crit).length, 5);
   assertEq("dmg sequence", r.log.map((e) => e.damage),
-    [17, 2, 11, 15, 2, 10, 11, 10, 19, 11, 11, 18, 11, 15, 25, 10, 23, 25, 15, 23, 10, 23, 24, 11, 25, 11, 23]);
+    [17, 2, 11, 15, 2, 10, 11, 18, 15, 11, 11, 18, 11, 15, 19, 10, 15, 18, 10, 15, 25, 25, 10, 23, 10, 25, 11, 24, 11, 23, 23, 10, 25, 11, 23, 15, 24, 11, 24]);
 });
 
 Deno.test("커버리지 배틀 파리티 (variant2 오프타입 collectionShared 선택) — seed 2468013", () => {
@@ -103,19 +103,19 @@ Deno.test("커버리지 배틀 파리티 (variant2 오프타입 collectionShared
   const teamB: BattleTeam = [snap("scrapBot", 0), snap("antennaBot", 0), snap("pixelBot", 0)];
   const r = simulate(teamA, teamB, 2468013n);
   assertEq("winner", r.winner, "b");
-  assertEq("rounds", r.rounds, 26);
+  assertEq("rounds", r.rounds, 40);
   // A는 오프타입 커버리지만 사용(자기타입 typeShared는 machine 상대로 손해라 선택 안 함).
   const aMoves = [...new Set(r.log.filter((e) => e.attacker === "a").map((e) => e.move))].sort();
   assertEq("A moves", aMoves, ["mainframe_overload"]);
   assertEq("dmg sequence", r.log.map((e) => e.damage),
-    [9, 21, 9, 9, 22, 9, 22, 9, 22, 9, 9, 9, 22, 9, 9, 21, 9, 23, 9, 9, 23, 9, 7, 3, 7, 26]);
+    [9, 21, 9, 9, 22, 9, 22, 9, 9, 23, 9, 22, 9, 2, 9, 8, 22, 9, 9, 22, 9, 9, 22, 9, 21, 9, 8, 21, 9, 21, 9, 9, 2, 9, 22, 9, 7, 25, 8, 27]);
 });
 
 // 스킬 카탈로그 전량 파리티 — 배틀 골든은 mainframe 경로 하나만 운동시켜 collectionShared type 18/19가
 // 무커버다. 이 덤프로 6 generic·6 typeShared·19 collectionShared의 id/type/power를 통째로 잠근다.
 // 골든은 Swift --arena-demo PARITYSKILLCAT 라인에서 캡처. 한 엔트리라도 Swift↔TS 드리프트하면 여기서 잡힌다.
 const GOLD_SKILL_CATALOG =
-  "PARITYSKILLCAT arcane:g=hotfix/arcane/8,ts=context_overflow/arcane/11 beast:g=hotfix/beast/8,ts=mem_leak/beast/11 chaos:g=hotfix/chaos/8,ts=friday_deploy/chaos/11 machine:g=hotfix/machine/8,ts=regression_sweep/machine/11 mascot:g=hotfix/mascot/8,ts=onboarding/mascot/11 warrior:g=hotfix/warrior/8,ts=force_push/warrior/11 ciRunners:cs=pipeline_stall/arcane/12 deprecated:cs=deprecated_strike/warrior/12 dns:cs=dns_propagation/arcane/12 emotionalSupport:cs=emotional_support/mascot/12 fridayDeploy:cs=friday_5pm/warrior/12 happyPath:cs=happy_path/beast/12 helloWorld:cs=hello_world/arcane/12 mainframe:cs=mainframe_overload/machine/12 noVerify:cs=no_verify/chaos/12 nodeModules:cs=node_modules_summon/arcane/12 npmInstall:cs=dependency_hell/chaos/12 onCall:cs=oncall_page/beast/12 oomKilled:cs=oom_kill/machine/12 rustEvangelists:cs=rewrite_in_rust/machine/12 tenXEngineer:cs=tenx_refactor/beast/12 todoSince2019:cs=tech_debt_invoice/warrior/12 tokenBurners:cs=token_burn/chaos/12 vibeCoders:cs=vibe_coding/chaos/12 wontfix:cs=wontfix_close/mascot/12 archer:u=remote_exec/warrior/14 bigDemon:u=prod_outage/chaos/14 clownCaptain:u=clown_deploy/warrior/14 dinoDragon:u=dino_stack/beast/14 fairy:u=pixie_patch/arcane/14 geralt:u=prompt_injection/warrior/14 ghost:u=zombie_process/chaos/14 gordon:u=crunch_mode/warrior/14 heroKnight:u=full_refactor/warrior/14 huntress:u=pinpoint_debug/warrior/14 kingHuman:u=legacy_monarch/arcane/14 knightF:u=blue_green/warrior/14 knightM:u=zero_downtime/warrior/14 lancer:u=zero_day/warrior/14 maskDude:u=anon_commit/warrior/14 medievalKing:u=feudal_arch/warrior/14 monk:u=zen_mode/warrior/14 mrMochi:u=infinite_scroll/mascot/14 ninjaFrog:u=stealth_deploy/warrior/14 ogre:u=monolith/chaos/14 orc:u=brute_merge/warrior/14 pawn:u=merge_conflict/warrior/14 pirateCaptain:u=code_plunder/warrior/14 plant:u=dependency_tree/arcane/14 princessSera:u=graceful_shutdown/mascot/14 pterodactyl:u=race_condition/beast/14 roboRetro:u=quantization/machine/14 skeletonLord:u=dead_code/chaos/14 skull:u=segfault/chaos/14 tRex:u=extinction_event/beast/14 visorBot:u=gradient_explosion/machine/14 warrior:u=fullstack_smash/warrior/14 whale:u=docker_whale/warrior/14 wizardM:u=hallucination/arcane/14";
+  "PARITYSKILLCAT arcane:g=hotfix/arcane/8,ts=context_overflow/arcane/11,ult=context_window_exceeded/arcane/24 beast:g=hotfix/beast/8,ts=mem_leak/beast/11,ult=kernel_panic/beast/24 chaos:g=hotfix/chaos/8,ts=friday_deploy/chaos/11,ult=total_outage/chaos/24 machine:g=hotfix/machine/8,ts=regression_sweep/machine/11,ult=blue_screen/machine/24 mascot:g=hotfix/mascot/8,ts=onboarding/mascot/11,ult=full_rollback/mascot/24 warrior:g=hotfix/warrior/8,ts=force_push/warrior/11,ult=rm_rf/warrior/24 ciRunners:cs=pipeline_stall/arcane/12 deprecated:cs=deprecated_strike/warrior/12 dns:cs=dns_propagation/arcane/12 emotionalSupport:cs=emotional_support/mascot/12 fridayDeploy:cs=friday_5pm/warrior/12 happyPath:cs=happy_path/beast/12 helloWorld:cs=hello_world/arcane/12 mainframe:cs=mainframe_overload/machine/12 noVerify:cs=no_verify/chaos/12 nodeModules:cs=node_modules_summon/arcane/12 npmInstall:cs=dependency_hell/chaos/12 onCall:cs=oncall_page/beast/12 oomKilled:cs=oom_kill/machine/12 rustEvangelists:cs=rewrite_in_rust/machine/12 tenXEngineer:cs=tenx_refactor/beast/12 todoSince2019:cs=tech_debt_invoice/warrior/12 tokenBurners:cs=token_burn/chaos/12 vibeCoders:cs=vibe_coding/chaos/12 wontfix:cs=wontfix_close/mascot/12 archer:u=remote_exec/warrior/14 bigDemon:u=prod_outage/chaos/14 clownCaptain:u=clown_deploy/warrior/14 dinoDragon:u=dino_stack/beast/14 fairy:u=pixie_patch/arcane/14 geralt:u=prompt_injection/warrior/14 ghost:u=zombie_process/chaos/14 gordon:u=crunch_mode/warrior/14 heroKnight:u=full_refactor/warrior/14 huntress:u=pinpoint_debug/warrior/14 kingHuman:u=legacy_monarch/arcane/14 knightF:u=blue_green/warrior/14 knightM:u=zero_downtime/warrior/14 lancer:u=zero_day/warrior/14 maskDude:u=anon_commit/warrior/14 medievalKing:u=feudal_arch/warrior/14 monk:u=zen_mode/warrior/14 mrMochi:u=infinite_scroll/mascot/14 ninjaFrog:u=stealth_deploy/warrior/14 ogre:u=monolith/chaos/14 orc:u=brute_merge/warrior/14 pawn:u=merge_conflict/warrior/14 pirateCaptain:u=code_plunder/warrior/14 plant:u=dependency_tree/arcane/14 princessSera:u=graceful_shutdown/mascot/14 pterodactyl:u=race_condition/beast/14 roboRetro:u=quantization/machine/14 skeletonLord:u=dead_code/chaos/14 skull:u=segfault/chaos/14 tRex:u=extinction_event/beast/14 visorBot:u=gradient_explosion/machine/14 warrior:u=fullstack_smash/warrior/14 whale:u=docker_whale/warrior/14 wizardM:u=hallucination/arcane/14";
 
 Deno.test("스킬 카탈로그 파리티 — generic·typeShared·collectionShared(19)·unique(34 type) 전량 Swift와 대조", () => {
   const TYPES: BattleType[] = ["beast", "warrior", "chaos", "arcane", "machine", "mascot"];
@@ -126,8 +126,8 @@ Deno.test("스킬 카탈로그 파리티 — generic·typeShared·collectionShar
   ];
   const parts: string[] = [];
   for (const t of [...TYPES].sort()) {   // JS 기본 정렬 = Swift rawValue 정렬(전부 ASCII)과 일치
-    const g = genericSkill(t), ts = typeSharedSkill(t);
-    parts.push(`${t}:g=${g.id}/${g.type}/${g.power},ts=${ts.id}/${ts.type}/${ts.power}`);
+    const g = genericSkill(t), ts = typeSharedSkill(t), ult = ultimateSkill(t);
+    parts.push(`${t}:g=${g.id}/${g.type}/${g.power},ts=${ts.id}/${ts.type}/${ts.power},ult=${ult.id}/${ult.type}/${ult.power}`);
   }
   for (const c of [...COLLECTIONS].sort()) {
     const cs = collectionSharedSkill(c);
@@ -149,13 +149,13 @@ Deno.test("고유기 배틀 파리티 (variant3 Epic+ per-kind unique 선택) �
   const teamB: BattleTeam = [snap("archer"), snap("pawn"), snap("warrior")];
   const r = simulate(teamA, teamB, 1357902n);
   assertEq("winner", r.winner, "b");
-  assertEq("rounds", r.rounds, 29);
+  assertEq("rounds", r.rounds, 42);
   const aMoves = [...new Set(r.log.filter((e) => e.attacker === "a").map((e) => e.move))].sort();
   const bMoves = [...new Set(r.log.filter((e) => e.attacker === "b").map((e) => e.move))].sort();
   assertEq("A moves(고유기)", aMoves, ["fullstack_smash", "zen_mode", "zero_day"]);
   assertEq("B moves(고유기)", bMoves, ["fullstack_smash", "merge_conflict", "remote_exec"]);
   assertEq("dmg sequence", r.log.map((e) => e.damage),
-    [29, 27, 28, 26, 27, 27, 28, 29, 3, 28, 28, 27, 29, 27, 28, 26, 29, 29, 27, 29, 27, 29, 27, 27, 28, 28, 29, 28, 28]);
+    [29, 27, 28, 26, 27, 27, 28, 29, 3, 28, 28, 27, 27, 29, 26, 29, 29, 27, 29, 27, 29, 26, 29, 29, 28, 28, 26, 28, 29, 28, 27, 28, 3, 27, 28, 28, 27, 27, 27, 29, 30, 33]);
 });
 
 Deno.test("저레어 variant3 게이팅 — Common 펫은 고유기 없이 3슬롯(Swift testVariant3UniqueSlotGating 대칭)", () => {
@@ -163,8 +163,27 @@ Deno.test("저레어 variant3 게이팅 — Common 펫은 고유기 없이 3슬�
   // skillsFor의 `if (u)` null 가드가 빠지면 여기서 length가 4가 되거나 selectSkill이 크래시.
   assertEq("fox v3 slots", skillsFor("fox", 3).length, 3);
   assertEq("fox unique 없음", uniqueSkill("fox"), null);
-  // Epic+는 4슬롯(warrior = mythic).
+  // Epic+는 4슬롯(warrior = mythic). 궁극기는 정규 슬롯이 아니라 별도(충전 발동)라 skillsFor에 안 들어감.
   assertEq("warrior v3 slots", skillsFor("warrior", 3).length, 4);
+  assertEq("warrior v4 slots(궁극기 제외)", skillsFor("warrior", 4).length, 4);
+});
+
+Deno.test("궁극기 배틀 파리티 (variant4 충전 게이지 N=6 발동) — seed 8642097", () => {
+  // 레인보우(variant4) 혼합 미러 — HP×1.5로 배틀이 길어 선봉이 6행동 도달 시 궁극기 발동(정규 스킬 대체).
+  // Swift --arena-demo PARITYULT 골든과 대조 — 충전 게이지/궁극기 데미지가 드리프트하면 여기서 잡힌다.
+  const snap = (kind: string) => ({ kind, variant: 4, enhanceLevel: 5, progressUnits: 2 });
+  const teamA: BattleTeam = [snap("fox"), snap("warrior"), snap("scrapBot")];
+  const teamB: BattleTeam = [snap("wolf"), snap("lancer"), snap("antennaBot")];
+  const r = simulate(teamA, teamB, 8642097n);
+  assertEq("winner", r.winner, "a");
+  assertEq("rounds", r.rounds, 21);
+  // 궁극기 id는 6타입 카탈로그 중 하나. 이 배틀에선 rm_rf(warrior)가 1회 발동.
+  const ultIds = new Set(["kernel_panic", "rm_rf", "total_outage", "context_window_exceeded", "blue_screen", "full_rollback"]);
+  const ults = r.log.filter((e) => ultIds.has(e.move));
+  assertEq("궁극기 발동 수", ults.length, 1);
+  assertEq("궁극기 종류", [...new Set(ults.map((e) => e.move))].sort(), ["rm_rf"]);
+  assertEq("dmg sequence", r.log.map((e) => e.damage),
+    [26, 24, 24, 25, 24, 25, 26, 80, 39, 25, 26, 28, 27, 26, 25, 39, 47, 25, 26, 70, 75]);
 });
 
 Deno.test("결정성 — 동일 (팀+시드) → 동일 로그", () => {

@@ -119,6 +119,20 @@ final class BattleEngineTests: XCTestCase {
         XCTAssertEqual(plainCrits, 0, "기본 이로치는 크리 없음")
     }
 
+    // 궁극기 — 레인보우(variant4)만 충전 게이지가 차면 발동. 비레인보우(variant0)는 절대 발동 안 함.
+    func testUltimateFiresForRainbowOnly() {
+        let rainbow = BattleTeam([BattlePetSnapshot(kind: .warrior, variant: 4, enhanceLevel: 5, progressUnits: 2)])
+        let tank = BattleTeam([BattlePetSnapshot(kind: .mrMan, variant: 0, enhanceLevel: 15, progressUnits: 8)])  // mascot 만강 = 최고 HP → 긴 배틀(레인보우 6+행동 보장)
+        var rbUlts = 0, tankUlts = 0
+        for seed in 0..<100 {
+            let r = BattleEngine.simulate(teamA: rainbow, teamB: tank, seed: UInt64(seed))
+            rbUlts += r.log.filter { $0.attacker == .a && SkillCatalog.isUltimate($0.move) }.count
+            tankUlts += r.log.filter { $0.attacker == .b && SkillCatalog.isUltimate($0.move) }.count
+        }
+        XCTAssertGreaterThan(rbUlts, 0, "레인보우는 충전 후 궁극기를 발동해야")
+        XCTAssertEqual(tankUlts, 0, "비레인보우(variant0)는 궁극기 없음")
+    }
+
     // 로그 이벤트의 데미지는 항상 ≥ 1, 스킬 상성 배수는 유효 3값 중 하나(Phase A: ×2.0/×1.0/×0.5).
     func testLogInvariants() {
         let r = BattleEngine.simulate(teamA: team(weak), teamB: team(strong), seed: 777)

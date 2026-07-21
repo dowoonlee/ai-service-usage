@@ -175,6 +175,11 @@ enum PetBattleStats {
         return (e0 * norm, e1 * norm, e2 * norm, e3 * norm)
     }
 
+    /// HP 전용 스케일 — atk/def는 그대로 두고 HP만 곱해 TTK(전투 지속)를 늘린다. 데미지식이 atk/def
+    /// **비율** 기반이라 전 스탯 균등 스케일은 TTK 불변 → HP만 올려야 배틀이 길어지고, 궁극기 충전 게이지가
+    /// 대전당 ~1회 차게 된다(스킬 전환으로 오른 데미지 상쇄 + 스윙 완화). 서버 pvp_policy.HP_SCALE 1:1.
+    static let hpScale = 1.5
+
     /// 최종 배틀 스탯. rarity=base, type+kind=archetype 프로필, 성장/variant는 계정 상태에서.
     static func compute(kind: PetKind, variant: Int, enhanceLevel: Int, progressUnits: Double) -> BattleStats {
         let rarity = PetKind.rarityFor(kind) ?? .common
@@ -183,6 +188,7 @@ enum PetBattleStats {
         let growth = growthMultiplier(enhanceLevel: enhanceLevel, progressUnits: progressUnits)
         let vb = 1.0 + variantMultiplier(variant: variant)
         func stat(_ arch: Double) -> Int { max(1, Int((base * arch * growth * vb).rounded())) }
-        return BattleStats(hp: stat(a.hp), atk: stat(a.atk), def: stat(a.def), spd: stat(a.spd))
+        return BattleStats(hp: max(1, Int((base * a.hp * growth * vb * hpScale).rounded())),
+                           atk: stat(a.atk), def: stat(a.def), spd: stat(a.spd))
     }
 }

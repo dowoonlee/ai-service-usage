@@ -1,11 +1,11 @@
 import Foundation
 
-// 펫 스킬 시스템 (Phase A/B1/B2) — 순수 로직. 서버 `_shared/pvp_policy.ts` 스킬 계층과 규칙 1:1.
+// 펫 스킬 시스템 (Phase A/B1/B2/C) — 순수 로직. 서버 `_shared/pvp_policy.ts` 스킬 계층과 규칙 1:1.
 // 설계 SSOT: docs/plans/pet-skills.md.
 //
 // 이로치(variant) 단계마다 스킬을 얻는다: variant 0 = generic("핫픽스") / 1 = typeShared(타입 6종) /
 // 2 = collectionShared(컬렉션 19종·오프타입 커버리지) / 3 = unique(Epic+ per-kind 고유기·자기타입).
-// (Phase C에서 variant 4 궁극기 추가 예정.)
+// variant 4 = **궁극기**(타입 6종) — 정규 슬롯이 아니라 BattleEngine의 충전 게이지로 발동(아래 ultimateTable).
 // 데미지식은 "스킬 타입 vs 방어자 타입" 상성(×2.0/×0.5)과 자속(STAB ×1.5)으로 전환 — 패시브 ×1.6/0.625 대체.
 // generic/typeShared 는 펫 타입에서 **규칙 파생**이라 per-kind 데이터가 없고, 양측 동일 로직으로 재현된다.
 
@@ -150,6 +150,27 @@ enum SkillCatalog {
         return Skill(id: e.id, name: e.name, type: kind.battleType, power: uniquePower, tier: .unique)
     }
 
+    static let ultimatePower = 24.0
+
+    /// ultimate — 레인보우(variant 4) 궁극기. **타입별 6종**(규칙 파생), 자기타입 시그니처 power 24.
+    /// 정규 슬롯이 아니라 충전 게이지(BattleEngine.ultChargeActions)가 차면 발동. 효과는 effects
+    /// 페이즈로 분리(현재 순수 고파워). 톤: 개발 밈 아이코닉. 서버 pvp_policy.ultimateSkill 1:1.
+    static let ultimateTable: [BattleType: (id: String, name: String)] = [
+        .beast:   ("kernel_panic", "커널 패닉"),
+        .warrior: ("rm_rf", "rm -rf --no-preserve-root"),
+        .chaos:   ("total_outage", "전면 장애"),
+        .arcane:  ("context_window_exceeded", "컨텍스트 초과"),
+        .machine: ("blue_screen", "블루 스크린"),
+        .mascot:  ("full_rollback", "전체 롤백"),
+    ]
+    /// 타입의 궁극기(순수 — 발동 조건 variant4는 엔진이 isRainbow로 게이팅).
+    static func ultimate(for type: BattleType) -> Skill {
+        let e = ultimateTable[type]!   // 6타입 전부 정의 — 강제 언랩 안전.
+        return Skill(id: e.id, name: e.name, type: type, power: ultimatePower, tier: .ultimate)
+    }
+    static let ultimateIds: Set<String> = Set(ultimateTable.values.map { $0.id })
+    static func isUltimate(_ id: String) -> Bool { ultimateIds.contains(id) }
+
     /// 이 펫이 variant까지 해금한 정규 스킬 목록. 슬롯 인덱스 순(선택 AI tie-break 기준).
     /// 서버 pvp_policy.skillsFor 1:1.
     static func skills(kind: PetKind, variant: Int) -> [Skill] {
@@ -158,7 +179,7 @@ enum SkillCatalog {
         if variant >= 1 { out.append(typeShared(for: t)) }              // 슬롯1 — 이로치1
         if variant >= 2 { out.append(collectionShared(for: kind.collection)) }  // 슬롯2 — 이로치2(오프타입 커버리지)
         if variant >= 3, let u = unique(for: kind) { out.append(u) }    // 슬롯3 — 이로치3, Epic+ 고유기(자기타입)
-        // Phase C: variant>=4 ultimate(레인보우 궁극기)
+        // 궁극기(variant 4)는 **의도적으로 여기 없음** — 정규 선택 슬롯이 아니라 BattleEngine 충전 게이지로 발동.
         return out
     }
 
@@ -188,6 +209,7 @@ enum SkillCatalog {
         for (_, e) in typeSharedTable { m[e.id] = e.name }
         for (_, e) in collectionSharedTable { m[e.id] = e.name }
         for (_, e) in uniqueTable { m[e.id] = e.name }
+        for (_, e) in ultimateTable { m[e.id] = e.name }
         return m
     }()
     static func displayName(id: String) -> String? { nameById[id] }
