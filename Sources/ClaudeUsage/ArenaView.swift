@@ -916,7 +916,8 @@ struct ArenaView: View {
         return BattleEngine.finalStats(for: m, in: BattleTeam(snaps)).hp
     }
     /// 서버 maxHP 배열(팀 순서)을 kind→maxHP 딕셔너리로. 배열 없거나 길이 불일치면 nil(로컬 폴백).
-    private static func serverMaxHpDict(_ snaps: [BattlePetSnapshot], _ arr: [Int]?) -> [PetKind: Int]? {
+    /// (internal — 하위호환 폴백 회귀 테스트용. ArenaMaxHpPayloadTests 참조.)
+    static func serverMaxHpDict(_ snaps: [BattlePetSnapshot], _ arr: [Int]?) -> [PetKind: Int]? {
         guard let arr, arr.count == snaps.count else { return nil }
         return Dictionary(zip(snaps.map(\.kind), arr), uniquingKeysWith: { x, _ in x })
     }
