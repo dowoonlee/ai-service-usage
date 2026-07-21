@@ -43,8 +43,8 @@ final class PetSkillsTests: XCTestCase {
         XCTAssertEqual(s1[1].type, .beast)
         XCTAssertEqual(s1[1].tier, .typeShared)
 
-        // 레인보우(4)도 Phase A에선 typeShared까지만.
-        XCTAssertEqual(SkillCatalog.skills(kind: .fox, variant: 4).count, 2)
+        // 레인보우(4)는 하위 슬롯 누적 → generic+typeShared+collectionShared 3개(Phase B1 기준).
+        XCTAssertEqual(SkillCatalog.skills(kind: .fox, variant: 4).count, 3)
     }
 
     // 6타입 전부 typeShared가 정의돼 있고 self-type·power 11.
@@ -94,14 +94,14 @@ final class PetSkillsTests: XCTestCase {
 
     // ── collectionShared (Phase B1) ──────────────────────────────────────────
 
-    // 19 컬렉션 전부 collectionShared 정의 · power 12 · 표시명 존재.
-    func testCollectionSharedTableComplete() {
-        XCTAssertEqual(SkillCatalog.collectionSharedTable.count, 19)
-        for (collection, e) in SkillCatalog.collectionSharedTable {
-            let skill = SkillCatalog.collectionShared(for: collection)
-            XCTAssertEqual(skill.id, e.id)
+    // **모든** PetCollection 케이스가 collectionShared 매핑을 가진다(소진성). count 매직넘버가 아니라
+    // allCases를 순회 → 향후 컬렉션 추가 시 테이블 갱신을 깜빡하면 여기서 fail-closed(강제언랩 크래시 예방).
+    func testCollectionSharedCoversAllCollections() {
+        for c in PetCollection.allCases {
+            XCTAssertNotNil(SkillCatalog.collectionSharedTable[c], "\(c) collectionShared 매핑 누락")
+            let skill = SkillCatalog.collectionShared(for: c)   // 매핑 없으면 강제언랩 크래시 → 테스트가 먼저 잡음
             XCTAssertEqual(skill.power, 12.0, accuracy: 1e-9)
-            XCTAssertNotNil(SkillCatalog.displayName(id: e.id))
+            XCTAssertNotNil(SkillCatalog.displayName(id: skill.id))
         }
     }
 

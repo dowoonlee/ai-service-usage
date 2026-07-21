@@ -9,7 +9,10 @@ import Foundation
 
 /// 배틀 속성(타입) — 6타입 육각형 상성. `PetCollection`(19)에서 파생.
 /// 상성 사이클: machine → beast → chaos → arcane → mascot → warrior → (machine).
-/// 각 타입은 정확히 하나를 강하게 이기고(×1.6), 하나에 약하게 진다(×0.625).
+/// 각 타입은 정확히 하나를 이기고 하나에 진다(사이클 = `beats`).
+/// ⚠️ 실제 배틀 데미지 상성은 스킬 기반이다(`SkillCatalog.skillEffectiveness` ×2.0/×0.5 + STAB ×1.5).
+/// 아래 `effectiveness`(패시브 ×1.6/0.625)는 스킬 전환(Phase A) 전 방식으로, 배틀 엔진은 더 이상 호출하지
+/// 않는다(사이클 검증용 테스트만 참조). 사이클 자체(`beats`)는 스킬 상성이 재사용하는 SSOT다.
 enum BattleType: String, CaseIterable, Codable, Hashable {
     case beast, warrior, chaos, arcane, machine, mascot
 
@@ -28,7 +31,8 @@ enum BattleType: String, CaseIterable, Codable, Hashable {
     static let superMultiplier = 1.6
     static let weakMultiplier  = 0.625   // = 1 / 1.6
 
-    /// attacker가 defender를 칠 때 타입 상성 배수 (1.6 / 1.0 / 0.625).
+    /// [레거시 — 배틀 미사용] 패시브 타입 상성 배수 (1.6 / 1.0 / 0.625). 스킬 전환(Phase A) 이후
+    /// 배틀은 `SkillCatalog.skillEffectiveness`(×2.0/×0.5)를 쓴다. 사이클 검증 테스트만 이 함수를 참조.
     static func effectiveness(_ attacker: BattleType, vs defender: BattleType) -> Double {
         if attacker.beats == defender { return superMultiplier }
         if defender.beats == attacker { return weakMultiplier }

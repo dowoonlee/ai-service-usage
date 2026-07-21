@@ -115,6 +115,10 @@ enum SkillCatalog {
     }
 
     /// 결정적 선택 AI — 점수 최대, 동점이면 슬롯 인덱스 낮은 것(strict >). 서버 selectSkill 1:1.
+    /// 전제: `skills`는 비지 않음(`skills(kind:variant:)`가 generic을 항상 첫 슬롯에 넣음).
+    /// ⚠️ 파리티: score(power×eff×stab)가 Phase A/B1에선 전부 dyadic rational(power 8/11/12, 배수
+    /// 0.5/1.0/1.5/2.0)이라 Swift Double·JS number가 비트동일 → tie-break 결과 일치. B2에서 비-dyadic
+    /// power/배수(예: 13, ×1.3)를 도입하면 반올림이 갈려 동점 tie-break가 어긋날 수 있으니 dyadic 유지.
     static func select(from skills: [Skill], attackerType: BattleType, defenderType: BattleType) -> Skill {
         var best = skills[0]
         var bestScore = score(best, attackerType: attackerType, defenderType: defenderType)

@@ -9,6 +9,7 @@
 
 import { SeededRNG, roll, apply, baseCost, expectedVP, safeOdds, safeCost, cost, canSafeEnhance, rollSafe } from "./enhance_engine.ts";
 import { simulate, BattleTeam } from "./battle_engine.ts";
+import { genericSkill, typeSharedSkill, collectionSharedSkill, type BattleType } from "./pvp_policy.ts";
 
 function assertEq(name: string, got: unknown, exp: unknown) {
   const g = JSON.stringify(got), e = JSON.stringify(exp);
@@ -107,6 +108,31 @@ Deno.test("커버리지 배틀 파리티 (variant2 오프타입 collectionShared
   assertEq("A moves", aMoves, ["mainframe_overload"]);
   assertEq("dmg sequence", r.log.map((e) => e.damage),
     [9, 21, 9, 9, 22, 9, 22, 9, 22, 9, 9, 9, 22, 9, 9, 21, 9, 23, 9, 9, 23, 9, 7, 3, 7, 26]);
+});
+
+// 스킬 카탈로그 전량 파리티 — 배틀 골든은 mainframe 경로 하나만 운동시켜 collectionShared type 18/19가
+// 무커버다. 이 덤프로 6 generic·6 typeShared·19 collectionShared의 id/type/power를 통째로 잠근다.
+// 골든은 Swift --arena-demo PARITYSKILLCAT 라인에서 캡처. 한 엔트리라도 Swift↔TS 드리프트하면 여기서 잡힌다.
+const GOLD_SKILL_CATALOG =
+  "PARITYSKILLCAT arcane:g=hotfix/arcane/8,ts=context_overflow/arcane/11 beast:g=hotfix/beast/8,ts=mem_leak/beast/11 chaos:g=hotfix/chaos/8,ts=friday_deploy/chaos/11 machine:g=hotfix/machine/8,ts=regression_sweep/machine/11 mascot:g=hotfix/mascot/8,ts=onboarding/mascot/11 warrior:g=hotfix/warrior/8,ts=force_push/warrior/11 ciRunners:cs=pipeline_stall/arcane/12 deprecated:cs=deprecated_strike/warrior/12 dns:cs=dns_propagation/arcane/12 emotionalSupport:cs=emotional_support/mascot/12 fridayDeploy:cs=friday_5pm/warrior/12 happyPath:cs=happy_path/beast/12 helloWorld:cs=hello_world/arcane/12 mainframe:cs=mainframe_overload/machine/12 noVerify:cs=no_verify/chaos/12 nodeModules:cs=node_modules_summon/arcane/12 npmInstall:cs=dependency_hell/chaos/12 onCall:cs=oncall_page/beast/12 oomKilled:cs=oom_kill/machine/12 rustEvangelists:cs=rewrite_in_rust/machine/12 tenXEngineer:cs=tenx_refactor/beast/12 todoSince2019:cs=tech_debt_invoice/warrior/12 tokenBurners:cs=token_burn/chaos/12 vibeCoders:cs=vibe_coding/chaos/12 wontfix:cs=wontfix_close/mascot/12";
+
+Deno.test("스킬 카탈로그 파리티 — generic·typeShared·collectionShared(19 type) 전량 Swift와 대조", () => {
+  const TYPES: BattleType[] = ["beast", "warrior", "chaos", "arcane", "machine", "mascot"];
+  const COLLECTIONS = [
+    "mainframe", "emotionalSupport", "npmInstall", "nodeModules", "dns", "deprecated",
+    "vibeCoders", "tenXEngineer", "onCall", "rustEvangelists", "noVerify", "wontfix",
+    "oomKilled", "fridayDeploy", "tokenBurners", "todoSince2019", "ciRunners", "happyPath", "helloWorld",
+  ];
+  const parts: string[] = [];
+  for (const t of [...TYPES].sort()) {   // JS 기본 정렬 = Swift rawValue 정렬(전부 ASCII)과 일치
+    const g = genericSkill(t), ts = typeSharedSkill(t);
+    parts.push(`${t}:g=${g.id}/${g.type}/${g.power},ts=${ts.id}/${ts.type}/${ts.power}`);
+  }
+  for (const c of [...COLLECTIONS].sort()) {
+    const cs = collectionSharedSkill(c);
+    parts.push(`${c}:cs=${cs.id}/${cs.type}/${cs.power}`);
+  }
+  assertEq("skill catalog", "PARITYSKILLCAT " + parts.join(" "), GOLD_SKILL_CATALOG);
 });
 
 Deno.test("결정성 — 동일 (팀+시드) → 동일 로그", () => {
