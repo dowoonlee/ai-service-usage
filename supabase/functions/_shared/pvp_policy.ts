@@ -61,6 +61,66 @@ export function effectiveness(attacker: BattleType, defender: BattleType): numbe
   return 1.0;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 스킬 (Phase A) — Swift PetSkills.swift 와 규칙 1:1. 설계 SSOT: docs/plans/pet-skills.md.
+// variant 0 = generic("핫픽스") / variant 1 = typeShared(타입 6종). 타입에서 규칙 파생(per-kind 데이터 없음).
+
+export type SkillTier = "generic" | "typeShared" | "collectionShared" | "unique" | "ultimate";
+export interface Skill { id: string; name: string; type: BattleType; power: number; tier: SkillTier; }
+
+// 스킬 상성 — 타입 6-사이클(BEATS) 재사용, 배수만 ×2.0/×0.5(패시브 ×1.6/0.625 대체).
+export const SKILL_SUPER = 2.0;
+export const SKILL_WEAK = 0.5;
+export const STAB_MULT = 1.5;
+export const GENERIC_POWER = 8.0;
+export const TYPE_SHARED_POWER = 11.0;
+
+export function skillEffectiveness(skillType: BattleType, defender: BattleType): number {
+  if (BEATS[skillType] === defender) return SKILL_SUPER;
+  if (BEATS[defender] === skillType) return SKILL_WEAK;
+  return 1.0;
+}
+// 자속(STAB) — 스킬 타입 == 펫 타입이면 ×1.5.
+export function stabMult(skillType: BattleType, petType: BattleType): number {
+  return skillType === petType ? STAB_MULT : 1.0;
+}
+
+const TYPE_SHARED_SKILL: Record<BattleType, [string, string]> = {
+  beast: ["mem_leak", "메모리 릭"],
+  warrior: ["force_push", "강제 푸시"],
+  chaos: ["friday_deploy", "금요일 배포"],
+  arcane: ["context_overflow", "컨텍스트 폭발"],
+  machine: ["regression_sweep", "회귀 스윕"],
+  mascot: ["onboarding", "온보딩"],
+};
+export function genericSkill(type: BattleType): Skill {
+  return { id: "hotfix", name: "핫픽스", type, power: GENERIC_POWER, tier: "generic" };
+}
+export function typeSharedSkill(type: BattleType): Skill {
+  const [id, name] = TYPE_SHARED_SKILL[type];
+  return { id, name, type, power: TYPE_SHARED_POWER, tier: "typeShared" };
+}
+// variant까지 해금한 정규 스킬(슬롯 순). Swift SkillCatalog.skills 1:1.
+export function skillsFor(kind: string, variant: number): Skill[] {
+  const t = battleTypeOf(kind);
+  const out = [genericSkill(t)];                    // 슬롯0 — 항상 보유
+  if (variant >= 1) out.push(typeSharedSkill(t));   // 슬롯1 — 이로치1 해금
+  return out;
+}
+export function skillScore(s: Skill, attackerType: BattleType, defenderType: BattleType): number {
+  return s.power * skillEffectiveness(s.type, defenderType) * stabMult(s.type, attackerType);
+}
+// 결정적 선택 AI — 점수 최대, 동점이면 슬롯 인덱스 낮은 것(strict >). Swift SkillCatalog.select 1:1.
+export function selectSkill(skills: Skill[], attackerType: BattleType, defenderType: BattleType): Skill {
+  let best = skills[0];
+  let bestScore = skillScore(best, attackerType, defenderType);
+  for (let i = 1; i < skills.length; i++) {
+    const sc = skillScore(skills[i], attackerType, defenderType);
+    if (sc > bestScore) { bestScore = sc; best = skills[i]; }
+  }
+  return best;
+}
+
 // base 를 4스탯으로 분배하는 archetype 배수.
 const ARCHETYPE: Record<BattleType, [number, number, number, number]> = {
   beast: [1.00, 1.05, 0.95, 1.10],

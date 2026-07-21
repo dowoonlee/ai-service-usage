@@ -827,7 +827,8 @@ struct ArenaView: View {
     @ViewBuilder
     private func currentActionLine(_ e: BattleEvent?) -> some View {
         if let e {
-            let move = BattleLines.moveName(collection: e.attackerKind.collection, signature: e.move == "signature")
+            let move = SkillCatalog.displayName(id: e.move)
+                ?? BattleLines.moveName(collection: e.attackerKind.collection, signature: e.move == "signature")
             VStack(spacing: 2) {
                 Text("\(PetMetaStore.shared.displayName(for: e.attackerKind)) «\(move)» ▶ \(PetMetaStore.shared.displayName(for: e.defenderKind))  −\(e.damage)  \(tagString(e))")
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
@@ -884,7 +885,8 @@ struct ArenaView: View {
             VStack(alignment: .leading, spacing: 1) {
                 ForEach(Array(log.enumerated()), id: \.offset) { _, e in
                     let side = e.attacker == .a ? "A" : "B"
-                    let move = BattleLines.moveName(collection: e.attackerKind.collection, signature: e.move == "signature")
+                    let move = SkillCatalog.displayName(id: e.move)
+                        ?? BattleLines.moveName(collection: e.attackerKind.collection, signature: e.move == "signature")
                     Text("R\(e.round) \(side) \(PetMetaStore.shared.displayName(for: e.attackerKind)) «\(move)» ▶ \(PetMetaStore.shared.displayName(for: e.defenderKind)) −\(e.damage)\(e.quip != nil ? " «\(e.quip!)»" : "")")
                         .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(e.attacker == .a ? Color.primary : Color.secondary)

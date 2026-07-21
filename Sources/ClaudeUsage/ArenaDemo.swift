@@ -47,9 +47,9 @@ enum ArenaDemo {
 
     // MARK: 타입 상성
     private static func typeSection() {
-        print("\n[ 타입 상성 6-사이클 ]  우위 ×1.6 / 열위 ×0.625")
+        print("\n[ 스킬 타입 상성 6-사이클 ]  우위 ×2.0 / 열위 ×0.5  (+ 자속 STAB ×1.5)")
         for t in BattleType.allCases {
-            print("  \(pad(t.displayName,8)) ▶ \(pad(t.beats.displayName,8))  (역: \(t.beats.displayName) ▶ \(t.displayName) ×0.625)")
+            print("  \(pad(t.displayName,8)) ▶ \(pad(t.beats.displayName,8))  (역: \(t.beats.displayName) ▶ \(t.displayName) ×0.5)")
         }
     }
 

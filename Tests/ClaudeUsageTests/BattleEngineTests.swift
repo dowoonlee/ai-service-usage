@@ -119,12 +119,12 @@ final class BattleEngineTests: XCTestCase {
         XCTAssertEqual(plainCrits, 0, "기본 이로치는 크리 없음")
     }
 
-    // 로그 이벤트의 데미지는 항상 ≥ 1, 상성 배수는 유효 3값 중 하나.
+    // 로그 이벤트의 데미지는 항상 ≥ 1, 스킬 상성 배수는 유효 3값 중 하나(Phase A: ×2.0/×1.0/×0.5).
     func testLogInvariants() {
         let r = BattleEngine.simulate(teamA: team(weak), teamB: team(strong), seed: 777)
         for e in r.log {
             XCTAssertGreaterThanOrEqual(e.damage, 1)
-            XCTAssertTrue([0.625, 1.0, 1.6].contains(e.effectiveness))
+            XCTAssertTrue([0.5, 1.0, 2.0].contains(e.effectiveness))
         }
     }
 

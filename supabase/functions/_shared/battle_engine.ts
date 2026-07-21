@@ -4,8 +4,9 @@
 // 동일 (두 팀 스냅샷 + 시드) → 동일 로그·승자. RNG·반올림은 pvp_policy/enhance_engine 명세를 따른다.
 
 import {
-  BattleStats, BattleType, StatKind, computeStats, teamSynergyBonus, synergyStatMultiplier,
-  effectiveness, matchup, collectionOf, battleTypeOf, roundAway,
+  BattleStats, BattleType, StatKind, Skill, computeStats, teamSynergyBonus, synergyStatMultiplier,
+  matchup, collectionOf, battleTypeOf, roundAway,
+  skillsFor, selectSkill, skillEffectiveness, stabMult,
 } from "./pvp_policy.ts";
 import { SeededRNG } from "./enhance_engine.ts";
 
@@ -23,9 +24,9 @@ export interface BattleEvent {
   attacker: BattleSide;
   attackerKind: string;
   defenderKind: string;
-  move: "basic" | "signature";
+  move: string;             // 스킬 id ("hotfix"/"mem_leak"…). 구 로그엔 "basic"/"signature"
   damage: number;
-  effectiveness: number;    // 1.6 / 1.0 / 0.625
+  effectiveness: number;    // 스킬 타입 상성 2.0 / 1.0 / 0.5 (구 로그엔 1.6 / 1.0 / 0.625)
   collectionMult: number;   // 밈/상성망 배수
   quip: string | null;
   parried: boolean;
@@ -39,8 +40,6 @@ export interface BattleResult {
 }
 
 export const MAX_ROUNDS = 180;   // 5v5는 총 HP가 늘어 상향(조기 타이브레이크 무승부 방지). rage 램프가 장기전 수렴.
-export const BASIC_POWER = 10.0;
-export const SIGNATURE_POWER = 14.0;
 export const SPEED_BASE = 1000.0;
 
 // 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적으로 데미지 ×critMult. Swift BattleEngine 1:1.
@@ -69,7 +68,7 @@ export function rageMultiplier(action: number): number {
   return 1.0 + Math.max(0, action - RAGE_START) * RAGE_STEP;
 }
 
-interface Combatant { kind: string; type: BattleType; stats: BattleStats; hp: number; isRainbow: boolean; }
+interface Combatant { kind: string; type: BattleType; stats: BattleStats; hp: number; isRainbow: boolean; skills: Skill[]; }
 
 // 팀 시너지까지 반영한 최종 전투 스탯. Swift finalStats 와 동일 소스.
 export function finalStats(member: BattlePetSnapshot, team: BattleTeam): BattleStats {
@@ -82,7 +81,10 @@ export function finalStats(member: BattlePetSnapshot, team: BattleTeam): BattleS
 function makeCombatants(team: BattleTeam): Combatant[] {
   return team.map((m) => {
     const st = finalStats(m, team);
-    return { kind: m.kind, type: battleTypeOf(m.kind), stats: st, hp: st.hp, isRainbow: m.variant >= RAINBOW_VARIANT };
+    return {
+      kind: m.kind, type: battleTypeOf(m.kind), stats: st, hp: st.hp,
+      isRainbow: m.variant >= RAINBOW_VARIANT, skills: skillsFor(m.kind, m.variant),
+    };
   });
 }
 function activeIdx(team: Combatant[]): number { return team.findIndex((c) => c.hp > 0); }
@@ -144,14 +146,15 @@ function attack(
   const attacker = from[ai];
   const defender = to[di];
 
-  const eff = effectiveness(attacker.type, defender.type);
+  // 스킬 선택(결정적 AI) → 스킬 타입 상성(×2.0/×0.5) + 자속(STAB ×1.5)으로 데미지식 전환.
+  const skill = selectSkill(attacker.skills, attacker.type, defender.type);
+  const eff = skillEffectiveness(skill.type, defender.type);   // 로그 effectiveness = 스킬 상성
+  const stab = stabMult(skill.type, attacker.type);
   const syn = matchup(collectionOf(attacker.kind), collectionOf(defender.kind));
-  const useSignature = eff > 1.0 || syn.mult > 1.0;
-  const power = useSignature ? SIGNATURE_POWER : BASIC_POWER;
 
   const rngFactor = 0.9 + 0.1 * rng.uniform01();   // [0.9, 1.0)
   const rage = rageMultiplier(round);
-  const raw = (attacker.stats.atk / defender.stats.def) * power * eff * syn.mult * rngFactor * rage;
+  const raw = (attacker.stats.atk / defender.stats.def) * skill.power * eff * stab * syn.mult * rngFactor * rage;
   const baseDmg = Math.max(1, roundAway(raw));
 
   // 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적 ×critMult. 조건부 draw라 비-레인보우
@@ -175,7 +178,7 @@ function attack(
     attacker: attackerSide,
     attackerKind: attacker.kind,
     defenderKind: defender.kind,
-    move: useSignature ? "signature" : "basic",
+    move: skill.id,
     damage: dmg,
     effectiveness: eff,
     collectionMult: syn.mult,
