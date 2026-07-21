@@ -37,9 +37,9 @@ struct BattleEvent: Codable, Equatable {
     var attacker: BattleSide
     var attackerKind: PetKind
     var defenderKind: PetKind
-    var move: String            // "basic" | "signature"
+    var move: String            // 스킬 id ("hotfix"/"mem_leak"…). 구 로그엔 "basic"/"signature"
     var damage: Int             // 최종 데미지 (패링 반영 후)
-    var effectiveness: Double   // 타입 상성 1.6 / 1.0 / 0.625
+    var effectiveness: Double   // 스킬 타입 상성 2.0 / 1.0 / 0.5 (구 로그엔 1.6 / 1.0 / 0.625)
     var collectionMult: Double  // 컬렉션 상성(밈/상성망) 배수
     var quip: String?           // 밈 라이벌 발동 시 배틀로그 대사
     var parried: Bool           // 방어자 퍼펙트 가드(패링) 발동 여부
@@ -56,8 +56,6 @@ struct BattleResult: Codable, Equatable {
 enum BattleEngine {
     /// 최대 행동 수 backstop (ATB라 "라운드"가 아니라 누적 행동 수). 초과 시 잔여 HP 타이브레이크.
     static let maxRounds = 180   // 5v5는 총 HP가 늘어 상향(조기 타이브레이크 방지). rage 램프가 장기전 수렴.
-    static let basicPower = 10.0
-    static let signaturePower = 14.0
     /// ATB 행동 주기 = speedBase / SPD. SPD 2배 → 주기 절반 → 2배 자주 행동(연속 공격 가능).
     static let speedBase = 1000.0
 
@@ -101,6 +99,7 @@ enum BattleEngine {
         let stats: BattleStats
         var hp: Int
         let isRainbow: Bool   // 최종 이로치(레인보우) — 크리 특수효과 대상
+        let skills: [Skill]   // variant까지 해금한 정규 스킬(슬롯 순) — 선택 AI 후보
         var alive: Bool { hp > 0 }
     }
 
@@ -122,7 +121,8 @@ enum BattleEngine {
         team.members.map { m in
             let s = finalStats(for: m, in: team)
             return Combatant(kind: m.kind, type: m.kind.battleType, stats: s, hp: s.hp,
-                             isRainbow: m.variant >= rainbowVariant)
+                             isRainbow: m.variant >= rainbowVariant,
+                             skills: SkillCatalog.skills(kind: m.kind, variant: m.variant))
         }
     }
 
@@ -190,16 +190,16 @@ enum BattleEngine {
         let attacker = from[ai]
         let defender = to[di]
 
-        let eff = BattleType.effectiveness(attacker.type, vs: defender.type)
-        // B/C. 컬렉션 상성(밈 라이벌 + 상성망) — 타입 상성과 곱해진다.
+        // 스킬 선택(결정적 AI) → 스킬 타입 상성(×2.0/×0.5) + 자속(STAB ×1.5)으로 데미지식 전환.
+        let skill = SkillCatalog.select(from: attacker.skills, attackerType: attacker.type, defenderType: defender.type)
+        let eff = SkillCatalog.skillEffectiveness(skill.type, vs: defender.type)   // 로그 effectiveness = 스킬 상성
+        let stab = SkillCatalog.stab(skillType: skill.type, petType: attacker.type)
+        // B/C. 컬렉션 상성(밈 라이벌 + 상성망) — 그대로 곱해진다.
         let synergy = PetSynergy.matchup(attacker.kind.collection, vs: defender.kind.collection)
-        // 무브 선택 휴리스틱: 타입 또는 컬렉션 상성 유리면 시그니처, 아니면 기본.
-        let useSignature = eff > 1.0 || synergy.mult > 1.0
-        let power = useSignature ? signaturePower : basicPower
 
         let rngFactor = 0.9 + 0.1 * rng.uniform01()   // [0.9, 1.0)
         let rage = rageMultiplier(action: round)      // 장기전 데미지 점증(격노)
-        let raw = (Double(attacker.stats.atk) / Double(defender.stats.def)) * power * eff * synergy.mult * rngFactor * rage
+        let raw = (Double(attacker.stats.atk) / Double(defender.stats.def)) * skill.power * eff * stab * synergy.mult * rngFactor * rage
         let baseDmg = max(1, Int(raw.rounded()))
 
         // 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적 ×critMult. 조건부 draw라 비-레인보우
@@ -225,7 +225,7 @@ enum BattleEngine {
             attacker: attackerSide,
             attackerKind: attacker.kind,
             defenderKind: defender.kind,
-            move: useSignature ? "signature" : "basic",
+            move: skill.id,
             damage: dmg,
             effectiveness: eff,
             collectionMult: synergy.mult,
