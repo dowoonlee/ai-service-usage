@@ -16,10 +16,10 @@ import Foundation
 enum StatKind: Equatable { case hp, atk, def, spd }
 
 enum TeamSynergy {
-    /// 같은 컬렉션(동족) 최대 수 → **전 스탯** 버프(강한 유대라 크게).
-    static let collectionBonus: [Int: Double] = [2: 0.05, 3: 0.10]
-    /// 같은 배틀 타입 최대 동속 수 → **그 타입 대표 스탯만** 버프(방향성).
-    static let typeBonus: [Int: Double] = [2: 0.03, 3: 0.05]
+    /// 같은 컬렉션(동족) 최대 수 → **전 스탯** 버프(강한 유대라 크게). 5마리까지 가속 누진.
+    static let collectionBonus: [Int: Double] = [2: 0.05, 3: 0.10, 4: 0.17, 5: 0.26]
+    /// 같은 배틀 타입 최대 동속 수 → **그 타입 대표 스탯만** 버프(방향성). 5마리까지 가속 누진.
+    static let typeBonus: [Int: Double] = [2: 0.03, 3: 0.06, 4: 0.10, 5: 0.15]
 
     /// 각 타입 시너지가 강화하는 대표 스탯(아키타입 성향). 타입 정체성 강화·팀빌딩 다양화.
     static func signatureStat(of type: BattleType) -> StatKind {
@@ -42,16 +42,26 @@ enum TeamSynergy {
     }
 
     /// 팀 구성에서 시너지 산출. 종 유니크 전제라 컬렉션/타입 그룹 크기로 판정.
-    /// (3마리 팀에서 타입이 2 이상 겹치는 그룹은 최대 하나뿐이라 대표 타입은 유일 — 결정적.)
+    /// 최다 타입 tie-break는 **팀 순서 first-max(strict >)** — 서버 pvp_policy.teamSynergyBonus 와 1:1.
+    /// (5마리 팀은 타입이 2+2+1처럼 동수로 갈릴 수 있어, Dictionary 비결정 순서 대신 팀 순서로 확정.)
     static func bonus(for members: [BattlePetSnapshot]) -> Bonus {
         guard members.count >= 2 else { return .none }
-        let maxCollection = Dictionary(grouping: members, by: { $0.kind.collection })
-            .values.map(\.count).max() ?? 1
+        // 같은 컬렉션 최대 수 — 값만 필요(순서 무관).
+        var collCounts: [PetCollection: Int] = [:]
+        for m in members { collCounts[m.kind.collection, default: 0] += 1 }
+        let maxCollection = collCounts.values.max() ?? 1
         let collMult = 1.0 + (collectionBonus[maxCollection] ?? 0)
-        let topType = Dictionary(grouping: members, by: { $0.kind.battleType })
-            .max { $0.value.count < $1.value.count }
-        if let topType, let add = typeBonus[topType.value.count] {
-            return Bonus(collectionMult: collMult, typeStat: signatureStat(of: topType.key), typeAdd: add)
+        // 최다 타입 — 팀 순서로 순회하며 strict > 로 갱신 → 동수면 먼저 등장한 타입 채택(서버와 동일).
+        var typeCounts: [BattleType: Int] = [:]
+        for m in members { typeCounts[m.kind.battleType, default: 0] += 1 }
+        var topType: BattleType? = nil
+        var topCount = 0
+        for m in members {
+            let c = typeCounts[m.kind.battleType] ?? 0
+            if c > topCount { topCount = c; topType = m.kind.battleType }
+        }
+        if let topType, let add = typeBonus[topCount] {
+            return Bonus(collectionMult: collMult, typeStat: signatureStat(of: topType), typeAdd: add)
         }
         return Bonus(collectionMult: collMult, typeStat: nil, typeAdd: 0)
     }

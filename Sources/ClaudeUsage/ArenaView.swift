@@ -126,9 +126,10 @@ struct ArenaView: View {
         }
         .onAppear {
             if teamKinds.isEmpty {
-                // 저장된 배틀 팀(순서 유지) 복원 — 소유 중인 kind만, 최대 3. 없으면 소유 상위 3으로 시드.
+                // 저장된 배틀 팀(순서 유지) 복원 — 소유 중인 kind만, 최대 5. 미설정이면 소유 펫 중 랜덤 5로
+                // 최초 1회 시드(onChange가 즉시 저장 → 이후 고정, 매번 랜덤 아님). 소유 5마리 미만이면 전부.
                 let saved = settings.battleTeam.filter { settings.ownedPets[$0] != nil }
-                teamKinds = saved.isEmpty ? Array(owned.prefix(3)) : Array(saved.prefix(3))
+                teamKinds = saved.isEmpty ? Array(owned.shuffled().prefix(5)) : Array(saved.prefix(5))
             }
             if enhanceKind == nil { enhanceKind = owned.first }
         }
@@ -180,7 +181,7 @@ struct ArenaView: View {
                     .background(RoundedRectangle(cornerRadius: 6).fill(typeColor(t).opacity(0.08)))
                 }
             }
-            Text("동타입 3마리를 모으면 그 타입 대표 스탯이 오릅니다(방향성 시너지).")
+            Text("같은 타입·컬렉션을 많이 모을수록 시너지가 점점 강해집니다(최대 5마리).")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
             Spacer()
         }
@@ -235,13 +236,13 @@ struct ArenaView: View {
                     Label("파티에서", systemImage: "square.and.arrow.down").font(.system(size: 10))
                 }.menuStyle(.borderlessButton).fixedSize().foregroundStyle(.tint)
             }
-            Button { teamKinds = Array(owned.shuffled().prefix(3)); stopPlayback(); result = nil } label: {
+            Button { teamKinds = Array(owned.shuffled().prefix(5)); stopPlayback(); result = nil } label: {
                 Label("팀 새로 뽑기", systemImage: "shuffle").font(.system(size: 10))
             }.buttonStyle(.plain).foregroundStyle(.tint)
         }
         HStack(spacing: 8) {
             ForEach(Array(teamKinds.enumerated()), id: \.offset) { idx, kind in petCard(kind, slot: idx) }
-            if teamKinds.count < 3 && teamKinds.count < owned.count { addSlotCard }
+            if teamKinds.count < 5 && teamKinds.count < owned.count { addSlotCard }
             if teamKinds.isEmpty { Text("펫 없음").font(.system(size: 11)).foregroundStyle(.secondary) }
         }
     }
@@ -320,8 +321,8 @@ struct ArenaView: View {
                 } message: {
                     Text("도전하면 오늘 랭크전 1판이 소모되고(현재 \(pvpDailyUsed)/\(pvpDailyLimit)판), 승패에 따라 레이팅이 변동됩니다.")
                 }
-            if teamKinds.count < 3 {
-                Text("랭크전은 3마리 풀팀이 필요합니다 (현재 \(teamKinds.count)/3). 팀을 채워주세요.")
+            if teamKinds.count < 5 {
+                Text("랭크전은 5마리 풀팀이 필요합니다 (현재 \(teamKinds.count)/5). 팀을 채워주세요.")
                     .font(.system(size: 9)).foregroundStyle(.orange)
             }
             Text("현재 팀이 등록되어 다른 유저의 상대(고스트)가 됩니다. 강화한 상태로 다시 도전하면 재등록됩니다.")
@@ -384,9 +385,9 @@ struct ArenaView: View {
         }
     }
 
-    // 도전 가능: 3마리 풀팀 + 진행 중 아님 + 일일 여유. (1~2마리 비대칭 3v3 방지 — #156)
+    // 도전 가능: 5마리 풀팀 + 진행 중 아님 + 일일 여유. (미달 팀의 비대칭 5v5 방지)
     private var rankedReady: Bool {
-        teamKinds.count == 3 && !rankedBusy && pvpDailyUsed < pvpDailyLimit
+        teamKinds.count == 5 && !rankedBusy && pvpDailyUsed < pvpDailyLimit
     }
 
     /// 랭킹 + 전적 로드(진입·도전 후). 미등록이면 no-op.
@@ -503,12 +504,12 @@ struct ArenaView: View {
         }.buttonStyle(.plain)
     }
 
-    // 파티 프리셋 → 배틀 팀 가져오기 (소유·유니크·최대 3마리).
+    // 파티 프리셋 → 배틀 팀 가져오기 (소유·유니크·최대 5마리).
     private func importParty(_ preset: PartyPreset) {
         var seen = Set<PetKind>(); var picked: [PetKind] = []
         for m in preset.members where settings.ownedPets[m.kind] != nil && !seen.contains(m.kind) {
             seen.insert(m.kind); picked.append(m.kind)
-            if picked.count >= 3 { break }
+            if picked.count >= 5 { break }
         }
         if !picked.isEmpty { teamKinds = picked; stopPlayback(); result = nil }
     }
@@ -561,7 +562,7 @@ struct ArenaView: View {
                 ForEach(choices, id: \.self) { k in
                     Button {
                         if slot < teamKinds.count { teamKinds[slot] = k }
-                        else if teamKinds.count < 3 { teamKinds.append(k) }   // 3마리 상한 방어(리뷰 m2)
+                        else if teamKinds.count < 5 { teamKinds.append(k) }   // 5마리 상한 방어
                         stopPlayback(); result = nil; editingSlot = nil
                     } label: {
                         VStack(spacing: 2) {
@@ -945,7 +946,7 @@ struct ArenaView: View {
     }
     /// 내 팀 전투력에 가장 근접한 상대 팀을 무작위 후보 중에서 고른다(일방적 매치 방지).
     private func matchmakeOpponent(against aS: [BattlePetSnapshot]) -> [BattlePetSnapshot] {
-        let size = max(1, min(3, aS.count))
+        let size = max(1, min(5, aS.count))
         let target = teamPower(aS)
         var best: [BattlePetSnapshot] = []
         var bestDiff = Int.max

@@ -24,7 +24,7 @@ interface RegisterPayload {
 }
 
 const MAX_CLOCK_SKEW_SEC = 3600;
-const MAX_TEAM = 3;
+const MAX_TEAM = 5;
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);

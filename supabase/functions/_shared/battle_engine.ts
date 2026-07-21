@@ -1,4 +1,4 @@
-// 3v3 ATB 자동전투 결정적 시뮬레이터 — 서버 authoritative. Swift `BattleEngine.swift` 와 규칙 1:1.
+// 5v5 ATB 자동전투 결정적 시뮬레이터 — 서버 authoritative. Swift `BattleEngine.swift` 와 규칙 1:1.
 //
 // 랭크전은 `pvp-challenge` 가 이 규칙으로 승패를 확정하고, 클라는 로그를 재생만 한다.
 // 동일 (두 팀 스냅샷 + 시드) → 동일 로그·승자. RNG·반올림은 pvp_policy/enhance_engine 명세를 따른다.
@@ -37,7 +37,7 @@ export interface BattleResult {
   log: BattleEvent[];
 }
 
-export const MAX_ROUNDS = 120;
+export const MAX_ROUNDS = 180;   // 5v5는 총 HP가 늘어 상향(조기 타이브레이크 무승부 방지). rage 램프가 장기전 수렴.
 export const BASIC_POWER = 10.0;
 export const SIGNATURE_POWER = 14.0;
 export const SPEED_BASE = 1000.0;

@@ -157,8 +157,8 @@ export function matchup(attacker: string, defender: string): Matchup {
 }
 
 // A. 팀 시너지 — 동족(컬렉션)=전 스탯 곱 / 동타입=그 타입 대표 스탯만 방향성 버프. Swift TeamSynergy 1:1.
-const TEAM_COLLECTION_BONUS: Record<number, number> = { 2: 0.05, 3: 0.10 };
-const TEAM_TYPE_BONUS: Record<number, number> = { 2: 0.03, 3: 0.05 };
+const TEAM_COLLECTION_BONUS: Record<number, number> = { 2: 0.05, 3: 0.10, 4: 0.17, 5: 0.26 };
+const TEAM_TYPE_BONUS: Record<number, number> = { 2: 0.03, 3: 0.06, 4: 0.10, 5: 0.15 };
 
 export type StatKind = "hp" | "atk" | "def" | "spd";
 // 각 타입 시너지가 강화하는 대표 스탯(아키타입 성향).
@@ -183,7 +183,8 @@ export function teamSynergyBonus(kinds: string[]): SynergyBonus {
   };
   const maxColl = Math.max(...counts(kinds.map(collectionOf)).values());
   const collectionMult = 1.0 + (TEAM_COLLECTION_BONUS[maxColl] ?? 0);
-  // 최다 타입 그룹 → 그 타입 대표 스탯 강화. (3마리 팀에서 count≥2 타입은 유일 — 결정적.)
+  // 최다 타입 그룹 → 그 타입 대표 스탯 강화. tie(5마리 2+2+1 등)는 아래 strict > 로 팀 순서
+  // 먼저 등장한 타입 채택 — 결정적, Swift TeamSynergy.bonus 와 1:1.
   let topType: BattleType | null = null, topCount = 0;
   for (const [t, c] of counts(kinds.map(battleTypeOf))) {
     if (c > topCount) { topCount = c; topType = t as BattleType; }

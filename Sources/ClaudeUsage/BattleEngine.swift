@@ -23,7 +23,7 @@ struct BattlePetSnapshot: Codable, Equatable, Hashable {
     }
 }
 
-/// 배틀 팀 — 최대 3마리, `members[0]`가 리드(선봉).
+/// 배틀 팀 — 최대 5마리, `members[0]`가 리드(선봉).
 struct BattleTeam: Codable, Equatable {
     var members: [BattlePetSnapshot]
     init(_ members: [BattlePetSnapshot]) { self.members = members }
@@ -54,7 +54,7 @@ struct BattleResult: Codable, Equatable {
 
 enum BattleEngine {
     /// 최대 행동 수 backstop (ATB라 "라운드"가 아니라 누적 행동 수). 초과 시 잔여 HP 타이브레이크.
-    static let maxRounds = 120
+    static let maxRounds = 180   // 5v5는 총 HP가 늘어 상향(조기 타이브레이크 방지). rage 램프가 장기전 수렴.
     static let basicPower = 10.0
     static let signaturePower = 14.0
     /// ATB 행동 주기 = speedBase / SPD. SPD 2배 → 주기 절반 → 2배 자주 행동(연속 공격 가능).
