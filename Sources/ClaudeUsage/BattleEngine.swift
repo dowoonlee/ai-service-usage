@@ -64,7 +64,7 @@ enum BattleEngine {
     static let rainbowCritChance = 0.20
     static let rainbowCritMult = 1.5
 
-    /// 궁극기 충전 — 레인보우 펫이 행동할 때마다 게이지 +1, 이 값 도달 시 다음(그 turn) 행동이 궁극기(정규
+    /// 궁극기 충전 — 레인보우 펫이 행동할 때마다 게이지 +1, 이 값 도달 시 **그 행동**이 궁극기(정규
     /// 스킬 대체) 후 게이지 리셋. **행동수 기반 = RNG 불필요·완전 결정적**(파리티 안전). 서버 battle_engine 1:1.
     static let ultChargeActions = 6
 
@@ -196,8 +196,10 @@ enum BattleEngine {
                                log: inout [BattleEvent], rng: inout SeededRNG) -> Bool {
         guard let ai = active(from), let di = active(to) else { return false }
         from[ai].charge += 1                     // 궁극기 게이지 — 행동마다 +1(결정적).
-        let attacker = from[ai]
+        let attacker = from[ai]                  // 값복사(Swift)/참조(TS) — charge 판정은 리셋 前이라 양측 동일.
         let defender = to[di]
+        // ⚠️ 파리티: 리셋(from[ai].charge=0) 이후 `attacker.charge`를 절대 읽지 말 것 — Swift는 복사본이라 옛값,
+        //    TS는 참조라 0으로 갈린다. 현재 로직은 리셋 후 charge 미사용이라 무해. effects 페이즈에서 주의.
 
         // 스킬 선택 — 레인보우가 충전 완료면 궁극기(정규 스킬 대체) 후 게이지 리셋, 아니면 결정적 선택 AI.
         // 스킬 타입 상성(×2.0/×0.5) + 자속(STAB ×1.5) 데미지식은 궁극기에도 동일 적용.

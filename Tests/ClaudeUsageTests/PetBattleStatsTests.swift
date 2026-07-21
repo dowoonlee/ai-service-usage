@@ -105,6 +105,20 @@ final class PetBattleStatsTests: XCTestCase {
         XCTAssertGreaterThan(profiles.count, 1, "같은 rarity·type이라도 개체마다 스탯 프로필이 달라야")
     }
 
+    // HP 스케일(Phase C) — compute()는 HP만 ×hpScale, atk/def/spd는 스케일 없이 순수 공식 그대로.
+    func testHPScaleOnlyAffectsHP() {
+        let k = PetKind.fox
+        let s = PetBattleStats.compute(kind: k, variant: 0, enhanceLevel: 10, progressUnits: 5)
+        let base = PetBattleStats.rarityBase(PetKind.rarityFor(k) ?? .common)
+        let growth = PetBattleStats.growthMultiplier(enhanceLevel: 10, progressUnits: 5)
+        let p = PetBattleStats.profileArchetype(k)   // variant 0 → vb 1
+        XCTAssertEqual(Double(s.hp),  (base * p.hp  * growth * PetBattleStats.hpScale).rounded(), accuracy: 0.5, "HP는 ×hpScale")
+        XCTAssertEqual(Double(s.atk), (base * p.atk * growth).rounded(), accuracy: 0.5, "ATK는 스케일 없음")
+        XCTAssertEqual(Double(s.def), (base * p.def * growth).rounded(), accuracy: 0.5, "DEF는 스케일 없음")
+        XCTAssertEqual(Double(s.spd), (base * p.spd * growth).rounded(), accuracy: 0.5, "SPD는 스케일 없음")
+        XCTAssertGreaterThan(PetBattleStats.hpScale, 1.0)   // 스케일이 실제로 적용 중
+    }
+
     // 밸런스 중립 — 프로필(profileArchetype)은 분배만 바꾸고 archetype 합은 보존한다.
     // (compute()의 총합은 HP ×1.5 스케일이 별도로 곱해져 보존되지 않음 — 그건 의도된 TTK 조정이므로
     //  balance-neutral 불변식은 스케일 전 단계인 profileArchetype에서 검증한다.)

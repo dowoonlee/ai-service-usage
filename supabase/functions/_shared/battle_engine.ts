@@ -154,8 +154,10 @@ function attack(
   const ai = activeIdx(from), di = activeIdx(to);
   if (ai < 0 || di < 0) return false;
   from[ai].charge += 1;                     // 궁극기 게이지 — 행동마다 +1(결정적).
-  const attacker = from[ai];
+  const attacker = from[ai];                // 참조(TS)/값복사(Swift) — charge 판정은 리셋 前이라 양측 동일.
   const defender = to[di];
+  // ⚠️ 파리티: 리셋(from[ai].charge=0) 이후 attacker.charge를 절대 읽지 말 것 — TS는 참조라 0, Swift는
+  //    복사본이라 옛값으로 갈린다. 현재 로직은 리셋 후 charge 미사용이라 무해. effects 페이즈에서 주의.
 
   // 레인보우가 충전 완료면 궁극기(정규 스킬 대체) 후 게이지 리셋, 아니면 결정적 선택 AI.
   let skill: Skill;
