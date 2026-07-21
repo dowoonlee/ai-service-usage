@@ -168,38 +168,77 @@ struct ArenaView: View {
                 Spacer()
                 Button("닫기") { showTypeHelp = false }.font(.system(size: 12))
             }
-            Text("각 타입은 하나를 강하게 이기고(×1.6) 하나에 약하게 진다(×0.625). 6타입 순환.")
+            Text("화살표가 가리키는 쪽이 지는 상대 (×1.6 우위 / 역방향 ×0.625). 나머지는 중립인 6타입 순환.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
-            VStack(spacing: 6) {
-                ForEach(BattleType.allCases, id: \.self) { t in
-                    HStack(spacing: 8) {
-                        typeChip(t)
-                        Image(systemName: "arrow.right").font(.system(size: 9)).foregroundStyle(.secondary)
-                        typeChip(t.beats)
-                        Text("강함").font(.system(size: 9)).foregroundStyle(.green)
-                        Spacer()
-                        Text("시너지 → \(statName(TeamSynergy.signatureStat(of: t)))")
-                            .font(.system(size: 9)).foregroundStyle(.tertiary)
-                    }
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(typeColor(t).opacity(0.08)))
-                }
-            }
+            typeWheel.frame(maxWidth: .infinity).frame(height: 258)
             Text("같은 타입·컬렉션을 많이 모을수록 시너지가 점점 강해집니다(최대 5마리).")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
-            Spacer()
+            Spacer(minLength: 0)
         }
-        .padding(16).frame(width: 320, height: 380)
+        .padding(16).frame(width: 320, height: 430)
     }
 
-    private func typeChip(_ t: BattleType) -> some View {
-        HStack(spacing: 4) {
-            if let img = PetSprite.icon(named: typeSynergyResource(t)) {
-                Image(nsImage: img).resizable().interpolation(.none).frame(width: 16, height: 16)
+    // 6타입 상성 순환 — 각 타입이 이기는 상대로 .beats 6회(단일 6-순환). 원형 배치 순서.
+    private var typeCycle: [BattleType] {
+        var out: [BattleType] = []
+        var t = BattleType.machine
+        for _ in 0..<6 { out.append(t); t = t.beats }
+        return out
+    }
+
+    // 원형 상성표 노드(컴팩트) — 컬러 아이콘 원 + 이름.
+    private func typeWheelNode(_ t: BattleType) -> some View {
+        VStack(spacing: 2) {
+            ZStack {
+                Circle().fill(typeColor(t).opacity(0.18))
+                Circle().strokeBorder(typeColor(t), lineWidth: 1.5)
+                if let img = PetSprite.icon(named: typeSynergyResource(t)) {
+                    Image(nsImage: img).resizable().interpolation(.none).frame(width: 18, height: 18)
+                }
             }
-            Text(t.displayName).font(.system(size: 10, weight: .semibold)).foregroundStyle(typeColor(t))
+            .frame(width: 34, height: 34)
+            Text(t.displayName).font(.system(size: 8, weight: .semibold)).foregroundStyle(typeColor(t))
         }
-        .frame(width: 84, alignment: .leading)
+        .frame(width: 52)
+    }
+
+    // 원형(육각) 상성 다이어그램 — 화살표 A▶B = A가 B를 이김(×1.6). 6-순환이라 링 형태로 흐른다.
+    private var typeWheel: some View {
+        let cycle = typeCycle
+        return GeometryReader { geo in
+            let cx = geo.size.width / 2, cy = geo.size.height / 2
+            let r = min(geo.size.width, geo.size.height) / 2 - 30
+            let pts: [CGPoint] = (0..<6).map { i in
+                let a = -Double.pi / 2 + Double(i) * (Double.pi / 3)   // 상단 시작, 시계방향 60°
+                return CGPoint(x: cx + r * CGFloat(cos(a)), y: cy + r * CGFloat(sin(a)))
+            }
+            let cols = cycle.map { typeColor($0) }
+            ZStack {
+                Canvas { ctx, _ in
+                    for i in 0..<6 {
+                        let p0 = pts[i], p1 = pts[(i + 1) % 6]
+                        let dx = p1.x - p0.x, dy = p1.y - p0.y
+                        let len = max(1, (dx * dx + dy * dy).squareRoot())
+                        let ux = dx / len, uy = dy / len
+                        let inset: CGFloat = 26
+                        let s = CGPoint(x: p0.x + ux * inset, y: p0.y + uy * inset)
+                        let e = CGPoint(x: p1.x - ux * inset, y: p1.y - uy * inset)
+                        var line = Path(); line.move(to: s); line.addLine(to: e)
+                        ctx.stroke(line, with: .color(cols[i].opacity(0.75)), lineWidth: 1.8)
+                        // 화살촉(끝점 e에서 뒤로 barb 2개).
+                        let ah: CGFloat = 7, side: CGFloat = 4
+                        let back = CGPoint(x: e.x - ux * ah, y: e.y - uy * ah)
+                        let left = CGPoint(x: back.x - uy * side, y: back.y + ux * side)
+                        let right = CGPoint(x: back.x + uy * side, y: back.y - ux * side)
+                        var head = Path(); head.move(to: left); head.addLine(to: e); head.addLine(to: right)
+                        ctx.stroke(head, with: .color(cols[i].opacity(0.9)), lineWidth: 1.8)
+                    }
+                }
+                ForEach(0..<6, id: \.self) { i in
+                    typeWheelNode(cycle[i]).position(pts[i])
+                }
+            }
+        }
     }
 
     private var emptyGate: some View {
