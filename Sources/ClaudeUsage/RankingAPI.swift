@@ -1820,6 +1820,8 @@ actor RankingAPI {
         let opponentNickname: String
         let myTeam: [BattlePetSnapshot]
         let oppTeam: [BattlePetSnapshot]
+        let maxHpA: [Int]?            // 서버 계산 HP 실링(팀 순서). 구서버 응답엔 없어 Optional → 클라 로컬 폴백.
+        let maxHpB: [Int]?
         let log: [BattleEvent]
         let rounds: Int
         let dailyUsed: Int
@@ -1882,6 +1884,7 @@ actor RankingAPI {
         let id: String; let createdAt: String; let iAmChallenger: Bool
         let opponentNickname: String; let result: String; let ratingDelta: Int
         let teamA: [BattlePetSnapshot]; let teamB: [BattlePetSnapshot]; let events: [BattleEvent]
+        let maxHpA: [Int]?; let maxHpB: [Int]?   // 서버 HP 실링(저장 로그). 구 로그엔 없어 Optional → 로컬 폴백.
     }
     struct PvpHistoryResponse: Decodable, Sendable { let matches: [PvpMatch] }
 
