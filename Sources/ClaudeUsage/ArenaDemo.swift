@@ -241,7 +241,8 @@ enum ArenaDemo {
         let r = BattleEngine.simulate(teamA: teamA, teamB: teamB, seed: seed)
         let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
         let aMoves = Set(r.log.filter { $0.attacker == .a }.map { $0.move }).sorted().joined(separator: ",")
-        print("  PARITYUNIQUE winner=\(winner) rounds=\(r.rounds) aMoves=[\(aMoves)] "
+        let bMoves = Set(r.log.filter { $0.attacker == .b }.map { $0.move }).sorted().joined(separator: ",")
+        print("  PARITYUNIQUE winner=\(winner) rounds=\(r.rounds) aMoves=[\(aMoves)] bMoves=[\(bMoves)] "
             + "dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
     }
 }

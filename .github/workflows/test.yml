@@ -20,3 +20,20 @@ jobs:
 
       - name: Run tests
         run: swift test
+
+      # 배틀/강화 엔진은 클라(Swift)↔서버(TS) 비트 파리티가 골든으로 잠겨 있다. deno 골든이 CI에
+      # 안 걸리면 파리티 안전망이 로컬 실행에만 의존한다 → 머지 게이트로 강제한다.
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Parity tests (Swift↔TS 골든)
+        run: deno test supabase/functions/_shared/pvp_engine.parity.test.ts
+
+      # pet_meta_gen.ts는 Swift 소스에서 생성한 아티팩트다. 재생성 후 diff가 있으면
+      # (uniqueTable 등 수정 후 gen 재실행을 깜빡한 것) 실패시켜 stale 커밋을 막는다.
+      - name: pet_meta_gen 신선도
+        run: |
+          python3 scripts/gen_pet_meta.py
+          git diff --exit-code supabase/functions/_shared/pet_meta_gen.ts

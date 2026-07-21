@@ -53,10 +53,12 @@ def main():
     # unique 고유기(Epic+ per-kind) — PetSkills.uniqueTable 블록에서 .kind: ("id", "name") 파싱.
     sk = read("PetSkills.swift")
     ublock = re.search(r"static let uniqueTable[^=]*=\s*\[(.*?)\n\s*\]", sk, re.S)
+    if not ublock:   # fail-closed: 앵커 미스매치 시 조용히 빈 맵 생성하지 않는다.
+        print("생성 실패 — PetSkills.uniqueTable 블록 파싱 실패(정규식 앵커 확인)", file=sys.stderr)
+        sys.exit(1)
     kind_unique = {}
-    if ublock:
-        for m in re.finditer(r'\.(\w+):\s*\("([^"]+)",\s*"([^"]+)"\)', ublock.group(1)):
-            kind_unique[m.group(1)] = [m.group(2), m.group(3)]
+    for m in re.finditer(r'\.(\w+):\s*\("([^"]+)",\s*"([^"]+)"\)', ublock.group(1)):
+        kind_unique[m.group(1)] = [m.group(2), m.group(3)]
 
     kset = set(kinds)
     errs = []
@@ -79,6 +81,9 @@ def main():
             errs.append(f"unique 여분(allCases 없음): {k}")
         elif kind_rarity.get(k) not in EPIC_PLUS:
             errs.append(f"unique는 Epic+ 전용인데 {k}={kind_rarity.get(k)}")
+    for k in kind_rarity:   # 역방향 — 모든 Epic+가 고유기를 갖는지(누락 방지, Swift 테스트와 대칭)
+        if kind_rarity[k] in EPIC_PLUS and k not in kind_unique:
+            errs.append(f"unique 누락(Epic+인데 고유기 없음): {k}")
     if errs:
         print("생성 실패 — 불일치:", *errs, sep="\n  ", file=sys.stderr)
         sys.exit(1)

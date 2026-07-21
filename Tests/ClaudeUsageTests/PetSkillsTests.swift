@@ -159,6 +159,18 @@ final class PetSkillsTests: XCTestCase {
         }
     }
 
+    // 스킬 id는 계층(generic/typeShared/collectionShared/unique) 전역에서 유일해야 한다 —
+    // nameById가 4테이블을 병합하며 id로 override하므로, 충돌하면 표시명이 조용히 덮인다.
+    func testAllSkillIdsAreUnique() {
+        var ids = ["hotfix"]
+        ids += SkillCatalog.typeSharedTable.values.map { $0.id }
+        ids += SkillCatalog.collectionSharedTable.values.map { $0.id }
+        ids += SkillCatalog.uniqueTable.values.map { $0.id }
+        XCTAssertEqual(Set(ids).count, ids.count, "스킬 id 계층 간 충돌 — 중복 id 존재")
+        // nameById가 모든 id를 커버(override로 잃은 id 없음).
+        XCTAssertEqual(SkillCatalog.nameById.count, ids.count)
+    }
+
     // variant 3 해금: Epic+는 4슬롯(고유기 추가), 저레어는 3슬롯 유지.
     func testVariant3UniqueSlotGating() {
         // fox = common → variant3도 3슬롯(고유기 없음)

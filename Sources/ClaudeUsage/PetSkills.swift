@@ -1,10 +1,11 @@
 import Foundation
 
-// 펫 스킬 시스템 (Phase A) — 순수 로직. 서버 `_shared/pvp_policy.ts` 스킬 계층과 규칙 1:1.
+// 펫 스킬 시스템 (Phase A/B1/B2) — 순수 로직. 서버 `_shared/pvp_policy.ts` 스킬 계층과 규칙 1:1.
 // 설계 SSOT: docs/plans/pet-skills.md.
 //
-// 이로치(variant) 단계마다 스킬을 얻는다: variant 0 = generic("핫픽스"), variant 1 = typeShared(타입 6종).
-// (Phase B에서 variant 2 collectionShared / variant 3 unique / variant 4 궁극기 추가 예정.)
+// 이로치(variant) 단계마다 스킬을 얻는다: variant 0 = generic("핫픽스") / 1 = typeShared(타입 6종) /
+// 2 = collectionShared(컬렉션 19종·오프타입 커버리지) / 3 = unique(Epic+ per-kind 고유기·자기타입).
+// (Phase C에서 variant 4 궁극기 추가 예정.)
 // 데미지식은 "스킬 타입 vs 방어자 타입" 상성(×2.0/×0.5)과 자속(STAB ×1.5)으로 전환 — 패시브 ×1.6/0.625 대체.
 // generic/typeShared 는 펫 타입에서 **규칙 파생**이라 per-kind 데이터가 없고, 양측 동일 로직으로 재현된다.
 

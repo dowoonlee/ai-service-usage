@@ -136,6 +136,21 @@ final class BattleEngineTests: XCTestCase {
                              BattleEngine.rageMultiplier(action: BattleEngine.rageStart + 5))
     }
 
+    // variant3 Epic+ 고유기 배틀도 backstop(maxRounds) 전에 종료하고 데미지 불변식을 지킨다.
+    // unique(power14 자기타입 STAB, 실효 21)가 종료성/데미지≥1 불변식을 깨지 않음을 회귀 가드.
+    func testUniqueBattleTerminates() {
+        func t3(_ kinds: [PetKind]) -> BattleTeam {
+            BattleTeam(kinds.map { BattlePetSnapshot(kind: $0, variant: 3, enhanceLevel: 5, progressUnits: 2) })
+        }
+        let a = t3([.warrior, .lancer, .monk])       // mythic warrior — 전원 고유기 보유
+        let b = t3([.archer, .pawn, .heroKnight])    // mythic/epic warrior — 전원 고유기 보유
+        for seed in 0..<60 {
+            let r = BattleEngine.simulate(teamA: a, teamB: b, seed: UInt64(seed))
+            XCTAssertLessThan(r.rounds, BattleEngine.maxRounds, "variant3 고유기 배틀도 backstop 전 종료(seed \(seed))")
+            for e in r.log { XCTAssertGreaterThanOrEqual(e.damage, 1) }
+        }
+    }
+
     // R1 회귀 가드: 데미지식은 성장이 atk/def에 동시 곱해져 비율 불변 → TTK가 HP만큼 선형 증가.
     // 격노 램프가 없으면 풀강 탱커(mascot=최고 HP archetype) 미러전이 maxRounds를 상시 초과해
     // "KO 없는 HP 총량 타이브레이크"로 수렴한다. 램프가 있으면 backstop 전에 KO로 결판나야 한다.

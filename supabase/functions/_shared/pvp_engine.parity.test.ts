@@ -9,7 +9,7 @@
 
 import { SeededRNG, roll, apply, baseCost, expectedVP, safeOdds, safeCost, cost, canSafeEnhance, rollSafe } from "./enhance_engine.ts";
 import { simulate, BattleTeam } from "./battle_engine.ts";
-import { genericSkill, typeSharedSkill, collectionSharedSkill, uniqueSkill, type BattleType } from "./pvp_policy.ts";
+import { genericSkill, typeSharedSkill, collectionSharedSkill, uniqueSkill, skillsFor, type BattleType } from "./pvp_policy.ts";
 import { UNIQUE_SKILL } from "./pet_meta_gen.ts";
 
 function assertEq(name: string, got: unknown, exp: unknown) {
@@ -151,9 +151,20 @@ Deno.test("고유기 배틀 파리티 (variant3 Epic+ per-kind unique 선택) �
   assertEq("winner", r.winner, "b");
   assertEq("rounds", r.rounds, 29);
   const aMoves = [...new Set(r.log.filter((e) => e.attacker === "a").map((e) => e.move))].sort();
+  const bMoves = [...new Set(r.log.filter((e) => e.attacker === "b").map((e) => e.move))].sort();
   assertEq("A moves(고유기)", aMoves, ["fullstack_smash", "zen_mode", "zero_day"]);
+  assertEq("B moves(고유기)", bMoves, ["fullstack_smash", "merge_conflict", "remote_exec"]);
   assertEq("dmg sequence", r.log.map((e) => e.damage),
     [29, 27, 28, 26, 27, 27, 28, 29, 3, 28, 28, 27, 29, 27, 28, 26, 29, 29, 27, 29, 27, 29, 27, 27, 28, 28, 29, 28, 28]);
+});
+
+Deno.test("저레어 variant3 게이팅 — Common 펫은 고유기 없이 3슬롯(Swift testVariant3UniqueSlotGating 대칭)", () => {
+  // fox = common → variant3에서도 generic+typeShared+collectionShared 3슬롯(고유기 미추가).
+  // skillsFor의 `if (u)` null 가드가 빠지면 여기서 length가 4가 되거나 selectSkill이 크래시.
+  assertEq("fox v3 slots", skillsFor("fox", 3).length, 3);
+  assertEq("fox unique 없음", uniqueSkill("fox"), null);
+  // Epic+는 4슬롯(warrior = mythic).
+  assertEq("warrior v3 slots", skillsFor("warrior", 3).length, 4);
 });
 
 Deno.test("결정성 — 동일 (팀+시드) → 동일 로그", () => {
