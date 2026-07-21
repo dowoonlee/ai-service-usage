@@ -53,6 +53,8 @@ const BEATS: Record<BattleType, BattleType> = {
   machine: "beast", beast: "chaos", chaos: "arcane",
   arcane: "mascot", mascot: "warrior", warrior: "machine",
 };
+// [레거시 — 배틀 미사용] 패시브 타입 상성. 스킬 전환(Phase A) 이후 배틀은 skillEffectiveness(×2.0/×0.5)를
+// 쓴다. 사이클(BEATS) 자체는 skillEffectiveness가 재사용하는 SSOT라 상수/함수는 남겨둔다.
 export const TYPE_SUPER = 1.6;
 export const TYPE_WEAK = 0.625;   // = 1 / 1.6
 export function effectiveness(attacker: BattleType, defender: BattleType): number {
@@ -126,7 +128,11 @@ const COLLECTION_SHARED_SKILL: Record<string, [string, string, BattleType]> = {
   helloWorld: ["hello_world", "Hello, World!", "arcane"],
 };
 export function collectionSharedSkill(collection: string): Skill {
-  const [id, name, type] = COLLECTION_SHARED_SKILL[collection] ?? ["mainframe_overload", "메인프레임 과부하", "machine"];
+  // fail-closed: 미매핑 컬렉션은 조용히 잘못된 타입으로 대체하지 않고 던진다(Swift 강제언랩과 대칭).
+  // 조용한 폴백은 authoritative 랭크 결과를 틀린 스킬타입으로 오염시키는데, 던지면 배포/테스트에서 잡힌다.
+  const e = COLLECTION_SHARED_SKILL[collection];
+  if (!e) throw new Error(`collectionSharedSkill: 미매핑 컬렉션 "${collection}" (Swift collectionSharedTable와 동기화 필요)`);
+  const [id, name, type] = e;
   return { id, name, type, power: COLLECTION_SHARED_POWER, tier: "collectionShared" };
 }
 
@@ -142,6 +148,8 @@ export function skillScore(s: Skill, attackerType: BattleType, defenderType: Bat
   return s.power * skillEffectiveness(s.type, defenderType) * stabMult(s.type, attackerType);
 }
 // 결정적 선택 AI — 점수 최대, 동점이면 슬롯 인덱스 낮은 것(strict >). Swift SkillCatalog.select 1:1.
+// 전제: skills 비지 않음(skillsFor가 generic을 항상 첫 슬롯에 둠). 파리티: score가 A/B1에선 dyadic이라
+// Swift↔JS 비트동일 — B2에서 비-dyadic power/배수 도입 시 tie-break 드리프트 주의(dyadic 유지).
 export function selectSkill(skills: Skill[], attackerType: BattleType, defenderType: BattleType): Skill {
   let best = skills[0];
   let bestScore = skillScore(best, attackerType, defenderType);
