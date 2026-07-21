@@ -17,6 +17,7 @@ struct ArenaView: View {
     @ObservedObject private var settings = Settings.shared
     @State private var mode: Mode = .practice
     @State private var showTypeHelp = false        // 6타입 상성 도움말 시트
+    @State private var showChallengeConfirm = false // 랭크전 도전 확인 alert(일일 판수 소모)
 
     // 연습전
     @State private var teamKinds: [PetKind] = []          // 편성 가능한 내 팀(전투 전 편집)
@@ -124,9 +125,14 @@ struct ArenaView: View {
             .padding(16)
         }
         .onAppear {
-            if teamKinds.isEmpty { teamKinds = Array(owned.prefix(3)) }
+            if teamKinds.isEmpty {
+                // 저장된 배틀 팀(순서 유지) 복원 — 소유 중인 kind만, 최대 3. 없으면 소유 상위 3으로 시드.
+                let saved = settings.battleTeam.filter { settings.ownedPets[$0] != nil }
+                teamKinds = saved.isEmpty ? Array(owned.prefix(3)) : Array(saved.prefix(3))
+            }
             if enhanceKind == nil { enhanceKind = owned.first }
         }
+        .onChange(of: teamKinds) { _, new in settings.battleTeam = new }  // 편성 변경 즉시 영속
         .sheet(isPresented: $showTypeHelp) { typeHelpSheet }
         .task { await loadEnhanceState() }   // 서버에서 강화 레벨·가용 VP 로드(등록 사용자)
         .task(id: mode) { if mode == .ranked { await loadRankedState() } }   // 랭크전 진입 시 랭킹·전적
@@ -144,7 +150,7 @@ struct ArenaView: View {
                     Label("타입 상성", systemImage: "hexagon").font(.system(size: 10))
                 }.buttonStyle(.plain).foregroundStyle(.tint)
             }
-            Text("강화는 서버 반영(VP 실차감·영속). 레이팅·랭크전·시즌 보상은 준비 중. 도트 임팩트는 에셋 확보 후.")
+            Text("강화·레이팅·시즌 보상 모두 서버 반영 — 승패는 조작 방지를 위해 서버가 확정합니다. 도트 임팩트는 에셋 확보 후.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
@@ -300,7 +306,7 @@ struct ArenaView: View {
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.1)))
             }
             teamEditor
-            Button { doRankedChallenge() } label: {
+            Button { showChallengeConfirm = true } label: {
                 Text(rankedBusy ? "매칭 중…" : "⚔️ 랭크전 도전")
                     .font(.system(size: 13, weight: .semibold))
                     .frame(maxWidth: .infinity).padding(.vertical, 9)
@@ -308,6 +314,16 @@ struct ArenaView: View {
                         .fill(Color.accentColor.opacity(rankedReady ? 1 : 0.5)))
                     .foregroundStyle(.white)
             }.buttonStyle(.plain).disabled(!rankedReady)
+                .alert("랭크전 도전", isPresented: $showChallengeConfirm) {
+                    Button("취소", role: .cancel) {}
+                    Button("도전") { doRankedChallenge() }
+                } message: {
+                    Text("도전하면 오늘 랭크전 1판이 소모되고(현재 \(pvpDailyUsed)/\(pvpDailyLimit)판), 승패에 따라 레이팅이 변동됩니다.")
+                }
+            if teamKinds.count < 3 {
+                Text("랭크전은 3마리 풀팀이 필요합니다 (현재 \(teamKinds.count)/3). 팀을 채워주세요.")
+                    .font(.system(size: 9)).foregroundStyle(.orange)
+            }
             Text("현재 팀이 등록되어 다른 유저의 상대(고스트)가 됩니다. 강화한 상태로 다시 도전하면 재등록됩니다.")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
             if let e = rankedError {
@@ -368,9 +384,9 @@ struct ArenaView: View {
         }
     }
 
-    // 도전 가능: 팀 있음 + 진행 중 아님 + 일일 여유.
+    // 도전 가능: 3마리 풀팀 + 진행 중 아님 + 일일 여유. (1~2마리 비대칭 3v3 방지 — #156)
     private var rankedReady: Bool {
-        !teamKinds.isEmpty && !rankedBusy && pvpDailyUsed < pvpDailyLimit
+        teamKinds.count == 3 && !rankedBusy && pvpDailyUsed < pvpDailyLimit
     }
 
     /// 랭킹 + 전적 로드(진입·도전 후). 미등록이면 no-op.
@@ -457,6 +473,14 @@ struct ArenaView: View {
             }
             .frame(width: 74).padding(.vertical, 6)
             .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.08)))
+            .overlay(alignment: .topLeading) {
+                if slot == 0 && teamKinds.count > 1 {
+                    Text("선봉").font(.system(size: 7, weight: .bold)).foregroundStyle(.white)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.accentColor))
+                        .offset(x: -2, y: -4)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if teamKinds.count > 1 {
                     Button { removeSlot(slot) } label: {
@@ -494,12 +518,45 @@ struct ArenaView: View {
         teamKinds.remove(at: slot); stopPlayback(); result = nil
     }
 
+    // 순서 재정렬 — teamKinds 순서 = 선봉 순서(slot 0 = 선봉). 인접 스왑 / 선봉으로 이동.
+    private func moveSlot(_ slot: Int, by delta: Int) {
+        let dst = slot + delta
+        guard teamKinds.indices.contains(slot), teamKinds.indices.contains(dst) else { return }
+        teamKinds.swapAt(slot, dst); stopPlayback(); result = nil
+    }
+    private func moveToLead(_ slot: Int) {
+        guard teamKinds.indices.contains(slot), slot != 0 else { return }
+        let k = teamKinds.remove(at: slot); teamKinds.insert(k, at: 0); stopPlayback(); result = nil
+    }
+
+    // 슬롯 편성 팝오버 상단 순서 재정렬 바 (선봉 = slot 0).
+    @ViewBuilder private func reorderBar(slot: Int) -> some View {
+        if slot < teamKinds.count, teamKinds.count > 1 {
+            HStack(spacing: 6) {
+                Text("순서").font(.system(size: 9)).foregroundStyle(.secondary)
+                Button { moveSlot(slot, by: -1); editingSlot = nil } label: { Image(systemName: "chevron.left") }
+                    .disabled(slot == 0)
+                Button { moveToLead(slot); editingSlot = nil } label: { Text("선봉으로").font(.system(size: 9)) }
+                    .disabled(slot == 0)
+                Button { moveSlot(slot, by: 1); editingSlot = nil } label: { Image(systemName: "chevron.right") }
+                    .disabled(slot >= teamKinds.count - 1)
+                Spacer()
+                Text("선봉이 먼저 싸웁니다").font(.system(size: 8)).foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.bordered).controlSize(.mini)
+            .padding(.horizontal, 8).padding(.top, 8)
+            Divider().padding(.top, 6)
+        }
+    }
+
     // 슬롯 편성 팝오버 — 소유 펫 그리드에서 골라 교체/추가. 중복 kind 방지(HP 딕셔너리 유니크 불변식).
     private func teamSlotPicker(slot: Int) -> some View {
         let currentKind = slot < teamKinds.count ? teamKinds[slot] : nil
         let inTeam = Set(teamKinds.enumerated().filter { $0.offset != slot }.map(\.element))
         let choices = owned.filter { !inTeam.contains($0) }
-        return ScrollView {
+        return VStack(spacing: 0) {
+            reorderBar(slot: slot)
+            ScrollView {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 58), spacing: 6)], spacing: 6) {
                 ForEach(choices, id: \.self) { k in
                     Button {
@@ -517,6 +574,7 @@ struct ArenaView: View {
                     }.buttonStyle(.plain)
                 }
             }.padding(8)
+            }
         }
         .frame(width: 264, height: 288)
     }
