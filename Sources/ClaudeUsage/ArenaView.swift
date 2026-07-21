@@ -23,6 +23,10 @@ struct ArenaView: View {
     @State private var teamKinds: [PetKind] = []          // 편성 가능한 내 팀(전투 전 편집)
     @State private var aSnaps: [BattlePetSnapshot] = []   // 실제 시뮬에 쓰인 내 팀 스냅샷(강화 반영)
     @State private var bSnaps: [BattlePetSnapshot] = []   // 상대 팀 스냅샷(매치메이킹 결과)
+    // 서버가 계산해 준 HP 실링(kind→maxHP). 있으면 HP 바 상한으로 우선 사용 → 엔진 버전 스큐에도 desync 없음.
+    // nil(로컬 대전·구서버·구 로그)이면 로컬 finalStats로 폴백. slot→kind 매핑(유니크 kind 전제, 방어적 uniquing).
+    @State private var serverMaxHpA: [PetKind: Int]?
+    @State private var serverMaxHpB: [PetKind: Int]?
     @State private var result: BattleResult?
     @State private var playbackStep = 0
     @State private var playbackTask: Task<Void, Never>?
@@ -463,6 +467,8 @@ struct ArenaView: View {
     private func replayHistory(_ m: RankingAPI.PvpMatch) {
         stopPlayback(); rankedResult = nil; rankedError = nil
         aSnaps = m.teamA; bSnaps = m.teamB
+        serverMaxHpA = Self.serverMaxHpDict(m.teamA, m.maxHpA)   // 저장된 실링(신규 로그) 우선, 구 로그면 nil→로컬 폴백
+        serverMaxHpB = Self.serverMaxHpDict(m.teamB, m.maxHpB)
         let w: BattleSide? = m.result == "draw" ? nil : ((m.result == "me") == m.iAmChallenger ? .a : .b)
         result = BattleResult(winner: w, rounds: m.events.count, log: m.events)
         showFullLog = false
@@ -486,6 +492,8 @@ struct ArenaView: View {
                 // 서버 팀·로그를 기존 배틀 재생에 먹인다.
                 aSnaps = resp.myTeam
                 bSnaps = resp.oppTeam
+                serverMaxHpA = Self.serverMaxHpDict(resp.myTeam, resp.maxHpA)   // 서버 실링 우선(버전 스큐 방지)
+                serverMaxHpB = Self.serverMaxHpDict(resp.oppTeam, resp.maxHpB)
                 let w: BattleSide? = resp.winner == "me" ? .a : (resp.winner == "opp" ? .b : nil)
                 result = BattleResult(winner: w, rounds: resp.rounds, log: resp.log)
                 rankedResult = RankedResult(winner: resp.winner, ratingDelta: resp.ratingDelta,
@@ -717,10 +725,10 @@ struct ArenaView: View {
                 }
             }
             .overlay(alignment: .topLeading) {
-                if let k = bActive { hpBox(k, cur: hp.b[k] ?? 0, showNumbers: false, snaps: bSnaps).padding(6) }
+                if let k = bActive { hpBox(k, cur: hp.b[k] ?? 0, showNumbers: false, snaps: bSnaps, server: serverMaxHpB).padding(6) }
             }
             .overlay(alignment: .bottomTrailing) {
-                if let k = aActive { hpBox(k, cur: hp.a[k] ?? 0, showNumbers: true, snaps: aSnaps).padding(6) }
+                if let k = aActive { hpBox(k, cur: hp.a[k] ?? 0, showNumbers: true, snaps: aSnaps, server: serverMaxHpA).padding(6) }
             }
         }
         .frame(height: 176)
@@ -758,8 +766,8 @@ struct ArenaView: View {
             .transition(.opacity)
     }
 
-    private func hpBox(_ kind: PetKind, cur: Int, showNumbers: Bool, snaps: [BattlePetSnapshot]) -> some View {
-        let maxv = maxHP(kind, in: snaps)
+    private func hpBox(_ kind: PetKind, cur: Int, showNumbers: Bool, snaps: [BattlePetSnapshot], server: [PetKind: Int]?) -> some View {
+        let maxv = maxHP(kind, in: snaps, server: server)
         let frac = maxv > 0 ? Double(max(0, cur)) / Double(maxv) : 0
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
@@ -900,16 +908,23 @@ struct ArenaView: View {
 
     // MARK: 배틀 상태 재구성 + 재생
 
-    /// 팀 시너지 + 강화까지 반영한 최대 HP — 엔진 makeCombatants와 동일 소스(BattleEngine.finalStats)를
-    /// 써서 관전 HP 바가 엔진 실제 HP와 정확히 일치하게 한다.
-    private func maxHP(_ kind: PetKind, in snaps: [BattlePetSnapshot]) -> Int {
+    /// HP 바 상한 — **서버가 실링(server[kind])을 줬으면 그걸 우선** 사용해 엔진 버전 스큐에도 desync가 없게
+    /// 한다. 없으면(로컬 대전·구서버·구 로그) 로컬 `BattleEngine.finalStats`로 폴백(엔진 makeCombatants 동일 소스).
+    private func maxHP(_ kind: PetKind, in snaps: [BattlePetSnapshot], server: [PetKind: Int]?) -> Int {
+        if let v = server?[kind] { return v }
         guard let m = snaps.first(where: { $0.kind == kind }) else { return 1 }
         return BattleEngine.finalStats(for: m, in: BattleTeam(snaps)).hp
     }
+    /// 서버 maxHP 배열(팀 순서)을 kind→maxHP 딕셔너리로. 배열 없거나 길이 불일치면 nil(로컬 폴백).
+    /// (internal — 하위호환 폴백 회귀 테스트용. ArenaMaxHpPayloadTests 참조.)
+    static func serverMaxHpDict(_ snaps: [BattlePetSnapshot], _ arr: [Int]?) -> [PetKind: Int]? {
+        guard let arr, arr.count == snaps.count else { return nil }
+        return Dictionary(zip(snaps.map(\.kind), arr), uniquingKeysWith: { x, _ in x })
+    }
     private func hpDicts(step: Int) -> (a: [PetKind: Int], b: [PetKind: Int]) {
         // 유니크 kind 전제지만 방어적으로 uniquing(미래에 동일 kind 편성 허용돼도 크래시 없게).
-        var a = Dictionary(aSnaps.map { ($0.kind, maxHP($0.kind, in: aSnaps)) }, uniquingKeysWith: { x, _ in x })
-        var b = Dictionary(bSnaps.map { ($0.kind, maxHP($0.kind, in: bSnaps)) }, uniquingKeysWith: { x, _ in x })
+        var a = Dictionary(aSnaps.map { ($0.kind, maxHP($0.kind, in: aSnaps, server: serverMaxHpA)) }, uniquingKeysWith: { x, _ in x })
+        var b = Dictionary(bSnaps.map { ($0.kind, maxHP($0.kind, in: bSnaps, server: serverMaxHpB)) }, uniquingKeysWith: { x, _ in x })
         for e in (result?.log ?? []).prefix(step) {
             if e.attacker == .a { b[e.defenderKind] = max(0, (b[e.defenderKind] ?? 0) - e.damage) }
             else { a[e.defenderKind] = max(0, (a[e.defenderKind] ?? 0) - e.damage) }
@@ -995,6 +1010,7 @@ struct ArenaView: View {
         let aS = teamKinds.map { BattlePetSnapshot(kind: $0, variant: battleVariant($0), enhanceLevel: serverLevels[$0] ?? 0) }
         let bS = matchmakeOpponent(against: aS)   // Σ스탯 근접 상대 샘플링(#4)
         aSnaps = aS; bSnaps = bS
+        serverMaxHpA = nil; serverMaxHpB = nil    // 로컬 대전 — 같은 엔진이 시뮬하니 로컬 finalStats로 렌더(스큐 없음)
         let r = BattleEngine.simulate(teamA: BattleTeam(aS), teamB: BattleTeam(bS), seed: .random(in: 1...UInt64.max))
         result = r
         showFullLog = false

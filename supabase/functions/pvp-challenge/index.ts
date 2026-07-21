@@ -12,7 +12,7 @@ import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { RATING_K, DAILY_RANK_LIMIT, WIN_COIN_BASE, RANKED_TEAM_SIZE } from "../_shared/pvp_policy.ts";
-import { simulate, BattleTeam } from "../_shared/battle_engine.ts";
+import { simulate, finalStats, BattleTeam } from "../_shared/battle_engine.ts";
 
 interface ChallengePayload { action: string; deviceId: string; ts: number; }
 
@@ -92,6 +92,10 @@ Deno.serve(async (req: Request) => {
   // 4) 서버 시뮬.
   const seed = cryptoU63();
   const result = simulate(myTeam, oppTeam, seed);
+  // HP 바 실링(팀 시너지 + HP 스케일 반영). 클라가 로컬 재도출하면 엔진 버전 스큐 때 desync되므로
+  // 서버가 계산해 응답/로그에 실어 클라가 그대로 렌더하게 한다(버전 무관). 팀 순서.
+  const maxHpA = myTeam.map((m) => finalStats(m, myTeam).hp);
+  const maxHpB = oppTeam.map((m) => finalStats(m, oppTeam).hp);
   const winSide = result.winner;   // "a"(나) | "b"(상대) | null(무승부)
 
   // 5) Elo.
@@ -120,7 +124,7 @@ Deno.serve(async (req: Request) => {
   await db.from("pvp_matches").insert({
     tenant_id: tenant, challenger: me, defender: opp.device_id, seed: seed.toString(),
     winner: winnerDevice, challenger_delta: deltaMe, defender_delta: -deltaMe,
-    log_json: { events: result.log, teamA: myTeam, teamB: oppTeam },
+    log_json: { events: result.log, teamA: myTeam, teamB: oppTeam, maxHpA, maxHpB },
   });
 
   // 7) 레이팅 갱신(양측) + pvp_teams.rating 캐시.
@@ -144,7 +148,7 @@ Deno.serve(async (req: Request) => {
     newRating: myNew,
     coinReward,
     opponentNickname: (oppUser.data?.nickname as string) ?? "상대",
-    myTeam, oppTeam,
+    myTeam, oppTeam, maxHpA, maxHpB,
     log: result.log,
     rounds: result.rounds,
     seed: seed.toString(),

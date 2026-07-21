@@ -74,6 +74,8 @@ Deno.serve(async (req: Request) => {
       teamA: lj.teamA ?? [],       // 도전자 팀
       teamB: lj.teamB ?? [],       // 방어자 팀
       events: lj.events ?? [],
+      maxHpA: lj.maxHpA ?? null,   // HP 실링(신규 로그만). 구 로그엔 없어 클라가 로컬 폴백.
+      maxHpB: lj.maxHpB ?? null,
     };
   });
 
