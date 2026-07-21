@@ -1665,16 +1665,20 @@ private struct PetPreviewView: View {
             .frame(maxWidth: .infinity)
             .background(headerColor)
 
-            // 본문 — 도감 화면처럼 살짝 들어간 inset 패널 느낌.
-            Text(PetMetaStore.shared.description(for: kind))
-                .font(.system(size: 11.5, design: .rounded))
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-                .multilineTextAlignment(.leading)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 9)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.gray.opacity(0.10))
+            // 본문 — 도감 화면처럼 살짝 들어간 inset 패널 느낌. 설명 + (보유 시) 해금 스킬.
+            VStack(alignment: .leading, spacing: 0) {
+                Text(PetMetaStore.shared.description(for: kind))
+                    .font(.system(size: 11.5, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                skillSection   // 보유 펫이면 해금 스킬, 아니면 아무것도 안 그림.
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.gray.opacity(0.10))
         }
         .frame(width: Self.descCardWidth, alignment: .leading)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
@@ -1682,6 +1686,66 @@ private struct PetPreviewView: View {
             RoundedRectangle(cornerRadius: AppRadius.lg)
                 .strokeBorder(headerColor.opacity(0.55), lineWidth: 1.2)
         )
+    }
+
+    /// 이 펫이 지금까지 해금한 스킬 — **보유 펫만**, 해금한 이로치(variant) 단계까지의 스킬.
+    /// 배틀과 동일하게 `max(unlockedVariants)`를 쓰고, 레인보우(4)면 궁극기까지 포함.
+    private var unlockedSkills: [Skill] {
+        guard let o = settings.ownedPets[kind] else { return [] }   // 미보유 펫은 빈 목록 → 섹션 미표시
+        let v = o.unlockedVariants.max() ?? 0
+        var out = SkillCatalog.skills(kind: kind, variant: v)
+        if v >= BattleEngine.rainbowVariant { out.append(SkillCatalog.ultimate(for: kind.battleType)) }
+        return out
+    }
+
+    /// 해금 스킬 섹션 — 도감 카드 본문 하단. 보유 펫이 아니면 아무것도 안 그린다("해금한 펫만").
+    @ViewBuilder
+    private var skillSection: some View {
+        let skills = unlockedSkills
+        if !skills.isEmpty {
+            Divider().padding(.horizontal, 9)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("해금 스킬").font(.system(size: 8.5, weight: .bold)).foregroundStyle(.secondary)
+                ForEach(skills, id: \.id) { skillDexRow($0) }
+            }
+            .padding(.horizontal, 9).padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // 스킬 한 줄 — 타입 색 점 · 이름 / (타입 · 티어) · 위력. 좁은 카드(160)라 컴팩트.
+    private func skillDexRow(_ s: Skill) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(Self.typeColor(s.type)).frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(s.name).font(.system(size: 9.5, weight: .medium)).lineLimit(1)
+                Text("\(s.type.displayName) · \(Self.tierLabel(s.tier))")
+                    .font(.system(size: 7)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 2)
+            Text("\(Int(s.power))").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.orange)
+        }
+    }
+
+    /// 스킬 티어 → 한글 라벨(해금 경로 감각). ArenaView.typeColor 와 동일 매핑을 로컬로 둔다(뷰 분리).
+    private static func tierLabel(_ t: SkillTier) -> String {
+        switch t {
+        case .generic:          return "기본"
+        case .typeShared:       return "타입 · 이로치1"
+        case .collectionShared: return "오프타입 · 이로치2"
+        case .unique:           return "고유기 · 이로치3"
+        case .ultimate:         return "궁극기 · 충전"
+        }
+    }
+    private static func typeColor(_ t: BattleType) -> Color {
+        switch t {
+        case .beast:   return .green
+        case .warrior: return .red
+        case .arcane:  return .purple
+        case .chaos:   return .indigo
+        case .machine: return .cyan
+        case .mascot:  return .pink
+        }
     }
 
     /// 도감 ID — `PetKind.allCases` 순서를 그대로 dex 번호로 사용. 새 펫이 enum 끝에 추가되면
