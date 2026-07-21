@@ -103,6 +103,11 @@ struct ArenaView: View {
 
     private var owned: [PetKind] { PetKind.allCases.filter { settings.ownedPets[$0] != nil } }
 
+    // 배틀에 반영할 이로치 단계 — 보유한 최고 해금 variant(0=기본 … 4=레인보우). 미보유 시 0.
+    private func battleVariant(_ kind: PetKind) -> Int {
+        settings.ownedPets[kind]?.unlockedVariants.max() ?? 0
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -468,7 +473,7 @@ struct ArenaView: View {
         guard rankedReady, canServerEnhance, let hmac = Keychain.loadRankingHmacKey() else { return }
         rankedError = nil; rankedResult = nil; stopPlayback(); result = nil
         let dev = settings.rankingDeviceID
-        let team = teamKinds.map { (kind: $0.rawValue, variant: 0, progressUnits: 0.0) }
+        let team = teamKinds.map { (kind: $0.rawValue, variant: battleVariant($0), progressUnits: 0.0) }
         rankedTask?.cancel()
         rankedBusy = true
         rankedTask = Task { @MainActor in
@@ -502,9 +507,9 @@ struct ArenaView: View {
     }
 
     private func petCard(_ kind: PetKind, slot: Int) -> some View {
-        // 강화소에서 올린 강화 레벨(서버 SSOT)을 반영해 배틀에 실제로 쓰일 스탯을 미리 보여준다.
+        // 강화소에서 올린 강화 레벨(서버 SSOT)+보유 이로치를 반영해 배틀에 실제로 쓰일 스탯을 미리 보여준다.
         let level = serverLevels[kind] ?? 0
-        let s = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: level, progressUnits: 0)
+        let s = PetBattleStats.compute(kind: kind, variant: battleVariant(kind), enhanceLevel: level, progressUnits: 0)
         return Button { editingSlot = SlotSel(id: slot) } label: {
             VStack(spacing: 3) {
                 thumb(kind, h: 30)
@@ -811,6 +816,7 @@ struct ArenaView: View {
 
     private func tagString(_ e: BattleEvent) -> String {
         var tags: [String] = []
+        if e.crit == true { tags.append("🌈 크리!") }
         if e.effectiveness > 1 { tags.append("타입▲") } else if e.effectiveness < 1 { tags.append("타입▼") }
         if e.collectionMult > 1.01 { tags.append("상성▲") } else if e.collectionMult < 0.99 { tags.append("상성▼") }
         if e.parried { tags.append("🛡️ 가드") }
@@ -982,8 +988,8 @@ struct ArenaView: View {
 
     private func fight() {
         stopPlayback()
-        // 내 팀 — 강화소 로컬 레벨 반영(#3).
-        let aS = teamKinds.map { BattlePetSnapshot(kind: $0, enhanceLevel: serverLevels[$0] ?? 0) }
+        // 내 팀 — 강화소 로컬 레벨 + 보유 이로치 반영.
+        let aS = teamKinds.map { BattlePetSnapshot(kind: $0, variant: battleVariant($0), enhanceLevel: serverLevels[$0] ?? 0) }
         let bS = matchmakeOpponent(against: aS)   // Σ스탯 근접 상대 샘플링(#4)
         aSnaps = aS; bSnaps = bS
         let r = BattleEngine.simulate(teamA: BattleTeam(aS), teamB: BattleTeam(bS), seed: .random(in: 1...UInt64.max))

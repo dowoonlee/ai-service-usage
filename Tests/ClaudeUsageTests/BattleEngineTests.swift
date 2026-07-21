@@ -105,6 +105,20 @@ final class BattleEngineTests: XCTestCase {
         XCTAssertGreaterThan(parries, 0)
     }
 
+    // 레인보우(variant 4) 공격자만 크리 발동 — 기본(0)은 절대 크리 없음.
+    func testRainbowCritOnlyForRainbow() {
+        let rainbow = BattleTeam([BattlePetSnapshot(kind: .fox, variant: 4, enhanceLevel: 10, progressUnits: 4)])
+        let plain = BattleTeam([BattlePetSnapshot(kind: .wolf, variant: 0, enhanceLevel: 10, progressUnits: 4)])
+        var rainbowCrits = 0, plainCrits = 0
+        for seed in 0..<100 {
+            let r = BattleEngine.simulate(teamA: rainbow, teamB: plain, seed: UInt64(seed))
+            rainbowCrits += r.log.filter { $0.attacker == .a && $0.crit == true }.count
+            plainCrits += r.log.filter { $0.attacker == .b && $0.crit == true }.count
+        }
+        XCTAssertGreaterThan(rainbowCrits, 0, "레인보우 공격자는 크리가 나와야")
+        XCTAssertEqual(plainCrits, 0, "기본 이로치는 크리 없음")
+    }
+
     // 로그 이벤트의 데미지는 항상 ≥ 1, 상성 배수는 유효 3값 중 하나.
     func testLogInvariants() {
         let r = BattleEngine.simulate(teamA: team(weak), teamB: team(strong), seed: 777)

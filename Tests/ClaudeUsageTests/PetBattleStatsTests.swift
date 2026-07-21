@@ -117,4 +117,13 @@ final class PetBattleStatsTests: XCTestCase {
                                      "\(kind): 프로필 총합은 순수 archetype 총합을 보존해야(밸런스 중립)")
         }
     }
+
+    // 이로치 버프 — 단계가 높을수록 전 스탯↑. 레인보우(4)>이로치3(3)>기본(0).
+    func testVariantBuffMonotonic() {
+        let v0 = PetBattleStats.compute(kind: .fox, variant: 0, enhanceLevel: 5, progressUnits: 0)
+        let v3 = PetBattleStats.compute(kind: .fox, variant: 3, enhanceLevel: 5, progressUnits: 0)
+        let v4 = PetBattleStats.compute(kind: .fox, variant: 4, enhanceLevel: 5, progressUnits: 0)
+        XCTAssertGreaterThan(v3.total, v0.total)
+        XCTAssertGreaterThan(v4.total, v3.total, "레인보우(+18%)가 이로치3(+10%)보다 총합 높아야")
+    }
 }

@@ -25,6 +25,7 @@ enum ArenaDemo {
         enhanceSection(seed: 20_260_716)
         battleSection(seed: 7_251_990)
         battleSection5v5(seed: 5_555_555)
+        battleSectionRainbow(seed: 9_999_999)
 
         print("\n\(bar)\n  끝 — 위 전부 컴파일된 엔진의 실제 출력입니다.\n\(bar)\n")
     }
@@ -151,5 +152,25 @@ enum ArenaDemo {
         let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
         // 파리티 골든 캡처용 한 줄 요약(TS pvp_engine.parity.test.ts 와 대조).
         print("  PARITY5V5 winner=\(winner) rounds=\(r.rounds) dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
+    }
+
+    // MARK: 레인보우 배틀 (이로치 버프 +18% + 레인보우 크리 파리티용 골든)
+    private static func battleSectionRainbow(seed: UInt64) {
+        // A: 레인보우(variant 4) — 이로치 버프 + 크리 발동 / B: 기본(variant 0).
+        let teamA = BattleTeam([
+            BattlePetSnapshot(kind: .fox, variant: 4, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .wolf, variant: 4, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .bear, variant: 4, enhanceLevel: 5, progressUnits: 2),
+        ])
+        let teamB = BattleTeam([
+            BattlePetSnapshot(kind: .scrapBot, variant: 0, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .antennaBot, variant: 0, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .warrior, variant: 0, enhanceLevel: 5, progressUnits: 2),
+        ])
+        print("\n[ 레인보우 배틀 ]  seed=\(seed)")
+        let r = BattleEngine.simulate(teamA: teamA, teamB: teamB, seed: seed)
+        let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
+        let crits = r.log.filter { $0.crit == true }.count
+        print("  PARITYRAINBOW winner=\(winner) rounds=\(r.rounds) crits=\(crits) dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
     }
 }

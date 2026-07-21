@@ -43,6 +43,7 @@ struct BattleEvent: Codable, Equatable {
     var collectionMult: Double  // 컬렉션 상성(밈/상성망) 배수
     var quip: String?           // 밈 라이벌 발동 시 배틀로그 대사
     var parried: Bool           // 방어자 퍼펙트 가드(패링) 발동 여부
+    var crit: Bool?             // 레인보우 크리 발동(구 로그엔 없어 Optional)
     var defenderFainted: Bool
 }
 
@@ -59,6 +60,11 @@ enum BattleEngine {
     static let signaturePower = 14.0
     /// ATB 행동 주기 = speedBase / SPD. SPD 2배 → 주기 절반 → 2배 자주 행동(연속 공격 가능).
     static let speedBase = 1000.0
+
+    /// 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적으로 데미지 ×critMult. 서버 battle_engine 1:1.
+    static let rainbowVariant = 4
+    static let rainbowCritChance = 0.20
+    static let rainbowCritMult = 1.5
 
     // MARK: 격노 램프 — 데미지식은 성장이 atk/def에 동시 곱해져 비율 불변이라 TTK가 HP(성장 비례)만큼
     // 선형으로 늘어난다. 풀강 탱커 미러전은 maxRounds를 상시 초과해 "KO 없는 HP 총량 타이브레이크"로
@@ -94,6 +100,7 @@ enum BattleEngine {
         let type: BattleType
         let stats: BattleStats
         var hp: Int
+        let isRainbow: Bool   // 최종 이로치(레인보우) — 크리 특수효과 대상
         var alive: Bool { hp > 0 }
     }
 
@@ -114,7 +121,8 @@ enum BattleEngine {
         // A. 팀 시너지 — 같은 컬렉션/타입 팀원 버프를 팀 전체 스탯에 곱한다.
         team.members.map { m in
             let s = finalStats(for: m, in: team)
-            return Combatant(kind: m.kind, type: m.kind.battleType, stats: s, hp: s.hp)
+            return Combatant(kind: m.kind, type: m.kind.battleType, stats: s, hp: s.hp,
+                             isRainbow: m.variant >= rainbowVariant)
         }
     }
 
@@ -194,11 +202,20 @@ enum BattleEngine {
         let raw = (Double(attacker.stats.atk) / Double(defender.stats.def)) * power * eff * synergy.mult * rngFactor * rage
         let baseDmg = max(1, Int(raw.rounded()))
 
+        // 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적 ×critMult. 조건부 draw라 비-레인보우
+        // 배틀의 RNG 스트림·기존 골든은 불변. 순서: rngFactor → (레인보우면 크리) → 패링 (서버와 1:1).
+        var critDmg = baseDmg
+        var crit = false
+        if attacker.isRainbow {
+            crit = rng.uniform01() < rainbowCritChance
+            if crit { critDmg = max(1, Int((Double(baseDmg) * rainbowCritMult).rounded())) }
+        }
+
         // 패링(퍼펙트 가드) — 방어자 SPD+DEF 조합 확률로 데미지 대폭 경감.
         let pc = parryChance(defSPD: defender.stats.spd, defDEF: defender.stats.def,
                              atkSPD: attacker.stats.spd, atkDEF: attacker.stats.def)
         let parried = rng.uniform01() < pc
-        let dmg = parried ? max(1, Int((Double(baseDmg) * parryDamageMult).rounded())) : baseDmg
+        let dmg = parried ? max(1, Int((Double(critDmg) * parryDamageMult).rounded())) : critDmg
 
         to[di].hp -= dmg
         let fainted = to[di].hp <= 0
@@ -214,6 +231,7 @@ enum BattleEngine {
             collectionMult: synergy.mult,
             quip: synergy.quip,
             parried: parried,
+            crit: crit,
             defenderFainted: fainted
         ))
         return fainted

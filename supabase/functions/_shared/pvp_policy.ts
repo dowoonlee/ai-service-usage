@@ -82,7 +82,7 @@ const RARITY_BASE: Record<Rarity, number> = {
 export const ENHANCE_BONUS = [
   0, 0.04, 0.08, 0.13, 0.18, 0.25, 0.30, 0.36, 0.43, 0.51, 0.60, 0.70, 0.82, 0.95, 1.07, 1.20,
 ];
-export const VARIANT_BONUS = [0, 0.02, 0.04, 0.06, 0.10];   // 기본/이로치1·2·3/레인보우
+export const VARIANT_BONUS = [0, 0.03, 0.06, 0.10, 0.18];   // 기본/이로치1·2·3/레인보우 (전 스탯 곱)
 export const MASTERY_MAX = 0.15;
 export const OVERFLOW_START_UNITS = 8.0;   // 숙련도 만렙 유닛 (Swift PetOwnership.overflowStartUnits)
 export const STAT_CAP_MULT = 2.6;

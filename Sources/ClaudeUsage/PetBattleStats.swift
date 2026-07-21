@@ -112,7 +112,7 @@ enum PetBattleStats {
         [0, 0.04, 0.08, 0.13, 0.18, 0.25, 0.30, 0.36, 0.43, 0.51, 0.60, 0.70, 0.82, 0.95, 1.07, 1.20]
 
     /// variant(이로치) 보너스. index = variant (0 기본 / 1·2·3 이로치 / 4 레인보우).
-    static let variantBonus: [Double] = [0, 0.02, 0.04, 0.06, 0.10]
+    static let variantBonus: [Double] = [0, 0.03, 0.06, 0.10, 0.18]
 
     /// 숙련도(무손실 트랙) 최대 보너스.
     static let masteryMax: Double = 0.15

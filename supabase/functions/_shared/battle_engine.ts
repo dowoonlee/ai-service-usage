@@ -29,6 +29,7 @@ export interface BattleEvent {
   collectionMult: number;   // 밈/상성망 배수
   quip: string | null;
   parried: boolean;
+  crit: boolean;            // 레인보우 크리 발동
   defenderFainted: boolean;
 }
 export interface BattleResult {
@@ -41,6 +42,11 @@ export const MAX_ROUNDS = 180;   // 5v5는 총 HP가 늘어 상향(조기 타이
 export const BASIC_POWER = 10.0;
 export const SIGNATURE_POWER = 14.0;
 export const SPEED_BASE = 1000.0;
+
+// 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적으로 데미지 ×critMult. Swift BattleEngine 1:1.
+export const RAINBOW_VARIANT = 4;
+export const RAINBOW_CRIT_CHANCE = 0.20;
+export const RAINBOW_CRIT_MULT = 1.5;
 
 // 패링(퍼펙트 가드) — DEF+SPD 조합.
 export const PARRY_BASE = 0.06;
@@ -63,7 +69,7 @@ export function rageMultiplier(action: number): number {
   return 1.0 + Math.max(0, action - RAGE_START) * RAGE_STEP;
 }
 
-interface Combatant { kind: string; type: BattleType; stats: BattleStats; hp: number; }
+interface Combatant { kind: string; type: BattleType; stats: BattleStats; hp: number; isRainbow: boolean; }
 
 // 팀 시너지까지 반영한 최종 전투 스탯. Swift finalStats 와 동일 소스.
 export function finalStats(member: BattlePetSnapshot, team: BattleTeam): BattleStats {
@@ -76,7 +82,7 @@ export function finalStats(member: BattlePetSnapshot, team: BattleTeam): BattleS
 function makeCombatants(team: BattleTeam): Combatant[] {
   return team.map((m) => {
     const st = finalStats(m, team);
-    return { kind: m.kind, type: battleTypeOf(m.kind), stats: st, hp: st.hp };
+    return { kind: m.kind, type: battleTypeOf(m.kind), stats: st, hp: st.hp, isRainbow: m.variant >= RAINBOW_VARIANT };
   });
 }
 function activeIdx(team: Combatant[]): number { return team.findIndex((c) => c.hp > 0); }
@@ -148,9 +154,18 @@ function attack(
   const raw = (attacker.stats.atk / defender.stats.def) * power * eff * syn.mult * rngFactor * rage;
   const baseDmg = Math.max(1, roundAway(raw));
 
+  // 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적 ×critMult. 조건부 draw라 비-레인보우
+  // 배틀의 RNG 스트림·기존 골든 불변. 순서: rngFactor → (레인보우면 크리) → 패링 (Swift와 1:1).
+  let critDmg = baseDmg;
+  let crit = false;
+  if (attacker.isRainbow) {
+    crit = rng.uniform01() < RAINBOW_CRIT_CHANCE;
+    if (crit) critDmg = Math.max(1, roundAway(baseDmg * RAINBOW_CRIT_MULT));
+  }
+
   const pc = parryChance(defender.stats.spd, defender.stats.def, attacker.stats.spd, attacker.stats.def);
   const parried = rng.uniform01() < pc;
-  const dmg = parried ? Math.max(1, roundAway(baseDmg * PARRY_DAMAGE_MULT)) : baseDmg;
+  const dmg = parried ? Math.max(1, roundAway(critDmg * PARRY_DAMAGE_MULT)) : critDmg;
 
   to[di].hp -= dmg;
   const fainted = to[di].hp <= 0;
@@ -166,6 +181,7 @@ function attack(
     collectionMult: syn.mult,
     quip: syn.quip,
     parried,
+    crit,
     defenderFainted: fainted,
   });
   return fainted;
