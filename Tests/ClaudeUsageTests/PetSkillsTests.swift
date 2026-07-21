@@ -160,12 +160,14 @@ final class PetSkillsTests: XCTestCase {
     }
 
     // 스킬 id는 계층(generic/typeShared/collectionShared/unique) 전역에서 유일해야 한다 —
-    // nameById가 4테이블을 병합하며 id로 override하므로, 충돌하면 표시명이 조용히 덮인다.
+    // nameById가 5테이블(generic/typeShared/collectionShared/unique/ultimate)을 병합하며 id로 override하므로,
+    // 충돌하면 표시명이 조용히 덮인다.
     func testAllSkillIdsAreUnique() {
         var ids = ["hotfix"]
         ids += SkillCatalog.typeSharedTable.values.map { $0.id }
         ids += SkillCatalog.collectionSharedTable.values.map { $0.id }
         ids += SkillCatalog.uniqueTable.values.map { $0.id }
+        ids += SkillCatalog.ultimateTable.values.map { $0.id }
         XCTAssertEqual(Set(ids).count, ids.count, "스킬 id 계층 간 충돌 — 중복 id 존재")
         // nameById가 모든 id를 커버(override로 잃은 id 없음).
         XCTAssertEqual(SkillCatalog.nameById.count, ids.count)
