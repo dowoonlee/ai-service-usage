@@ -560,7 +560,8 @@ struct ArenaView: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 58), spacing: 6)], spacing: 6) {
                 ForEach(choices, id: \.self) { k in
                     Button {
-                        if slot < teamKinds.count { teamKinds[slot] = k } else { teamKinds.append(k) }
+                        if slot < teamKinds.count { teamKinds[slot] = k }
+                        else if teamKinds.count < 3 { teamKinds.append(k) }   // 3마리 상한 방어(리뷰 m2)
                         stopPlayback(); result = nil; editingSlot = nil
                     } label: {
                         VStack(spacing: 2) {
