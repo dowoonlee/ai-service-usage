@@ -126,10 +126,14 @@ struct ArenaView: View {
         }
         .onAppear {
             if teamKinds.isEmpty {
-                // 저장된 배틀 팀(순서 유지) 복원 — 소유 중인 kind만, 최대 5. 미설정이면 소유 펫 중 랜덤 5로
-                // 최초 1회 시드(onChange가 즉시 저장 → 이후 고정, 매번 랜덤 아님). 소유 5마리 미만이면 전부.
-                let saved = settings.battleTeam.filter { settings.ownedPets[$0] != nil }
-                teamKinds = saved.isEmpty ? Array(owned.shuffled().prefix(5)) : Array(saved.prefix(5))
+                // 저장된 배틀 팀(순서 유지) 복원 — 소유 중인 kind만, 최대 5. 5칸 미만(미설정·레거시 3마리
+                // 팀)이면 소유 펫 중 미포함분을 랜덤으로 채워 5마리로(부족하면 전부). 최초 1회만 —
+                // onChange가 즉시 저장해 이후 고정(매번 랜덤 아님).
+                var seed = Array(settings.battleTeam.filter { settings.ownedPets[$0] != nil }.prefix(5))
+                if seed.count < 5 {
+                    seed.append(contentsOf: owned.filter { !seed.contains($0) }.shuffled().prefix(5 - seed.count))
+                }
+                teamKinds = seed
             }
             if enhanceKind == nil { enhanceKind = owned.first }
         }
@@ -864,20 +868,30 @@ struct ArenaView: View {
         }
         return (a, b)
     }
-    // 활성 시너지 감지 — 동족(컬렉션) / 동타입. (버프 배수가 실제로 붙는 경우만.)
+    // 활성 시너지 감지 — 동족(컬렉션) / 동타입. tie-break는 TeamSynergy.bonus 와 동일한 팀 순서
+    // first-max(strict >)로 결정 — 뱃지가 가리키는 타입/스탯이 실제 전투 엔진과 항상 일치(Dictionary
+    // 비결정 순서로 5마리 동수에서 엔진과 어긋나던 것 수정).
     private var collectionSynergy: (name: String, count: Int)? {
-        guard teamKinds.count >= 2,
-              let top = Dictionary(grouping: teamKinds, by: { $0.collection })
-                .max(by: { $0.value.count < $1.value.count }),
-              (TeamSynergy.collectionBonus[top.value.count] ?? 0) > 0 else { return nil }
-        return (top.key.displayName, top.value.count)
+        guard teamKinds.count >= 2 else { return nil }
+        var counts: [PetCollection: Int] = [:]
+        for k in teamKinds { counts[k.collection, default: 0] += 1 }
+        var top: PetCollection? = nil, topCount = 0
+        for k in teamKinds where (counts[k.collection] ?? 0) > topCount {
+            topCount = counts[k.collection] ?? 0; top = k.collection
+        }
+        guard let top, (TeamSynergy.collectionBonus[topCount] ?? 0) > 0 else { return nil }
+        return (top.displayName, topCount)
     }
     private var typeSynergy: (type: BattleType, count: Int)? {
-        guard teamKinds.count >= 2,
-              let top = Dictionary(grouping: teamKinds, by: { $0.battleType })
-                .max(by: { $0.value.count < $1.value.count }),
-              (TeamSynergy.typeBonus[top.value.count] ?? 0) > 0 else { return nil }
-        return (top.key, top.value.count)
+        guard teamKinds.count >= 2 else { return nil }
+        var counts: [BattleType: Int] = [:]
+        for k in teamKinds { counts[k.battleType, default: 0] += 1 }
+        var top: BattleType? = nil, topCount = 0
+        for k in teamKinds where (counts[k.battleType] ?? 0) > topCount {
+            topCount = counts[k.battleType] ?? 0; top = k.battleType
+        }
+        guard let top, (TeamSynergy.typeBonus[topCount] ?? 0) > 0 else { return nil }
+        return (top, topCount)
     }
 
     // 툴팁 문구 — 효과만 서술(버프 수치·배수 미표기).

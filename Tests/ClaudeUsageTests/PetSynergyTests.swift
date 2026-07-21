@@ -114,7 +114,7 @@ final class PetSynergyTests: XCTestCase {
     func testTeamSynergyAffectsBattle() {
         // 1마리 = 시너지 없음.
         XCTAssertEqual(TeamSynergy.bonus(for: [snap(.fox)]), .none)
-        // 모노 mainframe(beast): 전 스탯 ×1.10, 속도 ×1.15.
+        // 모노 mainframe(beast): 전 스탯 ×1.10, 속도 ×1.16 (컬렉션3 0.10 + 타입3 0.06).
         let syn = TeamSynergy.bonus(for: [snap(.fox), snap(.wolf), snap(.bear)])
         XCTAssertGreaterThan(syn.collectionMult, 1.0)
         XCTAssertEqual(syn.typeStat, .spd)

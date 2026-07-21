@@ -1,12 +1,12 @@
 import Foundation
 
-// 3v3 턴제 자동전투 결정적 시뮬레이터 (P0) — 순수 로직.
+// 5v5 ATB 자동전투 결정적 시뮬레이터 (P0) — 순수 로직.
 // 설계 SSOT: docs/plans/pet-battle.md §2-5 / §10.
 //
 // 랭크전은 서버가 이 규칙으로 시뮬레이션해 승패를 확정하고(authoritative), 클라는 로그를 재생만 한다.
-// 서버 `_shared/battle_engine.ts`(P1b 이식 예정)와 규칙 1:1을 목표 — 동일 (두 팀 스냅샷 + 시드) →
-// 동일 로그·승자. 이식 시 `rng.uniform01()`(EnhanceEngine.swift)과 `.rounded()`(away-from-zero,
-// JS `Math.round`와 다름)를 명세대로 재현해야 비트 단위로 일치한다.
+// 서버 `_shared/battle_engine.ts`(이식 완료·운영 중)와 규칙 1:1 — 동일 (두 팀 스냅샷 + 시드) →
+// 동일 로그·승자. `rng.uniform01()`(EnhanceEngine.swift)과 `.rounded()`(away-from-zero,
+// JS `Math.round`와 다름)를 명세대로 재현해 비트 단위로 일치한다.
 
 /// 배틀 팀 멤버 스냅샷 — 서버가 보관하는 고스트 방어 팀의 한 마리.
 struct BattlePetSnapshot: Codable, Equatable, Hashable {

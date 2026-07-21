@@ -24,6 +24,7 @@ enum ArenaDemo {
         synergySection()
         enhanceSection(seed: 20_260_716)
         battleSection(seed: 7_251_990)
+        battleSection5v5(seed: 5_555_555)
 
         print("\n\(bar)\n  끝 — 위 전부 컴파일된 엔진의 실제 출력입니다.\n\(bar)\n")
     }
@@ -123,5 +124,32 @@ enum ArenaDemo {
         }
         let winner = r.winner.map { $0 == .a ? "팀 A" : "팀 B" } ?? "무승부"
         print("  ── 승자: \(winner)  (\(r.rounds) 라운드, \(r.log.count) 액션) ──")
+    }
+
+    // MARK: 5v5 배틀 (누진 시너지 4/5 티어 + 타입 동수 tie-break 파리티용 골든)
+    private static func battleSection5v5(seed: UInt64) {
+        // A: warrior 컬렉션 5동족(컬렉션5=+0.26 · 타입5=+0.15 atk) — 최고 티어 경로.
+        // B: 타입 동수(beast fox,wolf=2 · machine scrapBot,antennaBot=2 · warrior 1) → tie는 팀 순서상
+        //    먼저 등장한 beast(spd) 채택 — tie-break 파리티 경로.
+        let teamA = BattleTeam([
+            BattlePetSnapshot(kind: .warrior, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .lancer, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .monk, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .archer, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .pawn, enhanceLevel: 5, progressUnits: 2),
+        ])
+        let teamB = BattleTeam([
+            BattlePetSnapshot(kind: .fox, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .wolf, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .scrapBot, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .antennaBot, enhanceLevel: 5, progressUnits: 2),
+            BattlePetSnapshot(kind: .warrior, enhanceLevel: 5, progressUnits: 2),
+        ])
+        print("\n[ 5v5 배틀 ]  seed=\(seed)")
+        print("  A: warrior·lancer·monk·archer·pawn (5동족)   vs   B: fox·wolf·scrapBot·antennaBot·warrior (타입 동수)")
+        let r = BattleEngine.simulate(teamA: teamA, teamB: teamB, seed: seed)
+        let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
+        // 파리티 골든 캡처용 한 줄 요약(TS pvp_engine.parity.test.ts 와 대조).
+        print("  PARITY5V5 winner=\(winner) rounds=\(r.rounds) dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
     }
 }

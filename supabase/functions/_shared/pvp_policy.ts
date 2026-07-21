@@ -206,3 +206,4 @@ export const RATING_START = 1000;
 export const RATING_K = 24;                 // Elo ±K
 export const DAILY_RANK_LIMIT = 10;         // 랭크전 하루 N판
 export const WIN_COIN_BASE = 30;            // 승리 기본 코인 (+상성·상위레이팅 보너스는 서버 산정)
+export const RANKED_TEAM_SIZE = 5;          // 랭크전 5v5 — 도전자·방어자 모두 이 크기 강제(매칭 대칭)

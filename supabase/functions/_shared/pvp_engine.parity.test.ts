@@ -53,6 +53,20 @@ Deno.test("3v3 배틀 파리티 — seed 7251990", () => {
   assertEq("dmg sequence", r.log.map((e) => e.damage), GOLD_BATTLE_DMG);
 });
 
+Deno.test("5v5 배틀 파리티 (누진 시너지 4/5 티어 + 타입 tie-break) — seed 5555555", () => {
+  // A: warrior 5동족(컬렉션5=+0.26·타입5=+0.15 atk) / B: 타입 동수 2+2+1(tie는 팀 순서 first=beast).
+  // 골든은 Swift --arena-demo 의 PARITY5V5 라인에서 캡처. TS teamSynergyBonus 의 tie-break·4/5 티어가
+  // Swift 와 드리프트하면 데미지 시퀀스가 어긋나 여기서 잡힌다.
+  const snap = (kind: string) => ({ kind, variant: 0, enhanceLevel: 5, progressUnits: 2 });
+  const teamA: BattleTeam = [snap("warrior"), snap("lancer"), snap("monk"), snap("archer"), snap("pawn")];
+  const teamB: BattleTeam = [snap("fox"), snap("wolf"), snap("scrapBot"), snap("antennaBot"), snap("warrior")];
+  const r = simulate(teamA, teamB, 5555555n);
+  assertEq("winner", r.winner, "a");
+  assertEq("rounds", r.rounds, 23);
+  assertEq("dmg sequence", r.log.map((e) => e.damage),
+    [31, 4, 32, 32, 5, 32, 49, 51, 49, 52, 17, 10, 17, 11, 17, 11, 18, 10, 16, 11, 17, 1, 16]);
+});
+
 Deno.test("결정성 — 동일 (팀+시드) → 동일 로그", () => {
   const t: BattleTeam = [{ kind: "fox", variant: 0, enhanceLevel: 0, progressUnits: 0 }];
   const r1 = simulate(t, [{ kind: "warrior", variant: 0, enhanceLevel: 0, progressUnits: 0 }], 12345n);

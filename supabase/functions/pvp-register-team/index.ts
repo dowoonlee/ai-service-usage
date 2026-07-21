@@ -1,7 +1,7 @@
 // POST /pvp-register-team
 // 배틀 팀 스냅샷 등록/갱신 (기획 §2-6). 등록된 팀은 다른 유저의 도전 상대(고스트 방어 대상)가 된다.
 //
-// 클라는 [{kind, variant, progressUnits}] ×≤3 (리드 순서)를 보낸다. 서버가 각 kind의 강화 레벨을
+// 클라는 [{kind, variant, progressUnits}] ×≤5 (리드 순서)를 보낸다. 서버가 각 kind의 강화 레벨을
 // pet_enhancements(SSOT)에서 조회해 스냅샷 [{kind, variant, enhanceLevel, progressUnits}]로 동결하고
 // power(시너지·강화 포함 총 전투력)를 재계산해 저장한다. 강화 레벨을 클라가 못 실으니 스탯 위조 불가.
 // variant/progressUnits는 저상한 로컬 축이라 서버가 클램프만 한다(§2-9).
