@@ -146,6 +146,22 @@ export function uniqueSkill(kind: string): Skill | null {
   return { id: u[0], name: u[1], type: battleTypeOf(kind), power: UNIQUE_POWER, tier: "unique" };
 }
 
+export const ULTIMATE_POWER = 24.0;
+// ultimate — 레인보우(variant 4) 궁극기. 타입별 6종, 자기타입 시그니처 power 24. 충전 게이지가 차면
+// 발동(battle_engine). 효과는 effects 페이즈로 분리. Swift SkillCatalog.ultimateTable 1:1.
+const ULTIMATE_SKILL: Record<BattleType, [string, string]> = {
+  beast: ["kernel_panic", "커널 패닉"],
+  warrior: ["rm_rf", "rm -rf --no-preserve-root"],
+  chaos: ["total_outage", "전면 장애"],
+  arcane: ["context_window_exceeded", "컨텍스트 초과"],
+  machine: ["blue_screen", "블루 스크린"],
+  mascot: ["full_rollback", "전체 롤백"],
+};
+export function ultimateSkill(type: BattleType): Skill {
+  const [id, name] = ULTIMATE_SKILL[type];
+  return { id, name, type, power: ULTIMATE_POWER, tier: "ultimate" };
+}
+
 // variant까지 해금한 정규 스킬(슬롯 순). Swift SkillCatalog.skills 1:1.
 export function skillsFor(kind: string, variant: number): Skill[] {
   const t = battleTypeOf(kind);
@@ -233,6 +249,9 @@ function kindArchetype(kind: string): [number, number, number, number] {
   return [e0 * norm, e1 * norm, e2 * norm, e3 * norm];
 }
 
+// HP 전용 스케일 — atk/def 불변, HP만 곱해 TTK↑(궁극기 충전 ~1회/대전 + 스윙 완화). Swift PetBattleStats.hpScale 1:1.
+export const HP_SCALE = 1.5;
+
 export function computeStats(
   kind: string, variant: number, enhanceLevel: number, progressUnits: number,
 ): BattleStats {
@@ -241,7 +260,7 @@ export function computeStats(
   const growth = growthMultiplier(enhanceLevel, progressUnits);
   const vb = 1.0 + variantMultiplier(variant);
   const stat = (arch: number) => Math.max(1, roundAway(base * arch * growth * vb));
-  return { hp: stat(a[0]), atk: stat(a[1]), def: stat(a[2]), spd: stat(a[3]) };
+  return { hp: Math.max(1, roundAway(base * a[0] * growth * vb * HP_SCALE)), atk: stat(a[1]), def: stat(a[2]), spd: stat(a[3]) };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

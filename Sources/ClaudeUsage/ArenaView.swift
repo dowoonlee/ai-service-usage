@@ -816,6 +816,7 @@ struct ArenaView: View {
 
     private func tagString(_ e: BattleEvent) -> String {
         var tags: [String] = []
+        if SkillCatalog.isUltimate(e.move) { tags.append("⚡️ 궁극기!") }
         if e.crit == true { tags.append("🌈 크리!") }
         if e.effectiveness > 1 { tags.append("타입▲") } else if e.effectiveness < 1 { tags.append("타입▼") }
         if e.collectionMult > 1.01 { tags.append("상성▲") } else if e.collectionMult < 0.99 { tags.append("상성▼") }

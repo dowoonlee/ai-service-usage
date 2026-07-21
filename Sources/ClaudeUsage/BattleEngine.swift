@@ -64,6 +64,10 @@ enum BattleEngine {
     static let rainbowCritChance = 0.20
     static let rainbowCritMult = 1.5
 
+    /// 궁극기 충전 — 레인보우 펫이 행동할 때마다 게이지 +1, 이 값 도달 시 다음(그 turn) 행동이 궁극기(정규
+    /// 스킬 대체) 후 게이지 리셋. **행동수 기반 = RNG 불필요·완전 결정적**(파리티 안전). 서버 battle_engine 1:1.
+    static let ultChargeActions = 6
+
     // MARK: 격노 램프 — 데미지식은 성장이 atk/def에 동시 곱해져 비율 불변이라 TTK가 HP(성장 비례)만큼
     // 선형으로 늘어난다. 풀강 탱커 미러전은 maxRounds를 상시 초과해 "KO 없는 HP 총량 타이브레이크"로
     // 메타가 수렴 → 막타/역전이 사라진다. 일정 액션 이후 데미지를 점증시켜 리플레이 길이에 자연 상한을
@@ -100,6 +104,8 @@ enum BattleEngine {
         var hp: Int
         let isRainbow: Bool   // 최종 이로치(레인보우) — 크리 특수효과 대상
         let skills: [Skill]   // variant까지 해금한 정규 스킬(슬롯 순) — 선택 AI 후보
+        let ultimate: Skill?  // 레인보우만 보유(타입 궁극기). 충전 게이지가 차면 발동.
+        var charge: Int = 0   // 궁극기 충전 게이지 — 행동마다 +1, ultChargeActions 도달 시 발동·리셋.
         var alive: Bool { hp > 0 }
     }
 
@@ -120,9 +126,11 @@ enum BattleEngine {
         // A. 팀 시너지 — 같은 컬렉션/타입 팀원 버프를 팀 전체 스탯에 곱한다.
         team.members.map { m in
             let s = finalStats(for: m, in: team)
+            let rainbow = m.variant >= rainbowVariant
             return Combatant(kind: m.kind, type: m.kind.battleType, stats: s, hp: s.hp,
-                             isRainbow: m.variant >= rainbowVariant,
-                             skills: SkillCatalog.skills(kind: m.kind, variant: m.variant))
+                             isRainbow: rainbow,
+                             skills: SkillCatalog.skills(kind: m.kind, variant: m.variant),
+                             ultimate: rainbow ? SkillCatalog.ultimate(for: m.kind.battleType) : nil)
         }
     }
 
@@ -187,11 +195,19 @@ enum BattleEngine {
                                attackerSide: BattleSide, round: Int,
                                log: inout [BattleEvent], rng: inout SeededRNG) -> Bool {
         guard let ai = active(from), let di = active(to) else { return false }
+        from[ai].charge += 1                     // 궁극기 게이지 — 행동마다 +1(결정적).
         let attacker = from[ai]
         let defender = to[di]
 
-        // 스킬 선택(결정적 AI) → 스킬 타입 상성(×2.0/×0.5) + 자속(STAB ×1.5)으로 데미지식 전환.
-        let skill = SkillCatalog.select(from: attacker.skills, attackerType: attacker.type, defenderType: defender.type)
+        // 스킬 선택 — 레인보우가 충전 완료면 궁극기(정규 스킬 대체) 후 게이지 리셋, 아니면 결정적 선택 AI.
+        // 스킬 타입 상성(×2.0/×0.5) + 자속(STAB ×1.5) 데미지식은 궁극기에도 동일 적용.
+        let skill: Skill
+        if let ult = attacker.ultimate, attacker.charge >= ultChargeActions {
+            skill = ult
+            from[ai].charge = 0
+        } else {
+            skill = SkillCatalog.select(from: attacker.skills, attackerType: attacker.type, defenderType: defender.type)
+        }
         let eff = SkillCatalog.skillEffectiveness(skill.type, vs: defender.type)   // 로그 effectiveness = 스킬 상성
         let stab = SkillCatalog.stab(skillType: skill.type, petType: attacker.type)
         // B/C. 컬렉션 상성(밈 라이벌 + 상성망) — 그대로 곱해진다.

@@ -6,7 +6,7 @@
 import {
   BattleStats, BattleType, StatKind, Skill, computeStats, teamSynergyBonus, synergyStatMultiplier,
   matchup, collectionOf, battleTypeOf, roundAway,
-  skillsFor, selectSkill, skillEffectiveness, stabMult,
+  skillsFor, selectSkill, skillEffectiveness, stabMult, ultimateSkill,
 } from "./pvp_policy.ts";
 import { SeededRNG } from "./enhance_engine.ts";
 
@@ -47,6 +47,10 @@ export const RAINBOW_VARIANT = 4;
 export const RAINBOW_CRIT_CHANCE = 0.20;
 export const RAINBOW_CRIT_MULT = 1.5;
 
+// 궁극기 충전 — 레인보우가 행동할 때마다 +1, 도달 시 그 행동이 궁극기(정규 스킬 대체) 후 리셋.
+// 행동수 기반 = RNG 불필요·결정적. Swift BattleEngine.ultChargeActions 1:1.
+export const ULT_CHARGE_ACTIONS = 6;
+
 // 패링(퍼펙트 가드) — DEF+SPD 조합.
 export const PARRY_BASE = 0.06;
 export const PARRY_SPD_WEIGHT = 0.25;
@@ -68,7 +72,10 @@ export function rageMultiplier(action: number): number {
   return 1.0 + Math.max(0, action - RAGE_START) * RAGE_STEP;
 }
 
-interface Combatant { kind: string; type: BattleType; stats: BattleStats; hp: number; isRainbow: boolean; skills: Skill[]; }
+interface Combatant {
+  kind: string; type: BattleType; stats: BattleStats; hp: number; isRainbow: boolean;
+  skills: Skill[]; ultimate: Skill | null; charge: number;
+}
 
 // 팀 시너지까지 반영한 최종 전투 스탯. Swift finalStats 와 동일 소스.
 export function finalStats(member: BattlePetSnapshot, team: BattleTeam): BattleStats {
@@ -81,9 +88,12 @@ export function finalStats(member: BattlePetSnapshot, team: BattleTeam): BattleS
 function makeCombatants(team: BattleTeam): Combatant[] {
   return team.map((m) => {
     const st = finalStats(m, team);
+    const t = battleTypeOf(m.kind);
+    const rainbow = m.variant >= RAINBOW_VARIANT;
     return {
-      kind: m.kind, type: battleTypeOf(m.kind), stats: st, hp: st.hp,
-      isRainbow: m.variant >= RAINBOW_VARIANT, skills: skillsFor(m.kind, m.variant),
+      kind: m.kind, type: t, stats: st, hp: st.hp,
+      isRainbow: rainbow, skills: skillsFor(m.kind, m.variant),
+      ultimate: rainbow ? ultimateSkill(t) : null, charge: 0,
     };
   });
 }
@@ -143,11 +153,18 @@ function attack(
 ): boolean {
   const ai = activeIdx(from), di = activeIdx(to);
   if (ai < 0 || di < 0) return false;
+  from[ai].charge += 1;                     // 궁극기 게이지 — 행동마다 +1(결정적).
   const attacker = from[ai];
   const defender = to[di];
 
-  // 스킬 선택(결정적 AI) → 스킬 타입 상성(×2.0/×0.5) + 자속(STAB ×1.5)으로 데미지식 전환.
-  const skill = selectSkill(attacker.skills, attacker.type, defender.type);
+  // 레인보우가 충전 완료면 궁극기(정규 스킬 대체) 후 게이지 리셋, 아니면 결정적 선택 AI.
+  let skill: Skill;
+  if (attacker.ultimate && attacker.charge >= ULT_CHARGE_ACTIONS) {
+    skill = attacker.ultimate;
+    from[ai].charge = 0;
+  } else {
+    skill = selectSkill(attacker.skills, attacker.type, defender.type);
+  }
   const eff = skillEffectiveness(skill.type, defender.type);   // 로그 effectiveness = 스킬 상성
   const stab = stabMult(skill.type, attacker.type);
   const syn = matchup(collectionOf(attacker.kind), collectionOf(defender.kind));

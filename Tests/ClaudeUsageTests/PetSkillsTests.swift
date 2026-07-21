@@ -185,4 +185,27 @@ final class PetSkillsTests: XCTestCase {
         // variant2에선 Epic+도 아직 3슬롯(고유기 미해금)
         XCTAssertEqual(SkillCatalog.skills(kind: .warrior, variant: 2).count, 3)
     }
+
+    // ── ultimate (Phase C) ───────────────────────────────────────────────────
+
+    // 궁극기 6종(타입별) · 자기타입 · power 24 · isUltimate · 표시명.
+    func testUltimateTableComplete() {
+        XCTAssertEqual(SkillCatalog.ultimateTable.count, 6)
+        for t in BattleType.allCases {
+            let u = SkillCatalog.ultimate(for: t)
+            XCTAssertEqual(u.type, t, "궁극기는 자기타입")
+            XCTAssertEqual(u.power, 24.0, accuracy: 1e-9)
+            XCTAssertEqual(u.tier, .ultimate)
+            XCTAssertTrue(SkillCatalog.isUltimate(u.id))
+            XCTAssertNotNil(SkillCatalog.displayName(id: u.id))
+        }
+        XCTAssertFalse(SkillCatalog.isUltimate("hotfix"))   // 정규 스킬은 궁극기 아님
+    }
+
+    // 궁극기는 정규 스킬 목록(skills)에 없다 — 충전 게이지로 별도 발동(엔진). variant4도 정규 4슬롯.
+    func testUltimateNotInRegularSkills() {
+        let s = SkillCatalog.skills(kind: .warrior, variant: 4)
+        XCTAssertEqual(s.count, 4)
+        XCTAssertFalse(s.contains { $0.tier == .ultimate })
+    }
 }

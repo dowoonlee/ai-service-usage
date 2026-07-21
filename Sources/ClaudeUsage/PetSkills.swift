@@ -150,6 +150,27 @@ enum SkillCatalog {
         return Skill(id: e.id, name: e.name, type: kind.battleType, power: uniquePower, tier: .unique)
     }
 
+    static let ultimatePower = 24.0
+
+    /// ultimate — 레인보우(variant 4) 궁극기. **타입별 6종**(규칙 파생), 자기타입 시그니처 power 24.
+    /// 정규 슬롯이 아니라 충전 게이지(BattleEngine.ultChargeActions)가 차면 발동. 효과는 effects
+    /// 페이즈로 분리(현재 순수 고파워). 톤: 개발 밈 아이코닉. 서버 pvp_policy.ultimateSkill 1:1.
+    static let ultimateTable: [BattleType: (id: String, name: String)] = [
+        .beast:   ("kernel_panic", "커널 패닉"),
+        .warrior: ("rm_rf", "rm -rf --no-preserve-root"),
+        .chaos:   ("total_outage", "전면 장애"),
+        .arcane:  ("context_window_exceeded", "컨텍스트 초과"),
+        .machine: ("blue_screen", "블루 스크린"),
+        .mascot:  ("full_rollback", "전체 롤백"),
+    ]
+    /// 타입의 궁극기(순수 — 발동 조건 variant4는 엔진이 isRainbow로 게이팅).
+    static func ultimate(for type: BattleType) -> Skill {
+        let e = ultimateTable[type]!   // 6타입 전부 정의 — 강제 언랩 안전.
+        return Skill(id: e.id, name: e.name, type: type, power: ultimatePower, tier: .ultimate)
+    }
+    static let ultimateIds: Set<String> = Set(ultimateTable.values.map { $0.id })
+    static func isUltimate(_ id: String) -> Bool { ultimateIds.contains(id) }
+
     /// 이 펫이 variant까지 해금한 정규 스킬 목록. 슬롯 인덱스 순(선택 AI tie-break 기준).
     /// 서버 pvp_policy.skillsFor 1:1.
     static func skills(kind: PetKind, variant: Int) -> [Skill] {
@@ -188,6 +209,7 @@ enum SkillCatalog {
         for (_, e) in typeSharedTable { m[e.id] = e.name }
         for (_, e) in collectionSharedTable { m[e.id] = e.name }
         for (_, e) in uniqueTable { m[e.id] = e.name }
+        for (_, e) in ultimateTable { m[e.id] = e.name }
         return m
     }()
     static func displayName(id: String) -> String? { nameById[id] }
