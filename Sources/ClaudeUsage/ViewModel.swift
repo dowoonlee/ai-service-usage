@@ -954,14 +954,48 @@ final class ViewModel: ObservableObject {
         ) { t in "월간 사용량이 \(t)%를 넘었습니다." }
     }
 
-    // Codex 주력 창 — Plus/Pro는 5h, free는 monthly. 섹션 헤더·큰 숫자·차트의 대표 창.
-    var codexUsesFiveHour: Bool { codexCurrent?.fiveHourPct != nil }
-    var codexPrimaryPct: Double? { codexCurrent.flatMap { $0.fiveHourPct ?? $0.monthlyPct } }
-    var codexPrimaryResetAt: Date? {
-        codexCurrent.flatMap { $0.fiveHourPct != nil ? $0.fiveHourResetAt : $0.monthlyResetAt }
+    // Codex 대표 창 — 우선순위 5h > 주간(7d) > 월간. Plus/Pro는 보통 5h+7d, free는 monthly지만,
+    // OpenAI가 특정 상태(5h 사용 0/비활성)에서 5h 창을 생략하고 주간만 내려주는 경우(#151)를 위해
+    // 주간을 폴백 계층으로 둔다. 정상(5h 존재) 케이스는 기존과 동일하게 5h가 대표.
+    enum CodexPrimaryWindow { case fiveHour, weekly, monthly, none }
+    var codexPrimaryWindow: CodexPrimaryWindow {
+        guard let c = codexCurrent else { return .none }
+        if c.fiveHourPct != nil { return .fiveHour }
+        if c.sevenDayPct != nil { return .weekly }
+        if c.monthlyPct  != nil { return .monthly }
+        return .none
     }
-    var codexPrimaryLabel: String { codexUsesFiveHour ? "5시간 창" : "월간" }
-    var codexPrimaryPeriodLength: TimeInterval { codexUsesFiveHour ? 5 * 3600 : 30 * 86400 }
+    var codexUsesFiveHour: Bool { codexPrimaryWindow == .fiveHour }
+    var codexPrimaryPct: Double? {
+        switch codexPrimaryWindow {
+        case .fiveHour: return codexCurrent?.fiveHourPct
+        case .weekly:   return codexCurrent?.sevenDayPct
+        case .monthly:  return codexCurrent?.monthlyPct
+        case .none:     return nil
+        }
+    }
+    var codexPrimaryResetAt: Date? {
+        switch codexPrimaryWindow {
+        case .fiveHour: return codexCurrent?.fiveHourResetAt
+        case .weekly:   return codexCurrent?.sevenDayResetAt
+        case .monthly:  return codexCurrent?.monthlyResetAt
+        case .none:     return nil
+        }
+    }
+    var codexPrimaryLabel: String {
+        switch codexPrimaryWindow {
+        case .fiveHour: return "5시간 창"
+        case .weekly:   return "주간"
+        case .monthly, .none: return "월간"
+        }
+    }
+    var codexPrimaryPeriodLength: TimeInterval {
+        switch codexPrimaryWindow {
+        case .fiveHour: return 5 * 3600
+        case .weekly:   return 7 * 86400
+        case .monthly, .none: return 30 * 86400
+        }
+    }
 
     var codexPrimaryProjectedPct: Double? {
         ViewModel.projectedPct(current: codexPrimaryPct, resetAt: codexPrimaryResetAt,
@@ -980,20 +1014,36 @@ final class ViewModel: ObservableObject {
                                           periodLength: 7 * 86400, now: now)
     }
 
-    /// Codex 주력 창 차트 시계열 — 5h(Plus/Pro) 또는 monthly(free)를 현재 창으로 필터.
+    /// Codex 대표 창 차트 시계열 — 우선순위 5h > 주간(7d) > 월간을 현재 창으로 필터(#151).
     /// claudeFiveHourSeries와 같은 관례(60s slack으로 현재 창 묶기, pct>0만, 인접 중복 합치기).
     nonisolated static func codexPrimarySeries(_ history: [CodexSnapshot]) -> [(Date, Double)] {
-        let useFiveHour = history.last?.fiveHourPct != nil
-        let currentReset: Date? = useFiveHour
-            ? history.last(where: { $0.fiveHourResetAt != nil })?.fiveHourResetAt
-            : history.last(where: { $0.monthlyResetAt != nil })?.monthlyResetAt
-        let filtered: [(Date, Double)] = history.compactMap { s in
-            let pct = useFiveHour ? s.fiveHourPct : s.monthlyPct
-            let reset = useFiveHour ? s.fiveHourResetAt : s.monthlyResetAt
-            if let cur = currentReset {
-                guard let r = reset, abs(r.timeIntervalSince(cur)) < 60 else { return nil }
+        guard let last = history.last else { return [] }
+        let kind: CodexPrimaryWindow =
+            last.fiveHourPct != nil ? .fiveHour :
+            last.sevenDayPct  != nil ? .weekly :
+            last.monthlyPct   != nil ? .monthly : .none
+        func pctOf(_ s: CodexSnapshot) -> Double? {
+            switch kind {
+            case .fiveHour: return s.fiveHourPct
+            case .weekly:   return s.sevenDayPct
+            case .monthly:  return s.monthlyPct
+            case .none:     return nil
             }
-            return pct.flatMap { v in v > 0 ? (s.takenAt, v) : nil }
+        }
+        func resetOf(_ s: CodexSnapshot) -> Date? {
+            switch kind {
+            case .fiveHour: return s.fiveHourResetAt
+            case .weekly:   return s.sevenDayResetAt
+            case .monthly:  return s.monthlyResetAt
+            case .none:     return nil
+            }
+        }
+        let currentReset: Date? = history.last(where: { resetOf($0) != nil }).flatMap(resetOf)
+        let filtered: [(Date, Double)] = history.compactMap { s in
+            if let cur = currentReset {
+                guard let r = resetOf(s), abs(r.timeIntervalSince(cur)) < 60 else { return nil }
+            }
+            return pctOf(s).flatMap { v in v > 0 ? (s.takenAt, v) : nil }
         }
         return dedupAdjacentByTime(filtered)
     }
