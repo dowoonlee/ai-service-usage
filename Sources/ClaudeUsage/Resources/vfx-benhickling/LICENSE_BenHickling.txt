@@ -1,0 +1,7 @@
+BenHickling — "Explosion" / "Ring Explosion" (CC0 / Public Domain Dedication)
+
+- vfx_explosion.png — https://opengameart.org/content/explosion-7 (원본 explosion1.png, 100×100 50프레임)
+- vfx_ring.png      — https://opengameart.org/content/ring-explosion (원본 explosion2.png, 100×100 56프레임)
+
+원본 10열 그리드 시트를 프로젝트 컨벤션(수평 스트립)으로 변환, 2프레임 간격 서브샘플
+(각 25/28프레임). CC0이라 attribution 의무 없음 — 본 파일은 출처 기록용.
