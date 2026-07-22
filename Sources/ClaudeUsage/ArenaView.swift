@@ -42,6 +42,10 @@ struct ArenaView: View {
     @State private var ultBannerText: String?
     @State private var ultBannerColor: Color = .yellow
     @State private var stageShake: CGFloat = 0   // ShakeEffect 트리거 — +1마다 감쇠 진동 1회
+    // 궁극기 도트 VFX (BenHickling CC0, Resources/vfx-benhickling) — 발동 버스트(링) + 피격 폭발.
+    // Date 기준 1회 재생(vfxSprite) — nil이면 뷰 자체가 없어 idle 비용 0.
+    @State private var ultBurst: (side: BattleSide, at: Date)?
+    @State private var ultImpact: (side: BattleSide, at: Date)?
     // 대사 말풍선
     @State private var speechText: String?
     @State private var speechSide: BattleSide?
@@ -725,9 +729,9 @@ struct ArenaView: View {
                 if let k = aActive {
                     stagePet(k, side: .a).position(x: w * 0.27, y: h * 0.68)
                 }
-                // 스킵(Control) 연출 — 그 펫 머리 위 💤 말풍선 (petY: stagePet 위치와 동일)
+                // 스킵(Control) 연출 — 그 펫 머리 위 💤 말풍선
                 if let sk = skipEvent {
-                    let x = bubbleX(sk.side, w), y = (sk.side == .a ? h * 0.68 : h * 0.36) - 40
+                    let x = bubbleX(sk.side, w), y = petY(sk.side, h) - 40
                     Text("💤 \(EffectCatalog.displayName(sk.effectId ?? "") ?? "행동불가")")
                         .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 7).padding(.vertical, 3)
@@ -741,6 +745,13 @@ struct ArenaView: View {
                 }
                 if let t = defenderText, let s = defenderSide {
                     speechBubble(t, faint: true).position(x: bubbleX(s, w), y: bubbleY(s, h))
+                }
+                // 궁극기 도트 VFX — 발동 버스트(공격자 위 링) → 피격 폭발(방어자 위). 펫 레이어 위.
+                if let v = ultBurst {
+                    vfxSprite("vfx_ring", start: v.at, size: 96).position(x: bubbleX(v.side, w), y: petY(v.side, h))
+                }
+                if let v = ultImpact {
+                    vfxSprite("vfx_explosion", start: v.at, size: 88).position(x: bubbleX(v.side, w), y: petY(v.side, h))
                 }
                 // 궁극기 컷인 — 발동 순간 스테이지 중앙 스킬명 배너 (히트스톱 동안 노출)
                 if let t = ultBannerText {
@@ -784,6 +795,21 @@ struct ArenaView: View {
 
     private func bubbleX(_ s: BattleSide, _ w: CGFloat) -> CGFloat { s == .a ? w * 0.27 : w * 0.73 }
     private func bubbleY(_ s: BattleSide, _ h: CGFloat) -> CGFloat { (s == .a ? h * 0.68 : h * 0.36) - 46 }
+    private func petY(_ s: BattleSide, _ h: CGFloat) -> CGFloat { s == .a ? h * 0.68 : h * 0.36 }
+
+    /// 도트 VFX 스프라이트 1회 재생 — start부터 32fps(재생 배속 연동)로 프레임 진행, 끝나면 빈 뷰.
+    /// 100×100 셀 스트립(vfx-benhickling)을 PetSprite 범용 로더로 슬라이스(캐시됨).
+    private func vfxSprite(_ name: String, start: Date, size: CGFloat) -> some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { ctx in
+            let frames = PetSprite.frames(named: name, cellSize: (100, 100))
+            let idx = Int(ctx.date.timeIntervalSince(start) * 32 * max(1, speed))
+            if idx >= 0, idx < frames.count {
+                Image(nsImage: frames[idx]).resizable().interpolation(.none)
+                    .frame(width: size, height: size)
+            }
+        }
+        .allowsHitTesting(false)
+    }
 
     private func speechBubble(_ text: String, faint: Bool) -> some View {
         Text(text)
@@ -1302,13 +1328,15 @@ struct ArenaView: View {
                 let e = log[i - 1]
                 let superEff = e.effectiveness > 1.0, weakEff = e.effectiveness < 1.0
                 let isUlt = SkillCatalog.isUltimate(e.move)
+                ultBurst = nil; ultImpact = nil   // 직전 이벤트 VFX 정리(재생 완료분 — TimelineView idle 비용 제거)
                 if isUlt {
-                    // 궁극기 컷인 — 스킬명 배너 펀치 인 + 스테이지 셰이크 + 히트스톱(배너 감상 시간).
+                    // 궁극기 컷인 — 스킬명 배너 펀치 인 + 발동 버스트(링) + 셰이크 + 히트스톱(배너 감상 시간).
                     // 배너 색 = 공격자 타입색(궁극기는 항상 자기타입 시그니처).
                     ultBannerColor = typeColor(e.attackerKind.battleType)
                     withAnimation(.spring(duration: 0.25, bounce: 0.4)) {
                         ultBannerText = "⚡️ \(SkillCatalog.displayName(id: e.move) ?? e.move)"
                     }
+                    ultBurst = (e.attacker, Date())
                     withAnimation(.linear(duration: 0.5)) { stageShake += 1 }
                     try? await Task.sleep(for: ms(450))
                     if Task.isCancelled { return }
@@ -1316,6 +1344,7 @@ struct ArenaView: View {
                 lungeSide = e.attacker
                 withAnimation(.easeOut(duration: 0.1)) { lungeAmount = isUlt ? 1.7 : (superEff ? 1.3 : 1) }   // 궁극기 > 효과 굉장 > 평타 순으로 파고듦
                 let defSide: BattleSide = (e.attacker == .a) ? .b : .a
+                if isUlt { ultImpact = (defSide, Date()) }   // 피격 폭발 — 히트 순간 방어자 위
                 flashSide = defSide
                 flashBrightness = isUlt ? 1.5 : (superEff ? 1.25 : (weakEff ? 0.45 : 0.9))     // 상성별 피격 섬광 강약
                 withAnimation(.easeOut(duration: 0.35)) { flashBrightness = 0 }
@@ -1336,6 +1365,8 @@ struct ArenaView: View {
                 if e.defenderFainted { try? await Task.sleep(for: ms(300)) }   // KO 순간 잠깐 멈춤(강조)
                 if Task.isCancelled { return }
             }
+            // 자연 종료 — 잔여 VFX 상태 정리(안 하면 TimelineView가 빈 뷰를 계속 tick).
+            ultBurst = nil; ultImpact = nil
         }
     }
     private func skipToEnd() { stopPlayback(); withAnimation { playbackStep = result?.log.count ?? 0 } }
@@ -1350,7 +1381,7 @@ struct ArenaView: View {
         playbackTask?.cancel(); playbackTask = nil
         lungeAmount = 0; flashBrightness = 0
         speechText = nil; speechSide = nil; defenderText = nil; defenderSide = nil
-        ultBannerText = nil
+        ultBannerText = nil; ultBurst = nil; ultImpact = nil
     }
 
     // MARK: 강화소 (펫 반응 이펙트)
