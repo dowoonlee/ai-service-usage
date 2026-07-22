@@ -375,10 +375,15 @@ private struct RankingSectionView: View {
                 Toggle("", isOn: pauseBinding).labelsHidden().toggleStyle(.switch)
             }
 
-            // 등록 상태인데 이 기기의 HMAC 인증 키가 유실된 경우(vault 마이그레이션/ACL 재승인 거부·재설치).
-            // 서버 동기화·아레나·강화가 전부 조용히 no-op 되므로, 계정 삭제 없이 GitHub 재인증으로 키를
-            // 재발급받는 경로를 노출한다. 정상 등록 사용자에겐 이 배너가 뜨지 않는다.
-            if Keychain.loadRankingHmacKey() == nil {
+            // 등록 상태인데 이 기기의 HMAC 인증 키에 접근할 수 없는 경우. **두 상황을 구분한다(#169)**:
+            //  · .absent      = 키가 정말 없음(재설치/유실) → GitHub 재인증으로 재발급
+            //  · .accessFailed = keychain을 지금 못 읽음(잠김·ad-hoc ACL 재승인 거부) → 재승인/재시도 유도.
+            //    이때 GitHub 복구를 돌리면 빈 vault를 덮어써 다른 값까지 날아가므로 복구 버튼을 노출하지 않는다.
+            // 정상 등록 사용자에겐 (.value) 이 배너가 뜨지 않는다.
+            switch Keychain.rankingHmacKeyLookup() {
+            case .value:
+                EmptyView()
+            case .absent:
                 VStack(alignment: .leading, spacing: 4) {
                     Label("인증 키 유실 — 서버 동기화가 중단됐습니다.", systemImage: "key.slash")
                         .font(.system(size: 11, weight: .medium)).foregroundStyle(.orange)
@@ -387,6 +392,16 @@ private struct RankingSectionView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Button("GitHub으로 계정 복구…") { showRecoveryEntry = true }
                         .controlSize(.small).padding(.top, 2)
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
+            case .accessFailed:
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("키체인 접근이 거부됐습니다.", systemImage: "lock.trianglebadge.exclamationmark")
+                        .font(.system(size: 11, weight: .medium)).foregroundStyle(.orange)
+                    Text("업데이트 후 macOS가 키체인 재승인을 요청했을 수 있습니다. 앱을 다시 실행하고 나타나는 키체인 대화상자에서 ‘항상 허용’을 눌러주세요. 인증 키는 삭제되지 않았습니다.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.12)))
@@ -614,7 +629,10 @@ private struct RankingSectionView: View {
                     githubUserId: settings.githubUserID,
                     profileJson: profile
                 )
-                Keychain.saveRankingHmacKey(resp.hmacKey)
+                guard Keychain.saveRankingHmacKey(resp.hmacKey) else {
+                    state = .error("인증 키를 키체인에 저장하지 못했습니다. 키체인 접근을 ‘항상 허용’으로 승인한 뒤 다시 시도해주세요.")
+                    return
+                }
                 settings.rankingDeviceID = deviceId
                 settings.rankingNickname = resp.nickname
                 settings.rankingRecoveryCode = resp.recoveryCode
@@ -636,7 +654,10 @@ private struct RankingSectionView: View {
         Task { @MainActor in
             do {
                 let resp = try await RankingAPI.shared.recoverWithRecoveryCode(recoveryInput, newDeviceId: newDeviceId)
-                Keychain.saveRankingHmacKey(resp.hmacKey)
+                guard Keychain.saveRankingHmacKey(resp.hmacKey) else {
+                    state = .error("인증 키를 키체인에 저장하지 못했습니다. 앱을 다시 실행하고 키체인 접근을 ‘항상 허용’으로 승인한 뒤 다시 시도해주세요.")
+                    return
+                }
                 settings.rankingDeviceID = resp.deviceId
                 settings.rankingNickname = resp.nickname
                 settings.rankingRecoveryCode = recoveryInput
@@ -675,34 +696,38 @@ private struct RankingSectionView: View {
         }
         githubPollTask?.cancel()
         githubPollTask = Task { @MainActor in
+            // device flow로 새 토큰 확보(재인증 창 표시) + 저장. 기존 토큰이 무효일 때 폴백 경로로도 쓴다.
+            @MainActor func freshDeviceFlow() async throws -> String {
+                let code = try await GitHubAuth.shared.requestDeviceCode()
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(code.user_code, forType: .string)
+                state = .githubAuthWaiting(userCode: code.user_code, verificationURL: code.verification_uri)
+                let t = try await GitHubAuth.shared.pollForToken(
+                    deviceCode: code.device_code, interval: code.interval, expiresIn: code.expires_in)
+                // 토큰 확보 직후 user 식별 정보까지 받아둠 — 실패하면 outer catch 로 정확한 에러 노출.
+                let user = try await GitHubAuth.shared.fetchUser(token: t)
+                Keychain.saveGitHubToken(t)
+                ContributorBonus.shared.updateToken(t)
+                settings.persistGitHubUser(user)
+                return t
+            }
             do {
                 let token: String
                 if let existing = Keychain.loadGitHubToken() {
-                    token = existing
-                    // 기존 토큰만 있고 로컬 식별 정보가 비어 있는 상태(이전 복구 실패/구버전)를 보강.
-                    if settings.githubLogin == nil || settings.githubUserID == nil ||
-                        (settings.githubCreatedAt ?? "").isEmpty {
-                        let user = try await GitHubAuth.shared.fetchUser(token: token)
+                    // 기존 토큰 유효성 검증 — 무효(만료·권한 상실)면 토큰을 지우고 재인증 창으로 폴백한다.
+                    // (이전엔 무효 토큰이어도 창을 띄우지 않아 "복구 버튼을 눌러도 창이 안 뜬다"였다 — #169.)
+                    do {
+                        let user = try await GitHubAuth.shared.fetchUser(token: existing)
                         settings.persistGitHubUser(user)
+                        token = existing
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        Keychain.clearGitHubToken()
+                        token = try await freshDeviceFlow()
                     }
                 } else {
-                    let code = try await GitHubAuth.shared.requestDeviceCode()
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(code.user_code, forType: .string)
-                    state = .githubAuthWaiting(userCode: code.user_code,
-                                               verificationURL: code.verification_uri)
-                    token = try await GitHubAuth.shared.pollForToken(
-                        deviceCode: code.device_code,
-                        interval: code.interval,
-                        expiresIn: code.expires_in
-                    )
-                    // 토큰 확보 직후 user 식별 정보까지 받아둠 — 실패하면 outer catch 로 흐름이
-                    // 전환되어 사용자에게 정확한 에러가 노출된다 (이전엔 `try?` 로 silent fail
-                    // 후 nil 상태로 peek 단계로 넘어가 UI/실제 상태가 어긋났음).
-                    let user = try await GitHubAuth.shared.fetchUser(token: token)
-                    Keychain.saveGitHubToken(token)
-                    ContributorBonus.shared.updateToken(token)
-                    settings.persistGitHubUser(user)
+                    token = try await freshDeviceFlow()
                 }
 
                 // peek — 변경 없이 메타만 조회. 사용자 컨펌 후 실제 복원.
@@ -725,7 +750,12 @@ private struct RankingSectionView: View {
                 state = .githubRecovering
                 let newDeviceId = settings.rankingDeviceID.isEmpty ? UUID().uuidString : settings.rankingDeviceID
                 let resp = try await RankingAPI.shared.recoverWithGitHub(token: token, newDeviceId: newDeviceId)
-                Keychain.saveRankingHmacKey(resp.hmacKey)
+                // ⚠️ keychain 저장 실패를 "복구 성공"으로 오인하지 않는다(#169). 저장이 실패하면
+                // 서버는 이미 키를 rotation 했는데 로컬엔 없어 배너가 계속 뜬다 — 에러로 명확히 알린다.
+                guard Keychain.saveRankingHmacKey(resp.hmacKey) else {
+                    state = .error("인증 키를 키체인에 저장하지 못했습니다. 앱을 다시 실행하고 키체인 접근을 ‘항상 허용’으로 승인한 뒤 다시 시도해주세요.")
+                    return
+                }
                 settings.rankingDeviceID = resp.deviceId
                 settings.rankingNickname = resp.nickname
                 // 서버가 알려준 계정 모드에 맞춰 baseline을 복원해 단위 불일치를 막는다.
