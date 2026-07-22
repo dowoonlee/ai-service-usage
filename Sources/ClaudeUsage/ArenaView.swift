@@ -649,6 +649,7 @@ struct ArenaView: View {
         let dicts = battleDicts(step: playbackStep)
         let hp = dicts.hp
         let charge = dicts.charge
+        let fx = dicts.fx
         let current: BattleEvent? = (playbackStep > 0 && playbackStep <= log.count) ? log[playbackStep - 1] : nil
         // 배틀 표시는 시뮬에 쓰인 스냅샷 기준(편성 편집과 무관하게 고정).
         let aKinds = aSnaps.map(\.kind), bKinds = bSnaps.map(\.kind)
@@ -656,7 +657,7 @@ struct ArenaView: View {
         let bActive = bKinds.first { (hp.b[$0] ?? 0) > 0 }
         return VStack(spacing: 8) {
             partyRow(hp: hp, aKinds: aKinds, bKinds: bKinds, aActive: aActive, bActive: bActive)
-            battleStage(hp: hp, charge: charge, aActive: aActive, bActive: bActive, current: current)
+            battleStage(hp: hp, charge: charge, fx: fx, aActive: aActive, bActive: bActive, current: current)
                 .overlay { if done { resultBanner(result?.winner) } }
             currentActionLine(current)
             controls(total: log.count)
@@ -707,8 +708,10 @@ struct ArenaView: View {
             .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(active ? Color.accentColor : .clear, lineWidth: 1.2))
     }
 
-    private func battleStage(hp: (a: [PetKind: Int], b: [PetKind: Int]), charge: (a: [PetKind: Int], b: [PetKind: Int]), aActive: PetKind?, bActive: PetKind?, current: BattleEvent?) -> some View {
-        GeometryReader { geo in
+    private func battleStage(hp: (a: [PetKind: Int], b: [PetKind: Int]), charge: (a: [PetKind: Int], b: [PetKind: Int]), fx: (a: [PetKind: [ActiveFx]], b: [PetKind: [ActiveFx]]), aActive: PetKind?, bActive: PetKind?, current: BattleEvent?) -> some View {
+        // 스킵 연출 — 현재 스텝의 액션이 스킵(공격 없음)이면 그 라운드의 skip 이벤트를 잡아 "💤" 표시.
+        let skipEvent = currentSkip()
+        return GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
             ZStack {
                 // 지면
@@ -721,6 +724,16 @@ struct ArenaView: View {
                 }
                 if let k = aActive {
                     stagePet(k, side: .a).position(x: w * 0.27, y: h * 0.68)
+                }
+                // 스킵(Control) 연출 — 그 펫 머리 위 💤 말풍선 (petY: stagePet 위치와 동일)
+                if let sk = skipEvent {
+                    let x = bubbleX(sk.side, w), y = (sk.side == .a ? h * 0.68 : h * 0.36) - 40
+                    Text("💤 \(EffectCatalog.displayName(sk.effectId ?? "") ?? "행동불가")")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 7).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.purple.opacity(0.9)))
+                        .foregroundStyle(.white)
+                        .position(x: x, y: y).transition(.scale.combined(with: .opacity))
                 }
                 // 대사 말풍선 (공격자 / 방어자 반응)
                 if let t = speechText, let s = speechSide {
@@ -738,13 +751,13 @@ struct ArenaView: View {
             .overlay(alignment: .topLeading) {
                 if let k = bActive {
                     hpBox(k, cur: hp.b[k] ?? 0, showNumbers: false, snaps: bSnaps, server: serverMaxHpB,
-                          charge: charge.b[k] ?? 0).padding(6)
+                          charge: charge.b[k] ?? 0, fx: fx.b[k] ?? []).padding(6)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
                 if let k = aActive {
                     hpBox(k, cur: hp.a[k] ?? 0, showNumbers: true, snaps: aSnaps, server: serverMaxHpA,
-                          charge: charge.a[k] ?? 0).padding(6)
+                          charge: charge.a[k] ?? 0, fx: fx.a[k] ?? []).padding(6)
                 }
             }
         }
@@ -799,7 +812,7 @@ struct ArenaView: View {
             .transition(.opacity)
     }
 
-    private func hpBox(_ kind: PetKind, cur: Int, showNumbers: Bool, snaps: [BattlePetSnapshot], server: [PetKind: Int]?, charge: Int = 0) -> some View {
+    private func hpBox(_ kind: PetKind, cur: Int, showNumbers: Bool, snaps: [BattlePetSnapshot], server: [PetKind: Int]?, charge: Int = 0, fx: [ActiveFx] = []) -> some View {
         let maxv = maxHP(kind, in: snaps, server: server)
         let frac = maxv > 0 ? Double(max(0, cur)) / Double(maxv) : 0
         // 궁극기 게이지 — 레인보우(variant4) 펫만. 로그 재생으로 접은 charge를 ultChargeCost 대비로 표시.
@@ -836,10 +849,59 @@ struct ArenaView: View {
             if showNumbers {
                 Text("\(max(0, cur))/\(maxv)").font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
             }
+            if !fx.isEmpty {
+                HStack(spacing: 2) {
+                    ForEach(fx.prefix(4), id: \.id) { effectChip($0) }
+                }
+            }
         }
         .padding(6)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .windowBackgroundColor).opacity(0.92)))
         .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.25), lineWidth: 1))
+    }
+
+    /// 상태 효과 칩 — 이모지 + 남은 턴. 색은 디버프(빨강)/버프(초록). 툴팁은 효과명.
+    private func effectChip(_ a: ActiveFx) -> some View {
+        let def = EffectCatalog.effect(a.id)
+        let debuff = def.map { BattleEngine.isDebuff($0) } ?? false
+        let color: Color = debuff ? .red : .green
+        return HStack(spacing: 1) {
+            Text(effectIcon(a.id)).font(.system(size: 8))
+            if a.remaining > 1 { Text("\(a.remaining)").font(.system(size: 7, weight: .bold, design: .monospaced)) }
+        }
+        .padding(.horizontal, 3).padding(.vertical, 1)
+        .background(Capsule().fill(color.opacity(0.20)))
+        .overlay(Capsule().strokeBorder(color.opacity(0.5), lineWidth: 0.5))
+        .help(EffectCatalog.displayName(a.id) ?? a.id)
+    }
+
+    /// 효과 id → 이모지. kind 기반 폴백으로 미래 효과도 안전하게 커버.
+    private func effectIcon(_ id: String) -> String {
+        switch id {
+        case "mem_leak", "infinite_loop": return "🔥"       // DoT
+        case "deadlock", "outage_stun", "rate_limited": return "💤"   // control
+        case "tech_debt", "legacy", "bsod_lag": return "⬇️"  // statMod 디버프
+        case "optimization", "firewall", "caching": return "⬆️"      // statMod 버프
+        case "load_balancer": return "🛡️"                   // shield
+        case "autoscaling": return "💚"                      // regen
+        default:
+            guard let def = EffectCatalog.effect(id) else { return "✨" }
+            switch def.kind {
+            case .dot: return "🔥"; case .regen: return "💚"; case .shield: return "🛡️"
+            case .controlFixed, .controlChance: return "💤"
+            case .statMod: return def.magnitude < 1 ? "⬇️" : "⬆️"
+            case .cleanse: return "🧹"
+            }
+        }
+    }
+
+    /// 스킵 연출 — 스킵 라운드는 공격 로그가 없어 자체 재생 스텝이 없다. 대신 "직전 공격 스텝의 라운드와
+    /// 현재 스텝의 라운드 사이"에 낀 스킵 이벤트를 현재 스텝에 얹어 보여준다(그 사이에 실제 발생했으므로).
+    private func currentSkip() -> EffectEvent? {
+        guard let log = result?.log, playbackStep > 0, playbackStep <= log.count else { return nil }
+        let curRound = log[playbackStep - 1].round
+        let prevRound = playbackStep >= 2 ? log[playbackStep - 2].round : 0
+        return (result?.effectEvents ?? []).first { $0.kind == "skip" && $0.at > prevRound && $0.at < curRound }
     }
 
     private func hpColor(_ cur: Int, _ maxv: Int) -> Color {
@@ -967,16 +1029,43 @@ struct ArenaView: View {
         .allowsHitTesting(false)
     }
 
+    /// 전체 로그 한 줄 — 공격 이벤트 또는 효과 이벤트(스킵/틱). id는 렌더 순서용.
+    private struct LogRow: Identifiable { let id: Int; let text: String; let color: Color }
+
+    /// 공격 로그 + 효과 이벤트(스킵/틱)를 라운드 순서로 병합. 스킵/틱은 공격 로그에 없는 별도 줄로 삽입돼
+    /// "왜 이 펫이 안 때렸나(스킵)"·"턴 시작 지속피해/회복"이 로그에서 보인다. grant/heal/splash는
+    /// 공격 줄에 붙는 effectLine과 중복이라 여기선 스킵·틱만(중복 최소화).
+    private func fullLogRows(_ log: [BattleEvent]) -> [LogRow] {
+        var rows: [(round: Int, order: Int, text: String, color: Color)] = []
+        for (i, e) in log.enumerated() {
+            let side = e.attacker == .a ? "A" : "B"
+            let move = SkillCatalog.displayName(id: e.move)
+                ?? BattleLines.moveName(collection: e.attackerKind.collection, signature: e.move == "signature")
+            let quip = e.quip != nil ? " «\(e.quip!)»" : ""
+            let ult = SkillCatalog.isUltimate(e.move) ? "⚡️" : ""
+            rows.append((e.round, 1, "R\(e.round) \(side) \(PetMetaStore.shared.displayName(for: e.attackerKind)) «\(ult)\(move)» ▶ \(PetMetaStore.shared.displayName(for: e.defenderKind)) −\(e.damage)\(quip)",
+                         e.attacker == .a ? .primary : .secondary))
+            _ = i
+        }
+        for e in (result?.effectEvents ?? []) {
+            let name = e.effectId.flatMap { EffectCatalog.displayName($0) } ?? "효과"
+            let who = PetMetaStore.shared.displayName(for: e.petKind)
+            if e.kind == "skip" {
+                rows.append((e.at, 0, "R\(e.at) 💤 \(who) — \(name)로 행동불가", .purple))
+            } else if e.kind == "tick", let d = e.hpDelta {
+                let icon = d < 0 ? "🔥" : "💚"
+                rows.append((e.at, 0, "R\(e.at) \(icon) \(who) \(name) \(d > 0 ? "+" : "")\(d)", d < 0 ? .orange : .green))
+            }
+        }
+        rows.sort { $0.round != $1.round ? $0.round < $1.round : $0.order < $1.order }
+        return rows.enumerated().map { LogRow(id: $0.offset, text: $0.element.text, color: $0.element.color) }
+    }
+
     private func fullLog(_ log: [BattleEvent]) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 1) {
-                ForEach(Array(log.enumerated()), id: \.offset) { _, e in
-                    let side = e.attacker == .a ? "A" : "B"
-                    let move = SkillCatalog.displayName(id: e.move)
-                        ?? BattleLines.moveName(collection: e.attackerKind.collection, signature: e.move == "signature")
-                    Text("R\(e.round) \(side) \(PetMetaStore.shared.displayName(for: e.attackerKind)) «\(move)» ▶ \(PetMetaStore.shared.displayName(for: e.defenderKind)) −\(e.damage)\(e.quip != nil ? " «\(e.quip!)»" : "")")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(e.attacker == .a ? Color.primary : Color.secondary)
+                ForEach(fullLogRows(log)) { row in
+                    Text(row.text).font(.system(size: 9, design: .monospaced)).foregroundStyle(row.color)
                 }
             }
         }
@@ -999,20 +1088,27 @@ struct ArenaView: View {
         guard let arr, arr.count == snaps.count else { return nil }
         return Dictionary(zip(snaps.map(\.kind), arr), uniquingKeysWith: { x, _ in x })
     }
-    /// 배틀 상태 재구성(HP + 궁극기 게이지) — 공격 로그와 효과 이벤트(E2)를 엔진 순서로 접는다.
+    /// 재생 시점 한 펫의 활성 효과 한 칸(표시용).
+    struct ActiveFx: Equatable { let id: String; let remaining: Int }
+    typealias BattleState = (hp: (a: [PetKind: Int], b: [PetKind: Int]),
+                             charge: (a: [PetKind: Int], b: [PetKind: Int]),
+                             fx: (a: [PetKind: [ActiveFx]], b: [PetKind: [ActiveFx]]))
+
+    /// 배틀 상태 재구성(HP + 궁극기 게이지 + 활성 효과) — 공격 로그와 효과 이벤트를 엔진 순서로 접는다.
     /// 발동/부여 여부는 로그가 이미 확정하고 hpDelta는 실적용량이라 임계/클램프 판정이 불필요
     /// (엔진 재현이 아닌 순수 재생 — 파리티 무관, 구 로그·effectEvents 없는 로그도 안전). 표시 전용.
     ///
-    /// 액션 r 처리 순서(엔진 1:1): ①fx(at==r) 중 tick/skip(행동 전) ②공격 이벤트(round==r — 스킵
-    /// 액션은 없음) ③fx(at==r) 중 grant/heal/splash(행동 후). 스플래시는 피격 충전 +1 + 기절 승계까지
-    /// 게이지에 반영. 승계 대상(다음 생존)은 같은 폴드의 HP로 판정해 화면의 활성 펫과 항상 일치한다.
-    private func battleDicts(step: Int) -> (hp: (a: [PetKind: Int], b: [PetKind: Int]), charge: (a: [PetKind: Int], b: [PetKind: Int])) {
+    /// 액션 r 처리 순서(엔진 1:1): ①그 라운드 자기 턴 주체의 효과 remaining-- (틱) ②fx tick/skip HP·게이지
+    /// ③공격 이벤트(round==r — 스킵 액션은 없음) ④fx grant/heal/splash(부여·자힐·광역). 효과 remaining은
+    /// "자기 턴" 기반(엔진 tick과 동일 축) — statMod/control까지 만료가 근사 재현된다(slot cap은 표시상 무시).
+    private func battleDicts(step: Int) -> BattleState {
         // 유니크 kind 전제지만 방어적으로 uniquing(미래에 동일 kind 편성 허용돼도 크래시 없게).
         var hpA = Dictionary(aSnaps.map { ($0.kind, maxHP($0.kind, in: aSnaps, server: serverMaxHpA)) }, uniquingKeysWith: { x, _ in x })
         var hpB = Dictionary(bSnaps.map { ($0.kind, maxHP($0.kind, in: bSnaps, server: serverMaxHpB)) }, uniquingKeysWith: { x, _ in x })
         var ca: [PetKind: Int] = [:], cb: [PetKind: Int] = [:]
+        var fa: [PetKind: [ActiveFx]] = [:], fb: [PetKind: [ActiveFx]] = [:]
         let log = Array((result?.log ?? []).prefix(step))
-        guard let curRound = log.last?.round else { return ((hpA, hpB), (ca, cb)) }
+        guard let curRound = log.last?.round else { return ((hpA, hpB), (ca, cb), (fa, fb)) }
 
         var fxByAt: [Int: [EffectEvent]] = [:]
         for e in (result?.effectEvents ?? []) where e.at <= curRound { fxByAt[e.at, default: []].append(e) }
@@ -1037,6 +1133,25 @@ struct ArenaView: View {
                     }
                 }
             }
+            // 효과 부여 — grant 이벤트만(heal/splash는 지속 효과 아님). cleanse(hot_reload)는 디버프 제거.
+            if e.kind == "grant", let id = e.effectId, let def = EffectCatalog.effect(id) {
+                if def.kind == .cleanse {
+                    if e.side == .a { fa[e.petKind]?.removeAll { EffectCatalog.effect($0.id).map { BattleEngine.isDebuff($0) } ?? false } }
+                    else { fb[e.petKind]?.removeAll { EffectCatalog.effect($0.id).map { BattleEngine.isDebuff($0) } ?? false } }
+                } else {
+                    let fx = ActiveFx(id: id, remaining: def.duration)
+                    if e.side == .a { setFx(&fa, e.petKind, fx) } else { setFx(&fb, e.petKind, fx) }
+                }
+            }
+        }
+        func setFx(_ dict: inout [PetKind: [ActiveFx]], _ k: PetKind, _ fx: ActiveFx) {
+            var arr = dict[k] ?? []
+            if let i = arr.firstIndex(where: { $0.id == fx.id }) { arr[i] = fx } else { arr.append(fx) }   // refresh
+            dict[k] = arr
+        }
+        func tickActor(_ side: BattleSide, _ k: PetKind) {   // 자기 턴 시작 — remaining-- 후 만료 제거
+            if side == .a { fa[k] = (fa[k] ?? []).map { ActiveFx(id: $0.id, remaining: $0.remaining - 1) }.filter { $0.remaining > 0 } }
+            else { fb[k] = (fb[k] ?? []).map { ActiveFx(id: $0.id, remaining: $0.remaining - 1) }.filter { $0.remaining > 0 } }
         }
         func applyAttack(_ e: BattleEvent) {
             let ult = SkillCatalog.isUltimate(e.move)
@@ -1058,11 +1173,15 @@ struct ArenaView: View {
         }
         for r in 1...curRound {
             let fx = fxByAt[r] ?? []
+            // 자기 턴 주체(엔진 tick 대상) — 공격자 > 스킵 > 틱(DoT 자멸) 순으로 그 라운드 행동 시도자.
+            if let a = atkByRound[r] { tickActor(a.attacker, a.attackerKind) }
+            else if let sk = fx.first(where: { $0.kind == "skip" }) { tickActor(sk.side, sk.petKind) }
+            else if let tk = fx.first(where: { $0.kind == "tick" }) { tickActor(tk.side, tk.petKind) }
             for e in fx where e.kind == "tick" || e.kind == "skip" { applyFx(e) }
             if let a = atkByRound[r] { applyAttack(a) }
             for e in fx where e.kind != "tick" && e.kind != "skip" { applyFx(e) }
         }
-        return ((hpA, hpB), (ca, cb))
+        return ((hpA, hpB), (ca, cb), (fa, fb))
     }
     // 활성 시너지 감지 — 동족(컬렉션) / 동타입. tie-break는 TeamSynergy.bonus 와 동일한 팀 순서
     // first-max(strict >)로 결정 — 뱃지가 가리키는 타입/스탯이 실제 전투 엔진과 항상 일치(Dictionary
