@@ -93,10 +93,31 @@ pet-skills.md의 궁극기 6종에 효과 1개씩. **두 부류**로 나뉜다:
 - 광역은 순차 처치 구조에서 후열 HP를 미리 깎음 — hpDicts류 UI 재구성에 다중 대상 이벤트 필요(`BattleEvent` 확장과 함께).
 
 ## 8. 페이즈 (스킬 Phase A 이후)
-- **E1** 효과 프레임: 모델·틱·StatMod/DoT/Regen/Shield + effective stat 반영.
-- **E2** 스킬 연동: 버프 스킬 + 공격 부수 상태이상 + 전용 디버프 스킬 + 선택 AI 확장.
-- **E3** Control: 확률 스킵 + 고정 무행동.
-- **E4** UI: 전투원 상태 아이콘·효과 로그 태그. 각 페이즈 파리티 골든.
+- **E1** ✅(#181) 효과 프레임: 모델·틱·StatMod/DoT/Regen/Shield + effective stat 반영 (no-op — 골든 불변 증명).
+- **E2** ✅ 스킬 연동: rider(부수효과) + 궁극기 특수효과(§7.5) + EffectEvent 스트림 + UI fold/태그. **구현 노트 §8.5.**
+  Control 확률/고정 스킵도 이때 함께 활성(원안 E3 통합 — outage_stun/deadlock이 rider·궁극기로 이미 부여됨).
+- **E3**(잔여) 전용 버프/디버프 스킬 + 선택 AI 확장(§6 우선순위: 위급 자힐·버프 미보유) + 미배정 효과 콘텐츠
+  (optimization/firewall/caching/hot_reload/rate_limited + collectionShared rider 18종).
+- **E4** UI: 전투원 상태 아이콘·스킵 연출·효과 로그 확장. 이후 승률 재실측 → 밸런스 재평가.
+
+## 8.5 구현 노트 (E2 — 파리티·호환 결정)
+- **rider 방식**: 효과는 전부 공격 스킬의 부수효과(rider)로 시작 — 선택 AI 무변경(§6 확장은 E3).
+  typeShared 6종 + collectionShared happyPath + **unique는 자기 타입 rider 상속**(타입 특성) —
+  미상속이면 Epic+가 unique(21)로 ts(16.5)를 항상 지배해 rider가 영영 침묵(실측으로 발견).
+- **EffectEvent 스트림**: 효과 이벤트(tick/skip/grant/heal/splash)는 `BattleResult.effectEvents`
+  (Optional, log와 **분리**)로 — 구 클라는 미지 필드를 무시하므로 공격 fold가 오염되지 않는다.
+  hpDelta는 실적용량(클램프 후) — UI는 판정 없이 더하기만 한다. 스킵 액션은 공격 로그가 없다
+  (rounds > log.count 가능).
+- **RNG draw 순서 고정**: (controlChance 스킵) → rngFactor → (레인보우 크리) → 패링 → (rider chance).
+  rider chance 1.0은 draw 미소비, 적 대상 rider는 막타 기절 시 draw까지 생략. forceCrit은 draw를
+  소비하고 결과만 강제(스트림 보존).
+- **스플래시**: 별도 BattleEvent 없이 effectEvents로만 기록(재생 스텝 미증가). 피격 충전 +1·기절 승계
+  규칙 동일 적용. DoT 자멸도 행동 없이 종료 + 게이지 승계, 공격측 선봉 교체 시 ATB 재스케줄.
+- **골든**: PARITYFX1(동타입 5쌍 — 틱/스킵/스플래시/부여/자힐), PARITYFX2(혼합 — 실드 refresh/자힐/
+  bsod_lag/오프타입 rider 침묵), PARITYFXCAT(효과 정의 14·rider 6·궁극기 특수효과 6 전량).
+  기존 골든 중 RAINBOW/UNIQUE/ULT 재캡처(리이더 draw·방어무시), 5V5/3v3/COVERAGE 불변.
+- **밸런스 관찰(재실측 대상)**: rm_rf 방어무시로 궁극기 데미지 급증(80→124/151) → 배틀 단축(21→13R);
+  mascot 확정 실드 refresh + full_rollback 자힐 = 강한 자기유지(FX2에서 3v3 역전승). 승률표 재실측 후 조정.
 
 ## 9. 리스크·미결
 - 밸런스: DoT %·Control 확률/지속·버프 배수 — 골든 승률 실측으로 튜닝.

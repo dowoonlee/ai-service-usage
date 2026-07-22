@@ -7,6 +7,7 @@ import {
   BattleStats, BattleType, StatKind, Skill, computeStats, teamSynergyBonus, synergyStatMultiplier,
   matchup, collectionOf, battleTypeOf, roundAway,
   skillsFor, selectSkill, skillEffectiveness, stabMult, ultimateSkill,
+  EffectDef, effectDef, ULT_EFFECT, ULT_DEF_IGNORE_MULT, ULT_SPLASH_MULT,
 } from "./pvp_policy.ts";
 import { SeededRNG } from "./enhance_engine.ts";
 
@@ -33,10 +34,22 @@ export interface BattleEvent {
   crit: boolean;            // 레인보우 크리 발동
   defenderFainted: boolean;
 }
+// 효과 이벤트(E2) — 공격 로그와 분리된 스트림(구 클라는 미지 필드 무시 → fold 오염 없음). Swift EffectEvent 1:1.
+export interface EffectEvent {
+  at: number;                 // 연관 액션 인덱스(BattleEvent.round 축) — tick/skip은 그 액션 직전 발생분
+  side: BattleSide;           // 대상 펫의 소속
+  petKind: string;
+  kind: "tick" | "skip" | "grant" | "heal" | "splash";
+  effectId: string | null;
+  hpDelta: number | null;     // tick(±)/heal(+)/splash(−) — 실제 적용량
+  fainted: boolean | null;    // splash 기절
+}
+
 export interface BattleResult {
   winner: BattleSide | null;   // null = 무승부(타이브레이크 동률)
   rounds: number;
   log: BattleEvent[];
+  effectEvents?: EffectEvent[];   // E2 — 효과 없으면 생략(구 로그와 JSON 동일)
 }
 
 export const MAX_ROUNDS = 180;   // 5v5는 총 HP가 늘어 상향(조기 타이브레이크 무승부 방지). rage 램프가 장기전 수렴.
@@ -74,26 +87,12 @@ export function rageMultiplier(action: number): number {
   return 1.0 + Math.max(0, action - RAGE_START) * RAGE_STEP;
 }
 
-// ── 효과 레이어 (E1 프레임) — 상태이상/버프. Swift BattleEngine 1:1. docs/plans/pet-effects.md.
-// E1은 프레임만: 어떤 스킬도 효과를 부여하지 않아 배틀 결과·RNG 스트림·기존 골든이 전부 불변
-// (effects 상시 빈 배열 = 전 경로 no-op). 부여는 E2 스킬 연동에서 — 그때 골든 재캡처.
+// ── 효과 레이어 (E1 프레임 + E2 스킬 연동) — 상태이상/버프. Swift BattleEngine 1:1. docs/plans/pet-effects.md.
+// E2부터 활성: typeShared rider 6종 + happyPath 버프 + 궁극기 특수효과(§7.5)가 효과를 부여한다.
+// 부여 스킬이 안 나오는 배틀(v0 팀 등)은 전 경로 no-op — RNG 스트림·구 골든 불변.
+// 효과 정의(EffectDef)·카탈로그는 pvp_policy(EFFECTS) — Swift EffectCatalog 1:1.
 
-export type EffectKind =
-  | "dot"            // 매 자기 턴 시작 HP -= magnitude(% of maxHP)
-  | "regen"          // 매 자기 턴 시작 HP += magnitude(% of maxHP), maxHP 상한
-  | "statModAtk" | "statModDef" | "statModSpd"   // 지속 중 해당 스탯 × magnitude (Swift statMod(StatKind))
-  | "controlFixed"   // duration 동안 무조건 턴 스킵
-  | "controlChance"  // 매 턴 chance 확률로 스킵 (draw는 보유 시에만 — 스트림 보존)
-  | "shield"         // flat HP 흡수막 — 소진 시 제거
-  | "cleanse";       // 즉시 — 자기 디버프 전부 제거
-
-export interface BattleEffectDef {
-  id: string; kind: EffectKind;
-  magnitude: number;      // dot/regen/shield: maxHP 비율, statMod*: 배수, control: 0
-  duration: number;       // 지속 자기 턴 수 (cleanse는 0)
-  chance: number | null;  // controlChance 스킵 확률
-}
-export interface ActiveEffect { effect: BattleEffectDef; remaining: number; shieldHP: number }
+export interface ActiveEffect { effect: EffectDef; remaining: number; shieldHP: number }
 
 export const EFFECT_SLOT_CAP = 4;   // 초과 부여 시 remaining 최소(동률: 앞 인덱스)부터 밀어냄.
 
@@ -106,23 +105,37 @@ function effStat(base: number, stat: StatKind, effects: ActiveEffect[]): number 
   return Math.max(1, roundAway(v));
 }
 
-// 자기 턴 시작 효과 틱 — DoT/Regen(≥1 보장) → remaining-- → 만료 제거. Swift tickEffects 1:1.
-function tickEffects(c: Combatant): void {
-  if (c.effects.length === 0) return;   // E1 상시 경로 — no-op
+// 자기 턴 시작 효과 틱 — DoT/Regen(≥1 보장, hpDelta는 실제 적용량) → remaining-- → 만료 제거. Swift 1:1.
+function tickEffects(c: Combatant, side: BattleSide, round: number, events: EffectEvent[]): void {
+  if (c.effects.length === 0) return;   // 미부여 배틀 상시 경로 — no-op
   for (const e of c.effects) {
     const amt = Math.max(1, roundAway(c.stats.hp * e.effect.magnitude));
-    if (e.effect.kind === "dot") c.hp -= amt;
-    else if (e.effect.kind === "regen") c.hp = Math.min(c.stats.hp, c.hp + amt);
+    if (e.effect.kind === "dot") {
+      c.hp -= amt;
+      events.push({ at: round, side, petKind: c.kind, kind: "tick", effectId: e.effect.id, hpDelta: -amt, fainted: null });
+    } else if (e.effect.kind === "regen") {
+      const healed = Math.min(c.stats.hp - c.hp, amt);
+      if (healed > 0) {
+        c.hp += healed;
+        events.push({ at: round, side, petKind: c.kind, kind: "tick", effectId: e.effect.id, hpDelta: healed, fainted: null });
+      }
+    }
   }
   for (const e of c.effects) e.remaining -= 1;
   c.effects = c.effects.filter((e) => e.remaining > 0);
 }
 
-// Control 체크 — 고정형 무조건 스킵, 확률형 draw < chance 스킵(보유 시에만 draw). Swift 1:1.
-function shouldSkipTurn(c: Combatant, rng: SeededRNG): boolean {
+// Control 체크 — 고정형 무조건 스킵, 확률형 draw < chance 스킵(보유 시에만 draw, 배열 순). Swift 1:1.
+function shouldSkipTurn(c: Combatant, side: BattleSide, round: number, events: EffectEvent[], rng: SeededRNG): boolean {
   for (const e of c.effects) {
-    if (e.effect.kind === "controlFixed") return true;
-    if (e.effect.kind === "controlChance" && rng.uniform01() < (e.effect.chance ?? 0)) return true;
+    if (e.effect.kind === "controlFixed") {
+      events.push({ at: round, side, petKind: c.kind, kind: "skip", effectId: e.effect.id, hpDelta: null, fainted: null });
+      return true;
+    }
+    if (e.effect.kind === "controlChance" && rng.uniform01() < (e.effect.chance ?? 0)) {
+      events.push({ at: round, side, petKind: c.kind, kind: "skip", effectId: e.effect.id, hpDelta: null, fainted: null });
+      return true;
+    }
   }
   return false;
 }
@@ -142,8 +155,8 @@ function absorbShield(c: Combatant, dmg: number): number {
 }
 
 // 효과 부여 — 동일 id refresh(중첩 없음), cleanse 즉시 디버프 제거, 슬롯 초과 시 remaining 최소 밀어냄.
-// Swift grant 1:1. E2에서 스킬 시전 경로가 호출(현재 미사용 — 프레임).
-export function grantEffect(c: Combatant, effect: BattleEffectDef): void {
+// Swift grant 1:1. attack의 rider/궁극기 grant 경로가 호출.
+export function grantEffect(c: Combatant, effect: EffectDef): void {
   if (effect.kind === "cleanse") {
     c.effects = c.effects.filter((a) => {
       const k = a.effect.kind;
@@ -201,6 +214,8 @@ export function simulate(teamA: BattleTeam, teamB: BattleTeam, seed: bigint): Ba
   const a = makeCombatants(teamA);
   const b = makeCombatants(teamB);
   const log: BattleEvent[] = [];
+  const fx: EffectEvent[] = [];   // 효과 이벤트 스트림(E2) — log와 분리(구 클라 호환)
+  const withFx = (r: BattleResult): BattleResult => fx.length > 0 ? { ...r, effectEvents: fx } : r;
 
   const ai0 = activeIdx(a), bi0 = activeIdx(b);
   if (ai0 < 0 || bi0 < 0) {
@@ -226,43 +241,49 @@ export function simulate(teamA: BattleTeam, teamB: BattleTeam, seed: bigint): Ba
     actions += 1;
     const t = aGoes ? aNext : bNext;
     if (aGoes) {
-      const fainted = attack(a, b, "a", actions, log, rng);
-      aNext = t + cd(aSpd);
+      const fainted = attack(a, b, "a", actions, log, fx, rng);
+      // DoT 자멸로 공격자 선봉이 바뀌었으면 새 선봉 주기로 재스케줄(Swift 1:1).
+      { const cur = activeIdx(a); if (cur >= 0) aNext = t + cd(cur === ai ? aSpd : effStat(a[cur].stats.spd, "spd", a[cur].effects)); }
       if (fainted) { const nb = activeIdx(b); if (nb >= 0) bNext = t + cd(effStat(b[nb].stats.spd, "spd", b[nb].effects)); }
     } else {
-      const fainted = attack(b, a, "b", actions, log, rng);
-      bNext = t + cd(bSpd);
+      const fainted = attack(b, a, "b", actions, log, fx, rng);
+      { const cur = activeIdx(b); if (cur >= 0) bNext = t + cd(cur === bi ? bSpd : effStat(b[cur].stats.spd, "spd", b[cur].effects)); }
       if (fainted) { const na = activeIdx(a); if (na >= 0) aNext = t + cd(effStat(a[na].stats.spd, "spd", a[na].effects)); }
     }
-    if (activeIdx(a) < 0) return { winner: "b", rounds: actions, log };
-    if (activeIdx(b) < 0) return { winner: "a", rounds: actions, log };
+    if (activeIdx(a) < 0) return withFx({ winner: "b", rounds: actions, log });
+    if (activeIdx(b) < 0) return withFx({ winner: "a", rounds: actions, log });
   }
 
   // backstop — 잔여 HP 합 타이브레이크.
   const sum = (t: Combatant[]) => t.reduce((acc, c) => acc + Math.max(0, c.hp), 0);
   const sumA = sum(a), sumB = sum(b);
   const winner: BattleSide | null = sumA === sumB ? null : (sumA > sumB ? "a" : "b");
-  return { winner, rounds: actions, log };
+  return withFx({ winner, rounds: actions, log });
 }
 
+// RNG draw 순서(파리티 고정): (controlChance 스킵) → rngFactor → (레인보우 크리) → 패링 → (rider chance).
 function attack(
   from: Combatant[], to: Combatant[], attackerSide: BattleSide,
-  round: number, log: BattleEvent[], rng: SeededRNG,
+  round: number, log: BattleEvent[], events: EffectEvent[], rng: SeededRNG,
 ): boolean {
   const ai = activeIdx(from), di = activeIdx(to);
   if (ai < 0 || di < 0) return false;
-  // 1) 효과 틱(자기 턴 시작) — DoT/Regen·만료 제거. DoT 자멸 시 행동 없이 종료.
-  //    (E1: effects 상시 빈 배열이라 전부 no-op — E2에서 자멸 이벤트 로깅·재스케줄 정합과 함께 골든 고정.)
-  tickEffects(from[ai]);
-  if (from[ai].hp <= 0) return false;
+  // 1) 효과 틱(자기 턴 시작) — DoT/Regen·만료 제거. DoT 자멸 시 행동 없이 종료하되,
+  //    게이지는 기절 승계 규칙 그대로 다음 생존 펫에게(팀 게이지 일관성).
+  tickEffects(from[ai], attackerSide, round, events);
+  if (from[ai].hp <= 0) {
+    const ni = activeIdx(from);
+    if (ni >= 0) from[ni].charge += from[ai].charge;
+    return false;
+  }
   // 2) Control 체크 — 스킵 턴은 행동이 아니므로 게이지 적립 없음. (draw는 확률형 보유 시에만 — 스트림 보존)
-  if (shouldSkipTurn(from[ai], rng)) return false;
+  if (shouldSkipTurn(from[ai], attackerSide, round, events, rng)) return false;
   // 3) 행동
   from[ai].charge += 1;                     // 궁극기 게이지 — 행동마다 +1(결정적).
   const attacker = from[ai];                // 참조(TS)/값복사(Swift) — charge 판정은 리셋 前이라 양측 동일.
   const defender = to[di];
   // ⚠️ 파리티: 리셋(from[ai].charge=0) 이후 attacker.charge를 절대 읽지 말 것 — TS는 참조라 0, Swift는
-  //    복사본이라 옛값으로 갈린다. 현재 로직은 리셋 후 charge 미사용이라 무해. effects 페이즈에서 주의.
+  //    복사본이라 옛값으로 갈린다. 효과 관련 읽기도 부여 지점 이전에 끝내고, 변이는 배열 원소로만(Swift와 1:1).
 
   // 레인보우가 충전 완료면 궁극기(정규 스킬 대체) 후 게이지 리셋, 아니면 결정적 선택 AI.
   let skill: Skill;
@@ -276,20 +297,26 @@ function attack(
   const stab = stabMult(skill.type, attacker.type);
   const syn = matchup(collectionOf(attacker.kind), collectionOf(defender.kind));
 
+  // 궁극기 특수효과(E2, §7.5) — 히트 변형은 아래 계산에, 부여/자힐은 히트 해소 후에 적용.
+  const ultFx = skill.tier === "ultimate" ? (ULT_EFFECT[skill.id] ?? null) : null;
+
   const rngFactor = 0.9 + 0.1 * rng.uniform01();   // [0.9, 1.0)
   const rage = rageMultiplier(round);
-  // atk/def는 StatMod 효과 반영(effective) — E1에선 base와 동일.
+  // atk/def는 StatMod 효과 반영(effective). rm_rf 방어무시는 defEff × ULT_DEF_IGNORE_MULT로 계산.
   const atkEff = effStat(attacker.stats.atk, "atk", attacker.effects);
   const defEff = effStat(defender.stats.def, "def", defender.effects);
-  const raw = (atkEff / defEff) * skill.power * eff * stab * syn.mult * rngFactor * rage;
+  const defCalc = ultFx?.t === "defIgnore" ? Math.max(1, roundAway(defEff * ULT_DEF_IGNORE_MULT)) : defEff;
+  const raw = (atkEff / defCalc) * skill.power * eff * stab * syn.mult * rngFactor * rage;
   const baseDmg = Math.max(1, roundAway(raw));
 
   // 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적 ×critMult. 조건부 draw라 비-레인보우
   // 배틀의 RNG 스트림·기존 골든 불변. 순서: rngFactor → (레인보우면 크리) → 패링 (Swift와 1:1).
+  // 확정 크리(context_window_exceeded): draw는 반드시 소비, 결과만 강제 true(스트림 보존 — §7.5).
   let critDmg = baseDmg;
   let crit = false;
   if (attacker.isRainbow) {
     crit = rng.uniform01() < RAINBOW_CRIT_CHANCE;
+    if (ultFx?.t === "forceCrit") crit = true;
     if (crit) critDmg = Math.max(1, roundAway(baseDmg * RAINBOW_CRIT_MULT));
   }
 
@@ -313,6 +340,59 @@ function attack(
   if (fainted) {
     const ni = activeIdx(to);
     if (ni >= 0) to[ni].charge += to[di].charge;
+  }
+
+  const defenderSide: BattleSide = attackerSide === "a" ? "b" : "a";
+
+  // 광역(kernel_panic) — 후열 생존 전원에 최종 데미지 × ULT_SPLASH_MULT(개별 실드 흡수).
+  // 배열 앞 인덱스부터 순차(결정적) — 스플래시 기절도 피격 충전·게이지 승계 규칙 동일 적용. Swift 1:1.
+  if (ultFx?.t === "splash") {
+    for (let j = 0; j < to.length; j++) {
+      if (j === di || to[j].hp <= 0) continue;
+      const sdmg = Math.max(1, roundAway(dmg * ULT_SPLASH_MULT));
+      const sHp = absorbShield(to[j], sdmg);
+      to[j].hp -= sHp;
+      to[j].charge += 1;
+      const sFaint = to[j].hp <= 0;
+      events.push({ at: round, side: defenderSide, petKind: to[j].kind, kind: "splash", effectId: null, hpDelta: -sHp, fainted: sFaint });
+      if (sFaint) { const ni = activeIdx(to); if (ni >= 0) to[ni].charge += to[j].charge; }
+    }
+  }
+
+  // 궁극기 부여/자힐(§7.5) — 부여는 적 활성 대상(막타 기절 시 생략), 자힐은 실제 회복량만 기록. Swift 1:1.
+  if (ultFx?.t === "grant") {
+    const def = effectDef(ultFx.effectId);
+    if (to[di].hp > 0 && def) {
+      grantEffect(to[di], def);
+      events.push({ at: round, side: defenderSide, petKind: to[di].kind, kind: "grant", effectId: ultFx.effectId, hpDelta: null, fainted: null });
+    }
+  } else if (ultFx?.t === "selfHeal") {
+    const amt = Math.max(1, roundAway(from[ai].stats.hp * ultFx.frac));
+    const healed = Math.min(from[ai].stats.hp - from[ai].hp, amt);
+    if (healed > 0) {
+      from[ai].hp += healed;
+      events.push({ at: round, side: attackerSide, petKind: from[ai].kind, kind: "heal", effectId: skill.id, hpDelta: healed, fainted: null });
+    }
+  }
+
+  // 스킬 부수효과(rider, §3) — chance 1.0 확정(draw 없음), 확률형 draw < chance.
+  // 적 대상 rider는 막타 기절 시 draw까지 생략(결정적 — Swift 1:1).
+  const rider = skill.rider;
+  if (rider) {
+    const def = effectDef(rider.effectId);
+    if (def) {
+      if (rider.selfTarget) {
+        if (rider.chance >= 1.0 || rng.uniform01() < rider.chance) {
+          grantEffect(from[ai], def);
+          events.push({ at: round, side: attackerSide, petKind: from[ai].kind, kind: "grant", effectId: rider.effectId, hpDelta: null, fainted: null });
+        }
+      } else if (to[di].hp > 0) {
+        if (rider.chance >= 1.0 || rng.uniform01() < rider.chance) {
+          grantEffect(to[di], def);
+          events.push({ at: round, side: defenderSide, petKind: to[di].kind, kind: "grant", effectId: rider.effectId, hpDelta: null, fainted: null });
+        }
+      }
+    }
   }
 
   log.push({

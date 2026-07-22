@@ -68,7 +68,48 @@ export function effectiveness(attacker: BattleType, defender: BattleType): numbe
 // variant 0 = generic("핫픽스") / variant 1 = typeShared(타입 6종). 타입에서 규칙 파생(per-kind 데이터 없음).
 
 export type SkillTier = "generic" | "typeShared" | "collectionShared" | "unique" | "ultimate";
-export interface Skill { id: string; name: string; type: BattleType; power: number; tier: SkillTier; }
+
+// 스킬 부수효과(rider, E2 — pet-effects.md §3). chance 1.0 = 확정(rng draw 미소비),
+// (0,1) = draw < chance. selfTarget: true = 시전자 자버프, false = 적 활성 디버프(막타 기절 시 draw까지 생략).
+// Swift SkillRider 1:1.
+export interface SkillRider { effectId: string; chance: number; selfTarget: boolean }
+export interface Skill { id: string; name: string; type: BattleType; power: number; tier: SkillTier; rider?: SkillRider }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 효과 카탈로그 (E2) — pet-effects.md §2 + §7.5. Swift EffectCatalog 1:1.
+// 스킬 id와 같은 이름의 효과(mem_leak 등)는 별도 네임스페이스(그 스킬이 부여하는 효과) — 충돌 아님.
+
+export interface EffectDef {
+  id: string;
+  kind: "dot" | "regen" | "statModAtk" | "statModDef" | "statModSpd" | "controlFixed" | "controlChance" | "shield" | "cleanse";
+  magnitude: number;      // dot/regen/shield: maxHP 비율, statMod*: 배수, control: 0
+  duration: number;
+  chance: number | null;  // controlChance 스킵 확률
+}
+export const EFFECTS: Record<string, { name: string; def: EffectDef }> = (() => {
+  const fx = (id: string, name: string, kind: EffectDef["kind"], magnitude: number, duration: number, chance: number | null = null) =>
+    [id, { name, def: { id, kind, magnitude, duration, chance } }] as const;
+  return Object.fromEntries([
+    // 상태이상(디버프)
+    fx("mem_leak",      "메모리 릭",      "dot", 0.05, 3),
+    fx("infinite_loop", "무한 루프",      "dot", 0.08, 3),
+    fx("deadlock",      "데드락",         "controlChance", 0, 3, 0.35),
+    fx("rate_limited",  "레이트 리밋",    "controlFixed", 0, 2),
+    fx("tech_debt",     "기술 부채",      "statModAtk", 0.80, 3),
+    fx("legacy",        "레거시",         "statModSpd", 0.75, 3),
+    // 버프(자신)
+    fx("optimization",  "최적화",         "statModAtk", 1.25, 3),
+    fx("firewall",      "방화벽",         "statModDef", 1.30, 3),
+    fx("caching",       "캐싱",           "statModSpd", 1.25, 3),
+    fx("load_balancer", "로드 밸런서",    "shield", 0.20, 3),
+    fx("autoscaling",   "오토스케일링",   "regen", 0.06, 3),
+    fx("hot_reload",    "핫 리로드",      "cleanse", 0, 0),
+    // 궁극기 부여 전용 (§7.5 — 카탈로그판과 지속이 달라 별도 id)
+    fx("outage_stun",   "전면 장애",      "controlFixed", 0, 1),
+    fx("bsod_lag",      "블루 스크린",    "statModSpd", 0.60, 2),
+  ]);
+})();
+export function effectDef(id: string): EffectDef | null { return EFFECTS[id]?.def ?? null; }
 
 // 스킬 상성 — 타입 6-사이클(BEATS) 재사용, 배수만 ×2.0/×0.5(패시브 ×1.6/0.625 대체).
 export const SKILL_SUPER = 2.0;
@@ -95,12 +136,22 @@ const TYPE_SHARED_SKILL: Record<BattleType, [string, string]> = {
   machine: ["regression_sweep", "회귀 스윕"],
   mascot: ["onboarding", "온보딩"],
 };
+// typeShared 부수효과(E2) — 타입당 1개, 밈 정합. 디버프 25~30% / 버프(onboarding) 확정 자부여.
+// Swift typeSharedRiderTable 1:1. 수치는 밸런스 튜닝 대상.
+const TYPE_SHARED_RIDER: Record<BattleType, SkillRider> = {
+  beast:   { effectId: "mem_leak", chance: 0.30, selfTarget: false },
+  warrior: { effectId: "tech_debt", chance: 0.30, selfTarget: false },
+  chaos:   { effectId: "infinite_loop", chance: 0.25, selfTarget: false },
+  arcane:  { effectId: "deadlock", chance: 0.25, selfTarget: false },
+  machine: { effectId: "legacy", chance: 0.30, selfTarget: false },
+  mascot:  { effectId: "load_balancer", chance: 1.0, selfTarget: true },
+};
 export function genericSkill(type: BattleType): Skill {
   return { id: "hotfix", name: "핫픽스", type, power: GENERIC_POWER, tier: "generic" };
 }
 export function typeSharedSkill(type: BattleType): Skill {
   const [id, name] = TYPE_SHARED_SKILL[type];
-  return { id, name, type, power: TYPE_SHARED_POWER, tier: "typeShared" };
+  return { id, name, type, power: TYPE_SHARED_POWER, tier: "typeShared", rider: TYPE_SHARED_RIDER[type] };
 }
 
 export const COLLECTION_SHARED_POWER = 12.0;
@@ -133,8 +184,12 @@ export function collectionSharedSkill(collection: string): Skill {
   const e = COLLECTION_SHARED_SKILL[collection];
   if (!e) throw new Error(`collectionSharedSkill: 미매핑 컬렉션 "${collection}" (Swift collectionSharedTable와 동기화 필요)`);
   const [id, name, type] = e;
-  return { id, name, type, power: COLLECTION_SHARED_POWER, tier: "collectionShared" };
+  return { id, name, type, power: COLLECTION_SHARED_POWER, tier: "collectionShared", rider: COLLECTION_SHARED_RIDER[collection] };
 }
+// collectionShared rider(E2) — 첫 배치는 happyPath만(효과 kind 커버리지 목적). Swift 1:1.
+const COLLECTION_SHARED_RIDER: Record<string, SkillRider> = {
+  happyPath: { effectId: "autoscaling", chance: 1.0, selfTarget: true },
+};
 
 export const UNIQUE_POWER = 14.0;
 // unique — Epic+ per-kind 고유기(variant 3). **자기타입 시그니처**. id/name은 pet_meta_gen.UNIQUE_SKILL
@@ -143,7 +198,10 @@ export const UNIQUE_POWER = 14.0;
 export function uniqueSkill(kind: string): Skill | null {
   const u = UNIQUE_SKILL[kind];
   if (!u) return null;
-  return { id: u[0], name: u[1], type: battleTypeOf(kind), power: UNIQUE_POWER, tier: "unique" };
+  // rider는 자기 타입 typeShared rider 상속(사실상 타입 특성) — 미상속 시 Epic+는 unique가 ts를 항상
+  // 지배해(21 > 16.5) rider가 영영 발동하지 않는다. Swift SkillCatalog.unique 1:1.
+  const t = battleTypeOf(kind);
+  return { id: u[0], name: u[1], type: t, power: UNIQUE_POWER, tier: "unique", rider: TYPE_SHARED_RIDER[t] };
 }
 
 export const ULTIMATE_POWER = 24.0;
@@ -161,6 +219,21 @@ export function ultimateSkill(type: BattleType): Skill {
   const [id, name] = ULTIMATE_SKILL[type];
   return { id, name, type, power: ULTIMATE_POWER, tier: "ultimate" };
 }
+
+// 궁극기 특수효과(E2, §7.5) — 히트 변형 3종 + 지속/즉시 3종. Swift ultimateEffectTable 1:1.
+export type UltEffect =
+  | { t: "defIgnore" } | { t: "forceCrit" } | { t: "splash" }
+  | { t: "grant"; effectId: string } | { t: "selfHeal"; frac: number };
+export const ULT_DEF_IGNORE_MULT = 0.3;
+export const ULT_SPLASH_MULT = 0.3;
+export const ULT_EFFECT: Record<string, UltEffect> = {
+  rm_rf:                   { t: "defIgnore" },
+  context_window_exceeded: { t: "forceCrit" },
+  kernel_panic:            { t: "splash" },
+  total_outage:            { t: "grant", effectId: "outage_stun" },
+  blue_screen:             { t: "grant", effectId: "bsod_lag" },
+  full_rollback:           { t: "selfHeal", frac: 0.25 },
+};
 
 // variant까지 해금한 정규 스킬(슬롯 순). Swift SkillCatalog.skills 1:1.
 export function skillsFor(kind: string, variant: number): Skill[] {

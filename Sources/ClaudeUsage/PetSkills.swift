@@ -13,13 +13,58 @@ enum SkillTier: String, Codable, Equatable {
     case generic, typeShared, collectionShared, unique, ultimate
 }
 
+/// 스킬 부수효과(rider) — 공격이 적중하면 chance 확률로 효과를 부여한다 (E2, pet-effects.md §3).
+/// `chance == 1.0`은 확정 부여로 **rng draw를 소비하지 않는다**(결정성 — 확률일 때만 draw).
+/// `selfTarget == true`면 시전자 자신(버프), false면 적 활성 펫(디버프 — 막타로 기절 시 부여 생략, draw도 생략).
+struct SkillRider: Equatable {
+    let effectId: String
+    let chance: Double
+    let selfTarget: Bool
+}
+
 /// 한 개의 스킬. `type`은 6배틀타입 중 하나, `power`는 데미지 계수, `tier`는 획득 계층.
+/// `rider`는 부수효과(E2) — 없으면 nil(기존 스킬과 동작 동일).
 struct Skill: Equatable {
     let id: String
     let name: String
     let type: BattleType
     let power: Double
     let tier: SkillTier
+    var rider: SkillRider? = nil
+}
+
+/// 효과 정의 카탈로그 (E2) — pet-effects.md §2 + §7.5(궁극기 부여용 2종). 서버 pvp_policy.EFFECTS 1:1.
+/// 스킬 id와 같은 이름의 효과(mem_leak 등)는 "그 스킬이 부여하는 효과" — 스킬/효과는 별도 네임스페이스라
+/// 충돌이 아니며, 표시명 조회도 각자 카탈로그를 쓴다(status doc의 네임스페이스 정리 = 이 규칙 명문화).
+enum EffectCatalog {
+    /// id → (표시명, 정의). magnitude/duration/chance 의미는 BattleEngine.BattleEffect 참조. 수치는 튜닝 대상.
+    static let table: [String: (name: String, def: BattleEngine.BattleEffect)] = {
+        func fx(_ id: String, _ name: String, _ kind: BattleEngine.EffectKind,
+                _ magnitude: Double, _ duration: Int, _ chance: Double? = nil) -> (String, (String, BattleEngine.BattleEffect)) {
+            (id, (name, BattleEngine.BattleEffect(id: id, kind: kind, magnitude: magnitude, duration: duration, chance: chance)))
+        }
+        return Dictionary(uniqueKeysWithValues: [
+            // 상태이상(디버프)
+            fx("mem_leak",      "메모리 릭",      .dot, 0.05, 3),
+            fx("infinite_loop", "무한 루프",      .dot, 0.08, 3),
+            fx("deadlock",      "데드락",         .controlChance, 0, 3, 0.35),
+            fx("rate_limited",  "레이트 리밋",    .controlFixed, 0, 2),
+            fx("tech_debt",     "기술 부채",      .statMod(.atk), 0.80, 3),
+            fx("legacy",        "레거시",         .statMod(.spd), 0.75, 3),
+            // 버프(자신)
+            fx("optimization",  "최적화",         .statMod(.atk), 1.25, 3),
+            fx("firewall",      "방화벽",         .statMod(.def), 1.30, 3),
+            fx("caching",       "캐싱",           .statMod(.spd), 1.25, 3),
+            fx("load_balancer", "로드 밸런서",    .shield, 0.20, 3),
+            fx("autoscaling",   "오토스케일링",   .regen, 0.06, 3),
+            fx("hot_reload",    "핫 리로드",      .cleanse, 0, 0),
+            // 궁극기 부여 전용 (§7.5 — 카탈로그판과 지속이 달라 별도 id)
+            fx("outage_stun",   "전면 장애",      .controlFixed, 0, 1),
+            fx("bsod_lag",      "블루 스크린",    .statMod(.spd), 0.60, 2),
+        ])
+    }()
+    static func effect(_ id: String) -> BattleEngine.BattleEffect? { table[id]?.def }
+    static func displayName(_ id: String) -> String? { table[id]?.name }
 }
 
 enum SkillCatalog {
@@ -57,9 +102,20 @@ enum SkillCatalog {
         .machine: ("regression_sweep", "회귀 스윕"),
         .mascot:  ("onboarding", "온보딩"),
     ]
+    /// typeShared 부수효과(E2) — 타입당 1개, 밈 정합 매핑. 디버프 25~30% / 버프(onboarding) 확정 자부여.
+    /// 서버 pvp_policy.TYPE_SHARED_RIDER 1:1. 수치는 밸런스 튜닝 대상(E2는 골든 승률 실측 전 초기값).
+    static let typeSharedRiderTable: [BattleType: SkillRider] = [
+        .beast:   SkillRider(effectId: "mem_leak", chance: 0.30, selfTarget: false),       // 램 잠식 DoT
+        .warrior: SkillRider(effectId: "tech_debt", chance: 0.30, selfTarget: false),      // 강제 푸시 → 부채
+        .chaos:   SkillRider(effectId: "infinite_loop", chance: 0.25, selfTarget: false),  // 주말 장애 DoT
+        .arcane:  SkillRider(effectId: "deadlock", chance: 0.25, selfTarget: false),       // 컨텍스트 혼란
+        .machine: SkillRider(effectId: "legacy", chance: 0.30, selfTarget: false),         // 회귀에 발목
+        .mascot:  SkillRider(effectId: "load_balancer", chance: 1.0, selfTarget: true),    // 방어형 실드(확정)
+    ]
     static func typeShared(for type: BattleType) -> Skill {
         let e = typeSharedTable[type]!   // 6타입 전부 정의 — 강제 언랩 안전.
-        return Skill(id: e.id, name: e.name, type: type, power: typeSharedPower, tier: .typeShared)
+        return Skill(id: e.id, name: e.name, type: type, power: typeSharedPower, tier: .typeShared,
+                     rider: typeSharedRiderTable[type])
     }
 
     static let collectionSharedPower = 12.0
@@ -94,9 +150,15 @@ enum SkillCatalog {
         .happyPath:        ("happy_path", "해피 패스", .beast),
         .helloWorld:       ("hello_world", "Hello, World!", .arcane),
     ]
+    /// collectionShared 부수효과(E2) — 첫 배치는 happyPath(자기 regen 확정)만. 나머지 18종은 콘텐츠
+    /// 패스에서 확장(효과 kind 커버리지 목적의 최소 배치). 서버 COLLECTION_SHARED_RIDER 1:1.
+    static let collectionSharedRiderTable: [PetCollection: SkillRider] = [
+        .happyPath: SkillRider(effectId: "autoscaling", chance: 1.0, selfTarget: true),   // 낙관 회복(확정)
+    ]
     static func collectionShared(for collection: PetCollection) -> Skill {
         let e = collectionSharedTable[collection]!   // 19컬렉션 전부 정의 — 강제 언랩 안전.
-        return Skill(id: e.id, name: e.name, type: e.type, power: collectionSharedPower, tier: .collectionShared)
+        return Skill(id: e.id, name: e.name, type: e.type, power: collectionSharedPower, tier: .collectionShared,
+                     rider: collectionSharedRiderTable[collection])
     }
 
     static let uniquePower = 14.0
@@ -145,9 +207,13 @@ enum SkillCatalog {
         .pawn:          ("merge_conflict", "머지 컨플릭트"),
     ]
     /// Epic+ 고유기(자기타입 시그니처). 저레어는 nil. 서버 pvp_policy.uniqueSkill 1:1.
+    /// rider는 자기 타입의 typeShared rider를 **상속** — 선택 AI가 같은 타입 고파워 unique로 typeShared를
+    /// 항상 지배하므로(21 > 16.5), 상속하지 않으면 Epic+ 펫은 rider가 영영 발동하지 않는다(E2 실측).
+    /// 사실상 "타입 특성": 자기타입 공격(ts/unique)이면 타입 rider가 살아있다.
     static func unique(for kind: PetKind) -> Skill? {
         guard let e = uniqueTable[kind] else { return nil }
-        return Skill(id: e.id, name: e.name, type: kind.battleType, power: uniquePower, tier: .unique)
+        return Skill(id: e.id, name: e.name, type: kind.battleType, power: uniquePower, tier: .unique,
+                     rider: typeSharedRiderTable[kind.battleType])
     }
 
     static let ultimatePower = 24.0
@@ -170,6 +236,26 @@ enum SkillCatalog {
     }
     static let ultimateIds: Set<String> = Set(ultimateTable.values.map { $0.id })
     static func isUltimate(_ id: String) -> Bool { ultimateIds.contains(id) }
+
+    /// 궁극기 특수효과 (E2, pet-effects.md §7.5) — 히트 변형 3종(그 한 방의 계산 변경) + 지속/즉시 3종.
+    /// 서버 pvp_policy.ULT_EFFECT 1:1. 발동은 BattleEngine.attack이 궁극기 시전 시 적용.
+    enum UltimateEffect: Equatable {
+        case defIgnore          // rm_rf — 방어무시: defEff × ultDefIgnoreMult로 계산
+        case forceCrit          // context_window_exceeded — 확정 크리(크리 draw는 소비, 결과만 강제 — 스트림 보존)
+        case splash             // kernel_panic — 후열 전원에 최종 데미지 × ultSplashMult
+        case grant(String)      // total_outage/blue_screen — 적 활성에 효과 부여(확정)
+        case selfHeal(Double)   // full_rollback — 자힐 maxHP 비율(즉시)
+    }
+    static let ultDefIgnoreMult = 0.3
+    static let ultSplashMult = 0.3
+    static let ultimateEffectTable: [String: UltimateEffect] = [
+        "rm_rf":                   .defIgnore,
+        "context_window_exceeded": .forceCrit,
+        "kernel_panic":            .splash,
+        "total_outage":            .grant("outage_stun"),
+        "blue_screen":             .grant("bsod_lag"),
+        "full_rollback":           .selfHeal(0.25),
+    ]
 
     /// 이 펫이 variant까지 해금한 정규 스킬 목록. 슬롯 인덱스 순(선택 AI tie-break 기준).
     /// 서버 pvp_policy.skillsFor 1:1.

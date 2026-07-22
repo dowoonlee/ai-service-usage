@@ -646,8 +646,9 @@ struct ArenaView: View {
     private var battleArena: some View {
         let log = result?.log ?? []
         let done = playbackStep >= log.count
-        let hp = hpDicts(step: playbackStep)
-        let charge = chargeDicts(step: playbackStep)
+        let dicts = battleDicts(step: playbackStep)
+        let hp = dicts.hp
+        let charge = dicts.charge
         let current: BattleEvent? = (playbackStep > 0 && playbackStep <= log.count) ? log[playbackStep - 1] : nil
         // 배틀 표시는 시뮬에 쓰인 스냅샷 기준(편성 편집과 무관하게 고정).
         let aKinds = aSnaps.map(\.kind), bKinds = bSnaps.map(\.kind)
@@ -901,11 +902,37 @@ struct ArenaView: View {
                 if let q = e.quip {
                     Text("«\(q)»").font(.system(size: 10)).italic().foregroundStyle(.tint)
                 }
+                if let fxLine = effectLine(for: e.round) {
+                    Text(fxLine).font(.system(size: 10, weight: .semibold)).foregroundStyle(.orange)
+                }
             }
             .frame(maxWidth: .infinity).id(playbackStep).transition(.opacity)
         } else {
             Text("전투 시작…").font(.system(size: 10)).foregroundStyle(.secondary)
         }
+    }
+
+    /// 이 액션에 연관된 효과 이벤트(E2) 한 줄 요약 — 부여/자힐/광역/지속피해. 스킵은 공격 스텝이
+    /// 없어 여기 안 나옴(E4에서 상태 아이콘과 함께). effectEvents 없는 구 로그는 nil.
+    private func effectLine(for round: Int) -> String? {
+        let fx = (result?.effectEvents ?? []).filter { $0.at == round }
+        guard !fx.isEmpty else { return nil }
+        var parts: [String] = []
+        for e in fx where e.kind == "grant" {
+            let name = e.effectId.flatMap { EffectCatalog.displayName($0) } ?? "효과"
+            parts.append("🧪 \(name) 부여")
+        }
+        let healSum = fx.filter { $0.kind == "heal" || ($0.kind == "tick" && ($0.hpDelta ?? 0) > 0) }
+            .compactMap(\.hpDelta).reduce(0, +)
+        if healSum > 0 { parts.append("💚 +\(healSum)") }
+        let dotSum = fx.filter { $0.kind == "tick" && ($0.hpDelta ?? 0) < 0 }.compactMap(\.hpDelta).reduce(0, +)
+        if dotSum < 0 { parts.append("🔥 지속피해 \(dotSum)") }
+        let splashes = fx.filter { $0.kind == "splash" }
+        if !splashes.isEmpty {
+            let sum = splashes.compactMap(\.hpDelta).reduce(0, +)
+            parts.append("🌊 광역 \(splashes.count)명 \(sum)")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "  ")
     }
 
     private func resultBanner(_ w: BattleSide?) -> some View {
@@ -972,25 +999,46 @@ struct ArenaView: View {
         guard let arr, arr.count == snaps.count else { return nil }
         return Dictionary(zip(snaps.map(\.kind), arr), uniquingKeysWith: { x, _ in x })
     }
-    private func hpDicts(step: Int) -> (a: [PetKind: Int], b: [PetKind: Int]) {
+    /// 배틀 상태 재구성(HP + 궁극기 게이지) — 공격 로그와 효과 이벤트(E2)를 엔진 순서로 접는다.
+    /// 발동/부여 여부는 로그가 이미 확정하고 hpDelta는 실적용량이라 임계/클램프 판정이 불필요
+    /// (엔진 재현이 아닌 순수 재생 — 파리티 무관, 구 로그·effectEvents 없는 로그도 안전). 표시 전용.
+    ///
+    /// 액션 r 처리 순서(엔진 1:1): ①fx(at==r) 중 tick/skip(행동 전) ②공격 이벤트(round==r — 스킵
+    /// 액션은 없음) ③fx(at==r) 중 grant/heal/splash(행동 후). 스플래시는 피격 충전 +1 + 기절 승계까지
+    /// 게이지에 반영. 승계 대상(다음 생존)은 같은 폴드의 HP로 판정해 화면의 활성 펫과 항상 일치한다.
+    private func battleDicts(step: Int) -> (hp: (a: [PetKind: Int], b: [PetKind: Int]), charge: (a: [PetKind: Int], b: [PetKind: Int])) {
         // 유니크 kind 전제지만 방어적으로 uniquing(미래에 동일 kind 편성 허용돼도 크래시 없게).
-        var a = Dictionary(aSnaps.map { ($0.kind, maxHP($0.kind, in: aSnaps, server: serverMaxHpA)) }, uniquingKeysWith: { x, _ in x })
-        var b = Dictionary(bSnaps.map { ($0.kind, maxHP($0.kind, in: bSnaps, server: serverMaxHpB)) }, uniquingKeysWith: { x, _ in x })
-        for e in (result?.log ?? []).prefix(step) {
-            if e.attacker == .a { b[e.defenderKind] = max(0, (b[e.defenderKind] ?? 0) - e.damage) }
-            else { a[e.defenderKind] = max(0, (a[e.defenderKind] ?? 0) - e.damage) }
-        }
-        return (a, b)
-    }
-    /// 궁극기 게이지 재구성 — 로그 prefix를 엔진과 동일 규칙(행동 +1 → 궁이면 리셋 · 피격 +1 · 기절 시
-    /// 다음 생존 펫에게 승계)으로 접는다. 발동 여부는 로그의 move가 이미 확정하므로 임계 판정이 불필요
-    /// (엔진 재현이 아닌 순수 재생 — 파리티 무관, 구 로그·구 서버 로그도 안전). 표시 전용.
-    /// 승계 대상(다음 생존)은 hpDicts와 동일한 HP 폴드로 판정해 화면의 활성 펫과 항상 일치한다.
-    private func chargeDicts(step: Int) -> (a: [PetKind: Int], b: [PetKind: Int]) {
         var hpA = Dictionary(aSnaps.map { ($0.kind, maxHP($0.kind, in: aSnaps, server: serverMaxHpA)) }, uniquingKeysWith: { x, _ in x })
         var hpB = Dictionary(bSnaps.map { ($0.kind, maxHP($0.kind, in: bSnaps, server: serverMaxHpB)) }, uniquingKeysWith: { x, _ in x })
         var ca: [PetKind: Int] = [:], cb: [PetKind: Int] = [:]
-        for e in (result?.log ?? []).prefix(step) {
+        let log = Array((result?.log ?? []).prefix(step))
+        guard let curRound = log.last?.round else { return ((hpA, hpB), (ca, cb)) }
+
+        var fxByAt: [Int: [EffectEvent]] = [:]
+        for e in (result?.effectEvents ?? []) where e.at <= curRound { fxByAt[e.at, default: []].append(e) }
+        var atkByRound: [Int: BattleEvent] = [:]
+        for e in log { atkByRound[e.round] = e }
+
+        func applyFx(_ e: EffectEvent) {
+            if let d = e.hpDelta {
+                if e.side == .a { hpA[e.petKind] = max(0, (hpA[e.petKind] ?? 0) + d) }
+                else { hpB[e.petKind] = max(0, (hpB[e.petKind] ?? 0) + d) }
+            }
+            if e.kind == "splash" {   // 스플래시 피격 충전 + 기절 시 승계(엔진 규칙 미러)
+                if e.side == .a {
+                    ca[e.petKind] = (ca[e.petKind] ?? 0) + 1
+                    if e.fainted == true, let next = aSnaps.first(where: { (hpA[$0.kind] ?? 0) > 0 })?.kind {
+                        ca[next] = (ca[next] ?? 0) + (ca[e.petKind] ?? 0)
+                    }
+                } else {
+                    cb[e.petKind] = (cb[e.petKind] ?? 0) + 1
+                    if e.fainted == true, let next = bSnaps.first(where: { (hpB[$0.kind] ?? 0) > 0 })?.kind {
+                        cb[next] = (cb[next] ?? 0) + (cb[e.petKind] ?? 0)
+                    }
+                }
+            }
+        }
+        func applyAttack(_ e: BattleEvent) {
             let ult = SkillCatalog.isUltimate(e.move)
             if e.attacker == .a {
                 ca[e.attackerKind] = ult ? 0 : (ca[e.attackerKind] ?? 0) + 1
@@ -1008,7 +1056,13 @@ struct ArenaView: View {
                 }
             }
         }
-        return (ca, cb)
+        for r in 1...curRound {
+            let fx = fxByAt[r] ?? []
+            for e in fx where e.kind == "tick" || e.kind == "skip" { applyFx(e) }
+            if let a = atkByRound[r] { applyAttack(a) }
+            for e in fx where e.kind != "tick" && e.kind != "skip" { applyFx(e) }
+        }
+        return ((hpA, hpB), (ca, cb))
     }
     // 활성 시너지 감지 — 동족(컬렉션) / 동타입. tie-break는 TeamSynergy.bonus 와 동일한 팀 순서
     // first-max(strict >)로 결정 — 뱃지가 가리키는 타입/스탯이 실제 전투 엔진과 항상 일치(Dictionary
