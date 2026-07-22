@@ -239,4 +239,35 @@ final class PetSkillsTests: XCTestCase {
                            "\(kind) unique rider는 타입 rider 상속이어야")
         }
     }
+
+    // ── E3 — cs rider 완전성 + 선택 AI 자기버프 우선 ─────────────────────────
+
+    // collectionShared rider는 19컬렉션 전부 배정 + effectId가 카탈로그에 실재해야 한다.
+    func testCollectionRidersCompleteAndResolve() {
+        XCTAssertEqual(SkillCatalog.collectionSharedRiderTable.count, PetCollection.allCases.count)
+        for c in PetCollection.allCases {
+            guard let r = SkillCatalog.collectionSharedRiderTable[c] else {
+                return XCTFail("\(c) cs rider 누락")
+            }
+            XCTAssertNotNil(EffectCatalog.effect(r.effectId), "\(c) cs rider \(r.effectId) 카탈로그 누락")
+        }
+    }
+
+    // 선택 AI(E3) — 자기 버프 rider가 미보유면 데미지가 낮아도 그 버프 스킬을 우선한다.
+    func testSelectPrefersUnownedSelfBuff() {
+        // mascot v2: hotfix(mascot) + onboarding(mascot, load_balancer 자버프) + collectionShared.
+        // 방어자 무관하게 미보유 버프(load_balancer/기타 자버프)를 우선 후보로 골라야.
+        let skills = SkillCatalog.skills(kind: .mrMan, variant: 2)   // mascot(helloWorld)
+        let selfBuffIds = Set(skills.compactMap { $0.rider }.filter { $0.selfTarget }.map { $0.effectId })
+        XCTAssertFalse(selfBuffIds.isEmpty, "이 펫은 자버프 rider를 가져야 테스트 유효")
+        let picked = SkillCatalog.select(from: skills, attackerType: .mascot, defenderType: .beast,
+                                         activeEffectIds: [], hasDebuff: false)
+        XCTAssertTrue(picked.rider?.selfTarget == true && selfBuffIds.contains(picked.rider!.effectId),
+                      "미보유 자버프를 우선해야 (실제 선택: \(picked.id))")
+        // 이미 그 버프를 보유하면 우선 후보에서 빠져 최대 데미지 스킬로 복귀.
+        let picked2 = SkillCatalog.select(from: skills, attackerType: .mascot, defenderType: .beast,
+                                          activeEffectIds: selfBuffIds, hasDebuff: false)
+        let maxDmg = SkillCatalog.select(from: skills, attackerType: .mascot, defenderType: .beast)
+        XCTAssertEqual(picked2.id, maxDmg.id, "버프 보유 시 최대 데미지 스킬로 복귀")
+    }
 }

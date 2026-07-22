@@ -186,9 +186,29 @@ export function collectionSharedSkill(collection: string): Skill {
   const [id, name, type] = e;
   return { id, name, type, power: COLLECTION_SHARED_POWER, tier: "collectionShared", rider: COLLECTION_SHARED_RIDER[collection] };
 }
-// collectionShared rider(E2) — 첫 배치는 happyPath만(효과 kind 커버리지 목적). Swift 1:1.
+// collectionShared rider — 19종 전량(E3). 디버프 20~30% / 버프 확정 자부여. Swift 1:1.
 const COLLECTION_SHARED_RIDER: Record<string, SkillRider> = {
-  happyPath: { effectId: "autoscaling", chance: 1.0, selfTarget: true },
+  // 디버프 (적 활성)
+  mainframe:     { effectId: "legacy", chance: 0.30, selfTarget: false },
+  npmInstall:    { effectId: "deadlock", chance: 0.25, selfTarget: false },
+  nodeModules:   { effectId: "mem_leak", chance: 0.30, selfTarget: false },
+  dns:           { effectId: "legacy", chance: 0.30, selfTarget: false },
+  deprecated:    { effectId: "tech_debt", chance: 0.30, selfTarget: false },
+  vibeCoders:    { effectId: "deadlock", chance: 0.25, selfTarget: false },
+  onCall:        { effectId: "rate_limited", chance: 0.20, selfTarget: false },
+  noVerify:      { effectId: "infinite_loop", chance: 0.25, selfTarget: false },
+  oomKilled:     { effectId: "rate_limited", chance: 0.20, selfTarget: false },
+  fridayDeploy:  { effectId: "infinite_loop", chance: 0.25, selfTarget: false },
+  tokenBurners:  { effectId: "deadlock", chance: 0.25, selfTarget: false },
+  todoSince2019: { effectId: "tech_debt", chance: 0.30, selfTarget: false },
+  ciRunners:     { effectId: "rate_limited", chance: 0.20, selfTarget: false },
+  // 버프 (자신, 확정)
+  emotionalSupport: { effectId: "firewall", chance: 1.0, selfTarget: true },
+  tenXEngineer:  { effectId: "caching", chance: 1.0, selfTarget: true },
+  rustEvangelists: { effectId: "optimization", chance: 1.0, selfTarget: true },
+  wontfix:       { effectId: "hot_reload", chance: 1.0, selfTarget: true },
+  happyPath:     { effectId: "autoscaling", chance: 1.0, selfTarget: true },
+  helloWorld:    { effectId: "caching", chance: 1.0, selfTarget: true },
 };
 
 export const UNIQUE_POWER = 14.0;
@@ -250,14 +270,32 @@ export function skillScore(s: Skill, attackerType: BattleType, defenderType: Bat
 // 결정적 선택 AI — 점수 최대, 동점이면 슬롯 인덱스 낮은 것(strict >). Swift SkillCatalog.select 1:1.
 // 전제: skills 비지 않음(skillsFor가 generic을 항상 첫 슬롯에 둠). 파리티: score가 A/B1에선 dyadic이라
 // Swift↔JS 비트동일 — B2에서 비-dyadic power/배수 도입 시 tie-break 드리프트 주의(dyadic 유지).
-export function selectSkill(skills: Skill[], attackerType: BattleType, defenderType: BattleType): Skill {
-  let best = skills[0];
-  let bestScore = skillScore(best, attackerType, defenderType);
-  for (let i = 1; i < skills.length; i++) {
-    const sc = skillScore(skills[i], attackerType, defenderType);
-    if (sc > bestScore) { bestScore = sc; best = skills[i]; }
-  }
-  return best;
+//
+// E3 확장 — 자기버프 우선(상태 기반, RNG 없음): 자기 대상 rider 스킬 중 ①일반 버프는 미보유일 때
+// ②cleanse는 자기에게 디버프가 있을 때를 "우선 후보"로 삼고, 있으면 그중 점수 최대를 고른다.
+// activeEffectIds/hasDebuff 미전달(기본 빈/false)이면 기존 최대 데미지 선택과 동일.
+export function selectSkill(
+  skills: Skill[], attackerType: BattleType, defenderType: BattleType,
+  activeEffectIds: Set<string> = new Set(), hasDebuff = false,
+): Skill {
+  const pick = (cands: Skill[]): Skill => {
+    let best = cands[0];
+    let bestScore = skillScore(best, attackerType, defenderType);
+    for (let i = 1; i < cands.length; i++) {
+      const sc = skillScore(cands[i], attackerType, defenderType);
+      if (sc > bestScore) { bestScore = sc; best = cands[i]; }
+    }
+    return best;
+  };
+  const buffWanted = skills.filter((s) => {
+    const r = s.rider;
+    if (!r || !r.selfTarget) return false;
+    const def = effectDef(r.effectId);
+    if (!def) return false;
+    if (def.kind === "cleanse") return hasDebuff;
+    return !activeEffectIds.has(r.effectId);
+  });
+  return pick(buffWanted.length > 0 ? buffWanted : skills);
 }
 
 // base 를 4스탯으로 분배하는 archetype 배수.

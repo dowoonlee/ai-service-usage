@@ -248,6 +248,10 @@ enum ArenaDemo {
             let r = SkillCatalog.typeSharedRiderTable[t]!
             parts.append("rider.\(t.rawValue)=\(r.effectId)/\(r.chance)/\(r.selfTarget ? "self" : "enemy")")
         }
+        for c in PetCollection.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let r = SkillCatalog.collectionSharedRiderTable[c]!   // E3: 19종 전량 배정
+            parts.append("csr.\(c.rawValue)=\(r.effectId)/\(r.chance)/\(r.selfTarget ? "self" : "enemy")")
+        }
         for (id, fx) in SkillCatalog.ultimateEffectTable.sorted(by: { $0.key < $1.key }) {
             let s: String
             switch fx {
@@ -259,7 +263,7 @@ enum ArenaDemo {
             }
             parts.append("ult.\(id)=\(s)")
         }
-        print("\n[ 효과 카탈로그 파리티 ]  (effects \(EffectCatalog.table.count) · rider 6 · ultFx \(SkillCatalog.ultimateEffectTable.count))")
+        print("\n[ 효과 카탈로그 파리티 ]  (effects \(EffectCatalog.table.count) · rider 6 · csr \(SkillCatalog.collectionSharedRiderTable.count) · ultFx \(SkillCatalog.ultimateEffectTable.count))")
         print("  PARITYFXCAT \(parts.joined(separator: " "))")
     }
 

@@ -150,10 +150,31 @@ enum SkillCatalog {
         .happyPath:        ("happy_path", "해피 패스", .beast),
         .helloWorld:       ("hello_world", "Hello, World!", .arcane),
     ]
-    /// collectionShared 부수효과(E2) — 첫 배치는 happyPath(자기 regen 확정)만. 나머지 18종은 콘텐츠
-    /// 패스에서 확장(효과 kind 커버리지 목적의 최소 배치). 서버 COLLECTION_SHARED_RIDER 1:1.
+    /// collectionShared 부수효과 — 19종 전량 배정(E3 콘텐츠 패스). 밈 정합 우선, 디버프 25~30%
+    /// (control 계열은 강력해서 20%) / 버프는 확정 자부여(draw 없음). 서버 COLLECTION_SHARED_RIDER 1:1.
+    /// 수치는 밸런스 튜닝 대상(effects 완료 후 승률표 실측).
     static let collectionSharedRiderTable: [PetCollection: SkillRider] = [
-        .happyPath: SkillRider(effectId: "autoscaling", chance: 1.0, selfTarget: true),   // 낙관 회복(확정)
+        // 디버프 (적 활성)
+        .mainframe:        SkillRider(effectId: "legacy", chance: 0.30, selfTarget: false),        // 과부하 → 굼뜸
+        .npmInstall:       SkillRider(effectId: "deadlock", chance: 0.25, selfTarget: false),      // 의존성 지옥 = 서로 대기
+        .nodeModules:      SkillRider(effectId: "mem_leak", chance: 0.30, selfTarget: false),      // 램 잠식(밈 원조)
+        .dns:              SkillRider(effectId: "legacy", chance: 0.30, selfTarget: false),        // 전파 지연
+        .deprecated:       SkillRider(effectId: "tech_debt", chance: 0.30, selfTarget: false),     // deprecated = 부채
+        .vibeCoders:       SkillRider(effectId: "deadlock", chance: 0.25, selfTarget: false),      // 뭐가 뭔지 모름
+        .onCall:           SkillRider(effectId: "rate_limited", chance: 0.20, selfTarget: false),  // 새벽 호출 = 행동불가
+        .noVerify:         SkillRider(effectId: "infinite_loop", chance: 0.25, selfTarget: false), // 검증 생략 → 장애
+        .oomKilled:        SkillRider(effectId: "rate_limited", chance: 0.20, selfTarget: false),  // 킬 후 재시작 대기
+        .fridayDeploy:     SkillRider(effectId: "infinite_loop", chance: 0.25, selfTarget: false), // 주말 장애
+        .tokenBurners:     SkillRider(effectId: "deadlock", chance: 0.25, selfTarget: false),      // 컨텍스트 소실
+        .todoSince2019:    SkillRider(effectId: "tech_debt", chance: 0.30, selfTarget: false),     // 청구서 그 자체
+        .ciRunners:        SkillRider(effectId: "rate_limited", chance: 0.20, selfTarget: false),  // 파이프라인 대기
+        // 버프 (자신, 확정)
+        .emotionalSupport: SkillRider(effectId: "firewall", chance: 1.0, selfTarget: true),        // 정서적 방어막
+        .tenXEngineer:     SkillRider(effectId: "caching", chance: 1.0, selfTarget: true),         // 10x는 빠르다
+        .rustEvangelists:  SkillRider(effectId: "optimization", chance: 1.0, selfTarget: true),    // 재작성 = 성능
+        .wontfix:          SkillRider(effectId: "hot_reload", chance: 1.0, selfTarget: true),      // 이슈 닫기 = 디버프 털기
+        .happyPath:        SkillRider(effectId: "autoscaling", chance: 1.0, selfTarget: true),     // 낙관 회복
+        .helloWorld:       SkillRider(effectId: "caching", chance: 1.0, selfTarget: true),         // 가볍고 빠르다
     ]
     static func collectionShared(for collection: PetCollection) -> Skill {
         let e = collectionSharedTable[collection]!   // 19컬렉션 전부 정의 — 강제 언랩 안전.
@@ -279,14 +300,28 @@ enum SkillCatalog {
     /// ⚠️ 파리티: score(power×eff×stab)가 Phase A/B1에선 전부 dyadic rational(power 8/11/12, 배수
     /// 0.5/1.0/1.5/2.0)이라 Swift Double·JS number가 비트동일 → tie-break 결과 일치. B2에서 비-dyadic
     /// power/배수(예: 13, ×1.3)를 도입하면 반올림이 갈려 동점 tie-break가 어긋날 수 있으니 dyadic 유지.
-    static func select(from skills: [Skill], attackerType: BattleType, defenderType: BattleType) -> Skill {
-        var best = skills[0]
-        var bestScore = score(best, attackerType: attackerType, defenderType: defenderType)
-        for s in skills.dropFirst() {
-            let sc = score(s, attackerType: attackerType, defenderType: defenderType)
-            if sc > bestScore { bestScore = sc; best = s }
+    ///
+    /// E3 확장(pet-effects.md §6 축소판, RNG 없이 상태 기반): **자기버프 우선** — 자기 대상 rider 스킬 중
+    /// ①일반 버프는 해당 효과 미보유일 때 ②cleanse는 자기에게 디버프가 있을 때가 "우선 후보"가 되고,
+    /// 우선 후보가 있으면 그중 점수 최대를 고른다(버프 uptime > 그 턴 데미지). 없으면 기존 최대 데미지.
+    /// (원안의 "위급 자힐"은 전용 힐 스킬이 없어 regen 버프 우선으로 흡수 — E3 결정.)
+    static func select(from skills: [Skill], attackerType: BattleType, defenderType: BattleType,
+                       activeEffectIds: Set<String> = [], hasDebuff: Bool = false) -> Skill {
+        func pick(_ candidates: [Skill]) -> Skill {
+            var best = candidates[0]
+            var bestScore = score(best, attackerType: attackerType, defenderType: defenderType)
+            for s in candidates.dropFirst() {
+                let sc = score(s, attackerType: attackerType, defenderType: defenderType)
+                if sc > bestScore { bestScore = sc; best = s }
+            }
+            return best
         }
-        return best
+        let buffWanted = skills.filter { s in
+            guard let r = s.rider, r.selfTarget, let def = EffectCatalog.effect(r.effectId) else { return false }
+            if def.kind == .cleanse { return hasDebuff }
+            return !activeEffectIds.contains(r.effectId)
+        }
+        return pick(buffWanted.isEmpty ? skills : buffWanted)
     }
 
     /// 스킬 id → 표시명(로그 UI). 구 로그의 "basic"/"signature"는 없음(호출부에서 레거시 폴백).

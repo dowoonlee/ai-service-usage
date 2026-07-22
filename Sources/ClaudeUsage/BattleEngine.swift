@@ -239,24 +239,29 @@ enum BattleEngine {
         return left
     }
 
+    /// 디버프 판정 — dot / control 계열 / statMod(배수 < 1). cleanse 제거 대상 + 선택 AI(hasDebuff) 공용.
+    static func isDebuff(_ e: BattleEffect) -> Bool {
+        switch e.kind {
+        case .dot, .controlFixed, .controlChance: return true
+        case .statMod: return e.magnitude < 1
+        default: return false
+        }
+    }
+
     /// 효과 부여 — 동일 id 재부여는 duration/shield **refresh**(중첩 없음). cleanse는 즉시 디버프 제거.
     /// 슬롯 초과 시 remaining 최소(동률: 앞 인덱스)를 밀어냄. attack의 rider/궁극기 grant 경로가 호출.
-    private static func grant(_ effect: BattleEffect, to c: inout Combatant) {
+    /// 반환: 실제로 적용됐는지 — cleanse는 **지운 게 있을 때만** true(무의미한 grant 이벤트 방지, 양측 1:1).
+    @discardableResult
+    private static func grant(_ effect: BattleEffect, to c: inout Combatant) -> Bool {
         if effect.kind == .cleanse {
-            // 디버프 = dot / controlFixed·Chance / statMod(배수 < 1)
-            c.effects.removeAll {
-                switch $0.effect.kind {
-                case .dot, .controlFixed, .controlChance: return true
-                case .statMod: return $0.effect.magnitude < 1
-                default: return false
-                }
-            }
-            return
+            let before = c.effects.count
+            c.effects.removeAll { isDebuff($0.effect) }
+            return c.effects.count < before
         }
         let shieldHP = effect.kind == .shield ? max(1, Int((Double(c.stats.hp) * effect.magnitude).rounded())) : 0
         if let i = c.effects.firstIndex(where: { $0.effect.id == effect.id }) {
             c.effects[i] = ActiveEffect(effect: effect, remaining: effect.duration, shieldHP: shieldHP)
-            return
+            return true
         }
         if c.effects.count >= effectSlotCap {
             var evict = 0
@@ -264,6 +269,7 @@ enum BattleEngine {
             c.effects.remove(at: evict)
         }
         c.effects.append(ActiveEffect(effect: effect, remaining: effect.duration, shieldHP: shieldHP))
+        return true
     }
 
     /// 팀 시너지까지 반영한 한 마리의 최종 전투 스탯. **관전 UI의 HP 바가 엔진과 어긋나지 않도록**
@@ -383,7 +389,11 @@ enum BattleEngine {
             skill = ult
             from[ai].charge = 0
         } else {
-            skill = SkillCatalog.select(from: attacker.skills, attackerType: attacker.type, defenderType: defender.type)
+            // E3 선택 AI — 자기버프 우선(미보유 버프·디버프 있을 때 cleanse). 상태는 시전 시점의 것.
+            let activeIds = Set(attacker.effects.map { $0.effect.id })
+            let hasDebuff = attacker.effects.contains { isDebuff($0.effect) }
+            skill = SkillCatalog.select(from: attacker.skills, attackerType: attacker.type, defenderType: defender.type,
+                                        activeEffectIds: activeIds, hasDebuff: hasDebuff)
         }
         let eff = SkillCatalog.skillEffectiveness(skill.type, vs: defender.type)   // 로그 effectiveness = 스킬 상성
         let stab = SkillCatalog.stab(skillType: skill.type, petType: attacker.type)
@@ -473,18 +483,21 @@ enum BattleEngine {
 
         // 스킬 부수효과(rider, §3) — chance 1.0은 확정(draw 없음), 확률형은 draw < chance.
         // 적 대상 rider는 막타로 기절 시 **draw까지 생략**(스트림 규칙 — 결정적, 양측 동일 판정).
+        // grant가 false면(예: cleanse인데 지울 디버프가 없음) 이벤트 미기록 — 무의미한 로그 방지.
         if let r = skill.rider, let def = EffectCatalog.effect(r.effectId) {
             if r.selfTarget {
                 if r.chance >= 1.0 || rng.uniform01() < r.chance {
-                    grant(def, to: &from[ai])
-                    events.append(EffectEvent(at: round, side: attackerSide, petKind: from[ai].kind, kind: "grant",
-                                              effectId: r.effectId, hpDelta: nil, fainted: nil))
+                    if grant(def, to: &from[ai]) {
+                        events.append(EffectEvent(at: round, side: attackerSide, petKind: from[ai].kind, kind: "grant",
+                                                  effectId: r.effectId, hpDelta: nil, fainted: nil))
+                    }
                 }
             } else if to[di].alive {
                 if r.chance >= 1.0 || rng.uniform01() < r.chance {
-                    grant(def, to: &to[di])
-                    events.append(EffectEvent(at: round, side: defenderSide, petKind: to[di].kind, kind: "grant",
-                                              effectId: r.effectId, hpDelta: nil, fainted: nil))
+                    if grant(def, to: &to[di]) {
+                        events.append(EffectEvent(at: round, side: defenderSide, petKind: to[di].kind, kind: "grant",
+                                                  effectId: r.effectId, hpDelta: nil, fainted: nil))
+                    }
                 }
             }
         }
