@@ -107,6 +107,8 @@ final class NotificationManager {
 
     /// 통합 보상(ops grant) 수령 알림 — RP·코인 공용. podium의 "명예의 전당 N등"과 달리
     /// 순위·달과 무관한 선물 형태라 가짜 period가 노출되지 않는다. claim 성공 시 1회.
+    // pvp 시즌 보상은 별도 grant 트랙을 만들지 않고 범용 pendingGrant + 이 grantKey prefix로 구분한다
+    // (#166 결정) — 적립·dedup은 범용 경로가 정상 처리하고, 전용 트랙 분리는 실익 없이 복잡도만 늘린다.
     func rewardGrantEarned(currency: String, amount: Int, grantKey: String = "") {
         let unit = currency == "rp" ? "RP" : "코인"
         if grantKey.hasPrefix("pvp-season") {

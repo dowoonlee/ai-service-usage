@@ -188,6 +188,14 @@ final class CoinLedger: UsageConsumer {
         DebugLog.log("CoinLedger: Wellness +\(amount) coin (total=\(Settings.shared.coins))")
     }
 
+    /// 랭크전 승리 보상 — 서버가 확정한 coinReward를 적립하는 명명된 진입점(#166).
+    /// winner는 "me"/"opp"/"draw"(로그·집계 구분용). 적립 규칙은 다른 보너스와 동일(① + ④, VP 무관).
+    func creditBattleWin(_ amount: Int, winner: String) {
+        guard amount > 0 else { return }
+        credit(amount)
+        DebugLog.log("CoinLedger: BattleWin +\(amount) coin (pvp-\(winner)) (total=\(Settings.shared.coins))")
+    }
+
     /// 외부 기여자 PR 머지 보너스. PR 1개 = 1,000 coin.
     static let coinPerContributorPR: Int = 1000
     func creditContributorBonus(prCount: Int) {
