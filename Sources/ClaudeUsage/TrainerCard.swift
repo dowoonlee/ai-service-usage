@@ -205,6 +205,8 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     case longHauler                // 90일+
 
     // ── 자동 unlock — 아레나 ──
+    // 기획의 "10연승" 칭호는 레이팅·랭킹 칭호로 대체 확정(#166) — 연승 트래킹은 서버 pvp_matches
+    // 히스토리 계산이 필요해 저우선 명명 정리 범위를 넘고, 아래 3개가 실력 지표를 이미 커버한다.
     case arenaRookie               // 아레나 첫 승리
     case arenaChallenger           // 레이팅 1200 도달
     case arenaChampion             // 아레나 랭킹 1위 도달
