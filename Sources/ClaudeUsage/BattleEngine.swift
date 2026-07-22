@@ -102,6 +102,41 @@ enum BattleEngine {
         return min(parryMax, max(0, parryBase + spdTerm + defTerm))
     }
 
+    // MARK: 효과 레이어 (E1 프레임) — 상태이상/버프. 설계: docs/plans/pet-effects.md.
+    // E1은 **프레임만**: 어떤 스킬도 효과를 부여하지 않아 배틀 결과·RNG 스트림·기존 골든이 전부
+    // 불변이다(effects 상시 빈 배열 = 전 경로 no-op). 부여는 E2 스킬 연동에서 — 그때 골든 재캡처.
+    // 서버 battle_engine 1:1 (모델·틱 순서·반올림·슬롯 규칙 전부).
+
+    /// 효과 종류 6종 — pet-effects.md §1.
+    enum EffectKind: Equatable {
+        case dot                 // 매 자기 턴 시작 HP -= magnitude(% of maxHP)
+        case regen               // 매 자기 턴 시작 HP += magnitude(% of maxHP), maxHP 상한
+        case statMod(StatKind)   // 지속 중 atk/def/spd × magnitude (hp는 비대상)
+        case controlFixed        // duration 동안 무조건 턴 스킵
+        case controlChance       // 매 턴 chance 확률로 스킵 (rng draw는 보유 시에만 — 스트림 보존)
+        case shield              // flat HP 흡수막 — 피해를 실드에서 먼저 차감, 소진 시 제거
+        case cleanse             // 즉시 — 자기 디버프 전부 제거 (지속 아님, 부여 시점 처리)
+    }
+
+    /// 효과 정의 (카탈로그 상수 — E2에서 스킬 `effect` 필드로 연결).
+    struct BattleEffect: Equatable {
+        let id: String
+        let kind: EffectKind
+        let magnitude: Double   // dot/regen/shield: maxHP 비율, statMod: 배수, control: 미사용(0)
+        let duration: Int       // 지속 자기 턴 수 (cleanse는 0)
+        let chance: Double?     // controlChance 스킵 확률. (부여 확률은 스킬 쪽 — E2)
+    }
+
+    /// 전투원이 보유 중인 효과 인스턴스.
+    struct ActiveEffect: Equatable {
+        let effect: BattleEffect
+        var remaining: Int
+        var shieldHP: Int   // shield 전용 잔여 흡수량(부여 시 maxHP×magnitude 반올림) — 그 외 0
+    }
+
+    /// 효과 슬롯 상한 — 초과 부여 시 remaining 최소(동률이면 앞 인덱스)부터 밀어냄. pet-effects.md §5.
+    static let effectSlotCap = 4
+
     /// 전투용 인스턴스 (스탯 + 현재 HP).
     private struct Combatant {
         let kind: PetKind
@@ -112,7 +147,90 @@ enum BattleEngine {
         let skills: [Skill]   // variant까지 해금한 정규 스킬(슬롯 순) — 선택 AI 후보
         let ultimate: Skill?  // 레인보우만 보유(타입 궁극기). 충전 게이지가 차면 발동.
         var charge: Int = 0   // 궁극기 충전 게이지 — 행동/피격마다 +1·기절 시 승계, ultChargeCost 도달 시 발동·리셋.
+        var effects: [ActiveEffect] = []   // 활성 효과(상한 effectSlotCap). E1에선 부여자가 없어 상시 빈 배열.
         var alive: Bool { hp > 0 }
+    }
+
+    /// StatMod 반영 스탯 — base × Π(해당 스탯 statMod magnitude), away-from-zero 반올림(파리티 명세).
+    private static func effStat(_ base: Int, _ stat: StatKind, _ effects: [ActiveEffect]) -> Int {
+        var v = Double(base)
+        for e in effects {
+            if case .statMod(let s) = e.effect.kind, s == stat { v *= e.effect.magnitude }
+        }
+        return max(1, Int(v.rounded()))
+    }
+
+    /// 자기 턴 시작 효과 틱 — ①DoT/Regen(% of maxHP, ≥1 보장) ②remaining-- ③만료 제거.
+    /// DoT로 자멸 가능(hp ≤ 0) — 호출부가 행동 전에 alive 재확인. RNG 불요(결정적).
+    private static func tickEffects(_ c: inout Combatant) {
+        guard !c.effects.isEmpty else { return }   // E1 상시 경로 — no-op
+        for e in c.effects {
+            let amt = max(1, Int((Double(c.stats.hp) * e.effect.magnitude).rounded()))
+            switch e.effect.kind {
+            case .dot:   c.hp -= amt
+            case .regen: c.hp = min(c.stats.hp, c.hp + amt)
+            default: break
+            }
+        }
+        for i in c.effects.indices { c.effects[i].remaining -= 1 }
+        c.effects.removeAll { $0.remaining <= 0 }
+    }
+
+    /// Control 체크 — 고정형이면 무조건 스킵, 확률형이면 rng draw < chance 스킵.
+    /// draw는 **확률형 보유 시에만** 소비(비보유 배틀의 RNG 스트림 불변 — 레인보우 크리와 동일 패턴).
+    /// 스킵 턴은 행동이 아니므로 궁극기 게이지도 적립하지 않는다.
+    private static func shouldSkipTurn(_ c: inout Combatant, rng: inout SeededRNG) -> Bool {
+        for e in c.effects {
+            switch e.effect.kind {
+            case .controlFixed: return true
+            case .controlChance:
+                if rng.uniform01() < (e.effect.chance ?? 0) { return true }
+            default: break
+            }
+        }
+        return false
+    }
+
+    /// 실드 흡수 — 피해를 shield 효과들에서 앞 인덱스부터 차감, 소진 실드 제거. HP로 갈 잔여 피해 반환.
+    /// ⚠️ E2에서 BattleEvent에 흡수량 필드를 추가해야 UI HP 재구성(damage fold)이 어긋나지 않는다.
+    private static func absorbShield(_ c: inout Combatant, _ dmg: Int) -> Int {
+        guard c.effects.contains(where: { $0.effect.kind == .shield }) else { return dmg }   // E1 상시 경로
+        var left = dmg
+        for i in c.effects.indices where left > 0 {
+            guard c.effects[i].effect.kind == .shield else { continue }
+            let absorb = min(c.effects[i].shieldHP, left)
+            c.effects[i].shieldHP -= absorb
+            left -= absorb
+        }
+        c.effects.removeAll { $0.effect.kind == .shield && $0.shieldHP <= 0 }
+        return left
+    }
+
+    /// 효과 부여 — 동일 id 재부여는 duration/shield **refresh**(중첩 없음). cleanse는 즉시 디버프 제거.
+    /// 슬롯 초과 시 remaining 최소(동률: 앞 인덱스)를 밀어냄. E2에서 스킬 시전 경로가 호출.
+    private static func grant(_ effect: BattleEffect, to c: inout Combatant) {
+        if effect.kind == .cleanse {
+            // 디버프 = dot / controlFixed·Chance / statMod(배수 < 1)
+            c.effects.removeAll {
+                switch $0.effect.kind {
+                case .dot, .controlFixed, .controlChance: return true
+                case .statMod: return $0.effect.magnitude < 1
+                default: return false
+                }
+            }
+            return
+        }
+        let shieldHP = effect.kind == .shield ? max(1, Int((Double(c.stats.hp) * effect.magnitude).rounded())) : 0
+        if let i = c.effects.firstIndex(where: { $0.effect.id == effect.id }) {
+            c.effects[i] = ActiveEffect(effect: effect, remaining: effect.duration, shieldHP: shieldHP)
+            return
+        }
+        if c.effects.count >= effectSlotCap {
+            var evict = 0
+            for i in c.effects.indices where c.effects[i].remaining < c.effects[evict].remaining { evict = i }
+            c.effects.remove(at: evict)
+        }
+        c.effects.append(ActiveEffect(effect: effect, remaining: effect.duration, shieldHP: shieldHP))
     }
 
     /// 팀 시너지까지 반영한 한 마리의 최종 전투 스탯. **관전 UI의 HP 바가 엔진과 어긋나지 않도록**
@@ -160,13 +278,15 @@ enum BattleEngine {
             let w: BattleSide? = active(a) != nil ? .a : (active(b) != nil ? .b : nil)
             return BattleResult(winner: w, rounds: 0, log: [])
         }
-        var aNext = cd(a[ai0].stats.spd)
-        var bNext = cd(b[bi0].stats.spd)
+        var aNext = cd(effStat(a[ai0].stats.spd, .spd, a[ai0].effects))
+        var bNext = cd(effStat(b[bi0].stats.spd, .spd, b[bi0].effects))
         var actions = 0
 
         while actions < maxRounds {
             guard let ai = active(a), let bi = active(b) else { break }
-            let aSpd = a[ai].stats.spd, bSpd = b[bi].stats.spd
+            // spd는 StatMod 효과 반영(effective) — ATB 주기·동시 tie-break 모두. E1에선 base와 동일.
+            let aSpd = effStat(a[ai].stats.spd, .spd, a[ai].effects)
+            let bSpd = effStat(b[bi].stats.spd, .spd, b[bi].effects)
             let aGoes: Bool
             if abs(aNext - bNext) < 1e-6 {
                 aGoes = aSpd != bSpd ? aSpd > bSpd : (rng.next() & 1 == 0)
@@ -178,11 +298,11 @@ enum BattleEngine {
             if aGoes {
                 let fainted = attack(from: &a, to: &b, attackerSide: .a, round: actions, log: &log, rng: &rng)
                 aNext = t + cd(aSpd)
-                if fainted, let nb = active(b) { bNext = t + cd(b[nb].stats.spd) }   // 새 방어자 재스케줄
+                if fainted, let nb = active(b) { bNext = t + cd(effStat(b[nb].stats.spd, .spd, b[nb].effects)) }   // 새 방어자 재스케줄
             } else {
                 let fainted = attack(from: &b, to: &a, attackerSide: .b, round: actions, log: &log, rng: &rng)
                 bNext = t + cd(bSpd)
-                if fainted, let na = active(a) { aNext = t + cd(a[na].stats.spd) }
+                if fainted, let na = active(a) { aNext = t + cd(effStat(a[na].stats.spd, .spd, a[na].effects)) }
             }
             if active(a) == nil { return BattleResult(winner: .b, rounds: actions, log: log) }
             if active(b) == nil { return BattleResult(winner: .a, rounds: actions, log: log) }
@@ -201,6 +321,13 @@ enum BattleEngine {
                                attackerSide: BattleSide, round: Int,
                                log: inout [BattleEvent], rng: inout SeededRNG) -> Bool {
         guard let ai = active(from), let di = active(to) else { return false }
+        // 1) 효과 틱(자기 턴 시작) — DoT/Regen·만료 제거. DoT 자멸 시 행동 없이 종료.
+        //    (E1: effects 상시 빈 배열이라 전부 no-op — E2에서 자멸 이벤트 로깅·재스케줄 정합과 함께 골든 고정.)
+        tickEffects(&from[ai])
+        guard from[ai].alive else { return false }
+        // 2) Control 체크 — 스킵 턴은 행동이 아니므로 게이지 적립 없음. (draw는 확률형 보유 시에만 — 스트림 보존)
+        if shouldSkipTurn(&from[ai], rng: &rng) { return false }
+        // 3) 행동
         from[ai].charge += 1                     // 궁극기 게이지 — 행동마다 +1(결정적).
         let attacker = from[ai]                  // 값복사(Swift)/참조(TS) — charge 판정은 리셋 前이라 양측 동일.
         let defender = to[di]
@@ -223,7 +350,10 @@ enum BattleEngine {
 
         let rngFactor = 0.9 + 0.1 * rng.uniform01()   // [0.9, 1.0)
         let rage = rageMultiplier(action: round)      // 장기전 데미지 점증(격노)
-        let raw = (Double(attacker.stats.atk) / Double(defender.stats.def)) * skill.power * eff * stab * synergy.mult * rngFactor * rage
+        // atk/def는 StatMod 효과 반영(effective) — E1에선 base와 동일.
+        let atkEff = effStat(attacker.stats.atk, .atk, attacker.effects)
+        let defEff = effStat(defender.stats.def, .def, defender.effects)
+        let raw = (Double(atkEff) / Double(defEff)) * skill.power * eff * stab * synergy.mult * rngFactor * rage
         let baseDmg = max(1, Int(raw.rounded()))
 
         // 레인보우(최종 이로치) 크리 — 공격자가 레인보우면 확률적 ×critMult. 조건부 draw라 비-레인보우
@@ -235,13 +365,16 @@ enum BattleEngine {
             if crit { critDmg = max(1, Int((Double(baseDmg) * rainbowCritMult).rounded())) }
         }
 
-        // 패링(퍼펙트 가드) — 방어자 SPD+DEF 조합 확률로 데미지 대폭 경감.
-        let pc = parryChance(defSPD: defender.stats.spd, defDEF: defender.stats.def,
-                             atkSPD: attacker.stats.spd, atkDEF: attacker.stats.def)
+        // 패링(퍼펙트 가드) — 방어자 SPD+DEF 조합 확률로 데미지 대폭 경감. 입력도 effective stat.
+        let pc = parryChance(defSPD: effStat(defender.stats.spd, .spd, defender.effects), defDEF: defEff,
+                             atkSPD: effStat(attacker.stats.spd, .spd, attacker.effects), atkDEF: effStat(attacker.stats.def, .def, attacker.effects))
         let parried = rng.uniform01() < pc
         let dmg = parried ? max(1, Int((Double(critDmg) * parryDamageMult).rounded())) : critDmg
 
-        to[di].hp -= dmg
+        // Shield 흡수 — 실드부터 차감, 잔여만 HP로. (E1: 실드 미부여라 hpDmg == dmg 항상.
+        //  E2에서 BattleEvent에 흡수량 필드 추가와 함께 UI HP fold 정합 처리.)
+        let hpDmg = absorbShield(&to[di], dmg)
+        to[di].hp -= hpDmg
         let fainted = to[di].hp <= 0
         // 피격 충전 — 맞은 쪽도 게이지 +1(막타 피격분 포함, 아래 승계로 이전됨). 지고 있어도 맞으면서
         // 차기 때문에 양측 충전 속도가 거의 대칭 → 패자 측도 궁극기를 보게 된다(격투게임 미터 방식).
