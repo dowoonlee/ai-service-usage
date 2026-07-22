@@ -210,4 +210,33 @@ final class PetSkillsTests: XCTestCase {
         XCTAssertEqual(s.count, 4)
         XCTAssertFalse(s.contains { $0.tier == .ultimate })
     }
+
+    // ── 효과 연동 (E2) ──────────────────────────────────────────────────────
+
+    // rider·궁극기 grant가 가리키는 effectId는 전부 EffectCatalog에 실재해야 한다(끊어진 참조 = 조용한 no-op).
+    func testRiderAndUltEffectIdsResolve() {
+        for (t, r) in SkillCatalog.typeSharedRiderTable {
+            XCTAssertNotNil(EffectCatalog.effect(r.effectId), "\(t) rider \(r.effectId) 카탈로그 누락")
+            XCTAssertTrue(r.chance > 0 && r.chance <= 1.0)
+        }
+        for (_, r) in SkillCatalog.collectionSharedRiderTable {
+            XCTAssertNotNil(EffectCatalog.effect(r.effectId))
+        }
+        for (id, fx) in SkillCatalog.ultimateEffectTable {
+            if case .grant(let e) = fx {
+                XCTAssertNotNil(EffectCatalog.effect(e), "궁극기 \(id) grant \(e) 카탈로그 누락")
+            }
+        }
+        XCTAssertEqual(SkillCatalog.ultimateEffectTable.count, 6, "궁극기 6종 전부 특수효과 보유")
+    }
+
+    // unique는 자기 타입 typeShared rider를 상속(타입 특성) — 미상속이면 Epic+는 unique가 ts를 항상
+    // 지배해(21 > 16.5) rider가 영영 발동하지 않는다(E2 실측 회귀 가드).
+    func testUniqueInheritsTypeRider() {
+        for (kind, _) in SkillCatalog.uniqueTable {
+            let u = SkillCatalog.unique(for: kind)!
+            XCTAssertEqual(u.rider, SkillCatalog.typeSharedRiderTable[kind.battleType],
+                           "\(kind) unique rider는 타입 rider 상속이어야")
+        }
+    }
 }
