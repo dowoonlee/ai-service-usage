@@ -49,9 +49,15 @@ enum Keychain {
 
     // MARK: - Ranking HMAC key
 
-    static func saveRankingHmacKey(_ value: String) { vault.set(rankingHmacAccount, value) }
+    /// 저장 성공 여부를 반환한다 — keychain 접근 실패 시 복구가 "성공"으로 오인되지 않게(#169).
+    @discardableResult
+    static func saveRankingHmacKey(_ value: String) -> Bool { vault.set(rankingHmacAccount, value) }
     static func loadRankingHmacKey() -> String? { vault.get(rankingHmacAccount) }
     static func clearRankingHmacKey() { vault.remove(rankingHmacAccount) }
+
+    /// HMAC 키가 정말 없는지(=재발급 필요) vs 지금 keychain을 못 읽는지(=재승인/재시도) 구분(#169).
+    /// "인증키 유실" 배너는 `.absent`일 때만 띄우고, `.accessFailed`면 다른 안내(재승인 유도)를 한다.
+    static func rankingHmacKeyLookup() -> Lookup { vault.lookup(rankingHmacAccount) }
 
     // MARK: - Ranking recovery code
 
@@ -86,20 +92,35 @@ enum Keychain {
 
     /// vault dict를 통째로 in-memory 캐시하고, 모든 R/W를 직렬 큐에서 처리한다. ad-hoc 서명 환경에서
     /// keychain 접근을 process당 1회로 축소하고, 한 값만 바꿔도 dict 전체를 재저장(SecItemUpdate)한다.
+    ///
+    /// ⚠️ 접근 실패(ACL 재승인 거부·잠김 등)와 "항목 없음"을 반드시 구분한다(#169). 이전엔 둘 다 nil로
+    /// 뭉개 vault가 살아있는데도 빈 dict로 캐시했고, 그 상태에서 set()이 호출되면 빈 dict로 vault를
+    /// 덮어써 다른 값(sessionKey·githubToken 등)까지 영구 유실시켰다. 이제 접근 실패면 `loaded`를 세우지
+    /// 않아 다음 접근에 재시도하고, get은 nil이 아니라 **접근 실패 신호**를 낼 수 있으며, set/remove는
+    /// **덮어쓰기를 거부**한다.
     private final class Vault {
         private let queue = DispatchQueue(label: "Keychain.vault")
         private var dict: [String: String] = [:]
         private var loaded = false
 
         func get(_ key: String) -> String? {
-            queue.sync { ensureLoaded(); return dict[key] }
+            queue.sync { ensureLoaded() ? dict[key] : nil }
         }
 
-        /// dict[key] 갱신 후 전체 재저장. 저장 성공 시에만 캐시를 반영한다.
+        /// 접근 실패(잠김/ACL 거부)와 "값 없음"을 구분해 반환. 배너 분기용 — 실패면 .accessFailed.
+        func lookup(_ key: String) -> Lookup {
+            queue.sync {
+                guard ensureLoaded() else { return .accessFailed }
+                return dict[key].map(Lookup.value) ?? .absent
+            }
+        }
+
+        /// dict[key] 갱신 후 전체 재저장. **로드 실패(접근 불가) 시 덮어쓰지 않는다**(false 반환).
+        /// 저장 성공 시에만 캐시를 반영한다.
         @discardableResult
         func set(_ key: String, _ value: String) -> Bool {
             queue.sync {
-                ensureLoaded()
+                guard ensureLoaded() else { return false }   // 접근 실패 상태에서 vault 덮어쓰기 금지
                 var d = dict
                 d[key] = value
                 guard Keychain.writeVaultDict(d) else { return false }
@@ -108,23 +129,38 @@ enum Keychain {
             }
         }
 
-        func remove(_ key: String) {
+        @discardableResult
+        func remove(_ key: String) -> Bool {
             queue.sync {
-                ensureLoaded()
-                guard dict[key] != nil else { return }
+                guard ensureLoaded() else { return false }   // 접근 실패 상태에서 삭제(=덮어쓰기) 금지
+                guard dict[key] != nil else { return true }
                 var d = dict
                 d.removeValue(forKey: key)
-                if Keychain.writeVaultDict(d) { dict = d }
+                guard Keychain.writeVaultDict(d) else { return false }
+                dict = d
+                return true
             }
         }
 
-        /// queue 내부 전용 — vault 항목을 1회 로드. 없으면 레거시 개별 항목을 이전해 온다.
-        private func ensureLoaded() {
-            if loaded { return }
-            loaded = true
-            dict = Keychain.readVaultDict() ?? Keychain.migrateLegacyItems()
+        /// queue 내부 전용 — vault 항목을 1회 로드. **접근 실패면 loaded를 세우지 않아 다음에 재시도**한다.
+        /// 반환: 로드 성공(dict 유효) 여부. 실패면 캐시를 오염시키지 않는다.
+        @discardableResult
+        private func ensureLoaded() -> Bool {
+            if loaded { return true }
+            switch Keychain.readVault() {
+            case .value(let json):
+                dict = Keychain.parseVaultJSON(json); loaded = true; return true
+            case .absent:
+                // vault 항목이 정말 없음 — 레거시 이전(있으면) 후 확정. 신규 설치는 빈 dict.
+                dict = Keychain.migrateLegacyItems(); loaded = true; return true
+            case .accessFailed:
+                return false   // 잠김/ACL 거부 — 확정하지 않고 다음 접근에 재시도
+            }
         }
     }
+
+    /// keychain 조회 3-상태 — "값 있음 / 항목 없음 / 접근 실패(잠김·ACL 거부)". #169 오판 방지.
+    enum Lookup { case value(String), absent, accessFailed }
 
     /// vault 항목이 아직 없을 때 1회 — 옛 개별 keychain 항목을 읽어 dict로 모으고, vault로 저장한 뒤
     /// 개별 항목을 삭제한다. 이 읽기에서 (이 도입 릴리스에 한해) 존재하는 항목 수만큼 재승인 프롬프트가
@@ -134,7 +170,7 @@ enum Keychain {
     private static func migrateLegacyItems() -> [String: String] {
         var d: [String: String] = [:]
         for account in legacyAccounts {
-            if let v = loadItem(account: account) { d[account] = v }
+            if case .value(let v) = loadItem(account: account) { d[account] = v }
         }
         guard !d.isEmpty else { return [:] }   // 신규 설치 — 이전할 것 없음
         if writeVaultDict(d) {
@@ -150,11 +186,14 @@ enum Keychain {
 
     // MARK: - 내부 primitives (vault 항목 자체 R/W + 레거시 읽기/삭제)
 
-    private static func readVaultDict() -> [String: String]? {
-        guard let json = loadItem(account: vaultAccount),
-              let data = json.data(using: .utf8),
+    /// vault 항목 원문 조회 — 접근 실패/없음/값 3-상태. 파싱은 호출부(parseVaultJSON)에서.
+    private static func readVault() -> Lookup { loadItem(account: vaultAccount) }
+
+    /// vault JSON → dict. 파싱 실패(손상)는 빈 dict(신규처럼) — 접근 실패와는 별개다.
+    private static func parseVaultJSON(_ json: String) -> [String: String] {
+        guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data),
-              let dict = obj as? [String: String] else { return nil }
+              let dict = obj as? [String: String] else { return [:] }
         return dict
     }
 
@@ -187,7 +226,10 @@ enum Keychain {
         return status == errSecSuccess
     }
 
-    private static func loadItem(account: String) -> String? {
+    /// keychain 항목 조회 — status를 구분해 3-상태로 반환한다(#169). `errSecItemNotFound`만 `.absent`,
+    /// 그 외 실패(`errSecAuthFailed`·`errSecInteractionNotAllowed`·잠김 등)는 `.accessFailed`로 —
+    /// "값이 없음"과 "지금 못 읽음"을 절대 뭉개지 않는다. 디코딩 실패(손상)도 접근 실패는 아니므로 .absent.
+    private static func loadItem(account: String) -> Lookup {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -196,10 +238,16 @@ enum Keychain {
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data,
-              let s = String(data: data, encoding: .utf8) else { return nil }
-        return s
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        switch status {
+        case errSecSuccess:
+            guard let data = item as? Data, let s = String(data: data, encoding: .utf8) else { return .absent }
+            return .value(s)
+        case errSecItemNotFound:
+            return .absent
+        default:
+            return .accessFailed   // errSecAuthFailed / errSecInteractionNotAllowed / errSecNotAvailable 등
+        }
     }
 
     private static func clearItem(account: String) {
