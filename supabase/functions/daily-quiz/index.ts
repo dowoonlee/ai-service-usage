@@ -36,7 +36,8 @@ interface QuizRequest {
 const MAX_CLOCK_SKEW_SEC = 3600;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const OPENAI_MODEL = "gpt-4o-mini";
-const PROMPT_VERSION = "quiz-v4";  // v4: 여러 피드 제목 풀 → LLM이 화제성·AI 핵심 기사 1건 선별
+const PROMPT_VERSION = "quiz-v5";  // v5: 최근 N일 출제 이력 제외(동일 URL 하드필터 + 최근 주제 LLM 회피)
+const RECENT_HISTORY_DAYS = 7;     // 이 일수 내 출제된 기사(URL/주제)는 재출제 회피
 const MODEL_LABEL = `${OPENAI_MODEL}:${PROMPT_VERSION}`;
 const NUM_QUESTIONS = 3;
 const NUM_CHOICES = 4;
@@ -241,11 +242,18 @@ async function ensureTodayQuiz(db: ReturnType<typeof getDb>, date: string): Prom
   const apiKey = Deno.env.get("OPENAI_API_KEY");
   if (!apiKey) throw new Error("openai_not_configured");
 
+  // 0) 최근 N일 출제 이력(URL/제목) — 같은 주제 반복 출제 방지(#179). 조회 실패는 무시(빈 이력으로 진행).
+  const recent = await fetchRecentHistory(db, date);
+
   // 1) 여러 AI 피드에서 최신 기사 제목을 모아, LLM이 화제성 높고 AI 핵심인 1건을 고른다.
   //    (RSS엔 조회수가 없어 실제 인기순 정렬은 불가 — 화제성/중요도 판단을 LLM에 위임.)
-  const articles = await fetchAllArticles();
-  if (articles.length === 0) throw new Error("no_articles");
-  const article = await selectBestArticle(articles, apiKey);
+  const allArticles = await fetchAllArticles();
+  if (allArticles.length === 0) throw new Error("no_articles");
+  // 동일 URL은 코드로 하드 필터(가장 확실한 중복 차단). 전부 걸러지면 폴백으로 원본 유지.
+  const recentUrls = new Set(recent.map((h) => h.url));
+  const filtered = allArticles.filter((a) => !recentUrls.has(a.link));
+  const articles = filtered.length > 0 ? filtered : allArticles;
+  const article = await selectBestArticle(articles, apiKey, recent.map((h) => h.title));
 
   // 2) OpenAI로 그 기사 하나에서 브리핑 + 3문항 생성. 문제는 이 기사에서만 출제(출처 링크와 일치).
   const generated = await generateQuiz(article, apiKey);
@@ -309,6 +317,25 @@ async function ensureTodayQuiz(db: ReturnType<typeof getDb>, date: string): Prom
 }
 
 interface Article { title: string; link: string; summary: string; source: string; }
+interface HistoryEntry { url: string; title: string; }
+
+// 최근 N일 출제 이력(오늘 제외) — 반복 주제 회피용(#179). URL은 하드필터, 제목은 LLM 회피 힌트.
+// 조회 실패는 치명적 아님 → 빈 배열 반환(이력 없이 진행, 퀴즈 생성이 막히지 않게).
+async function fetchRecentHistory(db: ReturnType<typeof getDb>, today: string): Promise<HistoryEntry[]> {
+  const since = new Date(`${today}T00:00:00Z`);
+  since.setUTCDate(since.getUTCDate() - RECENT_HISTORY_DAYS);
+  const sinceDate = since.toISOString().slice(0, 10);   // YYYY-MM-DD
+  const { data, error } = await db
+    .from("daily_quiz")
+    .select("source_url, source_title")
+    .gte("quiz_date", sinceDate)
+    .lt("quiz_date", today)   // 오늘(생성 중)은 제외
+    .order("quiz_date", { ascending: false });
+  if (error) { console.error("fetchRecentHistory failed", error); return []; }
+  return (data ?? [])
+    .map((r) => ({ url: (r.source_url ?? "") as string, title: (r.source_title ?? "") as string }))
+    .filter((h) => h.url || h.title);
+}
 
 async function fetchAllArticles(): Promise<Article[]> {
   // 모든 AI 피드를 병렬 fetch → 각 최신 5건을 후보 풀로 합친다 (LLM 선별 입력).
@@ -331,15 +358,21 @@ async function fetchAllArticles(): Promise<Article[]> {
 
 // 후보 제목 목록을 LLM에 주고 퀴즈 소재로 가장 좋은 AI 기사 1건을 고르게 한다.
 // RSS엔 조회수가 없어 실제 인기순 정렬이 불가하므로, 화제성·중요도·AI 관련성 판단을 LLM에 맡긴다.
+// recentTitles: 최근 출제된 제목 — 같은 주제/사건은 URL이 달라도(후속 보도) 피하게 한다(#179).
 // 실패(네트워크/파싱)하면 첫 기사로 폴백해 퀴즈 생성이 막히지 않게 한다.
-async function selectBestArticle(articles: Article[], apiKey: string): Promise<Article> {
+async function selectBestArticle(articles: Article[], apiKey: string, recentTitles: string[] = []): Promise<Article> {
   if (articles.length <= 1) return articles[0];
   const list = articles.map((a, i) => `${i}. [${a.source}] ${a.title}`).join("\n");
+  const recentBlock = recentTitles.length > 0
+    ? " 최근 며칠간 아래 주제가 이미 출제됐습니다 — 같은 사건/주제는(제목이 달라도) 피하고 새로운 소재를 고르세요:\n"
+      + recentTitles.map((t) => `- ${t}`).join("\n")
+    : "";
   const systemPrompt = [
     "당신은 개발자용 'AI 뉴스 퀴즈'의 기사 선별자입니다.",
     "아래는 여러 매체의 최신 기사 제목 목록입니다 (형식: 번호. [매체] 제목).",
     "이 중 퀴즈 소재로 가장 좋은 기사 하나의 번호를 고르세요.",
-    "기준: (1) AI/머신러닝이 핵심 주제일 것, (2) 화제성·중요도가 높을 것(단순 펀딩·인사·홍보성은 제외), (3) 사실관계가 분명해 문제를 낼 수 있을 것.",
+    "기준: (1) AI/머신러닝이 핵심 주제일 것, (2) 화제성·중요도가 높을 것(단순 펀딩·인사·홍보성은 제외), (3) 사실관계가 분명해 문제를 낼 수 있을 것, (4) 최근 출제 주제와 겹치지 않는 새로운 소재일 것.",
+    recentBlock,
     "출력은 반드시 JSON: {\"index\": 정수}.",
   ].join(" ");
   try {
