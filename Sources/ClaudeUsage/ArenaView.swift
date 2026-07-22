@@ -38,6 +38,10 @@ struct ArenaView: View {
     @State private var lungeAmount: CGFloat = 0
     @State private var flashSide: BattleSide?
     @State private var flashBrightness: Double = 0
+    // 궁극기 연출 — 컷인 배너(스킬명) + 스테이지 셰이크. 배너 색은 공격자 타입색(궁극기 = 항상 자기타입).
+    @State private var ultBannerText: String?
+    @State private var ultBannerColor: Color = .yellow
+    @State private var stageShake: CGFloat = 0   // ShakeEffect 트리거 — +1마다 감쇠 진동 1회
     // 대사 말풍선
     @State private var speechText: String?
     @State private var speechSide: BattleSide?
@@ -643,6 +647,7 @@ struct ArenaView: View {
         let log = result?.log ?? []
         let done = playbackStep >= log.count
         let hp = hpDicts(step: playbackStep)
+        let charge = chargeDicts(step: playbackStep)
         let current: BattleEvent? = (playbackStep > 0 && playbackStep <= log.count) ? log[playbackStep - 1] : nil
         // 배틀 표시는 시뮬에 쓰인 스냅샷 기준(편성 편집과 무관하게 고정).
         let aKinds = aSnaps.map(\.kind), bKinds = bSnaps.map(\.kind)
@@ -650,7 +655,7 @@ struct ArenaView: View {
         let bActive = bKinds.first { (hp.b[$0] ?? 0) > 0 }
         return VStack(spacing: 8) {
             partyRow(hp: hp, aKinds: aKinds, bKinds: bKinds, aActive: aActive, bActive: bActive)
-            battleStage(hp: hp, aActive: aActive, bActive: bActive, current: current)
+            battleStage(hp: hp, charge: charge, aActive: aActive, bActive: bActive, current: current)
                 .overlay { if done { resultBanner(result?.winner) } }
             currentActionLine(current)
             controls(total: log.count)
@@ -701,7 +706,7 @@ struct ArenaView: View {
             .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(active ? Color.accentColor : .clear, lineWidth: 1.2))
     }
 
-    private func battleStage(hp: (a: [PetKind: Int], b: [PetKind: Int]), aActive: PetKind?, bActive: PetKind?, current: BattleEvent?) -> some View {
+    private func battleStage(hp: (a: [PetKind: Int], b: [PetKind: Int]), charge: (a: [PetKind: Int], b: [PetKind: Int]), aActive: PetKind?, bActive: PetKind?, current: BattleEvent?) -> some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
             ZStack {
@@ -723,17 +728,44 @@ struct ArenaView: View {
                 if let t = defenderText, let s = defenderSide {
                     speechBubble(t, faint: true).position(x: bubbleX(s, w), y: bubbleY(s, h))
                 }
+                // 궁극기 컷인 — 발동 순간 스테이지 중앙 스킬명 배너 (히트스톱 동안 노출)
+                if let t = ultBannerText {
+                    ultCutIn(t).position(x: w * 0.5, y: h * 0.5)
+                }
             }
+            .modifier(ShakeEffect(animatableData: stageShake))   // 궁극기 임팩트 셰이크(평시 정수값 = 무변위)
             .overlay(alignment: .topLeading) {
-                if let k = bActive { hpBox(k, cur: hp.b[k] ?? 0, showNumbers: false, snaps: bSnaps, server: serverMaxHpB).padding(6) }
+                if let k = bActive {
+                    hpBox(k, cur: hp.b[k] ?? 0, showNumbers: false, snaps: bSnaps, server: serverMaxHpB,
+                          charge: charge.b[k] ?? 0).padding(6)
+                }
             }
             .overlay(alignment: .bottomTrailing) {
-                if let k = aActive { hpBox(k, cur: hp.a[k] ?? 0, showNumbers: true, snaps: aSnaps, server: serverMaxHpA).padding(6) }
+                if let k = aActive {
+                    hpBox(k, cur: hp.a[k] ?? 0, showNumbers: true, snaps: aSnaps, server: serverMaxHpA,
+                          charge: charge.a[k] ?? 0).padding(6)
+                }
             }
         }
         .frame(height: 176)
         .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.04)))
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
+    }
+
+    /// 궁극기 컷인 배너 — 타입색 캡슐 + 스킬명. transition의 큰 스케일이 "펀치 인" 임팩트를 만든다.
+    private func ultCutIn(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 15, weight: .heavy))
+            .foregroundStyle(.white)
+            .lineLimit(1).minimumScaleFactor(0.6)
+            .padding(.horizontal, 14).padding(.vertical, 6)
+            .background(Capsule().fill(ultBannerColor.gradient))
+            .overlay(Capsule().strokeBorder(.white.opacity(0.7), lineWidth: 1.5))
+            .shadow(color: ultBannerColor.opacity(0.8), radius: 10)
+            .rotationEffect(.degrees(-2))
+            .frame(maxWidth: 280)
+            .transition(.scale(scale: 1.9).combined(with: .opacity))
+            .allowsHitTesting(false)
     }
 
     private func bubbleX(_ s: BattleSide, _ w: CGFloat) -> CGFloat { s == .a ? w * 0.27 : w * 0.73 }
@@ -766,9 +798,12 @@ struct ArenaView: View {
             .transition(.opacity)
     }
 
-    private func hpBox(_ kind: PetKind, cur: Int, showNumbers: Bool, snaps: [BattlePetSnapshot], server: [PetKind: Int]?) -> some View {
+    private func hpBox(_ kind: PetKind, cur: Int, showNumbers: Bool, snaps: [BattlePetSnapshot], server: [PetKind: Int]?, charge: Int = 0) -> some View {
         let maxv = maxHP(kind, in: snaps, server: server)
         let frac = maxv > 0 ? Double(max(0, cur)) / Double(maxv) : 0
+        // 궁극기 게이지 — 레인보우(variant4) 펫만. 로그 재생으로 접은 charge를 ultChargeCost 대비로 표시.
+        let rainbow = (snaps.first(where: { $0.kind == kind })?.variant ?? 0) >= BattleEngine.rainbowVariant
+        let chargeFrac = min(1.0, Double(charge) / Double(BattleEngine.ultChargeCost))
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 9, weight: .bold)).lineLimit(1)
@@ -781,6 +816,22 @@ struct ArenaView: View {
                         .animation(.easeOut(duration: 0.35), value: cur)
                 }
             }.frame(width: 96, height: 6)
+            if rainbow {
+                HStack(spacing: 3) {
+                    GeometryReader { g in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.black.opacity(0.15))
+                            Capsule()
+                                .fill(LinearGradient(colors: chargeFrac >= 1 ? [.orange, .yellow] : [.purple.opacity(0.7), .orange.opacity(0.8)],
+                                                     startPoint: .leading, endPoint: .trailing))
+                                .frame(width: max(0, g.size.width * chargeFrac))
+                                .animation(.easeOut(duration: 0.3), value: charge)
+                        }
+                    }.frame(width: 84, height: 3)
+                    Text("⚡️").font(.system(size: 7)).opacity(chargeFrac >= 1 ? 1 : 0.25)
+                        .animation(.easeOut(duration: 0.3), value: chargeFrac >= 1)
+                }
+            }
             if showNumbers {
                 Text("\(max(0, cur))/\(maxv)").font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
             }
@@ -931,6 +982,34 @@ struct ArenaView: View {
         }
         return (a, b)
     }
+    /// 궁극기 게이지 재구성 — 로그 prefix를 엔진과 동일 규칙(행동 +1 → 궁이면 리셋 · 피격 +1 · 기절 시
+    /// 다음 생존 펫에게 승계)으로 접는다. 발동 여부는 로그의 move가 이미 확정하므로 임계 판정이 불필요
+    /// (엔진 재현이 아닌 순수 재생 — 파리티 무관, 구 로그·구 서버 로그도 안전). 표시 전용.
+    /// 승계 대상(다음 생존)은 hpDicts와 동일한 HP 폴드로 판정해 화면의 활성 펫과 항상 일치한다.
+    private func chargeDicts(step: Int) -> (a: [PetKind: Int], b: [PetKind: Int]) {
+        var hpA = Dictionary(aSnaps.map { ($0.kind, maxHP($0.kind, in: aSnaps, server: serverMaxHpA)) }, uniquingKeysWith: { x, _ in x })
+        var hpB = Dictionary(bSnaps.map { ($0.kind, maxHP($0.kind, in: bSnaps, server: serverMaxHpB)) }, uniquingKeysWith: { x, _ in x })
+        var ca: [PetKind: Int] = [:], cb: [PetKind: Int] = [:]
+        for e in (result?.log ?? []).prefix(step) {
+            let ult = SkillCatalog.isUltimate(e.move)
+            if e.attacker == .a {
+                ca[e.attackerKind] = ult ? 0 : (ca[e.attackerKind] ?? 0) + 1
+                hpB[e.defenderKind] = max(0, (hpB[e.defenderKind] ?? 0) - e.damage)
+                cb[e.defenderKind] = (cb[e.defenderKind] ?? 0) + 1
+                if e.defenderFainted, let next = bSnaps.first(where: { (hpB[$0.kind] ?? 0) > 0 })?.kind {
+                    cb[next] = (cb[next] ?? 0) + (cb[e.defenderKind] ?? 0)
+                }
+            } else {
+                cb[e.attackerKind] = ult ? 0 : (cb[e.attackerKind] ?? 0) + 1
+                hpA[e.defenderKind] = max(0, (hpA[e.defenderKind] ?? 0) - e.damage)
+                ca[e.defenderKind] = (ca[e.defenderKind] ?? 0) + 1
+                if e.defenderFainted, let next = aSnaps.first(where: { (hpA[$0.kind] ?? 0) > 0 })?.kind {
+                    ca[next] = (ca[next] ?? 0) + (ca[e.defenderKind] ?? 0)
+                }
+            }
+        }
+        return (ca, cb)
+    }
     // 활성 시너지 감지 — 동족(컬렉션) / 동타입. tie-break는 TeamSynergy.bonus 와 동일한 팀 순서
     // first-max(strict >)로 결정 — 뱃지가 가리키는 타입/스탯이 실제 전투 엔진과 항상 일치(Dictionary
     // 비결정 순서로 5마리 동수에서 엔진과 어긋나던 것 수정).
@@ -1049,11 +1128,23 @@ struct ArenaView: View {
                 guard let log = result?.log, i - 1 < log.count else { continue }
                 let e = log[i - 1]
                 let superEff = e.effectiveness > 1.0, weakEff = e.effectiveness < 1.0
+                let isUlt = SkillCatalog.isUltimate(e.move)
+                if isUlt {
+                    // 궁극기 컷인 — 스킬명 배너 펀치 인 + 스테이지 셰이크 + 히트스톱(배너 감상 시간).
+                    // 배너 색 = 공격자 타입색(궁극기는 항상 자기타입 시그니처).
+                    ultBannerColor = typeColor(e.attackerKind.battleType)
+                    withAnimation(.spring(duration: 0.25, bounce: 0.4)) {
+                        ultBannerText = "⚡️ \(SkillCatalog.displayName(id: e.move) ?? e.move)"
+                    }
+                    withAnimation(.linear(duration: 0.5)) { stageShake += 1 }
+                    try? await Task.sleep(for: ms(450))
+                    if Task.isCancelled { return }
+                }
                 lungeSide = e.attacker
-                withAnimation(.easeOut(duration: 0.1)) { lungeAmount = superEff ? 1.3 : 1 }   // 효과 굉장 → 크게 파고듦
+                withAnimation(.easeOut(duration: 0.1)) { lungeAmount = isUlt ? 1.7 : (superEff ? 1.3 : 1) }   // 궁극기 > 효과 굉장 > 평타 순으로 파고듦
                 let defSide: BattleSide = (e.attacker == .a) ? .b : .a
                 flashSide = defSide
-                flashBrightness = superEff ? 1.25 : (weakEff ? 0.45 : 0.9)                     // 상성별 피격 섬광 강약
+                flashBrightness = isUlt ? 1.5 : (superEff ? 1.25 : (weakEff ? 0.45 : 0.9))     // 상성별 피격 섬광 강약
                 withAnimation(.easeOut(duration: 0.35)) { flashBrightness = 0 }
                 // 대사: 공격자 ~30% + 방어자 반응(패링/리타이어)
                 speechSide = e.attacker
@@ -1064,6 +1155,11 @@ struct ArenaView: View {
                 try? await Task.sleep(for: ms(130))
                 if Task.isCancelled { return }
                 withAnimation(.easeIn(duration: 0.12)) { lungeAmount = 0 }
+                if isUlt {
+                    try? await Task.sleep(for: ms(250))   // 임팩트 여운 후 배너 해제
+                    if Task.isCancelled { return }
+                    withAnimation(.easeOut(duration: 0.2)) { ultBannerText = nil }
+                }
                 if e.defenderFainted { try? await Task.sleep(for: ms(300)) }   // KO 순간 잠깐 멈춤(강조)
                 if Task.isCancelled { return }
             }
@@ -1081,6 +1177,7 @@ struct ArenaView: View {
         playbackTask?.cancel(); playbackTask = nil
         lungeAmount = 0; flashBrightness = 0
         speechText = nil; speechSide = nil; defenderText = nil; defenderSide = nil
+        ultBannerText = nil
     }
 
     // MARK: 강화소 (펫 반응 이펙트)
@@ -1560,5 +1657,15 @@ struct ArenaView: View {
         case .machine: return .cyan
         case .mascot:  return .pink
         }
+    }
+}
+
+/// 궁극기 임팩트 셰이크 — animatableData(트리거 카운터)가 +1 진행하는 동안 sin 6π = 3회 좌우 진동.
+/// 정지 상태(정수값)에선 sin(k·6π)=0이라 변위가 없다. withAnimation으로 stageShake += 1 하면 발동.
+private struct ShakeEffect: GeometryEffect {
+    var travel: CGFloat = 5
+    var animatableData: CGFloat
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(CGAffineTransform(translationX: travel * sin(animatableData * .pi * 6), y: 0))
     }
 }

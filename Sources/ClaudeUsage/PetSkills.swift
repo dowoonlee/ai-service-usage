@@ -153,7 +153,7 @@ enum SkillCatalog {
     static let ultimatePower = 24.0
 
     /// ultimate — 레인보우(variant 4) 궁극기. **타입별 6종**(규칙 파생), 자기타입 시그니처 power 24.
-    /// 정규 슬롯이 아니라 충전 게이지(BattleEngine.ultChargeActions)가 차면 발동. 효과는 effects
+    /// 정규 슬롯이 아니라 충전 게이지(BattleEngine.ultChargeCost)가 차면 발동. 효과는 effects
     /// 페이즈로 분리(현재 순수 고파워). 톤: 개발 밈 아이코닉. 서버 pvp_policy.ultimateSkill 1:1.
     static let ultimateTable: [BattleType: (id: String, name: String)] = [
         .beast:   ("kernel_panic", "커널 패닉"),

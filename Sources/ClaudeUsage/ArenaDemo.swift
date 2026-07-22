@@ -226,13 +226,13 @@ enum ArenaDemo {
 
     // MARK: 궁극기 배틀 (variant4 충전 게이지 발동 파리티용 골든)
     private static func battleSectionUltimate(seed: UInt64) {
-        // 레인보우(variant4) 혼합 미러 — HP×1.5로 배틀이 길어 선봉이 6행동 도달 시 궁극기(타입별) 발동.
+        // 레인보우(variant4) 혼합 미러 — 게이지(행동+피격+승계)가 ultChargeCost에 도달하면 궁극기(타입별) 발동.
         func t4(_ ks: [PetKind]) -> BattleTeam {
             BattleTeam(ks.map { BattlePetSnapshot(kind: $0, variant: 4, enhanceLevel: 5, progressUnits: 2) })
         }
         let teamA = t4([.fox, .warrior, .scrapBot])       // beast/warrior/machine — 궁극기 kernel_panic/rm_rf/blue_screen
         let teamB = t4([.wolf, .lancer, .antennaBot])
-        print("\n[ 궁극기 배틀 ]  seed=\(seed)  (variant4 충전 N=\(BattleEngine.ultChargeActions))")
+        print("\n[ 궁극기 배틀 ]  seed=\(seed)  (variant4 충전 N=\(BattleEngine.ultChargeCost))")
         let r = BattleEngine.simulate(teamA: teamA, teamB: teamB, seed: seed)
         let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
         let ults = r.log.filter { SkillCatalog.isUltimate($0.move) }.count
