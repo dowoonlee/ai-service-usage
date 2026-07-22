@@ -154,23 +154,27 @@ function absorbShield(c: Combatant, dmg: number): number {
   return left;
 }
 
+// 디버프 판정 — dot / control 계열 / statMod(배수 < 1). cleanse 제거 대상 + 선택 AI 공용. Swift isDebuff 1:1.
+export function isDebuffEffect(e: EffectDef): boolean {
+  const k = e.kind;
+  if (k === "dot" || k === "controlFixed" || k === "controlChance") return true;
+  if (k === "statModAtk" || k === "statModDef" || k === "statModSpd") return e.magnitude < 1;
+  return false;
+}
+
 // 효과 부여 — 동일 id refresh(중첩 없음), cleanse 즉시 디버프 제거, 슬롯 초과 시 remaining 최소 밀어냄.
-// Swift grant 1:1. attack의 rider/궁극기 grant 경로가 호출.
-export function grantEffect(c: Combatant, effect: EffectDef): void {
+// Swift grant 1:1. 반환: 실제로 적용됐는지 — cleanse는 지운 게 있을 때만 true(무의미한 grant 이벤트 방지).
+export function grantEffect(c: Combatant, effect: EffectDef): boolean {
   if (effect.kind === "cleanse") {
-    c.effects = c.effects.filter((a) => {
-      const k = a.effect.kind;
-      if (k === "dot" || k === "controlFixed" || k === "controlChance") return false;
-      if (k === "statModAtk" || k === "statModDef" || k === "statModSpd") return a.effect.magnitude >= 1;
-      return true;
-    });
-    return;
+    const before = c.effects.length;
+    c.effects = c.effects.filter((a) => !isDebuffEffect(a.effect));
+    return c.effects.length < before;
   }
   const shieldHP = effect.kind === "shield" ? Math.max(1, roundAway(c.stats.hp * effect.magnitude)) : 0;
   const i = c.effects.findIndex((a) => a.effect.id === effect.id);
   if (i >= 0) {
     c.effects[i] = { effect, remaining: effect.duration, shieldHP };
-    return;
+    return true;
   }
   if (c.effects.length >= EFFECT_SLOT_CAP) {
     let evict = 0;
@@ -178,6 +182,7 @@ export function grantEffect(c: Combatant, effect: EffectDef): void {
     c.effects.splice(evict, 1);
   }
   c.effects.push({ effect, remaining: effect.duration, shieldHP });
+  return true;
 }
 
 interface Combatant {
@@ -291,7 +296,10 @@ function attack(
     skill = attacker.ultimate;
     from[ai].charge = 0;
   } else {
-    skill = selectSkill(attacker.skills, attacker.type, defender.type);
+    // E3 선택 AI — 자기버프 우선(미보유 버프·디버프 있을 때 cleanse). 상태는 시전 시점의 것.
+    const activeIds = new Set(attacker.effects.map((e) => e.effect.id));
+    const hasDebuff = attacker.effects.some((e) => isDebuffEffect(e.effect));
+    skill = selectSkill(attacker.skills, attacker.type, defender.type, activeIds, hasDebuff);
   }
   const eff = skillEffectiveness(skill.type, defender.type);   // 로그 effectiveness = 스킬 상성
   const stab = stabMult(skill.type, attacker.type);
@@ -377,19 +385,22 @@ function attack(
 
   // 스킬 부수효과(rider, §3) — chance 1.0 확정(draw 없음), 확률형 draw < chance.
   // 적 대상 rider는 막타 기절 시 draw까지 생략(결정적 — Swift 1:1).
+  // grantEffect가 false면(cleanse인데 지울 디버프 없음) 이벤트 미기록 — 무의미한 로그 방지.
   const rider = skill.rider;
   if (rider) {
     const def = effectDef(rider.effectId);
     if (def) {
       if (rider.selfTarget) {
         if (rider.chance >= 1.0 || rng.uniform01() < rider.chance) {
-          grantEffect(from[ai], def);
-          events.push({ at: round, side: attackerSide, petKind: from[ai].kind, kind: "grant", effectId: rider.effectId, hpDelta: null, fainted: null });
+          if (grantEffect(from[ai], def)) {
+            events.push({ at: round, side: attackerSide, petKind: from[ai].kind, kind: "grant", effectId: rider.effectId, hpDelta: null, fainted: null });
+          }
         }
       } else if (to[di].hp > 0) {
         if (rider.chance >= 1.0 || rng.uniform01() < rider.chance) {
-          grantEffect(to[di], def);
-          events.push({ at: round, side: defenderSide, petKind: to[di].kind, kind: "grant", effectId: rider.effectId, hpDelta: null, fainted: null });
+          if (grantEffect(to[di], def)) {
+            events.push({ at: round, side: defenderSide, petKind: to[di].kind, kind: "grant", effectId: rider.effectId, hpDelta: null, fainted: null });
+          }
         }
       }
     }

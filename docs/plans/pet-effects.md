@@ -96,8 +96,8 @@ pet-skills.md의 궁극기 6종에 효과 1개씩. **두 부류**로 나뉜다:
 - **E1** ✅(#181) 효과 프레임: 모델·틱·StatMod/DoT/Regen/Shield + effective stat 반영 (no-op — 골든 불변 증명).
 - **E2** ✅ 스킬 연동: rider(부수효과) + 궁극기 특수효과(§7.5) + EffectEvent 스트림 + UI fold/태그. **구현 노트 §8.5.**
   Control 확률/고정 스킵도 이때 함께 활성(원안 E3 통합 — outage_stun/deadlock이 rider·궁극기로 이미 부여됨).
-- **E3**(잔여) 전용 버프/디버프 스킬 + 선택 AI 확장(§6 우선순위: 위급 자힐·버프 미보유) + 미배정 효과 콘텐츠
-  (optimization/firewall/caching/hot_reload/rate_limited + collectionShared rider 18종).
+- **E3** ✅ collectionShared rider 19종 전량 + 선택 AI 자기버프 우선(§6 축소판) + 미배정 효과 활성화
+  (optimization/firewall/caching/hot_reload/rate_limited 전부 rider로 연결). **구현 노트 §8.6.**
 - **E4** UI: 전투원 상태 아이콘·스킵 연출·효과 로그 확장. 이후 승률 재실측 → 밸런스 재평가.
 
 ## 8.5 구현 노트 (E2 — 파리티·호환 결정)
@@ -118,6 +118,21 @@ pet-skills.md의 궁극기 6종에 효과 1개씩. **두 부류**로 나뉜다:
   기존 골든 중 RAINBOW/UNIQUE/ULT 재캡처(리이더 draw·방어무시), 5V5/3v3/COVERAGE 불변.
 - **밸런스 관찰(재실측 대상)**: rm_rf 방어무시로 궁극기 데미지 급증(80→124/151) → 배틀 단축(21→13R);
   mascot 확정 실드 refresh + full_rollback 자힐 = 강한 자기유지(FX2에서 3v3 역전승). 승률표 재실측 후 조정.
+
+## 8.6 구현 노트 (E3 — cs rider 완성 + 선택 AI)
+- **collectionShared rider 19종 전량**: 디버프 13종(20~30% — control 계열은 강력해 20%) + 버프 6종
+  (확정 자부여). 밈 정합 우선(deprecated→tech_debt, wontfix→hot_reload cleanse 등). 이로써 미배정이던
+  효과(optimization/firewall/caching/hot_reload/rate_limited)가 전부 실전에서 등장.
+- **선택 AI 자기버프 우선**(§6 축소판, RNG 없음·상태 기반): 자기 대상 rider 스킬 중 ①일반 버프는
+  미보유일 때 ②cleanse는 자기 디버프 보유 시가 "우선 후보"가 되고, 있으면 그중 점수 최대를 고른다
+  (버프 uptime > 그 턴 데미지). 원안 "위급 자힐"은 전용 힐 스킬이 없어 regen 버프 우선으로 흡수.
+  `select(activeEffectIds:hasDebuff:)`에 상태를 넘겨 결정 — 기본값(빈/false)이면 기존 최대 데미지와 동일.
+- **cleanse grant 반환값**: `grant`가 실제 적용 여부(cleanse는 지운 게 있을 때만 true)를 반환 →
+  호출부가 무의미한 grant 이벤트 미기록. 양측 1:1(로그 정합).
+- **골든**: cs rider 신규 추가로 variant≥2 팀의 rider draw가 스트림에 붙어 RAINBOW·COVERAGE·ULT·
+  FX1·FX2 재캡처. **5V5·UNIQUE(자기타입 unique만 씀)·3v3·SKILLCAT은 비트 불변**(stash 비교 확인).
+  FXCAT에 csr 19종 추가로 잠금. deno 15/15.
+- **잔여(E4)**: UI 상태 아이콘/스킵 연출은 배틀 로직 무관이라 별도. 이후 승률 재실측 → 밸런스.
 
 ## 9. 리스크·미결
 - 밸런스: DoT %·Control 확률/지속·버프 배수 — 골든 승률 실측으로 튜닝.
