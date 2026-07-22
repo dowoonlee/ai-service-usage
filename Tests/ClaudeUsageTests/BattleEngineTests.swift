@@ -122,7 +122,7 @@ final class BattleEngineTests: XCTestCase {
     // 궁극기 — 레인보우(variant4)만 충전 게이지가 차면 발동. 비레인보우(variant0)는 절대 발동 안 함.
     func testUltimateFiresForRainbowOnly() {
         let rainbow = BattleTeam([BattlePetSnapshot(kind: .warrior, variant: 4, enhanceLevel: 5, progressUnits: 2)])
-        let tank = BattleTeam([BattlePetSnapshot(kind: .mrMan, variant: 0, enhanceLevel: 15, progressUnits: 8)])  // mascot 만강 = 최고 HP → 긴 배틀(레인보우 6+행동 보장)
+        let tank = BattleTeam([BattlePetSnapshot(kind: .mrMan, variant: 0, enhanceLevel: 15, progressUnits: 8)])  // mascot 만강 = 최고 HP → 긴 배틀(레인보우 게이지 도달 보장)
         var rbUlts = 0, tankUlts = 0
         for seed in 0..<100 {
             let r = BattleEngine.simulate(teamA: rainbow, teamB: tank, seed: UInt64(seed))
@@ -131,6 +131,32 @@ final class BattleEngineTests: XCTestCase {
         }
         XCTAssertGreaterThan(rbUlts, 0, "레인보우는 충전 후 궁극기를 발동해야")
         XCTAssertEqual(tankUlts, 0, "비레인보우(variant0)는 궁극기 없음")
+    }
+
+    // 궁극기 가시성 — 팀 게이지(행동+피격 충전·기절 시 승계) 덕에 대폭 열세인 패자 측도 대부분의
+    // 배틀에서 궁극기를 최소 1회 발동한다. 구 규칙(행동만 +1, 개인 게이지)에선 패자 펫이 게이지가
+    // 차기 전에 죽어 대폭 우위 매치의 14%에서만 발동했다 — 이 테스트가 그 회귀를 잡는다.
+    // 시나리오는 동일 kind 미러 + 강화 격차(12v3): 시드 100개 전부 A 압승 & 패자 궁 발동(deno 사전 검증).
+    // (레어리티·시너지·강화가 전부 겹친 극단 학살전은 ~5행동에 끝나 아무도 게이지에 못 닿음 — 제외.)
+    func testLoserSideFiresUltimateDespiteStomp() {
+        func team(_ enh: Int, _ pu: Double) -> BattleTeam {
+            BattleTeam([PetKind.warrior, .lancer, .monk, .archer, .pawn].map {
+                BattlePetSnapshot(kind: $0, variant: 4, enhanceLevel: enh, progressUnits: pu)
+            })
+        }
+        let strong = team(12, 6), weak = team(3, 1)
+        var loserUltBattles = 0, decided = 0
+        for seed in 0..<100 {
+            let r = BattleEngine.simulate(teamA: strong, teamB: weak, seed: UInt64(seed))
+            guard let w = r.winner else { continue }
+            decided += 1
+            let loser: BattleSide = w == .a ? .b : .a
+            if r.log.contains(where: { $0.attacker == loser && SkillCatalog.isUltimate($0.move) }) {
+                loserUltBattles += 1
+            }
+        }
+        // deno 실측: 100/100. 결정적이라 항상 동일하지만, 엔진 미세 변경에 견디도록 하한은 과반으로.
+        XCTAssertGreaterThan(loserUltBattles, decided / 2, "패자 측도 과반 배틀에서 궁극기를 봐야")
     }
 
     // 로그 이벤트의 데미지는 항상 ≥ 1, 스킬 상성 배수는 유효 3값 중 하나(Phase A: ×2.0/×1.0/×0.5).

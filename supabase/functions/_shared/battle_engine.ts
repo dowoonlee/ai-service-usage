@@ -47,9 +47,11 @@ export const RAINBOW_VARIANT = 4;
 export const RAINBOW_CRIT_CHANCE = 0.20;
 export const RAINBOW_CRIT_MULT = 1.5;
 
-// 궁극기 충전 — 레인보우가 행동할 때마다 +1, 도달 시 그 행동이 궁극기(정규 스킬 대체) 후 리셋.
-// 행동수 기반 = RNG 불필요·결정적. Swift BattleEngine.ultChargeActions 1:1.
-export const ULT_CHARGE_ACTIONS = 6;
+// 궁극기 충전 비용 — 게이지는 ①행동 시 +1 ②피격 시 +1 로 차고, 기절 시 잔여 게이지가 다음 생존
+// 펫에게 승계된다(팀 게이지). 도달 시 그 행동이 궁극기(정규 스킬 대체) 후 리셋 → 장기전 다회 발동.
+// 전부 이벤트 기반 = RNG 불필요·결정적. Swift BattleEngine.ultChargeCost 1:1.
+// 가시성 패치(6 행동만 → 10 행동+피격+승계): 패자 궁 발동률 62/61/14% → 100/100/91% 실측, 승률 불변.
+export const ULT_CHARGE_COST = 10;
 
 // 패링(퍼펙트 가드) — DEF+SPD 조합.
 export const PARRY_BASE = 0.06;
@@ -161,7 +163,7 @@ function attack(
 
   // 레인보우가 충전 완료면 궁극기(정규 스킬 대체) 후 게이지 리셋, 아니면 결정적 선택 AI.
   let skill: Skill;
-  if (attacker.ultimate && attacker.charge >= ULT_CHARGE_ACTIONS) {
+  if (attacker.ultimate && attacker.charge >= ULT_CHARGE_COST) {
     skill = attacker.ultimate;
     from[ai].charge = 0;
   } else {
@@ -191,6 +193,16 @@ function attack(
 
   to[di].hp -= dmg;
   const fainted = to[di].hp <= 0;
+  // 피격 충전 — 맞은 쪽도 게이지 +1(막타 피격분 포함, 아래 승계로 이전됨). 지고 있어도 맞으면서
+  // 차기 때문에 양측 충전 속도가 거의 대칭 → 패자 측도 궁극기를 보게 된다(격투게임 미터 방식).
+  to[di].charge += 1;
+  // 게이지 승계 — 기절 시 잔여 게이지를 다음 생존 펫에게 이전(개인 게이지 → 팀 게이지).
+  // ⚠️ 파리티: to[di].charge(참조라 위 +1 반영된 최신값)를 그대로 읽는다 — Swift는 지역 복사본이
+  //    옛값이라 배열 원소를 강제. 순서 고정: HP 차감 → 피격 +1 → 승계 (Swift와 1:1).
+  if (fainted) {
+    const ni = activeIdx(to);
+    if (ni >= 0) to[ni].charge += to[di].charge;
+  }
 
   log.push({
     round,

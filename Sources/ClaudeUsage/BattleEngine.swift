@@ -64,9 +64,15 @@ enum BattleEngine {
     static let rainbowCritChance = 0.20
     static let rainbowCritMult = 1.5
 
-    /// 궁극기 충전 — 레인보우 펫이 행동할 때마다 게이지 +1, 이 값 도달 시 **그 행동**이 궁극기(정규
-    /// 스킬 대체) 후 게이지 리셋. **행동수 기반 = RNG 불필요·완전 결정적**(파리티 안전). 서버 battle_engine 1:1.
-    static let ultChargeActions = 6
+    /// 궁극기 충전 비용 — 게이지는 ①행동 시 +1 ②피격 시 +1 로 차고, 기절 시 잔여 게이지가 다음 생존
+    /// 펫에게 승계된다(개인 게이지 → 사실상 **팀 게이지**). 이 값 도달 시 **그 행동**이 궁극기(정규 스킬
+    /// 대체) 후 게이지 리셋 → 장기전 다회 발동. **전부 이벤트 기반 = RNG 불필요·완전 결정적**(파리티 안전).
+    /// 서버 battle_engine 1:1.
+    ///
+    /// 가시성 패치(6 행동만 → 10 행동+피격+승계): 패자 측이 게이지 6이 차기 전에(펫당 1.5~3.3행동) 죽어
+    /// 궁극기를 못 보던 문제 해소 — 패자 궁 발동률 62/61/14% → 100/100/91%(동급/소폭/대폭 우위 각 500판
+    /// 실측), 승률·라운드 수 불변(가시성 전용). docs/plans/pet-skills.md §5.
+    static let ultChargeCost = 10
 
     // MARK: 격노 램프 — 데미지식은 성장이 atk/def에 동시 곱해져 비율 불변이라 TTK가 HP(성장 비례)만큼
     // 선형으로 늘어난다. 풀강 탱커 미러전은 maxRounds를 상시 초과해 "KO 없는 HP 총량 타이브레이크"로
@@ -105,7 +111,7 @@ enum BattleEngine {
         let isRainbow: Bool   // 최종 이로치(레인보우) — 크리 특수효과 대상
         let skills: [Skill]   // variant까지 해금한 정규 스킬(슬롯 순) — 선택 AI 후보
         let ultimate: Skill?  // 레인보우만 보유(타입 궁극기). 충전 게이지가 차면 발동.
-        var charge: Int = 0   // 궁극기 충전 게이지 — 행동마다 +1, ultChargeActions 도달 시 발동·리셋.
+        var charge: Int = 0   // 궁극기 충전 게이지 — 행동/피격마다 +1·기절 시 승계, ultChargeCost 도달 시 발동·리셋.
         var alive: Bool { hp > 0 }
     }
 
@@ -204,7 +210,7 @@ enum BattleEngine {
         // 스킬 선택 — 레인보우가 충전 완료면 궁극기(정규 스킬 대체) 후 게이지 리셋, 아니면 결정적 선택 AI.
         // 스킬 타입 상성(×2.0/×0.5) + 자속(STAB ×1.5) 데미지식은 궁극기에도 동일 적용.
         let skill: Skill
-        if let ult = attacker.ultimate, attacker.charge >= ultChargeActions {
+        if let ult = attacker.ultimate, attacker.charge >= ultChargeCost {
             skill = ult
             from[ai].charge = 0
         } else {
@@ -237,6 +243,15 @@ enum BattleEngine {
 
         to[di].hp -= dmg
         let fainted = to[di].hp <= 0
+        // 피격 충전 — 맞은 쪽도 게이지 +1(막타 피격분 포함, 아래 승계로 이전됨). 지고 있어도 맞으면서
+        // 차기 때문에 양측 충전 속도가 거의 대칭 → 패자 측도 궁극기를 보게 된다(격투게임 미터 방식).
+        to[di].charge += 1
+        // 게이지 승계 — 기절 시 잔여 게이지를 다음 생존 펫에게 이전(개인 게이지 → 팀 게이지).
+        // ⚠️ 파리티: 반드시 배열 원소 to[di].charge를 읽고 쓸 것 — 지역 복사본 defender는 위 +1 이전의
+        //    옛값이라(TS는 참조로 최신값) 양측이 갈린다. 순서 고정: HP 차감 → 피격 +1 → 승계.
+        if fainted, let ni = active(to) {
+            to[ni].charge += to[di].charge
+        }
 
         log.append(BattleEvent(
             round: round,
