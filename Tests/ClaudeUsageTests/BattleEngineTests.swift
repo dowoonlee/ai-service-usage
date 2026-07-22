@@ -159,6 +159,32 @@ final class BattleEngineTests: XCTestCase {
         XCTAssertGreaterThan(loserUltBattles, decided / 2, "패자 측도 과반 배틀에서 궁극기를 봐야")
     }
 
+    // 효과 레이어(E2) — 동타입 페어 v4 5v5(PARITYFX1 조합)에서 부여/틱/스킵/스플래시/자힐이 실제 발생한다.
+    // 세부 시퀀스는 deno 파리티 골든이 잠그고, 여기선 "효과가 살아있다"는 커버리지만 가드.
+    func testEffectEventsFireInEffectBattle() {
+        func t4(_ ks: [PetKind]) -> BattleTeam {
+            BattleTeam(ks.map { BattlePetSnapshot(kind: $0, variant: 4, enhanceLevel: 5, progressUnits: 2) })
+        }
+        let r = BattleEngine.simulate(teamA: t4([.fox, .bear, .wizardM, .bigDemon, .mrMochi]),
+                                      teamB: t4([.wolf, .tRex, .fairy, .skull, .princessSera]),
+                                      seed: 4_812_162)
+        let fx = r.effectEvents ?? []
+        let kinds = Set(fx.map(\.kind))
+        for expected in ["grant", "tick", "skip", "splash", "heal"] {
+            XCTAssertTrue(kinds.contains(expected), "효과 이벤트 '\(expected)'가 발생해야 (PARITYFX1 조합)")
+        }
+        // 스킵 액션은 공격 로그가 없다 — rounds가 로그 길이보다 크다(명세).
+        XCTAssertGreaterThan(r.rounds, r.log.count, "Control 스킵 라운드는 공격 이벤트가 없어야")
+    }
+
+    // 효과 미발생 배틀(v0 팀 — generic만)은 effectEvents가 nil — no-op 경로·구 로그 JSON 형태 보존.
+    func testNoEffectEventsForPlainTeams() {
+        let a = BattleTeam([BattlePetSnapshot(kind: .fox, variant: 0, enhanceLevel: 5, progressUnits: 2)])
+        let b = BattleTeam([BattlePetSnapshot(kind: .warrior, variant: 0, enhanceLevel: 5, progressUnits: 2)])
+        let r = BattleEngine.simulate(teamA: a, teamB: b, seed: 777)
+        XCTAssertNil(r.effectEvents, "부여 스킬 없는 배틀은 effectEvents가 없어야(구 로그 호환)")
+    }
+
     // 로그 이벤트의 데미지는 항상 ≥ 1, 스킬 상성 배수는 유효 3값 중 하나(Phase A: ×2.0/×1.0/×0.5).
     func testLogInvariants() {
         let r = BattleEngine.simulate(teamA: team(weak), teamB: team(strong), seed: 777)

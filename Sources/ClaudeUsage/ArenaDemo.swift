@@ -29,6 +29,7 @@ enum ArenaDemo {
         battleSectionCoverage(seed: 2_468_013)
         battleSectionUnique(seed: 1_357_902)
         battleSectionUltimate(seed: 8_642_097)
+        battleSectionEffects(seed: 4_812_162)
         skillCatalogSection()
 
         print("\n\(bar)\n  끝 — 위 전부 컴파일된 엔진의 실제 출력입니다.\n\(bar)\n")
@@ -222,6 +223,44 @@ enum ArenaDemo {
         }
         print("\n[ 스킬 카탈로그 파리티 ]  (generic6 · typeShared6 · ultimate6 · collectionShared19 · unique\(SkillCatalog.uniqueTable.count))")
         print("  PARITYSKILLCAT \(parts.joined(separator: " "))")
+        effectCatalogSection()
+    }
+
+    // MARK: 효과 카탈로그 파리티 (E2) — 효과 정의 14종 + rider 배정 + 궁극기 특수효과를 통째로 잠근다.
+    // 배틀 골든이 못 건드리는 엔트리(legacy/tech_debt 수치 등)도 어느 한쪽 드리프트를 deno가 잡게.
+    private static func effectCatalogSection() {
+        func kindStr(_ k: BattleEngine.EffectKind) -> String {
+            switch k {
+            case .dot: return "dot"; case .regen: return "regen"
+            case .statMod(.atk): return "statModAtk"; case .statMod(.def): return "statModDef"
+            case .statMod(.spd): return "statModSpd"; case .statMod: return "statModHp"   // 비대상 — 등장하면 골든이 잡음
+            case .controlFixed: return "controlFixed"; case .controlChance: return "controlChance"
+            case .shield: return "shield"; case .cleanse: return "cleanse"
+            }
+        }
+        var parts: [String] = []
+        for id in EffectCatalog.table.keys.sorted() {
+            let d = EffectCatalog.table[id]!.def
+            let chanceStr = d.chance.map { String($0) } ?? "-"
+            parts.append("\(id)=\(kindStr(d.kind))/\(d.magnitude)/\(d.duration)/\(chanceStr)")
+        }
+        for t in BattleType.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let r = SkillCatalog.typeSharedRiderTable[t]!
+            parts.append("rider.\(t.rawValue)=\(r.effectId)/\(r.chance)/\(r.selfTarget ? "self" : "enemy")")
+        }
+        for (id, fx) in SkillCatalog.ultimateEffectTable.sorted(by: { $0.key < $1.key }) {
+            let s: String
+            switch fx {
+            case .defIgnore: s = "defIgnore"
+            case .forceCrit: s = "forceCrit"
+            case .splash: s = "splash"
+            case .grant(let e): s = "grant:\(e)"
+            case .selfHeal(let f): s = "selfHeal:\(f)"
+            }
+            parts.append("ult.\(id)=\(s)")
+        }
+        print("\n[ 효과 카탈로그 파리티 ]  (effects \(EffectCatalog.table.count) · rider 6 · ultFx \(SkillCatalog.ultimateEffectTable.count))")
+        print("  PARITYFXCAT \(parts.joined(separator: " "))")
     }
 
     // MARK: 궁극기 배틀 (variant4 충전 게이지 발동 파리티용 골든)
@@ -239,6 +278,35 @@ enum ArenaDemo {
         let ultMoves = Set(r.log.filter { SkillCatalog.isUltimate($0.move) }.map { $0.move }).sorted().joined(separator: ",")
         print("  PARITYULT winner=\(winner) rounds=\(r.rounds) ults=\(ults) ultMoves=[\(ultMoves)] "
             + "dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
+    }
+
+    // MARK: 효과 배틀 (E2 — rider 부여·틱·Control·실드·궁극기 특수효과 파리티용 골든)
+    private static func battleSectionEffects(seed: UInt64) {
+        func t4(_ ks: [PetKind]) -> BattleTeam {
+            BattleTeam(ks.map { BattlePetSnapshot(kind: $0, variant: 4, enhanceLevel: 5, progressUnits: 2) })
+        }
+        func line(_ tag: String, _ teamA: BattleTeam, _ teamB: BattleTeam, _ seed: UInt64) {
+            let r = BattleEngine.simulate(teamA: teamA, teamB: teamB, seed: seed)
+            let winner = r.winner.map { $0 == .a ? "a" : "b" } ?? "draw"
+            let fx = r.effectEvents ?? []
+            var kindCounts: [String: Int] = [:]
+            for e in fx { kindCounts[e.kind, default: 0] += 1 }
+            let kindsStr = kindCounts.keys.sorted().map { "\($0):\(kindCounts[$0]!)" }.joined(separator: ",")
+            let idsStr = Set(fx.compactMap(\.effectId)).sorted().joined(separator: ",")
+            let hpSum = fx.compactMap(\.hpDelta).reduce(0, +)
+            print("  \(tag) winner=\(winner) rounds=\(r.rounds) fxKinds=[\(kindsStr)] fxIds=[\(idsStr)] fxHp=\(hpSum) "
+                + "dmg=[\(r.log.map { String($0.damage) }.joined(separator: ","))]")
+        }
+        print("\n[ 효과 배틀 ]  seed=\(seed)  (E2 — rider·틱·Control·실드·궁극기 특수효과)")
+        // FX1: 동타입 페어 5쌍(beast×2/arcane/chaos/mascot) 5v5 — 자기타입 STAB 스킬이 선택돼 rider가
+        //      살아있고, 장기전이라 궁극기도 다회 발동하는 조합. mem_leak·infinite_loop DoT(틱),
+        //      deadlock(확률 스킵), kernel_panic(스플래시), context_window_exceeded(확정 크리),
+        //      total_outage(outage_stun 고정 스킵), load_balancer(실드) 경로 운동.
+        line("PARITYFX1", t4([.fox, .bear, .wizardM, .bigDemon, .mrMochi]),
+                          t4([.wolf, .tRex, .fairy, .skull, .princessSera]), seed)
+        // FX2: 혼합 상성 조합 — 커버리지 선택으로 rider가 안 나가는 경로 + mascot 자기버프(실드 refresh)
+        //      + full_rollback 자힐 + rm_rf 방어무시 운동. (오프타입 선택 시 rider 침묵도 명세의 일부.)
+        line("PARITYFX2", t4([.bigDemon, .wizardM, .mrMochi]), t4([.fox, .warrior, .scrapBot]), seed &* 2 &+ 1)
     }
 
     // MARK: 고유기 배틀 (variant 3 Epic+ per-kind unique 선택 파리티용 골든)
