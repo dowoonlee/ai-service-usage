@@ -39,7 +39,8 @@ struct WorldMapView: View {
                 let cam = currentCamera(at: timeline.date, size: size)
                 ZStack {
                     MapTileCanvas(camera: cam, highlighted: highlightedRegions,
-                                  townProgress: townProgresses, discovered: discoveredSet)
+                                  townProgress: townProgresses, discovered: discoveredSet,
+                                  mastered: masteredRegions)
                     inputLayer(cam: cam, size: size)
                     avatarCanvas(cam: cam, date: timeline.date, size: size)
                 }
@@ -64,6 +65,9 @@ struct WorldMapView: View {
         if let hovered { s.insert(hovered) }
         return s
     }
+
+    /// 마스터(8/8)한 region — 테라포밍 렌더용.
+    private var masteredRegions: Set<String> { Settings.shared.masteredRegions }
 
     /// 마을별 진행 스냅샷 — Canvas에 값으로 넘겨 클로저의 actor 격리를 피한다.
     private var townProgresses: [BadgeRegion: TownProgress] {
@@ -137,7 +141,7 @@ struct WorldMapView: View {
         let br = worldCam.screenPoint(ofWorld: CGPoint(x: vis.maxX, y: vis.maxY), in: mmSize)
         return ZStack(alignment: .topLeading) {
             MapTileCanvas(camera: worldCam, highlighted: Set(BadgeRegion.allCases),
-                          showBuildings: false, discovered: discoveredSet)
+                          showBuildings: false, discovered: discoveredSet, mastered: masteredRegions)
             Rectangle()
                 .stroke(Color.white, lineWidth: 1)
                 .frame(width: max(4, br.x - tl.x), height: max(4, br.y - tl.y))
@@ -276,6 +280,8 @@ struct MapTileCanvas: View {
     var showBuildings: Bool = true
     /// 발견된 region(rawValue) — 미발견은 구름으로 덮는다(fog of war). 빈 집합이면 fog 미적용.
     var discovered: Set<String> = []
+    /// 마스터(8/8)한 region(rawValue) — 테라포밍 색 오버레이 + 정복 왕관.
+    var mastered: Set<String> = []
 
     var body: some View {
         Canvas { context, size in
@@ -319,6 +325,11 @@ struct MapTileCanvas: View {
                         let base = WorldMap.palette[code]
                         context.fill(Path(rect),
                                      with: .color(isBright ? base : base.opacity(0.4)))
+                    }
+                    // 테라포밍 — 마스터한 region의 바이옴 진화 색.
+                    if let cr = cellRegion, mastered.contains(cr.rawValue),
+                       let tint = WorldMap.terraformTint(cr) {
+                        context.fill(Path(rect), with: .color(tint))
                     }
                     // 미발견 region — 구름으로 덮는다(fog of war, 테마=Cloud).
                     if !discovered.isEmpty, let cr = cellRegion,
@@ -408,6 +419,19 @@ struct MapTileCanvas: View {
                 }
                 context.draw(bimg, in: CGRect(x: foot.x - bw / 2, y: foot.y - bh,
                                               width: bw, height: bh))
+                // 마스터(8/8) 정복 표식 — 건물 지붕 위 왕관.
+                if mastered.contains(region.rawValue) {
+                    let cw = bw * 0.55
+                    let icon = BadgePixelIcons.crown
+                    let ch = cw * icon.viewBox.height / icon.viewBox.width
+                    let ox = foot.x - cw / 2, oy = foot.y - bh - ch - 2
+                    let sx = cw / icon.viewBox.width, sy = ch / icon.viewBox.height
+                    for rr in icon.rects() {
+                        context.fill(Path(CGRect(x: ox + rr.minX * sx, y: oy + rr.minY * sy,
+                                                 width: rr.width * sx, height: rr.height * sy)),
+                                     with: .color(.yellow))
+                    }
+                }
                 if camera.zoom > 16, let prog = townProgress[region] {
                     let txt = Text("\(prog.cleared)/\(prog.total)")
                         .font(.system(size: 9, weight: .bold, design: .monospaced))

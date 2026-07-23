@@ -145,6 +145,18 @@ enum WorldMap {
         "building_\(region.rawValue)"
     }
 
+    /// 테라포밍 — 지역 마스터(8/8) 시 바이옴이 진화한 색 오버레이. nil이면 변화 없음.
+    /// 용암→흑요석 / 설원→오로라 / 사막→오아시스 식생 / 암반→요새 금빛 / 본토→번영.
+    static func terraformTint(_ region: BadgeRegion) -> Color? {
+        switch region {
+        case .oss:   return Color.black.opacity(0.38)
+        case .daily: return Color(red: 0.35, green: 0.95, blue: 0.75).opacity(0.30)
+        case .arena: return Color(red: 0.30, green: 0.75, blue: 0.35).opacity(0.32)
+        case .guild: return Color(red: 1.0, green: 0.82, blue: 0.25).opacity(0.22)
+        default:     return Color(red: 1.0, green: 0.95, blue: 0.55).opacity(0.16)
+        }
+    }
+
     /// 두 마을 사이 도로 최단 경로(routes 그래프 BFS). 결과는 from…to를 포함한 마을 순서.
     /// 마을→마을 카메라 전환이 도로를 따라 움직이도록 하는 waypoint용.
     static func shortestPath(from: BadgeRegion, to: BadgeRegion) -> [BadgeRegion] {
