@@ -63,6 +63,9 @@ final class DailyQuizVM: ObservableObject {
                 deviceId: s.rankingDeviceID, hmacKeyBase64: hmacKey,
                 date: todayString(), answers: answers)
             s.dailyQuizLastSolvedDate = Date()
+            // 도장 Daily 카운터 — Quiz 정답 누적 + Ritual streak.
+            s.dailyQuizCorrectTotal += res.correctCount
+            Settings.bumpDailyRitual()
             justSubmitted = res
         } catch {
             phase = .error(error.localizedDescription)

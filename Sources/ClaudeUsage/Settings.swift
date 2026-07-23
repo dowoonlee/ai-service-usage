@@ -364,6 +364,46 @@ final class Settings: ObservableObject {
     @Published var usageStreakLastDay: Date? {
         didSet { UserDefaults.standard.set(usageStreakLastDay, forKey: Keys.usageStreakLastDay) }
     }
+    // ── 클라우드 제도 신규 카운터 (gym-expansion.md §5.5) ──
+    /// Guild·Contribution — 길드 기여(코인/VP) 누적.
+    @Published var guildContributionTotal: Int {
+        didSet { UserDefaults.standard.set(guildContributionTotal, forKey: Keys.guildContributionTotal) }
+    }
+    /// Guild·Tenure 기준 — 길드 최초 가입 시각. tenure = now − joinedAt(일).
+    @Published var guildJoinedAt: Date? {
+        didSet { UserDefaults.standard.set(guildJoinedAt, forKey: Keys.guildJoinedAt) }
+    }
+    /// Daily·Quiz — 데일리 퀴즈 정답 누적.
+    @Published var dailyQuizCorrectTotal: Int {
+        didSet { UserDefaults.standard.set(dailyQuizCorrectTotal, forKey: Keys.dailyQuizCorrectTotal) }
+    }
+    /// Daily·Ritual — 일일 방문 streak.
+    @Published var dailyRitualStreak: Int {
+        didSet { UserDefaults.standard.set(dailyRitualStreak, forKey: Keys.dailyRitualStreak) }
+    }
+    /// Daily·Ritual 판정 기준일 — 마지막 방문 인정일(같은 날 재발동 방지).
+    @Published var dailyRitualLastDay: Date? {
+        didSet { UserDefaults.standard.set(dailyRitualLastDay, forKey: Keys.dailyRitualLastDay) }
+    }
+    /// OSS·Bug — 버그 리포트 제출 횟수.
+    @Published var bugReportCount: Int {
+        didSet { UserDefaults.standard.set(bugReportCount, forKey: Keys.bugReportCount) }
+    }
+    /// Daily·Ritual streak 갱신 — 하루 1회, 연속 방문이면 +1, 하루라도 끊기면 1로 리셋.
+    static func bumpDailyRitual() {
+        let s = Settings.shared
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        if let last = s.dailyRitualLastDay {
+            let lastDay = cal.startOfDay(for: last)
+            if lastDay == today { return }   // 오늘 이미 인정
+            let gap = cal.dateComponents([.day], from: lastDay, to: today).day ?? 99
+            s.dailyRitualStreak = (gap == 1) ? s.dailyRitualStreak + 1 : 1
+        } else {
+            s.dailyRitualStreak = 1
+        }
+        s.dailyRitualLastDay = today
+    }
     /// 클리어된 뱃지 ID 집합. 형식: `"<category>.<tier>"` (예: `"standup.production"`).
     @Published var clearedBadges: Set<String> {
         didSet { persist(clearedBadges, forKey: Keys.clearedBadges) }
@@ -382,6 +422,18 @@ final class Settings: ObservableObject {
     /// 챔피언 뱃지(33번째) 획득 시각. nil = 미획득.
     @Published var championBadgeEarnedAt: Date? {
         didSet { UserDefaults.standard.set(championBadgeEarnedAt, forKey: Keys.championBadgeEarnedAt) }
+    }
+    /// 클라우드 제도 챔피언 획득 시각.
+    @Published var cloudChampionAt: Date? {
+        didSet { UserDefaults.standard.set(cloudChampionAt, forKey: Keys.cloudChampionAt) }
+    }
+    /// Grand Champion(모든 대륙 정복) 획득 시각.
+    @Published var grandChampionAt: Date? {
+        didSet { UserDefaults.standard.set(grandChampionAt, forKey: Keys.grandChampionAt) }
+    }
+    /// 발견한 region(BadgeRegion.rawValue) — 구름 fog 해제 상태(gym-map-redesign.md).
+    @Published var discoveredRegions: Set<String> {
+        didSet { persist(discoveredRegions, forKey: Keys.discoveredRegions) }
     }
     /// 도장 페이지에서 reveal 강조용 — 앱 launch 후 아직 사용자가 도장 페이지를 안 열어
     /// migration으로 자동 클리어된 뱃지를 처음 보는 상태인지.
@@ -600,7 +652,11 @@ final class Settings: ObservableObject {
     /// 내 길드 표시 캐시 — 서버(guild-info)가 SSOT, 여기는 탭 첫 로드 전 표시·트레이너 카드
     /// 태그(P2a)용. 빈 문자열 = 무길드. guild-info 응답마다 동기화.
     @Published var guildID: String {
-        didSet { UserDefaults.standard.set(guildID, forKey: Keys.guildID) }
+        didSet {
+            UserDefaults.standard.set(guildID, forKey: Keys.guildID)
+            // 도장 Guild·Tenure 기준 — 최초 가입 시각 기록(재가입해도 유지).
+            if !guildID.isEmpty && guildJoinedAt == nil { guildJoinedAt = Date() }
+        }
     }
     @Published var guildName: String {
         didSet { UserDefaults.standard.set(guildName, forKey: Keys.guildName) }
@@ -858,6 +914,15 @@ final class Settings: ObservableObject {
             }
         }
         self.championBadgeEarnedAt = d.object(forKey: Keys.championBadgeEarnedAt) as? Date
+        self.cloudChampionAt = d.object(forKey: Keys.cloudChampionAt) as? Date
+        self.grandChampionAt = d.object(forKey: Keys.grandChampionAt) as? Date
+        self.discoveredRegions = (d.data(forKey: Keys.discoveredRegions).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        self.guildContributionTotal = (d.object(forKey: Keys.guildContributionTotal) as? Int) ?? 0
+        self.guildJoinedAt = d.object(forKey: Keys.guildJoinedAt) as? Date
+        self.dailyQuizCorrectTotal = (d.object(forKey: Keys.dailyQuizCorrectTotal) as? Int) ?? 0
+        self.dailyRitualStreak = (d.object(forKey: Keys.dailyRitualStreak) as? Int) ?? 0
+        self.dailyRitualLastDay = d.object(forKey: Keys.dailyRitualLastDay) as? Date
+        self.bugReportCount = (d.object(forKey: Keys.bugReportCount) as? Int) ?? 0
         self.masteredRegions = (d.data(forKey: Keys.masteredRegions).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.hasViewedGymPage      = (d.object(forKey: Keys.hasViewedGymPage) as? Bool) ?? false
         self.hasViewedGuide        = (d.object(forKey: Keys.hasViewedGuide) as? Bool) ?? false
@@ -1642,6 +1707,15 @@ final class Settings: ObservableObject {
         static let masteredRegions             = "settings.masteredRegions"
         static let creditedBadgeRewards        = "settings.creditedBadgeRewards"
         static let championBadgeEarnedAt       = "settings.championBadgeEarnedAt"
+        static let cloudChampionAt             = "settings.cloudChampionAt"
+        static let grandChampionAt             = "settings.grandChampionAt"
+        static let discoveredRegions           = "settings.discoveredRegions"
+        static let guildContributionTotal      = "settings.guildContributionTotal"
+        static let guildJoinedAt               = "settings.guildJoinedAt"
+        static let dailyQuizCorrectTotal       = "settings.dailyQuizCorrectTotal"
+        static let dailyRitualStreak           = "settings.dailyRitualStreak"
+        static let dailyRitualLastDay          = "settings.dailyRitualLastDay"
+        static let bugReportCount              = "settings.bugReportCount"
         static let hasViewedGymPage            = "settings.hasViewedGymPage"
         static let hasViewedGuide              = "settings.hasViewedGuide"
         static let hasReceivedCoffeeReward     = "settings.hasReceivedCoffeeReward"
