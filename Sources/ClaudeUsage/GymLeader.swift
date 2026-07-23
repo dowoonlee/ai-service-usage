@@ -91,6 +91,55 @@ struct GymLeader {
                     "...모든 fork를 등재했다. 짐의 monorepo에 영원히 기록되리라."
                 ]
             )
+        // ── 클라우드 제도 (gym-expansion.md 부록 B) ──
+        case .arena:
+            // Load Balancer — 트래픽을 가르는 투기장 주인. 거구.
+            return GymLeader(
+                region: .arena, kind: .ogre,
+                name: "Load Balancer",
+                dialogues: [
+                    "요청 0건. 링에 오를 자격도 없군.",
+                    "트래픽이 들어오는군. 몇 판 붙어봤나.",
+                    "라운드로빈처럼 승수를 분산하는군. 안정적이다.",
+                    "...너의 레이팅은 이제 5-nine이다. 무패에 가깝군. 인정."
+                ]
+            )
+        case .guild:
+            // Merge Conflict — 길드 파벌 다툼의 화신.
+            return GymLeader(
+                region: .guild, kind: .orcWarrior,
+                name: "Merge Conflict",
+                dialogues: [
+                    "<<<<<<< 소속 없음. 너는 어느 브랜치냐.",
+                    "기여가 쌓인다. 충돌을 해소하기 시작했군.",
+                    "길드에 오래 남는군. HEAD가 안정적이다.",
+                    "=======  >>>>>>> 모든 충돌을 해소했다. clean merge. 인정."
+                ]
+            )
+        case .daily:
+            // Cron-tab Monk — 매일 같은 시각의 수도승.
+            return GymLeader(
+                region: .daily, kind: .monk,
+                name: "Cron-tab Monk",
+                dialogues: [
+                    "하루도 오지 않는 날이 있군. 수행이 끊겼다.",
+                    "매일의 정진이 시작됐군. 0 0 * * *.",
+                    "연속된 나날이 쌓인다. 흔들림 없는 리듬이군.",
+                    "...365일 정답과 정진. 너는 이미 깨달음에 이르렀다."
+                ]
+            )
+        case .oss:
+            // Maintainer — PR을 심판하는 지친 오픈소스 관리자.
+            return GymLeader(
+                region: .oss, kind: .wizardM,
+                name: "Maintainer",
+                dialogues: [
+                    "PR도, 이슈도 없군. 이 저장소는 아직 비어있다.",
+                    "첫 기여가 머지됐군. LGTM.",
+                    "리뷰가 쌓인다. 너는 신뢰받는 컨트리뷰터다.",
+                    "...너에게 커밋 권한을 준다. 이제 이 저장소는 너의 것이기도 하다."
+                ]
+            )
         }
     }
 }

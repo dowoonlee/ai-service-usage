@@ -372,6 +372,8 @@ struct BugReportView: View {
         )
         if let url = BugReport.makeURL(title: title, body: body) {
             NSWorkspace.shared.open(url)
+            // 도장 OSS·Bug Hunter 카운터.
+            Settings.shared.bugReportCount += 1
         }
         close()
     }
