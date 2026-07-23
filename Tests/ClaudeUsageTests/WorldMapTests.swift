@@ -107,7 +107,8 @@ final class WorldMapTests: XCTestCase {
         let t0 = Date(timeIntervalSinceReferenceDate: 1000)
         let tw = CameraTween(from: a, to: b, start: t0)
         XCTAssertEqual(tw.value(at: t0), a)
-        let end = t0.addingTimeInterval(tw.duration)
+        // duration 경계는 부동소수점 오차가 있으므로 여유를 둔다(value는 clamp되어 b, finished는 true).
+        let end = t0.addingTimeInterval(tw.duration + 0.01)
         XCTAssertEqual(tw.value(at: end), b)
         XCTAssertTrue(tw.finished(at: end))
         let mid = tw.value(at: t0.addingTimeInterval(tw.duration * 0.5))
