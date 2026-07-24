@@ -368,14 +368,16 @@ struct MapTileCanvas: View {
                 var path = Path(); path.move(to: pa); path.addLine(to: pb)
                 let lit = (townProgress[a]?.cleared ?? 0) > 0 && (townProgress[b]?.cleared ?? 0) > 0
                 let w = max(1.5, camera.zoom * 0.16)
-                if lit {
-                    context.stroke(path, with: .color(Color(red: 0.82, green: 0.66, blue: 0.42)),
-                                   style: StrokeStyle(lineWidth: w, lineCap: .round))
-                } else {
-                    context.stroke(path, with: .color(.white.opacity(0.28)),
-                                   style: StrokeStyle(lineWidth: max(1, w * 0.7),
-                                                      lineCap: .round, dash: [w * 1.4, w]))
-                }
+                // 모든 도로 동일 스타일(tan 포장 + 얇은 어두운 케이싱) — 대륙/지형/진행도 무관하게 같은
+                // 이미지로 읽힌다. 개통(양쪽 마을 진행) 도로만 살짝 밝고 굵게(미세한 진행 신호), 미개통은
+                // 같은 tan을 흐리게 — 흰 점선/검은 실선 같은 딴판 스타일을 없앴다.
+                let roadW = lit ? w : w * 0.85
+                context.stroke(path, with: .color(.black.opacity(0.35)),
+                               style: StrokeStyle(lineWidth: roadW + 1.6, lineCap: .round))
+                let fill = lit ? Color(red: 0.86, green: 0.70, blue: 0.44)
+                               : Color(red: 0.74, green: 0.63, blue: 0.47).opacity(0.7)
+                context.stroke(path, with: .color(fill),
+                               style: StrokeStyle(lineWidth: roadW, lineCap: .round))
             }
 
             // 데코 — 나무/바위/선인장 (타일 위, 밑동 anchor). 발견 지역만.
