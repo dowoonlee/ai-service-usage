@@ -419,7 +419,7 @@ struct MapTileCanvas: View {
                 }
                 context.draw(bimg, in: CGRect(x: foot.x - bw / 2, y: foot.y - bh,
                                               width: bw, height: bh))
-                // 마스터(8/8) 정복 표식 — 건물 지붕 위 왕관.
+                // 정복 표식 — 마스터(전 tier 격파)면 왕관, 관장을 한 번이라도 격파(≥localhost)했으면 깃발.
                 if mastered.contains(region.rawValue) {
                     let cw = bw * 0.55
                     let icon = BadgePixelIcons.crown
@@ -431,6 +431,21 @@ struct MapTileCanvas: View {
                                                  width: rr.width * sx, height: rr.height * sy)),
                                      with: .color(.yellow))
                     }
+                } else if (townProgress[region]?.cleared ?? 0) > 0 {
+                    // 관장 격파 페넌트 — 지붕 우측 깃대 + 삼각 깃발(정복 중 표식).
+                    let poleW = max(1, bw * 0.03)
+                    let poleH = bh * 0.30
+                    let px = foot.x + bw * 0.20
+                    let topY = foot.y - bh - 2
+                    context.fill(Path(CGRect(x: px, y: topY, width: poleW, height: poleH)),
+                                 with: .color(.white.opacity(0.9)))
+                    let fw = bw * 0.28, fh = poleH * 0.5
+                    var tri = Path()
+                    tri.move(to: CGPoint(x: px + poleW, y: topY))
+                    tri.addLine(to: CGPoint(x: px + poleW + fw, y: topY + fh * 0.5))
+                    tri.addLine(to: CGPoint(x: px + poleW, y: topY + fh))
+                    tri.closeSubpath()
+                    context.fill(tri, with: .color(Color(red: 0.95, green: 0.35, blue: 0.30)))
                 }
                 if camera.zoom > 16, let prog = townProgress[region] {
                     let txt = Text("\(prog.cleared)/\(prog.total)")

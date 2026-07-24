@@ -106,7 +106,17 @@
 |---|---|---|
 | **P1 — 게이트 로직** | BadgeRegistry `challengeableTier`/`defeatLeader`/`evaluateDerived` + Settings `hasResetBadgesForBattle` 초기화 | ✅ 완료 |
 | **P2 — 코어+재생** | `GymLeader.team(tier:)` (9관장 진행 스케일) + `GymBattleView`(파티 vs 관장 → simulate → 공유 재생 → 결과 카드) + GymView 도전 버튼(게이트 연동) | ✅ 완료 |
-| **P3 — 연동(후속)** | 격파 칭호/카드 표식 + 맵 마을 트로피 + 대륙/그랜드 챔피언 연출 | 대기 |
+| **P3 — 연동** | 격파 칭호(cloud/grandChampion) + Grandmaster 프레임 + 맵 마을 페넌트 + 헤더 챔피언 연출 | ✅ 완료 |
+
+### P3 구현 (2026-07-24)
+
+- **칭호/카드 표식**: `CardTitle`에 `cloudChampion`("클라우드 챔피언")·`grandChampion`("그랜드 챔피언") 추가
+  (unlock = `cloudChampionAt`/`grandChampionAt`). `CardFrame`에 최상위 `grandmaster`(프리즘 아쿠아, glow,
+  unlock = `grandChampionAt`) 추가 — `hasGlow` 도입해 sparkle과 동급 연출. `champion` 칭호는 "본토 챔피언"으로 명칭 정리.
+- **맵 마을 트로피**: `WorldMapView` 건물 렌더에 페넌트(깃대+삼각 깃발) — 관장을 한 번이라도 격파
+  (`townProgress.cleared > 0`)했지만 아직 마스터(전 tier) 전이면 표시. 마스터 시 왕관으로 승격(기존).
+- **챔피언 연출**: `GymView` 헤더가 그랜드 챔피언이면 아쿠아 "그랜드 챔피언" 라벨+glow, 아니면 본토(gold)/
+  클라우드(cyan) 왕관을 대륙별로 표시. (전원 격파 보너스 코인/티켓은 #189 `evaluateDerived`에 이미 배선됨.)
 
 ### 구현 노트 (2026-07-23)
 

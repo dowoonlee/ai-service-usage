@@ -160,11 +160,32 @@ struct GymView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
-            if settings.championBadgeEarnedAt != nil {
-                Image(systemName: "crown.fill")
-                    .foregroundStyle(.yellow)
-                    .font(.system(size: 13))
-                    .help("챔피언 — 모든 도장 정복")
+            championCrowns
+        }
+    }
+
+    /// 대륙별 챔피언 표시 — 그랜드 챔피언(전 대륙 정복)이면 특별 라벨+glow, 아니면 대륙별 왕관.
+    @ViewBuilder
+    private var championCrowns: some View {
+        if settings.grandChampionAt != nil {
+            let aqua = Color(red: 0.25, green: 0.85, blue: 1.0)
+            HStack(spacing: 3) {
+                Image(systemName: "crown.fill").font(.system(size: 13))
+                Text("그랜드 챔피언").font(.system(size: 10, weight: .heavy))
+            }
+            .foregroundStyle(aqua)
+            .shadow(color: aqua.opacity(0.6), radius: 4)
+            .help("그랜드 챔피언 — 본토·클라우드 전 도장 정복")
+        } else {
+            HStack(spacing: 4) {
+                if settings.championBadgeEarnedAt != nil {
+                    Image(systemName: "crown.fill").foregroundStyle(.yellow)
+                        .font(.system(size: 13)).help("본토 챔피언 — 본토 전 도장 정복")
+                }
+                if settings.cloudChampionAt != nil {
+                    Image(systemName: "crown.fill").foregroundStyle(.cyan)
+                        .font(.system(size: 13)).help("클라우드 챔피언 — 클라우드 제도 전 도장 정복")
+                }
             }
         }
     }

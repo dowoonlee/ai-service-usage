@@ -98,28 +98,31 @@ enum TrainerBackground: Codable, Hashable {
 /// 카드 외곽 프레임 — 4단계 자동 unlock. 도장·컬렉션 진척에 비례.
 enum CardFrame: String, CaseIterable, Codable, Hashable {
     case none
-    case bronze     // 도장 4뱃지
-    case silver     // 도장 8뱃지
-    case gold       // 챔피언 뱃지
-    case sparkle    // 모든 컬렉션 컴플리트
+    case bronze       // 도장 4뱃지
+    case silver       // 도장 8뱃지
+    case gold         // 본토 챔피언 뱃지
+    case sparkle      // 모든 컬렉션 컴플리트
+    case grandmaster  // 그랜드 챔피언 (본토+클라우드 전 대륙 정복)
 
     var displayName: String {
         switch self {
-        case .none:     return "기본"
-        case .bronze:   return "Bronze"
-        case .silver:   return "Silver"
-        case .gold:     return "Gold"
-        case .sparkle:  return "Sparkle"
+        case .none:        return "기본"
+        case .bronze:      return "Bronze"
+        case .silver:      return "Silver"
+        case .gold:        return "Gold"
+        case .sparkle:     return "Sparkle"
+        case .grandmaster: return "Grandmaster"
         }
     }
 
     var color: Color {
         switch self {
-        case .none:     return .secondary.opacity(0.5)
-        case .bronze:   return Color(red: 0.72, green: 0.45, blue: 0.20)
-        case .silver:   return Color(red: 0.75, green: 0.75, blue: 0.78)
-        case .gold:     return Color(red: 1.00, green: 0.78, blue: 0.00)
-        case .sparkle:  return Color(red: 0.85, green: 0.30, blue: 0.85)
+        case .none:        return .secondary.opacity(0.5)
+        case .bronze:      return Color(red: 0.72, green: 0.45, blue: 0.20)
+        case .silver:      return Color(red: 0.75, green: 0.75, blue: 0.78)
+        case .gold:        return Color(red: 1.00, green: 0.78, blue: 0.00)
+        case .sparkle:     return Color(red: 0.85, green: 0.30, blue: 0.85)
+        case .grandmaster: return Color(red: 0.25, green: 0.85, blue: 1.00)   // 프리즘 아쿠아 — 최상위
         }
     }
 
@@ -131,17 +134,22 @@ enum CardFrame: String, CaseIterable, Codable, Hashable {
         case .silver: return 2.5
         case .gold: return 3
         case .sparkle: return 3.5
+        case .grandmaster: return 4
         }
     }
+
+    /// 최상위 프레임 — 카드 렌더에서 glow 추가(sparkle과 동급 연출).
+    var hasGlow: Bool { self == .sparkle || self == .grandmaster }
 
     /// 호버 popover에 노출할 unlock 조건.
     var unlockDescription: String {
         switch self {
-        case .none:    return "기본 프레임 — 별도 조건 없음"
-        case .bronze:  return "도장 4뱃지 클리어 시 unlock"
-        case .silver:  return "도장 8뱃지 클리어 시 unlock"
-        case .gold:    return "도장 챔피언 뱃지 획득 시 unlock"
-        case .sparkle: return "11 컬렉션 셋 전부 컴플리트 시 unlock"
+        case .none:        return "기본 프레임 — 별도 조건 없음"
+        case .bronze:      return "도장 4뱃지 클리어 시 unlock"
+        case .silver:      return "도장 8뱃지 클리어 시 unlock"
+        case .gold:        return "본토 챔피언 뱃지 획득 시 unlock"
+        case .sparkle:     return "11 컬렉션 셋 전부 컴플리트 시 unlock"
+        case .grandmaster: return "그랜드 챔피언 — 본토·클라우드 전 도장 정복 시 unlock"
         }
     }
 
@@ -155,6 +163,7 @@ enum CardFrame: String, CaseIterable, Codable, Hashable {
         if s.completedCollections.count >= PetCollection.allCases.count {
             set.insert(.sparkle)
         }
+        if s.grandChampionAt != nil { set.insert(.grandmaster) }
         return set
     }
 }
@@ -191,7 +200,9 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     // ── 자동 unlock — 도장 ──
     case fourBadges                // 도장 4뱃지
     case eightBadges               // 도장 8뱃지
-    case champion                  // 챔피언 뱃지
+    case champion                  // 본토 챔피언 뱃지
+    case cloudChampion             // 클라우드 제도 챔피언
+    case grandChampion             // 본토+클라우드 전 대륙 정복
     case stagingLead               // production tier 4개 클리어
     case prodOwner                 // 모든(가능한) production tier 클리어
 
@@ -253,7 +264,9 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .collectorAll:          return "도감 마스터"
         case .fourBadges:            return "4뱃지 도전자"
         case .eightBadges:           return "8뱃지 트레이너"
-        case .champion:              return "도장 챔피언"
+        case .champion:              return "본토 챔피언"
+        case .cloudChampion:         return "클라우드 챔피언"
+        case .grandChampion:         return "그랜드 챔피언"
         case .stagingLead:           return "Staging Lead"
         case .prodOwner:             return "Prod Owner"
         case .wellnessGuru:          return "Wellness Guru"
@@ -306,7 +319,9 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .collectorAll:          return "11 컬렉션 셋 전부 컴플리트"
         case .fourBadges:            return "도장 4뱃지 클리어"
         case .eightBadges:           return "도장 8뱃지 클리어"
-        case .champion:              return "도장 챔피언 뱃지 획득"
+        case .champion:              return "본토 챔피언 뱃지 획득 (본토 전 도장 정복)"
+        case .cloudChampion:         return "클라우드 제도 전 도장 정복"
+        case .grandChampion:         return "본토·클라우드 전 도장 정복 (그랜드 마스터)"
         case .stagingLead:           return "production tier 도장 4개 클리어"
         case .prodOwner:             return "가능한 모든 production tier 도장 클리어"
         case .wellnessGuru:          return "Wellness 응답 50회"
@@ -391,6 +406,8 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         if cleared >= 4 { set.insert(.fourBadges) }
         if cleared >= 8 { set.insert(.eightBadges) }
         if s.championBadgeEarnedAt != nil { set.insert(.champion) }
+        if s.cloudChampionAt != nil { set.insert(.cloudChampion) }
+        if s.grandChampionAt != nil { set.insert(.grandChampion) }
         // production tier 단계 칭호.
         let prodCleared = s.clearedBadges.filter { $0.hasSuffix(".production") }.count
         if prodCleared >= 4 { set.insert(.stagingLead) }
