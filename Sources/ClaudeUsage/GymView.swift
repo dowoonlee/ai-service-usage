@@ -11,6 +11,8 @@ struct GymView: View {
     @State private var selectedRegion: BadgeRegion = .coffee
     /// 호버된 뱃지 ID (BadgeID.key). nil이면 tooltip 숨김.
     @State private var hoveredKey: String?
+    /// 진행 중인 관장 배틀(sheet 트리거). nil이면 배틀 창 닫힘.
+    @State private var activeBattle: GymBattleRequest?
 
     var body: some View {
         VStack(spacing: 12) {
@@ -33,20 +35,26 @@ struct GymView: View {
                 settings.hasViewedGymPage = true
             }
         }
+        .sheet(item: $activeBattle) { req in
+            GymBattleView(region: req.region, tier: req.tier)
+        }
     }
 
-    /// 맵과 카테고리 사이 — selected region의 관장 sprite + 진척도별 대사.
+    /// 맵과 카테고리 사이 — selected region의 관장 sprite + 진척도별 대사 + 도전 게이트.
     private var gymLeaderSection: some View {
         let leader = GymLeader.leader(for: selectedRegion)
         let progress = BadgeRegistry.progress(forRegion: selectedRegion, settings)
         let stage = GymLeader.stage(cleared: progress.cleared, total: progress.total)
         let action = leader.action(stage: stage)
         let defeated = stage == 3
+        // metric이 다음 tier 임계를 넘어 "관장 도전 자격"이 열렸는지(게이트).
+        let challengeable = BadgeRegistry.challengeableTier(selectedRegion, settings)
 
         // King Human(Repo)은 다른 펫보다 sprite 픽셀이 작아 시각적으로 묻힘 → scale up.
         let extraScale: CGFloat = (leader.kind == .kingHuman) ? 1.45 : 1.0
 
-        return HStack(alignment: .center, spacing: 12) {
+        return VStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 12) {
             // sprite — 상태별 다른 action.
             ZStack {
                 if let img = PetSprite.image(for: leader.kind, action: action, frameIndex: 0) {
@@ -96,8 +104,45 @@ struct GymView: View {
                     )
             }
         }
+        challengeBar(challengeable)
+        }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
+    }
+
+    /// 관장 도전 게이트 바 — metric이 다음 tier 임계를 넘으면 "도전" 버튼, 아니면 안내 문구.
+    @ViewBuilder
+    private func challengeBar(_ tier: BadgeTier?) -> some View {
+        if let tier {
+            Button {
+                activeBattle = GymBattleRequest(region: selectedRegion, tier: tier)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "flame.fill").font(.system(size: 10))
+                    Text("\(tier.displayName) 관장에게 도전")
+                        .font(.system(size: 11, weight: .bold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Self.strokeColor(for: tier))
+        } else if BadgeRegistry.isRegionMastered(selectedRegion, settings) {
+            HStack(spacing: 5) {
+                Image(systemName: "crown.fill").font(.system(size: 10)).foregroundStyle(.yellow)
+                Text("이 지역 관장을 모두 정복했습니다")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 4)
+        } else {
+            Text("다음 tier 기준을 채우면 관장 도전이 열립니다")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+        }
     }
 
     // MARK: - Header
@@ -426,6 +471,13 @@ private struct BadgeTierTooltip: View {
         .padding(12)
         .frame(width: 230, alignment: .leading)
     }
+}
+
+/// 관장 배틀 sheet 트리거 — region + 도전 tier. id는 조합 키(같은 조합이면 동일 sheet).
+struct GymBattleRequest: Identifiable {
+    let region: BadgeRegion
+    let tier: BadgeTier
+    var id: String { "\(region.rawValue).\(tier.rawValue)" }
 }
 
 // MARK: - Color hex helper
