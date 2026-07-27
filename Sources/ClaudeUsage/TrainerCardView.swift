@@ -120,13 +120,13 @@ struct TrainerCardView: View {
         .allowsHitTesting(false)
     }
 
-    /// Frame stroke — `CardFrame`별 색·두께. sparkle은 추가 glow.
+    /// Frame stroke — `CardFrame`별 색·두께. sparkle/grandmaster는 추가 glow.
     private var frameOverlay: some View {
         RoundedRectangle(cornerRadius: 14)
             .stroke(card.frame.color, lineWidth: card.frame.lineWidth)
             .shadow(
-                color: card.frame == .sparkle ? card.frame.color.opacity(0.6) : .clear,
-                radius: card.frame == .sparkle ? 8 : 0
+                color: card.frame.hasGlow ? card.frame.color.opacity(0.6) : .clear,
+                radius: card.frame.hasGlow ? 8 : 0
             )
     }
 

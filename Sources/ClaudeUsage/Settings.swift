@@ -1236,6 +1236,18 @@ final class Settings: ObservableObject {
     /// `Settings.shared` 초기화가 끝난 뒤 App 시작 훅(`applicationDidFinishLaunching`)에서 1회 호출.
     func applyGymMigrationIfNeeded() {
         let d = UserDefaults.standard
+        // 게이트 방식(gym-battle.md) 도입 — 기존 자동 획득한 도장 진행을 초기화하고 관장 배틀로 재획득.
+        // clearedBadges/챔피언/지역마스터를 리셋. creditedBadgeRewards는 유지 → 뱃지 코인 재지급 방지.
+        if !d.bool(forKey: Keys.hasResetBadgesForBattle) {
+            clearedBadges = []
+            championBadgeEarnedAt = nil
+            cloudChampionAt = nil
+            grandChampionAt = nil
+            masteredRegions = []
+            d.set(true, forKey: Keys.hasResetBadgesForBattle)
+            DebugLog.log("Gym battle gate: 도장 진행 초기화(배틀로 재획득)")
+        }
+        // 파생 재평가(초기화 반영). 게이트라 metric 자동 clear는 더 이상 없음.
         guard !d.bool(forKey: Keys.hasMigratedGymBadges) else { return }
         BadgeRegistry.evaluate(silent: true)
         d.set(true, forKey: Keys.hasMigratedGymBadges)
@@ -1724,6 +1736,7 @@ final class Settings: ObservableObject {
         static let hasReceivedTenantVerifyBonus = "settings.hasReceivedTenantVerifyBonus"
         static let tenantPromptOptedOut        = "settings.tenantPromptOptedOut"
         static let hasMigratedGymBadges        = "settings.hasMigratedGymBadges"
+        static let hasResetBadgesForBattle     = "settings.hasResetBadgesForBattle"
         // 펫 컬렉션 (셋 보너스)
         static let completedCollections        = "settings.completedCollections"
         static let collectionCompletedAt       = "settings.collectionCompletedAt"

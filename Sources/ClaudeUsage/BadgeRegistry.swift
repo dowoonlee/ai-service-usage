@@ -396,39 +396,18 @@ enum BadgeRegistry {
     /// Grand Champion — 모든 대륙 정복 보너스.
     static let grandChampionCoinReward = 10_000
 
-    /// polling cycle 끝 / 사용자 액션 후 호출.
-    /// 새로 임계 통과한 뱃지를 모두 클리어 처리하고 (코인 보너스 + 알림), 챔피언 조건도 평가.
-    /// migration 흐름에서 알림 없이 silent 클리어가 필요할 땐 `silent: true`.
+    /// polling cycle 끝 / 사용자 액션 후 호출. **게이트 방식(gym-battle.md)**:
+    /// metric은 이제 '자동 클리어'가 아니라 관장 배틀 '자격'만 연다(`challengeableTier`).
+    /// 뱃지 클리어는 배틀 승리(`defeatLeader`)로만 일어나므로, 여기선 clearedBadges 기반
+    /// 파생(대륙 챔피언 + 지역 마스터)만 평가한다.
     static func evaluate(silent: Bool = false) {
+        evaluateDerived(silent: silent)
+    }
+
+    /// clearedBadges(배틀로 획득) 기반 파생 — 대륙 챔피언 + 지역 마스터. 배틀 승리 후에도 호출.
+    static func evaluateDerived(silent: Bool = false) {
         let s = Settings.shared
-        var newlyCleared: [BadgeID] = []
-
-        for cat in BadgeCategory.allCases {
-            let value = cat.currentValue(s)
-            for tier in BadgeTier.allCases {
-                let id = BadgeID(category: cat, tier: tier)
-                if s.clearedBadges.contains(id.key) { continue }
-                guard let threshold = cat.thresholds[tier] else { continue }
-                if value >= threshold {
-                    s.clearedBadges.insert(id.key)
-                    // 보상 dedup — 한 번 코인 받은 뱃지는 clearedBadges가 어떤 이유로 리셋돼도 재지급 X.
-                    if !s.creditedBadgeRewards.contains(id.key) {
-                        CoinLedger.shared.creditBonus(tier.coinReward, reason: "badge.\(id.key)")
-                        s.creditedBadgeRewards.insert(id.key)
-                        newlyCleared.append(id)
-                    } else {
-                        DebugLog.log("Badge re-cleared: \(id.key) (이미 보상 지급됨, skip)")
-                    }
-                }
-            }
-        }
-
-        if !newlyCleared.isEmpty && !silent {
-            NotificationManager.shared.badgesCleared(ids: newlyCleared)
-        }
-
         // 대륙별 챔피언 — region 증가에도 도달성 유지(gym-map-redesign.md).
-        // championBadgeEarnedAt은 '본토 챔피언'으로 의미 승계(기존 전체 달성자는 본토도 완료라 그대로 유지).
         if s.championBadgeEarnedAt == nil && isChampionEarned(s, continent: .mainland) {
             s.championBadgeEarnedAt = Date()
             CoinLedger.shared.creditBonus(championCoinReward, reason: "badge.champion.mainland")
@@ -440,24 +419,59 @@ enum BadgeRegistry {
             CoinLedger.shared.creditBonus(championCoinReward, reason: "badge.champion.cloud")
             if !silent { NotificationManager.shared.championEarned() }
         }
-        // Grand Champion — 모든 대륙 정복.
         if s.grandChampionAt == nil,
            GymContinent.allCases.allSatisfy({ isChampionEarned(s, continent: $0) }) {
             s.grandChampionAt = Date()
             CoinLedger.shared.creditBonus(grandChampionCoinReward, reason: "badge.champion.grand")
             if !silent { NotificationManager.shared.championEarned() }
         }
-
-        // 지역 마스터 — 한 region의 (가능한) 모든 도장 클리어 시 프리미엄 가챠권 1장. dedup으로 1회만.
+        // 지역 마스터 — 한 region의 (가능한) 모든 도장 클리어 시 프리미엄 가챠권 1장. dedup 1회.
         for region in BadgeRegion.allCases where !s.masteredRegions.contains(region.rawValue) {
             guard isRegionMastered(region, s) else { continue }
             s.masteredRegions.insert(region.rawValue)
             s.premiumTickets += 1
             DebugLog.log("Region mastered: \(region.rawValue) → +1 premium ticket (total=\(s.premiumTickets))")
-            if !silent {
-                NotificationManager.shared.regionMastered(region: region)
+            if !silent { NotificationManager.shared.regionMastered(region: region) }
+        }
+    }
+
+    /// 그 region에서 지금 도전 가능한 tier — metric이 임계를 넘었지만 아직 배틀로 못 깬 최저 tier.
+    /// nil = 도전 불가(현재 tier metric 미충족, 또는 available 뱃지 전부 격파).
+    /// tier는 localhost→production 순으로 순차 개방된다(낮은 tier를 먼저 격파해야 다음이 열림).
+    static func challengeableTier(_ region: BadgeRegion, _ s: Settings) -> BadgeTier? {
+        let cats = region.categories.filter { $0.isAvailable(s) }
+        guard !cats.isEmpty else { return nil }
+        for tier in BadgeTier.allCases {
+            let allCleared = cats.allSatisfy { s.clearedBadges.contains(BadgeID(category: $0, tier: tier).key) }
+            if allCleared { continue }
+            let allMet = cats.allSatisfy { $0.currentValue(s) >= ($0.thresholds[tier] ?? Int.max) }
+            return allMet ? tier : nil
+        }
+        return nil
+    }
+
+    /// 관장 배틀 승리 — region의 해당 tier 뱃지(모든 available category)를 클리어 + 코인 + 파생 재평가.
+    /// 보상 dedup은 creditedBadgeRewards로(clearedBadges 초기화돼도 코인 재지급 X).
+    /// 반환: 이번에 새로 지급한 코인 합(재도전·이미 획득이면 0) — 배틀 결과 카드 표시용.
+    @discardableResult
+    static func defeatLeader(region: BadgeRegion, tier: BadgeTier, silent: Bool = false) -> Int {
+        let s = Settings.shared
+        var newly: [BadgeID] = []
+        var creditedCoins = 0
+        for cat in region.categories where cat.isAvailable(s) {
+            let id = BadgeID(category: cat, tier: tier)
+            if s.clearedBadges.contains(id.key) { continue }
+            s.clearedBadges.insert(id.key)
+            if !s.creditedBadgeRewards.contains(id.key) {
+                CoinLedger.shared.creditBonus(tier.coinReward, reason: "badge.\(id.key)")
+                s.creditedBadgeRewards.insert(id.key)
+                creditedCoins += tier.coinReward
+                newly.append(id)
             }
         }
+        if !newly.isEmpty && !silent { NotificationManager.shared.badgesCleared(ids: newly) }
+        evaluateDerived(silent: silent)
+        return creditedCoins
     }
 
     /// 한 지역의 (사용자 plan에서 가능한) 모든 카테고리×tier 클리어 검사. `isChampionEarned`의 region 한정 버전.

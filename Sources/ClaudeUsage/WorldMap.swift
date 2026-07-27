@@ -147,13 +147,21 @@ enum WorldMap {
 
     /// 테라포밍 — 지역 마스터(8/8) 시 바이옴이 진화한 색 오버레이. nil이면 변화 없음.
     /// 용암→흑요석 / 설원→오로라 / 사막→오아시스 식생 / 암반→요새 금빛 / 본토→번영.
+    /// 지역 마스터(정복) 시 그 영역 타일에 덧입히는 "바이옴 진화" 색조 — 지역 테마색.
+    /// 전 지역 명시(default 없음) — 새 region 추가 시 밍밍한 공용 tint로 묻히지 않게 강제.
     static func terraformTint(_ region: BadgeRegion) -> Color? {
         switch region {
-        case .oss:   return Color.black.opacity(0.38)
-        case .daily: return Color(red: 0.35, green: 0.95, blue: 0.75).opacity(0.30)
+        // 본토
+        case .coffee:   return Color(red: 0.55, green: 0.32, blue: 0.14).opacity(0.30)  // 에스프레소 브라운
+        case .vibe:     return Color(red: 0.25, green: 0.55, blue: 0.98).opacity(0.28)  // 에이전트 블루
+        case .cron:     return Color(red: 0.58, green: 0.32, blue: 0.82).opacity(0.28)  // 시간/네크로 퍼플
+        case .repo:     return Color(red: 0.95, green: 0.62, blue: 0.15).opacity(0.26)  // 아카이브 앰버
+        case .registry: return Color(red: 0.15, green: 0.68, blue: 0.62).opacity(0.28)  // 스택 틸
+        // 클라우드 제도
         case .arena: return Color(red: 0.30, green: 0.75, blue: 0.35).opacity(0.32)
-        case .guild: return Color(red: 1.0, green: 0.82, blue: 0.25).opacity(0.22)
-        default:     return Color(red: 1.0, green: 0.95, blue: 0.55).opacity(0.16)
+        case .guild: return Color(red: 1.0,  green: 0.82, blue: 0.25).opacity(0.22)
+        case .daily: return Color(red: 0.35, green: 0.95, blue: 0.75).opacity(0.30)
+        case .oss:   return Color.black.opacity(0.38)
         }
     }
 
