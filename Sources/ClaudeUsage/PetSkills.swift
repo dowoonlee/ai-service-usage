@@ -3,11 +3,13 @@ import Foundation
 // 펫 스킬 시스템 (Phase A/B1/B2/C) — 순수 로직. 서버 `_shared/pvp_policy.ts` 스킬 계층과 규칙 1:1.
 // 설계 SSOT: docs/plans/pet-skills.md.
 //
-// 이로치(variant) 단계마다 스킬을 얻는다: variant 0 = generic("핫픽스") / 1 = typeShared(타입 6종) /
-// 2 = collectionShared(컬렉션 19종·오프타입 커버리지) / 3 = unique(Epic+ per-kind 고유기·자기타입).
+// 이로치(variant) 단계마다 스킬을 얻는다: variant 0 = generic(기본기 풀 12종 per-kind 배정) /
+// 1 = typeShared(타입 풀 25종 per-kind 배정) / 2 = collectionShared(컬렉션 19종·오프타입 커버리지) /
+// 3 = unique(Epic+ per-kind 고유기·자기타입).
 // variant 4 = **궁극기**(타입 6종) — 정규 슬롯이 아니라 BattleEngine의 충전 게이지로 발동(아래 ultimateTable).
 // 데미지식은 "스킬 타입 vs 방어자 타입" 상성(×2.0/×0.5)과 자속(STAB ×1.5)으로 전환 — 패시브 ×1.6/0.625 대체.
-// generic/typeShared 는 펫 타입에서 **규칙 파생**이라 per-kind 데이터가 없고, 양측 동일 로직으로 재현된다.
+// generic/typeShared 배정은 컬렉션 멤버 인덱스에서 **결정적 파생**(assignIndex) — 서버는 gen_pet_meta.py가
+// emit한 resolved 테이블을 조회한다(카탈로그 다양화 설계: docs/plans/skill-catalog-expansion.md).
 
 enum SkillTier: String, Codable, Equatable {
     case generic, typeShared, collectionShared, unique, ultimate
@@ -88,20 +90,100 @@ enum SkillCatalog {
     static let genericPower = 8.0
     static let typeSharedPower = 11.0
 
-    /// generic — 전 펫 공용(variant 0). 항상 펫 자기 타입(자속). id "hotfix".
-    static func generic(for type: BattleType) -> Skill {
-        Skill(id: "hotfix", name: "핫픽스", type: type, power: genericPower, tier: .generic)
+    // ── 스킬 카탈로그 다양화 (docs/plans/skill-catalog-expansion.md) ─────────────
+    // generic/typeShared를 "전원 공용 1종/타입당 1종"에서 **풀 + 결정적 per-kind 배정**으로 전환.
+    // 신규 스킬은 기존 tier의 (자속·power·타입 rider)를 그대로 상속 — 선택 AI 점수(power×eff×stab)가
+    // 동일해 배틀 결과·승률이 비트 불변, 로그의 move id만 다양해진다(밸런스 무손상 콘텐츠 확장).
+    // 각 풀 idx 0 = 기존 id 잔류(구 로그 표시명·기존 골든의 fox/scrapBot 경로 호환).
+
+    /// generic 풀 — "신입 기본기" 12종(variant 0). 전 타입 공용·항상 자속. 타입 무관 톤-중립.
+    static let genericPool: [(id: String, name: String)] = [
+        ("hotfix", "핫픽스"),                         // idx 0 — 기존 잔류
+        ("printf_debug", "printf 디버깅"),
+        ("stackoverflow_paste", "스택오버플로 복붙"),
+        ("off_and_on", "껐다 켜기"),
+        ("cache_purge", "캐시 삭제"),
+        ("git_blame", "git blame"),
+        ("rubber_duck", "러버덕 디버깅"),
+        ("console_log_spam", "console.log 도배"),
+        ("retry_loop", "일단 재시도"),
+        ("todo_later", "TODO: 나중에"),
+        ("ctrl_cv", "Ctrl+C Ctrl+V"),
+        ("regenerate", "다시 생성"),
+    ]
+
+    /// typeShared 풀 — 타입 정체성 확장(variant 1). 풀 크기는 로스터 비례(beast 60→6 … machine 16→3).
+    /// 전부 자기 타입·power 11·타입 rider 상속. idx 0 = 기존 6종 잔류.
+    static let typeSharedPools: [BattleType: [(id: String, name: String)]] = [
+        .beast: [
+            ("mem_leak", "메모리 릭"),
+            ("cpu_spike", "CPU 스파이크"),
+            ("fork_bomb", "포크 폭탄"),
+            ("disk_full", "디스크 100%"),
+            ("swap_thrash", "스왑 지옥"),
+            ("thread_stampede", "스레드 폭주"),
+        ],
+        .warrior: [
+            ("force_push", "강제 푸시"),
+            ("hard_reset", "hard reset"),
+            ("sudo_strike", "sudo 일격"),
+            ("breaking_change", "브레이킹 체인지"),
+            ("prod_hotpatch", "프로드 직수정"),
+        ],
+        .chaos: [
+            ("friday_deploy", "금요일 배포"),
+            ("heisenbug", "하이젠버그"),
+            ("cascade_failure", "연쇄 장애"),
+            ("flaky_test", "플레이키 테스트"),
+        ],
+        .arcane: [
+            ("context_overflow", "컨텍스트 폭발"),
+            ("hallucinated_api", "존재하지 않는 API"),
+            ("temperature_max", "temperature 1.0"),
+        ],
+        .machine: [
+            ("regression_sweep", "회귀 스윕"),
+            ("retry_storm", "리트라이 폭풍"),
+            ("cron_avalanche", "크론 눈사태"),
+        ],
+        .mascot: [
+            ("onboarding", "온보딩"),
+            ("lgtm", "LGTM"),
+            ("pair_programming", "페어 프로그래밍"),
+            ("daily_standup", "데일리 스탠드업"),
+        ],
+    ]
+
+    /// 배정 인덱스 — (컬렉션 순번 cIdx, 컬렉션 내 멤버 순번 mIdx). **members 배열은 append-only 규약** —
+    /// 중간 삽입 시 기존 유저의 배정이 바뀐다(신규 펫은 뒤에 추가). 서버는 gen_pet_meta.py가 emit한
+    /// resolved 테이블을 조회하므로 이 공식의 유일한 대응물은 py 구현 — 드리프트는 PARITYBASE 골든이 잡는다.
+    static let assignIndex: [PetKind: (cIdx: Int, mIdx: Int)] = {
+        var m: [PetKind: (cIdx: Int, mIdx: Int)] = [:]
+        for (ci, c) in PetCollection.allCases.enumerated() {
+            for (mi, k) in c.members.enumerated() { m[k] = (ci, mi) }
+        }
+        return m
+    }()
+
+    /// generic 인덱스 stride — 두 tier의 배정 인덱스 정렬(멤버 0이 항상 양쪽 idx 0을 받는 류) 방지.
+    static let genericStride = 5
+
+    /// generic — per-kind 배정(variant 0). 항상 펫 자기 타입(자속)·power 8.
+    static func generic(for kind: PetKind) -> Skill {
+        let (ci, mi) = assignIndex[kind] ?? (0, 0)   // 미배정(이론상 없음) → idx 0 = hotfix
+        let e = genericPool[(ci * genericStride + mi) % genericPool.count]
+        return Skill(id: e.id, name: e.name, type: kind.battleType, power: genericPower, tier: .generic)
     }
 
-    /// typeShared — 같은 배틀 타입끼리 공유(variant 1). 자기 타입, power 11.
-    static let typeSharedTable: [BattleType: (id: String, name: String)] = [
-        .beast:   ("mem_leak", "메모리 릭"),
-        .warrior: ("force_push", "강제 푸시"),
-        .chaos:   ("friday_deploy", "금요일 배포"),
-        .arcane:  ("context_overflow", "컨텍스트 폭발"),
-        .machine: ("regression_sweep", "회귀 스윕"),
-        .mascot:  ("onboarding", "온보딩"),
-    ]
+    /// typeShared — per-kind 배정(variant 1). 자기 타입·power 11·타입 rider 상속.
+    static func typeShared(for kind: PetKind) -> Skill {
+        let t = kind.battleType
+        let pool = typeSharedPools[t]!               // 6타입 전부 정의 — 강제 언랩 안전.
+        let mi = assignIndex[kind]?.mIdx ?? 0
+        let e = pool[mi % pool.count]
+        return Skill(id: e.id, name: e.name, type: t, power: typeSharedPower, tier: .typeShared,
+                     rider: typeSharedRiderTable[t])
+    }
     /// typeShared 부수효과(E2) — 타입당 1개, 밈 정합 매핑. 디버프 25~30% / 버프(onboarding) 확정 자부여.
     /// 서버 pvp_policy.TYPE_SHARED_RIDER 1:1. 수치는 밸런스 튜닝 대상(E2는 골든 승률 실측 전 초기값).
     static let typeSharedRiderTable: [BattleType: SkillRider] = [
@@ -112,12 +194,6 @@ enum SkillCatalog {
         .machine: SkillRider(effectId: "legacy", chance: 0.30, selfTarget: false),         // 회귀에 발목
         .mascot:  SkillRider(effectId: "load_balancer", chance: 1.0, selfTarget: true),    // 방어형 실드(확정)
     ]
-    static func typeShared(for type: BattleType) -> Skill {
-        let e = typeSharedTable[type]!   // 6타입 전부 정의 — 강제 언랩 안전.
-        return Skill(id: e.id, name: e.name, type: type, power: typeSharedPower, tier: .typeShared,
-                     rider: typeSharedRiderTable[type])
-    }
-
     static let collectionSharedPower = 12.0
 
     /// collectionShared — 컬렉션 밈 스킬(variant 2). **오프타입**: 각 컬렉션의 자기 배틀타입과 다른 타입을
@@ -281,9 +357,8 @@ enum SkillCatalog {
     /// 이 펫이 variant까지 해금한 정규 스킬 목록. 슬롯 인덱스 순(선택 AI tie-break 기준).
     /// 서버 pvp_policy.skillsFor 1:1.
     static func skills(kind: PetKind, variant: Int) -> [Skill] {
-        let t = kind.battleType
-        var out = [generic(for: t)]                                      // 슬롯0 — 항상 보유
-        if variant >= 1 { out.append(typeShared(for: t)) }              // 슬롯1 — 이로치1
+        var out = [generic(for: kind)]                                   // 슬롯0 — 항상 보유
+        if variant >= 1 { out.append(typeShared(for: kind)) }           // 슬롯1 — 이로치1
         if variant >= 2 { out.append(collectionShared(for: kind.collection)) }  // 슬롯2 — 이로치2(오프타입 커버리지)
         if variant >= 3, let u = unique(for: kind) { out.append(u) }    // 슬롯3 — 이로치3, Epic+ 고유기(자기타입)
         // 궁극기(variant 4)는 **의도적으로 여기 없음** — 정규 선택 슬롯이 아니라 BattleEngine 충전 게이지로 발동.
@@ -326,8 +401,9 @@ enum SkillCatalog {
 
     /// 스킬 id → 표시명(로그 UI). 구 로그의 "basic"/"signature"는 없음(호출부에서 레거시 폴백).
     static let nameById: [String: String] = {
-        var m: [String: String] = ["hotfix": "핫픽스"]
-        for (_, e) in typeSharedTable { m[e.id] = e.name }
+        var m: [String: String] = [:]
+        for e in genericPool { m[e.id] = e.name }
+        for (_, pool) in typeSharedPools { for e in pool { m[e.id] = e.name } }
         for (_, e) in collectionSharedTable { m[e.id] = e.name }
         for (_, e) in uniqueTable { m[e.id] = e.name }
         for (_, e) in ultimateTable { m[e.id] = e.name }

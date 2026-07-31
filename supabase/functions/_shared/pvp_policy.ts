@@ -7,7 +7,7 @@
 // 반올림 규약: Swift `Int(x.rounded())` = round-half-away-from-zero. 입력이 전부 양수라 JS
 // `Math.round`와 동일하지만, 명세 고정을 위해 `roundAway`를 쓴다(음수 안전).
 
-import { RARITY, COLLECTION, UNIQUE_SKILL } from "./pet_meta_gen.ts";
+import { RARITY, COLLECTION, UNIQUE_SKILL, GENERIC_SKILL, TYPE_SKILL } from "./pet_meta_gen.ts";
 
 // round half away from zero (Swift .rounded() 기본 규약).
 export function roundAway(x: number): number {
@@ -65,7 +65,8 @@ export function effectiveness(attacker: BattleType, defender: BattleType): numbe
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 스킬 (Phase A) — Swift PetSkills.swift 와 규칙 1:1. 설계 SSOT: docs/plans/pet-skills.md.
-// variant 0 = generic("핫픽스") / variant 1 = typeShared(타입 6종). 타입에서 규칙 파생(per-kind 데이터 없음).
+// variant 0 = generic(기본기 풀 12종) / variant 1 = typeShared(타입 풀 25종) — per-kind 배정은
+// pet_meta_gen(GENERIC_SKILL/TYPE_SKILL) 조회(카탈로그 다양화, docs/plans/skill-catalog-expansion.md).
 
 export type SkillTier = "generic" | "typeShared" | "collectionShared" | "unique" | "ultimate";
 
@@ -137,8 +138,9 @@ const TYPE_SHARED_SKILL: Record<BattleType, [string, string]> = {
   mascot: ["onboarding", "온보딩"],
 };
 // typeShared 부수효과(E2) — 타입당 1개, 밈 정합. 디버프 25~30% / 버프(onboarding) 확정 자부여.
-// Swift typeSharedRiderTable 1:1. 수치는 밸런스 튜닝 대상.
-const TYPE_SHARED_RIDER: Record<BattleType, SkillRider> = {
+// Swift typeSharedRiderTable 1:1. 수치는 밸런스 튜닝 대상. (export: FXCAT 파리티 테스트가 직접 대조 —
+// typeSharedSkill이 per-kind 시그니처로 바뀌어 타입 단위 rider 조회 경로가 필요.)
+export const TYPE_SHARED_RIDER: Record<BattleType, SkillRider> = {
   beast:   { effectId: "mem_leak", chance: 0.30, selfTarget: false },
   warrior: { effectId: "tech_debt", chance: 0.30, selfTarget: false },
   chaos:   { effectId: "infinite_loop", chance: 0.25, selfTarget: false },
@@ -146,12 +148,18 @@ const TYPE_SHARED_RIDER: Record<BattleType, SkillRider> = {
   machine: { effectId: "legacy", chance: 0.30, selfTarget: false },
   mascot:  { effectId: "load_balancer", chance: 1.0, selfTarget: true },
 };
-export function genericSkill(type: BattleType): Skill {
-  return { id: "hotfix", name: "핫픽스", type, power: GENERIC_POWER, tier: "generic" };
+// generic/typeShared — per-kind 배정(카탈로그 다양화, docs/plans/skill-catalog-expansion.md).
+// 배정은 Swift 공식의 resolved 산출물(pet_meta_gen)을 조회만 한다. 미등록 kind(버전 스큐 —
+// 신 클라 펫을 구 서버가 모름)는 각 풀 idx0(기존 id)로 폴백해 Swift의 assignIndex ?? (0,0)과 일치.
+export function genericSkill(kind: string): Skill {
+  const t = battleTypeOf(kind);
+  const [id, name] = GENERIC_SKILL[kind] ?? ["hotfix", "핫픽스"];
+  return { id, name, type: t, power: GENERIC_POWER, tier: "generic" };
 }
-export function typeSharedSkill(type: BattleType): Skill {
-  const [id, name] = TYPE_SHARED_SKILL[type];
-  return { id, name, type, power: TYPE_SHARED_POWER, tier: "typeShared", rider: TYPE_SHARED_RIDER[type] };
+export function typeSharedSkill(kind: string): Skill {
+  const t = battleTypeOf(kind);
+  const [id, name] = TYPE_SKILL[kind] ?? TYPE_SHARED_SKILL[t];
+  return { id, name, type: t, power: TYPE_SHARED_POWER, tier: "typeShared", rider: TYPE_SHARED_RIDER[t] };
 }
 
 export const COLLECTION_SHARED_POWER = 12.0;
@@ -257,9 +265,8 @@ export const ULT_EFFECT: Record<string, UltEffect> = {
 
 // variant까지 해금한 정규 스킬(슬롯 순). Swift SkillCatalog.skills 1:1.
 export function skillsFor(kind: string, variant: number): Skill[] {
-  const t = battleTypeOf(kind);
-  const out = [genericSkill(t)];                    // 슬롯0 — 항상 보유
-  if (variant >= 1) out.push(typeSharedSkill(t));   // 슬롯1 — 이로치1
+  const out = [genericSkill(kind)];                    // 슬롯0 — 항상 보유
+  if (variant >= 1) out.push(typeSharedSkill(kind));   // 슬롯1 — 이로치1
   if (variant >= 2) out.push(collectionSharedSkill(collectionOf(kind)));   // 슬롯2 — 이로치2(오프타입 커버리지)
   if (variant >= 3) { const u = uniqueSkill(kind); if (u) out.push(u); }   // 슬롯3 — 이로치3, Epic+ 고유기
   return out;
