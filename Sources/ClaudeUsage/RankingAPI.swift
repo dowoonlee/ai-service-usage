@@ -170,6 +170,25 @@ actor RankingAPI {
         var dedupKey: String { grantKey }
     }
 
+    /// claim 응답 유실 복구용 재시도 디스크립터 (#191) — claim 호출 "전에"
+    /// `Settings.pendingClaimRetries`에 기록하고 수령 확정 후 제거한다. 서버가 claimed_at을
+    /// 기록했는데 응답이 유실되면(타임아웃 등) leaderboard의 pending 목록에서 빠져 재시도 근거가
+    /// 사라지므로, 이 디스크립터가 유일한 복구 경로다. 서버 claim은 이미 수령된 row에
+    /// alreadyClaimed=true로 idempotent 응답하므로 같은 파라미터 재-claim은 언제나 안전하다.
+    /// (coins podium은 credit-먼저 + 로컬 dedup 패턴이라 유실돼도 다음 cycle 재시도됨 — 대상 아님.)
+    struct PendingClaimRetry: Codable, Equatable, Sendable {
+        let rewardType: String      // "rp" | "grant"
+        let period: String          // rp: 정산 period / grant: grantKey (claim 서명의 period 슬롯)
+        let rank: Int               // rp: 순위 / grant: 1 (서명 채움용 더미)
+        let periodType: String?     // rp 전용 — "monthly" | "weekly" | "guild-monthly"
+        let currency: String        // 적립 원장 선택 — "rp" | "coin"
+        let amount: Int             // 적립액 (leaderboard pending 응답 시점 금액)
+        let dedupKey: String        // claimedRpRewards/claimedGrants 매칭 키
+        /// 응답은 받았으나 실패(5xx·디코딩 등)한 횟수 — 캡 초과 시 폐기. 전송 실패(.network)는
+        /// 서버 도달 여부 불명이라 세지 않고 무기한 재시도 (오프라인 중 복구 기회 보존).
+        var attempts: Int = 0
+    }
+
     struct ClaimRewardPayload: Encodable {
         let deviceId: String
         let period: String
@@ -190,7 +209,9 @@ actor RankingAPI {
         let rewardType: String?      // "coins" | "rp" (구버전 서버 nil)
         let rewardCoins: Int?        // coins claim 시
         let rp: Int?                 // rp claim 시
-        let claimedAt: String
+        /// 수령 시각 — 동시 claim race에서 진 쪽의 duplicate 응답(!won 분기)에는 서버가 싣지
+        /// 않으므로 optional. non-optional이면 그 응답이 디코딩 실패로 throw돼 재시도를 유발한다.
+        let claimedAt: String?
     }
 
     struct SetPodiumMessagePayload: Encodable {

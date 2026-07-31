@@ -7,3 +7,8 @@
 # Supabase anon key 는 클라이언트에 노출되어도 안전한 값 (RLS 가 권한 통제) —
 # 같은 파일 132 줄에 명시되어 있음.
 c2873d72cb1a7780bbf064498e3e3e35458d1357:docs/SETUP_RANKING.md:generic-api-key:129
+
+# Tests/ClaimRetryTests.swift:33 — RP 보상 dedup 키 테스트 픽스처.
+# periodType.period.rank 형식의 리터럴(주간 W30, 5위)이지 시크릿이 아님 —
+# 파라미터명에 Key가 들어간 문자열 인자에 대한 오탐.
+ef23e28f815cc5e64e5c9390d67981a411ef57f6:Tests/ClaudeUsageTests/ClaimRetryTests.swift:generic-api-key:33

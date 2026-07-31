@@ -689,6 +689,11 @@ final class Settings: ObservableObject {
     @Published var claimedGrants: Set<String> {
         didSet { persist(claimedGrants, forKey: Keys.claimedGrants) }
     }
+    /// 응답 미확정(진행 중/유실) claim 디스크립터 (#191). claim 호출 전에 추가, 수령 확정 후 제거 —
+    /// 응답이 유실되면 다음 폴링 cycle에 같은 파라미터로 재-claim해 복구한다 (ViewModel.retryPendingClaims).
+    @Published var pendingClaimRetries: [RankingAPI.PendingClaimRetry] {
+        didSet { persist(pendingClaimRetries, forKey: Keys.pendingClaimRetries) }
+    }
     /// Cursor Pro/Free 사용자의 request delta 추적용. Ultra는 events 기반이라 불필요.
     /// startOfMonth가 바뀌면 reset.
     @Published var cursorLastRequestsSeen: Int? {
@@ -882,6 +887,8 @@ final class Settings: ObservableObject {
         self.claimedRpRewards = (claimedRpData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         let claimedGrantData = d.data(forKey: Keys.claimedGrants)
         self.claimedGrants = (claimedGrantData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let pendingClaimData = d.data(forKey: Keys.pendingClaimRetries)
+        self.pendingClaimRetries = (pendingClaimData.flatMap { try? JSONDecoder().decode([RankingAPI.PendingClaimRetry].self, from: $0) }) ?? []
         self.cursorLastRequestsSeen    = d.object(forKey: Keys.cursorLastRequestsSeen) as? Int
         self.cursorLastStartOfMonth    = d.object(forKey: Keys.cursorLastStartOfMonth) as? Date
         self.boardLastSeenAt           = d.object(forKey: Keys.boardLastSeenAt) as? Date
@@ -1698,6 +1705,7 @@ final class Settings: ObservableObject {
         static let claimedPodiumPeriods        = "settings.claimedPodiumPeriods"
         static let claimedRpRewards            = "settings.claimedRpRewards"
         static let claimedGrants               = "settings.claimedGrants"
+        static let pendingClaimRetries         = "settings.pendingClaimRetries"
         static let cursorLastRequestsSeen      = "settings.cursorLastRequestsSeen"
         static let cursorLastStartOfMonth      = "settings.cursorLastStartOfMonth"
         static let boardLastSeenAt             = "settings.boardLastSeenAt"
