@@ -47,15 +47,61 @@ final class PetSkillsTests: XCTestCase {
         XCTAssertEqual(SkillCatalog.skills(kind: .fox, variant: 4).count, 3)
     }
 
-    // 6타입 전부 typeShared가 정의돼 있고 self-type·power 11.
-    func testTypeSharedTableComplete() {
+    // ── 카탈로그 다양화(풀 + per-kind 배정) — docs/plans/skill-catalog-expansion.md ──
+
+    // 6타입 전부 typeShared 풀이 정의돼 있고, 전 kind의 typeShared는 self-type·power 11·타입 rider.
+    func testTypeSharedPoolsCompleteAndSelfType() {
         for t in BattleType.allCases {
-            let s = SkillCatalog.typeShared(for: t)
-            XCTAssertEqual(s.type, t)
+            XCTAssertFalse(SkillCatalog.typeSharedPools[t]!.isEmpty, "\(t) 풀 비어있음")
+        }
+        for k in PetKind.allCases {
+            let s = SkillCatalog.typeShared(for: k)
+            XCTAssertEqual(s.type, k.battleType, "\(k) typeShared는 자속이어야")
             XCTAssertEqual(s.power, 11.0, accuracy: 1e-9)
             XCTAssertEqual(s.tier, .typeShared)
+            XCTAssertEqual(s.rider, SkillCatalog.typeSharedRiderTable[k.battleType], "\(k) 타입 rider 상속이어야")
             XCTAssertNotNil(SkillCatalog.displayName(id: s.id))
         }
+    }
+
+    // 전 kind의 generic은 self-type·power 8·rider 없음 + 표시명 존재.
+    func testGenericAssignmentSelfType() {
+        for k in PetKind.allCases {
+            let g = SkillCatalog.generic(for: k)
+            XCTAssertEqual(g.type, k.battleType, "\(k) generic은 자속이어야")
+            XCTAssertEqual(g.power, 8.0, accuracy: 1e-9)
+            XCTAssertEqual(g.tier, .generic)
+            XCTAssertNil(g.rider)
+            XCTAssertNotNil(SkillCatalog.displayName(id: g.id))
+        }
+    }
+
+    // 기존 id 잔류 계약 — 각 풀 idx0 = 구 카탈로그 id(구 로그 표시명·기존 골든의 멤버0 경로 호환).
+    // gen_pet_meta.py의 LEGACY_TS 검증과 대칭(클라 쪽 fail-closed).
+    func testLegacyIdsRemainAtPoolHead() {
+        XCTAssertEqual(SkillCatalog.genericPool[0].id, "hotfix")
+        let legacy: [BattleType: String] = [
+            .beast: "mem_leak", .warrior: "force_push", .chaos: "friday_deploy",
+            .arcane: "context_overflow", .machine: "regression_sweep", .mascot: "onboarding",
+        ]
+        for (t, id) in legacy {
+            XCTAssertEqual(SkillCatalog.typeSharedPools[t]![0].id, id, "\(t) 풀 idx0은 기존 id여야")
+        }
+    }
+
+    // 배정 결정성 + 다양성 — 같은 kind는 항상 같은 배정, 풀의 모든 엔트리가 실제로 ≥1 kind에 배정된다
+    // (죽은 엔트리 = 컬렉션 멤버 수 대비 풀 과대 신호).
+    func testAssignmentDeterministicAndAllPoolEntriesUsed() {
+        var usedGeneric = Set<String>(), usedTs = Set<String>()
+        for k in PetKind.allCases {
+            XCTAssertEqual(SkillCatalog.generic(for: k).id, SkillCatalog.generic(for: k).id)
+            XCTAssertEqual(SkillCatalog.typeShared(for: k).id, SkillCatalog.typeShared(for: k).id)
+            usedGeneric.insert(SkillCatalog.generic(for: k).id)
+            usedTs.insert(SkillCatalog.typeShared(for: k).id)
+        }
+        XCTAssertEqual(usedGeneric, Set(SkillCatalog.genericPool.map { $0.id }), "generic 풀에 미사용 엔트리")
+        let allTs = Set(SkillCatalog.typeSharedPools.values.flatMap { $0.map { $0.id } })
+        XCTAssertEqual(usedTs, allTs, "typeShared 풀에 미사용 엔트리")
     }
 
     // 결정적 선택 AI — 점수 최대. Phase A는 두 스킬 다 자기 타입이라 power 큰 typeShared를 항상 채택.
@@ -76,16 +122,19 @@ final class PetSkillsTests: XCTestCase {
         XCTAssertEqual(pick.id, "a")
     }
 
-    // variant 0 펫은 generic 하나뿐 → 항상 hotfix.
-    func testVariantZeroAlwaysHotfix() {
-        let skills = SkillCatalog.skills(kind: .scrapBot, variant: 0)   // machine
+    // variant 0 펫은 generic 하나뿐 → 배정된 generic이 그대로 선택된다(scrapBot 배정 = git_blame).
+    func testVariantZeroPicksAssignedGeneric() {
+        let skills = SkillCatalog.skills(kind: .scrapBot, variant: 0)   // machine, ciRunners 멤버0
+        XCTAssertEqual(skills.count, 1)
         let pick = SkillCatalog.select(from: skills, attackerType: .machine, defenderType: .beast)
-        XCTAssertEqual(pick.id, "hotfix")
+        XCTAssertEqual(pick.id, skills[0].id)
+        XCTAssertEqual(pick.tier, .generic)
     }
 
     // 선택 점수식 = power × skillEff × stab.
     func testScoreFormula() {
-        let s = SkillCatalog.typeShared(for: .beast)   // power 11, beast
+        let s = SkillCatalog.typeShared(for: .fox)   // fox=beast 멤버0 → mem_leak, power 11
+        XCTAssertEqual(s.id, "mem_leak")
         // beast 스킬 vs chaos(=beast가 이김) : 11 × 2.0 × 1.5(자속) = 33
         XCTAssertEqual(SkillCatalog.score(s, attackerType: .beast, defenderType: .chaos), 33.0, accuracy: 1e-9)
         // beast 스킬 vs machine(=beast가 짐) : 11 × 0.5 × 1.5 = 8.25
@@ -163,8 +212,8 @@ final class PetSkillsTests: XCTestCase {
     // nameById가 5테이블(generic/typeShared/collectionShared/unique/ultimate)을 병합하며 id로 override하므로,
     // 충돌하면 표시명이 조용히 덮인다.
     func testAllSkillIdsAreUnique() {
-        var ids = ["hotfix"]
-        ids += SkillCatalog.typeSharedTable.values.map { $0.id }
+        var ids = SkillCatalog.genericPool.map { $0.id }
+        ids += SkillCatalog.typeSharedPools.values.flatMap { $0.map { $0.id } }
         ids += SkillCatalog.collectionSharedTable.values.map { $0.id }
         ids += SkillCatalog.uniqueTable.values.map { $0.id }
         ids += SkillCatalog.ultimateTable.values.map { $0.id }

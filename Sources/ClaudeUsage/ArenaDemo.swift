@@ -204,14 +204,15 @@ enum ArenaDemo {
 
     // MARK: 스킬 카탈로그 파리티 (전체 카탈로그 결정적 덤프 — TS와 대조)
     // collectionShared의 type은 **데이터로 지정**돼 데미지를 좌우하는데(파리티-크리티컬), 배틀 골든은
-    // mainframe 경로 하나만 운동시킨다(18/19 무커버). 이 덤프로 6 generic·6 typeShared·19 collectionShared의
+    // mainframe 경로 하나만 운동시킨다(18/19 무커버). 이 덤프로 6 ultimate·19 collectionShared·unique의
     // id/type/power를 통째로 잠가, 어느 컬렉션 엔트리가 Swift↔TS에서 갈라져도 deno 파리티가 잡게 한다.
+    // generic/typeShared는 per-kind 배정으로 전환(카탈로그 다양화) — 전 kind 배정을 PARITYBASE 라인이
+    // 별도로 잠근다(Swift 공식 ↔ py gen 테이블 드리프트 감지).
     private static func skillCatalogSection() {
         var parts: [String] = []
         for t in BattleType.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
-            let g = SkillCatalog.generic(for: t), ts = SkillCatalog.typeShared(for: t), ult = SkillCatalog.ultimate(for: t)
-            parts.append("\(t.rawValue):g=\(g.id)/\(g.type.rawValue)/\(Int(g.power)),ts=\(ts.id)/\(ts.type.rawValue)/\(Int(ts.power))"
-                + ",ult=\(ult.id)/\(ult.type.rawValue)/\(Int(ult.power))")
+            let ult = SkillCatalog.ultimate(for: t)
+            parts.append("\(t.rawValue):ult=\(ult.id)/\(ult.type.rawValue)/\(Int(ult.power))")
         }
         for c in PetCollection.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
             let cs = SkillCatalog.collectionShared(for: c)
@@ -221,9 +222,23 @@ enum ArenaDemo {
             let u = SkillCatalog.unique(for: k)!   // uniqueTable 키라 non-nil
             parts.append("\(k.rawValue):u=\(u.id)/\(u.type.rawValue)/\(Int(u.power))")
         }
-        print("\n[ 스킬 카탈로그 파리티 ]  (generic6 · typeShared6 · ultimate6 · collectionShared19 · unique\(SkillCatalog.uniqueTable.count))")
+        print("\n[ 스킬 카탈로그 파리티 ]  (ultimate6 · collectionShared19 · unique\(SkillCatalog.uniqueTable.count))")
         print("  PARITYSKILLCAT \(parts.joined(separator: " "))")
+        baseSkillSection()
         effectCatalogSection()
+    }
+
+    // MARK: 베이스 스킬 배정 파리티 — 전 kind의 generic/typeShared per-kind 배정을 통째로 잠근다.
+    // Swift 배정 공식(SkillCatalog.assignIndex 파생)과 서버 resolved 테이블(gen_pet_meta.py emit)은
+    // 별도 구현이라, 어느 쪽이 드리프트해도 이 골든과 deno 재계산이 어긋나 잡힌다.
+    private static func baseSkillSection() {
+        var parts: [String] = []
+        for k in PetKind.allCases.sorted(by: { $0.rawValue < $1.rawValue }) {
+            let g = SkillCatalog.generic(for: k), ts = SkillCatalog.typeShared(for: k)
+            parts.append("\(k.rawValue):g=\(g.id)/\(g.type.rawValue)/\(Int(g.power)),ts=\(ts.id)/\(ts.type.rawValue)/\(Int(ts.power))")
+        }
+        print("\n[ 베이스 스킬 배정 파리티 ]  (generic 풀 \(SkillCatalog.genericPool.count) · typeShared 풀 \(SkillCatalog.typeSharedPools.values.map(\.count).reduce(0, +)) · \(PetKind.allCases.count) kinds)")
+        print("  PARITYBASE \(parts.joined(separator: " "))")
     }
 
     // MARK: 효과 카탈로그 파리티 (E2) — 효과 정의 14종 + rider 배정 + 궁극기 특수효과를 통째로 잠근다.
