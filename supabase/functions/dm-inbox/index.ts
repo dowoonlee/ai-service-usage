@@ -5,11 +5,16 @@
 // 서버는 나와 얽힌 메시지(발신/수신)를 상대(peer)별로 묶어 최근 1건을 요약해 준다. 본문은
 // E2EE라 서버가 못 읽으므로 ciphertext 그대로 내려주고, 클라가 복호(수신분)하거나 로컬 echo
 // (발신분)로 미리보기를 만든다. 삭제(tombstone)된 내 쪽은 제외.
+//
+// 응답의 `invites`는 받은 길드 초대 — 클라의 통합 인박스 배지가 "미확인 쪽지 + 대기중 초대"
+// 라서 예전엔 guild-invite(list)를 따로 한 번 더 호출했다. 배지 하나에 함수 호출 두 개는
+// 배경 폴링에 곱해지면 무료 플랜 쿼터를 갉아먹어서 여기로 합쳤다.
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { listPendingInvites } from "../_shared/guild_invites.ts";
 
 interface InboxPayload {
   deviceId: string;
@@ -114,7 +119,17 @@ Deno.serve(async (req: Request) => {
     for (const k of keys ?? []) pubById.set(k.device_id, k.x25519_pub);
   }
 
+  // 받은 길드 초대 — 실패해도 쪽지 목록은 내려간다(빈 배열). 구버전 클라는 이 필드를
+  // 무시하고 guild-invite(list)를 계속 쓰므로 응답 추가는 하위호환이다.
+  let invites: Awaited<ReturnType<typeof listPendingInvites>> = [];
+  try {
+    invites = await listPendingInvites(db, deviceId);
+  } catch (error) {
+    console.error("dm-inbox invite list failed", error);
+  }
+
   return jsonResponse({
+    invites,
     threads: list.map((t) => ({
       peerDevice: t.peerDevice,
       peerNickname: nickById.get(t.peerDevice) ?? null,

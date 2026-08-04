@@ -13,6 +13,7 @@ import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { checkJoinCooldown } from "../_shared/guild_policy.ts";
+import { listPendingInvites } from "../_shared/guild_invites.ts";
 
 type InviteAction = "list" | "accept" | "decline";
 const INVITE_ACTIONS: ReadonlySet<string> = new Set(["list", "accept", "decline"]);
@@ -78,50 +79,14 @@ Deno.serve(async (req: Request) => {
   const nowIso = new Date().toISOString();
 
   if (p.action === "list") {
-    // 대기중 + 미만료 초대. guild_id는 FK라 embed로 길드명, inviter는 FK 없어 별도 조회.
-    const { data: invites, error } = await db
-      .from("guild_invites")
-      .select("id, guild_id, inviter_device_id, expires_at, created_at, guilds(name)")
-      .eq("invitee_device_id", deviceId)
-      .eq("status", "pending")
-      .gt("expires_at", nowIso)
-      .order("created_at", { ascending: false });
-    if (error) {
+    // 구현은 _shared/guild_invites.ts — dm-inbox가 같은 목록을 응답에 얹는다.
+    // 이 분기는 그 필드를 모르는 구버전 클라를 위해 유지된다.
+    try {
+      return jsonResponse({ invites: await listPendingInvites(db, deviceId) });
+    } catch (error) {
       console.error("guild-invite list failed", error);
       return errorResponse(500, "list_failed");
     }
-    const rows = invites ?? [];
-    // inviter 닉네임 일괄 조회.
-    const inviterIds = [...new Set(rows.map((r) => r.inviter_device_id))];
-    const nickById = new Map<string, string>();
-    if (inviterIds.length > 0) {
-      const { data: inviters } = await db
-        .from("users")
-        .select("device_id, nickname")
-        .in("device_id", inviterIds);
-      for (const u of inviters ?? []) nickById.set(u.device_id, u.nickname);
-    }
-    // 멤버 수 — 초대에 걸린 길드들만.
-    const guildIds = [...new Set(rows.map((r) => r.guild_id))];
-    const countByGuild = new Map<string, number>();
-    for (const gid of guildIds) {
-      const { count } = await db
-        .from("guild_members")
-        .select("device_id", { count: "exact", head: true })
-        .eq("guild_id", gid);
-      countByGuild.set(gid, count ?? 0);
-    }
-    return jsonResponse({
-      invites: rows.map((r) => ({
-        inviteId: r.id,
-        guildId: r.guild_id,
-        // deno-lint-ignore no-explicit-any
-        guildName: (r.guilds as any)?.name ?? "",
-        inviterNickname: nickById.get(r.inviter_device_id) ?? null,
-        memberCount: countByGuild.get(r.guild_id) ?? 0,
-        expiresAt: r.expires_at,
-      })),
-    });
   }
 
   // accept / decline — 이 초대가 내 것(피초대자=나) + 대기중 + 미만료여야.

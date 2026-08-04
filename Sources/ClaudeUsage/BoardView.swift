@@ -90,12 +90,16 @@ struct BoardView: View {
             // 윈도우 표시 → 미확인 카운트 즉시 0. 활성자만 fetch.
             if rankingActive {
                 NotificationCenter.default.post(name: .boardSeen, object: nil)
+                // 이 창이 떠 있는 동안은 메인 폴링 사이클의 unread 조회가 같은 `board`
+                // 엔드포인트를 중복 호출하지 않게 한다.
+                PollGate.boardViewIsOpen = true
                 refresh()
                 startPolling()
                 startClockTick()
             }
         }
         .onDisappear {
+            PollGate.boardViewIsOpen = false
             refreshTask?.cancel()
             pollTask?.cancel()
             cooldownTickTask?.cancel()
@@ -382,10 +386,12 @@ struct BoardView: View {
         pollTask?.cancel()
         pollTask = Task { @MainActor in
             while !Task.isCancelled {
-                // 60s 주기 — 게시판이 채팅 아닌 게시판 톤이라 1분 충분. Supabase free tier
-                // (500K invocations/mo) 안전마진 확보. 50명 active 사용자 시 30s는 한계 근처.
-                try? await Task.sleep(for: .seconds(60))
+                // 180s 주기 — 게시판이 채팅 아닌 게시판 톤이고, 실제 글 유입은 주 단위라
+                // 1분은 과했다(무료 플랜 550K invocations/mo 대비 board 단독 26%).
+                try? await Task.sleep(for: .seconds(180))
                 if Task.isCancelled { return }
+                // 패널이 숨겨졌거나 시스템 sleep이면 건너뛴다 — 창을 다시 열면 곧 재개된다.
+                guard PollGate.shouldPoll else { continue }
                 refresh()
             }
         }

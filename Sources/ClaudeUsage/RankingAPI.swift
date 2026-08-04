@@ -1339,7 +1339,13 @@ actor RankingAPI {
         let unreadCount: Int
         var id: String { peerDevice }
     }
-    struct DMInboxResponse: Decodable, Sendable { let threads: [DMThread] }
+    /// dm-inbox 응답. `invites`는 통합 인박스용 길드 초대 — 서버가 이 필드를 내려주기
+    /// 전(v0.17.10 이하) 빌드와 섞일 수 있어 optional이다. nil이면 호출부가
+    /// `listGuildInvites`로 폴백한다.
+    struct DMInboxResponse: Decodable, Sendable {
+        let threads: [DMThread]
+        let invites: [GuildReceivedInvite]?
+    }
 
     /// 스레드 한 메시지 (dm-thread). fromMe면 로컬 echo, 아니면 HPKE 복호.
     struct DMMessage: Decodable, Sendable, Identifiable {
@@ -1435,12 +1441,12 @@ actor RankingAPI {
         return try await post(path: "dm-send", body: DMSendRequest(payload: payload, signature: sig))
     }
 
-    func dmInbox(deviceId: String, hmacKeyBase64: String) async throws -> [DMThread] {
+    /// 쪽지 스레드 요약 + (서버가 지원하면) 받은 길드 초대를 한 번에.
+    func dmInbox(deviceId: String, hmacKeyBase64: String) async throws -> DMInboxResponse {
         let payload = DMInboxPayload(deviceId: deviceId, ts: nowTs())
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
-        let resp: DMInboxResponse = try await post(path: "dm-inbox",
-                                                   body: DMInboxRequest(payload: payload, signature: sig))
-        return resp.threads
+        return try await post(path: "dm-inbox",
+                              body: DMInboxRequest(payload: payload, signature: sig))
     }
 
     func dmThread(deviceId: String, peerDevice: String,
