@@ -622,7 +622,7 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  defaultTheme: .space)
         case .miniBot:
             return PetDefinition(prefix: "MiniBot", displayName: "꼬마 로봇",
-                                 cellSize: (14, 25), defaultFacingLeft: false,
+                                 cellSize: (14, 18), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .space)
         case .visorBot:
@@ -981,7 +981,7 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  defaultTheme: .wilderness)
         case .dinoDragon:
             return PetDefinition(prefix: "DinoDragon", displayName: "새끼 드래곤",
-                                 cellSize: (93, 86), defaultFacingLeft: true,
+                                 cellSize: (98, 65), defaultFacingLeft: true,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .volcano)
         case .dinoBug:
@@ -991,22 +991,22 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  defaultTheme: .field)
         case .dinoLizard:
             return PetDefinition(prefix: "DinoLizard", displayName: "고대 도마뱀",
-                                 cellSize: (97, 68), defaultFacingLeft: true,
+                                 cellSize: (105, 45), defaultFacingLeft: true,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .desert)
         case .miniRex:
             return PetDefinition(prefix: "MiniRex", displayName: "아기 렉스",
-                                 cellSize: (80, 82), defaultFacingLeft: true,
+                                 cellSize: (80, 52), defaultFacingLeft: true,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .wilderness)
         case .dinoPlant:
             return PetDefinition(prefix: "DinoPlant", displayName: "식충 식물룡",
-                                 cellSize: (135, 113), defaultFacingLeft: true,
+                                 cellSize: (135, 82), defaultFacingLeft: true,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .toxic)
         case .pterodactyl:
             return PetDefinition(prefix: "Pterodactyl", displayName: "프테라노돈",
-                                 cellSize: (122, 150), defaultFacingLeft: true,
+                                 cellSize: (126, 113), defaultFacingLeft: true,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .aurora)
         case .dinoTurtle:
@@ -1038,7 +1038,7 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  defaultTheme: .grassland)
         case .dragonMan:
             return PetDefinition(prefix: "DragonMan", displayName: "드래곤맨",
-                                 cellSize: (145, 134), defaultFacingLeft: false,
+                                 cellSize: (58, 67), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .volcano)
         case .lionWarrior:
