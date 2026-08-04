@@ -105,18 +105,22 @@ final class DMViewModel: ObservableObject {
     /// 인박스 갱신. `full`이 false면 배지 계산에 필요한 것만 가져온다 — 배경 폴링용.
     ///
     /// 예전엔 호출 한 번이 `dm-inbox` + `guild-invite` + `dm-settings` 세 함수를 모두 때려서
-    /// 300s 루프가 기기당 하루 864회를 썼다. 수신 정책·차단 목록은 배지와 무관하니
-    /// 쪽지 창을 실제로 열 때만 가져오고, 길드 초대는 `visibleInvites`가 무소속일 때만
-    /// 노출하므로 소속 중엔 아예 조회하지 않는다.
+    /// 300s 루프가 기기당 하루 864회를 썼다. 지금은 초대가 `dm-inbox` 응답에 실려 오고,
+    /// 수신 정책·차단 목록은 배지와 무관하니 쪽지 창을 실제로 열 때만 가져온다.
     func refreshInbox(silent: Bool = false, full: Bool = true) async {
         guard ready else { return }
         if !silent { loading = true; error = nil }
         defer { if !silent { loading = false } }
         await publishKeyIfNeeded()
+        // 서버가 초대를 함께 내려줬는지 — nil이면 구버전 서버라 아래에서 따로 조회한다.
+        var embeddedInvites: [RankingAPI.GuildReceivedInvite]?
+        var inboxOK = false
         do {
-            let raw = try await RankingAPI.shared.dmInbox(deviceId: device, hmacKeyBase64: hmac)
+            let resp = try await RankingAPI.shared.dmInbox(deviceId: device, hmacKeyBase64: hmac)
+            embeddedInvites = resp.invites
+            inboxOK = true
             var rows: [ThreadRow] = []
-            for t in raw {
+            for t in resp.threads {
                 var keyChanged = false
                 if let pub = t.peerIdPub {
                     switch DMStore.shared.evaluate(device: t.peerDevice, serverPub: pub) {
@@ -135,14 +139,18 @@ final class DMViewModel: ObservableObject {
         } catch {
             if !silent { self.error = mapError(error) }
         }
-        // 받은 길드 초대도 함께 적재 (통합 인박스). 실패는 조용히 무시.
-        // 소속 중이면 `visibleInvites`가 어차피 비므로 조회 자체를 건너뛴다.
-        if Settings.shared.guildID.isEmpty {
+        // 받은 길드 초대 (통합 인박스). 소속 중이면 `visibleInvites`가 어차피 비므로 버린다.
+        if !Settings.shared.guildID.isEmpty {
+            if !invites.isEmpty { invites = [] }
+        } else if let embedded = embeddedInvites {
+            invites = embedded
+        } else if inboxOK {
+            // 구버전 서버 폴백 — 응답에 invites 필드가 없을 때만 별도 호출. 실패는 조용히 무시.
             invites = (try? await RankingAPI.shared.listGuildInvites(
                 deviceId: device, hmacKeyBase64: hmac)) ?? []
-        } else if !invites.isEmpty {
-            invites = []
         }
+        // 인박스 호출 자체가 실패했으면 직전 초대 목록을 유지한다 — 일시적 네트워크 오류로
+        // 배지가 깜빡이지 않게.
         // 수신 정책·차단 목록은 스레드의 차단 상태 표시용 — 창을 열 때만 필요하다.
         if full { await loadSettings() }
     }
