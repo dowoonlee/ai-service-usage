@@ -30,6 +30,10 @@ final class DMViewModel: ObservableObject {
 
     private var didPublishThisSession = false
     private var refreshTask: Task<Void, Never>?
+    /// peerDevice → 마지막으로 서버에 올린 읽음 지점(ts). 주기 폴링마다 같은 ts를
+    /// 재전송하던 걸 막는다 — 스레드를 열어두면 `dm-read`만으로 하루 1만 회를 먹었다.
+    /// 세션 메모리라 앱 재시작 시 스레드당 1회 재전송되는데, 그 정도는 무해하다.
+    private var lastReadSentTs: [String: Int64] = [:]
 
     /// 인박스 행 — 복호/echo로 만든 미리보기 포함.
     struct ThreadRow: Identifiable {
@@ -53,6 +57,18 @@ final class DMViewModel: ObservableObject {
     private var hmac: String { Keychain.loadRankingHmacKey() ?? "" }
     private var ready: Bool { RankingAPI.isConfigured && Settings.shared.rankingRegistered && !device.isEmpty }
 
+    /// 열린 스레드 폴링 주기 — 대화가 오가는 동안은 active, 무활동이 이어지면 idle로 늘린다.
+    /// 8s 고정이던 시절엔 스레드 하나를 열어둔 채 방치하는 것만으로 월 60만 invocation이
+    /// 나갔다(무료 플랜 쿼터 55만). 실제 쪽지 유입은 주 단위라 20s로도 체감 차이가 없다.
+    static let threadPollActiveSec: Double = 20
+    static let threadPollIdleSec: Double = 60
+    /// 마지막 활동 후 이만큼 조용하면 idle 주기로 전환.
+    static let threadPollIdleAfterSec: Double = 120
+
+    /// 열린 스레드에서 마지막으로 메시지가 오간 시각 — 폴링 주기 결정에만 쓴다.
+    /// 스레드를 열거나 메시지를 주고받으면 갱신되므로, 발신 직후에도 active 주기가 유지된다.
+    private(set) var lastThreadActivityAt = Date()
+
     /// 무소속일 때만 초대 노출 — 소속 중엔 수락 불가라 숨긴다.
     var visibleInvites: [RankingAPI.GuildReceivedInvite] {
         Settings.shared.guildID.isEmpty ? invites : []
@@ -68,7 +84,9 @@ final class DMViewModel: ObservableObject {
         refreshTask?.cancel()
         refreshTask = Task { @MainActor in
             while !Task.isCancelled {
-                if ready { await refreshInbox(silent: true) }
+                // MainView가 배지 때문에 이 싱글턴을 잡고 있어서 쪽지 창을 한 번도 안 열어도
+                // 앱 수명 내내 돈다 → 가시성 게이트가 없으면 숨긴 패널에서도 계속 나간다.
+                if ready && PollGate.shouldPoll { await refreshInbox(silent: true, full: false) }
                 try? await Task.sleep(for: .seconds(300))
             }
         }
@@ -84,7 +102,13 @@ final class DMViewModel: ObservableObject {
         } catch { /* 다음 시도에서 재게시 */ }
     }
 
-    func refreshInbox(silent: Bool = false) async {
+    /// 인박스 갱신. `full`이 false면 배지 계산에 필요한 것만 가져온다 — 배경 폴링용.
+    ///
+    /// 예전엔 호출 한 번이 `dm-inbox` + `guild-invite` + `dm-settings` 세 함수를 모두 때려서
+    /// 300s 루프가 기기당 하루 864회를 썼다. 수신 정책·차단 목록은 배지와 무관하니
+    /// 쪽지 창을 실제로 열 때만 가져오고, 길드 초대는 `visibleInvites`가 무소속일 때만
+    /// 노출하므로 소속 중엔 아예 조회하지 않는다.
+    func refreshInbox(silent: Bool = false, full: Bool = true) async {
         guard ready else { return }
         if !silent { loading = true; error = nil }
         defer { if !silent { loading = false } }
@@ -112,10 +136,15 @@ final class DMViewModel: ObservableObject {
             if !silent { self.error = mapError(error) }
         }
         // 받은 길드 초대도 함께 적재 (통합 인박스). 실패는 조용히 무시.
-        invites = (try? await RankingAPI.shared.listGuildInvites(
-            deviceId: device, hmacKeyBase64: hmac)) ?? []
-        // 수신 정책·차단 목록도 갱신 (스레드의 차단 상태 표시에 사용).
-        await loadSettings()
+        // 소속 중이면 `visibleInvites`가 어차피 비므로 조회 자체를 건너뛴다.
+        if Settings.shared.guildID.isEmpty {
+            invites = (try? await RankingAPI.shared.listGuildInvites(
+                deviceId: device, hmacKeyBase64: hmac)) ?? []
+        } else if !invites.isEmpty {
+            invites = []
+        }
+        // 수신 정책·차단 목록은 스레드의 차단 상태 표시용 — 창을 열 때만 필요하다.
+        if full { await loadSettings() }
     }
 
     private func previewText(for t: RankingAPI.DMThread) -> String {
@@ -134,8 +163,9 @@ final class DMViewModel: ObservableObject {
         if openPeer != peer { openMessages = []; openPeerNickname = nil }  // 다른 상대면 잔상 제거
         openPeer = peer
         error = nil
+        lastThreadActivityAt = Date()   // 막 연 스레드는 active 주기로 시작
         await refreshOpenThread(silent: false)
-        await refreshInbox(silent: true)   // 인박스 미확인 배지 즉시 반영
+        await refreshInbox(silent: true, full: false)   // 인박스 미확인 배지 즉시 반영
     }
 
     /// 열린 스레드 재로드(복호 + 읽음 처리). 최초 오픈·발신·주기 폴링(뷰 `.task`)에서 재사용.
@@ -161,12 +191,22 @@ final class DMViewModel: ObservableObject {
                 }
             }
             guard openPeer == peer else { return }   // 그 사이 닫히거나 바뀌면 무시
+            if msgs.count != openMessages.count || msgs.last?.id != openMessages.last?.id {
+                lastThreadActivityAt = Date()
+            }
             openPeerNickname = resp.peerNickname
             openMessages = msgs
+            // 읽음 처리는 직전에 올린 지점보다 새 수신이 있을 때만. 실패 시 캐시를 갱신하지
+            // 않으므로 다음 폴링에서 자연히 재시도된다.
             if let latest = latestReceived {
-                try? await RankingAPI.shared.dmRead(
-                    deviceId: device, peerDevice: peer,
-                    upToTs: Int64(latest.timeIntervalSince1970) + 1, hmacKeyBase64: hmac)
+                let ts = Int64(latest.timeIntervalSince1970) + 1
+                if ts > lastReadSentTs[peer] ?? 0 {
+                    do {
+                        try await RankingAPI.shared.dmRead(
+                            deviceId: device, peerDevice: peer, upToTs: ts, hmacKeyBase64: hmac)
+                        lastReadSentTs[peer] = ts
+                    } catch { /* 다음 폴링에서 재시도 */ }
+                }
             }
         } catch {
             if !silent { self.error = mapError(error) }
@@ -175,7 +215,7 @@ final class DMViewModel: ObservableObject {
 
     func closeThread() {
         openPeer = nil; openMessages = []; openPeerNickname = nil
-        Task { await refreshInbox(silent: true) }
+        Task { await refreshInbox(silent: true, full: false) }
     }
 
     /// 현재 열린 대화를 내 쪽에서 삭제(tombstone). 상대 사본은 유지.
@@ -228,7 +268,7 @@ final class DMViewModel: ObservableObject {
             if openPeer == key.deviceId {
                 await openThread(peer: key.deviceId)
             } else {
-                await refreshInbox(silent: true)
+                await refreshInbox(silent: true, full: false)
             }
         } catch {
             self.error = mapError(error)
@@ -248,7 +288,7 @@ final class DMViewModel: ObservableObject {
             Settings.shared.guildName = resp.name
             Settings.shared.isGuildLeader = false
             DebugLog.log("DM: 길드 초대 수락 → [\(resp.name)] (\(resp.memberCount)명)")
-            await refreshInbox(silent: true)
+            await refreshInbox(silent: true, full: false)
         } catch {
             self.error = mapInviteError(error)
         }
@@ -596,12 +636,19 @@ private struct DMThreadView: View {
             }
             .padding(8)
         }
-        // 스레드가 열려 있는 동안 8초마다 새 메시지 폴링 — 뷰가 사라지면 자동 취소.
+        // 스레드가 열려 있는 동안 새 메시지 폴링 — 뷰가 사라지면 자동 취소.
+        // 새 메시지가 오면 active 주기, 2분간 조용하면 idle 주기로 물러난다.
         .task(id: vm.openPeer) {
             guard vm.openPeer != nil else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(8))
+                let quietFor = Date().timeIntervalSince(vm.lastThreadActivityAt)
+                let sleepSec = quietFor > DMViewModel.threadPollIdleAfterSec
+                    ? DMViewModel.threadPollIdleSec
+                    : DMViewModel.threadPollActiveSec
+                try? await Task.sleep(for: .seconds(sleepSec))
                 if Task.isCancelled { break }
+                // 패널이 숨겨졌거나 시스템 sleep이면 건너뛴다.
+                guard PollGate.shouldPoll else { continue }
                 await vm.refreshOpenThread()
             }
         }

@@ -664,6 +664,8 @@ struct GuildView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(300))
                 if Task.isCancelled { break }
+                // 패널이 숨겨졌거나 시스템 sleep이면 건너뛴다 (PollGate).
+                guard PollGate.shouldPoll else { continue }
                 refresh()
             }
         }

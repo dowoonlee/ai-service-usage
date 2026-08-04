@@ -113,10 +113,11 @@ final class ViewModel: ObservableObject {
     // (3) sleep gate: macOS sleep/wake 동안 폴링 중단 (깨자마자 폭주 방지).
     // (4) visibility gate: panel/menu bar 모두 안 보이면 폴링 skip.
     /// 폴링 cycle 직전 visibility 검사용 — App.swift가 panel show/orderOut 시 갱신.
-    /// 기본값 true (panel 가시 가정), 메뉴바 모드는 `Settings.showMenuBar`로 별도 판단.
-    var panelIsVisible: Bool = true
-    /// macOS sleep 진입 동안 true. didWake 시 false → polling 재개.
-    private var isSystemSleeping: Bool = false
+    /// 실체는 `PollGate` — 뷰 레벨 폴링 루프도 같은 값을 봐야 해서 그쪽으로 옮겼다.
+    var panelIsVisible: Bool {
+        get { PollGate.panelIsVisible }
+        set { PollGate.panelIsVisible = newValue }
+    }
     /// 연속된 transient 실패 (429/5xx/network) 카운터. 성공 시 0으로 reset.
     /// sleep 시간을 2^min(n,4) 배 (최대 16x) 늘려서 endpoint에 부담 안 주게 backoff.
     private var consecutiveBackoffSteps: Int = 0
@@ -391,11 +392,7 @@ final class ViewModel: ObservableObject {
     }
 
     /// 현재 polling을 진행할지 결정. macOS sleep 또는 가시 surface(패널/메뉴바) 둘 다 없으면 false.
-    private func shouldPollNow() -> Bool {
-        if isSystemSleeping { return false }
-        let visibleSurface = panelIsVisible || Settings.shared.showMenuBar
-        return visibleSurface
-    }
+    private func shouldPollNow() -> Bool { PollGate.shouldPoll }
 
     /// 한 cycle의 결과로 backoff counter + schema-suspect counter 갱신.
     /// transient/schema-suspect 모두 backoff 대상 (endpoint 부담 줄이기).
@@ -436,15 +433,15 @@ final class ViewModel: ObservableObject {
     /// sleep 동안 polling task가 내부적으로 멈춘다 (Task.sleep가 wall-clock 기반이라 자동 보정됨).
     func registerSleepWakeObservers() {
         let nc = NSWorkspace.shared.notificationCenter
-        nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.isSystemSleeping = true
+        nc.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in
+                PollGate.isSystemSleeping = true
                 DebugLog.log("System will sleep — polling paused")
             }
         }
-        nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.isSystemSleeping = false
+        nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+            Task { @MainActor in
+                PollGate.isSystemSleeping = false
                 DebugLog.log("System did wake — polling resumed")
             }
         }
@@ -863,6 +860,9 @@ final class ViewModel: ObservableObject {
             if boardUnreadCount != 0 { boardUnreadCount = 0 }
             return
         }
+        // 게시판 창이 떠 있으면 그쪽 폴링이 같은 `board` 엔드포인트를 이미 치고 있고,
+        // 카운트도 .boardSeen으로 0이라 여기서 또 부를 이유가 없다.
+        guard !PollGate.boardViewIsOpen else { return }
         do {
             let resp = try await RankingAPI.shared.fetchBoard(deviceId: s.rankingDeviceID)
             // 첫 fetch — boardLastSeenAt 시드. 과거 글이 다 unread로 잡히지 않게.
