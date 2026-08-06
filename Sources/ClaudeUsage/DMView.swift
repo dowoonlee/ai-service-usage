@@ -617,6 +617,19 @@ private struct DMThreadView: View {
             if let error = vm.error {
                 Text(error).font(.system(size: 11)).foregroundStyle(.red).padding(8)
             }
+            // 상대가 계정을 복구하면 x25519 키가 새로 게시되어 핀된 키와 어긋난다(.changed).
+            // 이때 send는 경고만 세우고 조용히 반환하므로, 작성 시트와 동일한 신뢰 확인 UI가
+            // 여기에도 없으면 "전송을 눌러도 아무 일도 안 일어나는" 상태가 된다.
+            if let warn = vm.keyChangeWarning, warn == vm.openPeerNickname {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("⚠ \(warn)님의 보안 키가 바뀌었어요. 기기 변경/재설치일 수 있어요.")
+                        .font(.system(size: 10)).foregroundStyle(.orange)
+                    Button("새 키 신뢰하고 보내기") { sendDraft(trust: true) }
+                        .font(.system(size: 11)).controlSize(.small)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
@@ -701,12 +714,16 @@ private struct DMThreadView: View {
         .menuStyle(.borderlessButton).frame(width: 28)
     }
 
-    private func sendDraft() {
+    /// 전송 성공했을 때만 입력창을 비운다 — 키 변경 경고·네트워크 실패로 반려되면 원문이
+    /// 사라져 "글자만 없어지고 안 보내진다"로 보였다. 경고 배너의 재시도도 이 draft를 쓴다.
+    private func sendDraft(trust: Bool = false) {
         let text = draft
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty,
               let nick = vm.openPeerNickname else { return }
-        draft = ""
-        Task { await vm.send(toNickname: nick, text: text) }
+        Task {
+            await vm.send(toNickname: nick, text: text, trustChangedKey: trust)
+            if vm.keyChangeWarning == nil && vm.error == nil { draft = "" }
+        }
     }
 
     @ViewBuilder
