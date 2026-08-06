@@ -102,6 +102,63 @@ enum EffectCategory: String, CaseIterable, Identifiable {
     }
 }
 
+/// RP 증감 1건의 기록. "언제 얼마가 왜" 들어왔는지 확인할 수 없어 정상 적립조차 "안 들어온다"로
+/// 체감되던 문제(#191)의 대응 — `RankPointLedger`가 모든 증감의 단일 경유점이라 여기서만 쌓으면
+/// 누락이 없다. `amount`는 부호 있는 값(적립 +, 소비 −).
+struct RPHistoryEntry: Codable, Identifiable, Sendable {
+    let id: UUID
+    let date: Date
+    let amount: Int
+    /// ledger reason 코드 원문 (예: `rank.weekly.2026-W30.5`, `effect.aura.fox`). 표시용 문구는
+    /// `label`이 파생 — 원문을 보존해야 나중에 표기를 바꿔도 과거 기록이 살아난다.
+    let reason: String
+
+    init(amount: Int, reason: String, date: Date = Date()) {
+        self.id = UUID()
+        self.date = date
+        self.amount = amount
+        self.reason = reason
+    }
+
+    /// reason 코드 → 사용자용 한국어 라벨. 알 수 없는 코드는 적립/사용으로만 표기해 앞으로
+    /// 새 reason이 추가돼도 UI가 깨지지 않는다.
+    var label: String {
+        // reason 코드의 구분자가 소스마다 다르다 — 정산은 `rank.weekly.2026-W30.5`(점),
+        // 이펙트 구매는 `effect:fox:aura`(콜론). 종류 판정은 첫 토큰만 보므로 둘 다 받는다.
+        let head = String(reason.prefix { $0 != "." && $0 != ":" })
+        let parts = reason.split(separator: ".").map(String.init)
+        switch head {
+        case "rank":
+            // rank.<periodType>.<period>.<rank> — 예: rank.weekly.2026-W30.5
+            guard parts.count >= 4 else { return "순위 정산" }
+            let kind: String
+            switch parts[1] {
+            case "weekly":         kind = "주간 정산"
+            case "monthly":        kind = "월간 정산"
+            case "guild-monthly":  kind = "길드 시상"
+            default:               kind = "순위 정산"
+            }
+            return "\(kind) \(parts[2]) · \(parts[3])위"
+        case "grant":
+            let key = parts.dropFirst().joined(separator: ".")
+            if key.hasPrefix("pvp-season") { return "아레나 시즌 보상" }
+            return "보상 지급"
+        case "contributor": return "기여자 보너스"
+        case "coffee":      return "커피 후원 감사 보상"
+        case "effect":
+            // effect:<petKind>:<effectKind> — 이펙트 이름까지 보여준다.
+            let fields = reason.split(separator: ":").map(String.init)
+            if fields.count >= 3, let kind = EffectKind(rawValue: fields[2]) {
+                return "이펙트 구매 · \(kind.displayName)"
+            }
+            return "이펙트 구매"
+        case "premiumTicket": return "프리미엄 가챠권 구매"
+        case "guild":       return parts.count > 1 && parts[1] == "rename" ? "길드명 변경" : "길드"
+        default:            return amount >= 0 ? "적립" : "사용"
+        }
+    }
+}
+
 /// RP 적립/소비 ledger. 코인 경제(`CoinLedger`)와 완전 독립이며, 사용량 이벤트(`UsageConsumer`)에는
 /// 참여하지 않는다 — faucet은 랭킹 순위 보상(`creditReward`), sink는 이펙트 구매(`purchaseEffect`)와
 /// 프리미엄 가챠권 구매(`purchasePremiumTicket`).
@@ -117,7 +174,21 @@ final class RankPointLedger {
         let s = Settings.shared
         s.rp += amount
         s.rpTotalEarned += amount
+        record(amount, reason: reason)
         DebugLog.log("RankPointLedger: +\(amount) RP (\(reason)) (total=\(s.rp))")
+    }
+
+    /// 보관 상한 — 주간+월간 정산이 연 60건 남짓이라 100건이면 1년 이상 남는다.
+    /// UserDefaults에 통째로 직렬화되므로 무한 성장은 막는다.
+    static let historyLimit = 100
+
+    /// 증감 1건 기록. credit/spend 양쪽이 호출 — 여기 한 곳만 거치면 이력이 새지 않는다.
+    private func record(_ amount: Int, reason: String) {
+        let s = Settings.shared
+        var h = s.rpHistory
+        h.append(RPHistoryEntry(amount: amount, reason: reason))
+        if h.count > Self.historyLimit { h.removeFirst(h.count - Self.historyLimit) }
+        s.rpHistory = h
     }
 
     /// 외부 기여자 PR 머지 보너스. PR 1개 = `rpPerContributorPR` RP.
@@ -138,6 +209,7 @@ final class RankPointLedger {
             return false
         }
         s.rp -= amount
+        record(-amount, reason: reason)
         DebugLog.log("RankPointLedger: -\(amount) RP (\(reason)) (balance=\(s.rp))")
         return true
     }

@@ -27,6 +27,8 @@ struct RankingView: View {
     @State private var showingVerify = false
     /// 테넌트 전용 공지 (전역 패치공지와 별개). 비어 있으면 배너 미표시.
     @State private var tenantAnnouncements: [RankingAPI.TenantAnnouncementRow] = []
+    /// RP 적립 이력 시트 트리거.
+    @State private var showingRpHistory = false
 
     enum Scope: String, CaseIterable, Identifiable {
         case personal, guild
@@ -79,6 +81,9 @@ struct RankingView: View {
                 refresh()
             }
         }
+        .sheet(isPresented: $showingRpHistory) {
+            RPHistoryView { showingRpHistory = false }
+        }
     }
 
     private var header: some View {
@@ -110,6 +115,18 @@ struct RankingView: View {
                 .help("지금 회사 이메일로 인증하면 3,000 coin · 3,000 RP를 드립니다.")
             }
             Spacer()
+            // RP 잔액 + 적립 이력 진입점. 정산 RP가 언제 얼마 들어왔는지 확인할 방법이 없어
+            // 정상 적립도 "안 들어온다"로 읽히던 문제(#191)의 대응.
+            Button { showingRpHistory = true } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "diamond.fill")
+                        .font(.system(size: 10)).foregroundStyle(.cyan)
+                    Text("\(settings.rp)")
+                        .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                }
+            }
+            .buttonStyle(.plain)
+            .help("RP 적립 이력 보기")
             if loading {
                 ProgressView().controlSize(.small)
             } else {
@@ -918,6 +935,79 @@ private struct PodiumBubbleTail: Shape {
         p.closeSubpath()
         return p
     }
+}
+
+// MARK: - RP 적립 이력
+
+/// RP 증감 이력 시트. 정산이 알림 없이 조용히 적립돼 "안 들어온다"로 체감되던 문제(#191)의
+/// 근거 화면 — 언제·왜·얼마가 오갔는지 한 화면에서 확인한다. 기록은 `RankPointLedger`가
+/// 단일 경유점으로 쌓으므로 여기선 읽기만 한다.
+private struct RPHistoryView: View {
+    @ObservedObject private var settings = Settings.shared
+    let onDone: () -> Void
+
+    /// 최신순. 저장은 오래된 것 먼저라 표시에서만 뒤집는다.
+    private var entries: [RPHistoryEntry] { settings.rpHistory.reversed() }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Image(systemName: "diamond.fill").font(.system(size: 11)).foregroundStyle(.cyan)
+                Text("RP 적립 이력").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button("닫기") { onDone() }.font(.system(size: 11))
+            }
+            HStack(spacing: 10) {
+                Text("보유 \(settings.rp)")
+                    .font(.system(size: 11, weight: .semibold)).monospacedDigit()
+                Text("누적 적립 \(settings.rpTotalEarned)")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
+            }
+            Divider()
+            if entries.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("아직 적립 이력이 없습니다.")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text("RP는 사용량에 따라 실시간으로 오르지 않습니다. 매주 월요일(주간)·매월 1일(월간) 순위 정산 때 순위에 따라 지급됩니다.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 8)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(entries) { e in
+                            row(e)
+                            Divider().opacity(0.4)
+                        }
+                    }
+                }
+                .frame(maxHeight: 260)
+            }
+        }
+        .padding(16).frame(width: 340)
+    }
+
+    private func row(_ e: RPHistoryEntry) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.label).font(.system(size: 12))
+                Text(Self.dateFormatter.string(from: e.date))
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Text(e.amount >= 0 ? "+\(e.amount)" : "\(e.amount)")
+                .font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                .foregroundStyle(e.amount >= 0 ? Color.cyan : Color.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy.MM.dd HH:mm"
+        return f
+    }()
 }
 
 // (별도 윈도우 컨트롤러 제거됨 — `GachaView`의 .ranking 탭에 임베드.
