@@ -661,18 +661,10 @@ private struct RankingSectionView: View {
                 settings.rankingDeviceID = resp.deviceId
                 settings.rankingNickname = resp.nickname
                 settings.rankingRecoveryCode = recoveryInput
-                // 서버가 알려준 계정 모드에 맞춰 baseline을 복원해 단위 불일치를 막는다.
-                //  · zeroBaseline 계정: baseline = VP - 서버 totalCoins 로 역산 → 복구 직후
-                //    rankingSubmittableTotal(= VP - baseline) == totalCoins == lastSubmittedTotal
-                //    이 되어 delta=0에서 재개, 이후 증가분만 제출(중복/누락 없음). VP가 totalCoins
-                //    보다 작으면 baseline 음수 → 새 디바이스에서도 서버 누적분 위에 정확히 쌓인다.
-                //  · 레거시(또는 구버전 서버 nil): 절대 누적 모드 유지. baseline 미사용이라 관례상 VP.
-                let zeroBaseline = resp.usesZeroBaseline ?? false
-                settings.rankingUsesZeroBaseline = zeroBaseline
-                settings.rankingBaselineCoins = zeroBaseline
-                    ? settings.rankingScoreEarnedVP - resp.totalCoins
-                    : settings.rankingScoreEarnedVP
-                settings.rankingLastSubmittedTotal = resp.totalCoins
+                // 계정 모드와 무관하게 baseline을 서버 누적 기준으로 역산해 단위 불일치를 막는다.
+                // 레거시(절대 누적) 모드를 그대로 유지하면 복구 기기의 로컬 VP가 서버 누적보다
+                // 작을 때 delta가 영구 음수가 되어 제출이 멈췄다 (#197).
+                settings.rebaseRankingBaseline(serverTotal: resp.totalCoins)
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
                 settings.rankingPrivacyAccepted = true
@@ -758,18 +750,10 @@ private struct RankingSectionView: View {
                 }
                 settings.rankingDeviceID = resp.deviceId
                 settings.rankingNickname = resp.nickname
-                // 서버가 알려준 계정 모드에 맞춰 baseline을 복원해 단위 불일치를 막는다.
-                //  · zeroBaseline 계정: baseline = VP - 서버 totalCoins 로 역산 → 복구 직후
-                //    rankingSubmittableTotal(= VP - baseline) == totalCoins == lastSubmittedTotal
-                //    이 되어 delta=0에서 재개, 이후 증가분만 제출(중복/누락 없음). VP가 totalCoins
-                //    보다 작으면 baseline 음수 → 새 디바이스에서도 서버 누적분 위에 정확히 쌓인다.
-                //  · 레거시(또는 구버전 서버 nil): 절대 누적 모드 유지. baseline 미사용이라 관례상 VP.
-                let zeroBaseline = resp.usesZeroBaseline ?? false
-                settings.rankingUsesZeroBaseline = zeroBaseline
-                settings.rankingBaselineCoins = zeroBaseline
-                    ? settings.rankingScoreEarnedVP - resp.totalCoins
-                    : settings.rankingScoreEarnedVP
-                settings.rankingLastSubmittedTotal = resp.totalCoins
+                // 계정 모드와 무관하게 baseline을 서버 누적 기준으로 역산해 단위 불일치를 막는다.
+                // 레거시(절대 누적) 모드를 그대로 유지하면 복구 기기의 로컬 VP가 서버 누적보다
+                // 작을 때 delta가 영구 음수가 되어 제출이 멈췄다 (#197).
+                settings.rebaseRankingBaseline(serverTotal: resp.totalCoins)
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
                 settings.rankingPrivacyAccepted = true

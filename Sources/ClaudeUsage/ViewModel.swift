@@ -563,6 +563,16 @@ final class ViewModel: ObservableObject {
         // (재개·recover 포함) delta 계산이 단위 정합.
         let total = s.rankingSubmittableTotal
         let delta = total - s.rankingLastSubmittedTotal
+        // delta 음수 = 제출 단위 드리프트. 구버전 복구 로직이 레거시 계정을 절대 누적 모드로
+        // 되돌려놓아 로컬 VP가 서버 누적을 따라잡을 때까지 제출이 멈추던 상태다 (#197).
+        // 이 상태는 스스로 낫지 않으므로(로컬 VP만 늘고 lastSubmittedTotal은 고정) 감지 즉시
+        // 서버 누적 기준으로 리베이스해 다음 cycle부터 증가분이 정상 제출되게 한다.
+        // 리베이스는 delta를 0으로 맞출 뿐이라 과거분 이중 제출은 발생하지 않는다.
+        if delta < 0 {
+            s.rebaseRankingBaseline(serverTotal: s.rankingLastSubmittedTotal)
+            DebugLog.log("Ranking: 제출 단위 드리프트 감지 — baseline 리베이스 (VP=\(s.rankingScoreEarnedVP), server=\(s.rankingLastSubmittedTotal))")
+            return
+        }
         guard delta > 0 else { return }
         let profile = ProfileState.current(from: s)
         do {

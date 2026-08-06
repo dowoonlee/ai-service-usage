@@ -632,9 +632,14 @@ final class Settings: ObservableObject {
     /// submit delta 계산·일시정지 재개·recover 동기화가 모두 이 값을 단일 소스로 써야 단위가
     /// 어긋나지 않는다(어긋나면 제출이 장기 정지하거나 점수가 누락됨).
     var rankingSubmittableTotal: Int {
-        rankingUsesZeroBaseline
-            ? max(0, rankingScoreEarnedVP - rankingBaselineCoins)
-            : rankingScoreEarnedVP
+        Settings.submittableTotal(vp: rankingScoreEarnedVP,
+                                  baseline: rankingBaselineCoins,
+                                  usesZeroBaseline: rankingUsesZeroBaseline)
+    }
+
+    /// 위 계산의 순수 함수 버전 — 복구/리베이스 단위 정합을 테스트에서 검증하기 위해 분리.
+    nonisolated static func submittableTotal(vp: Int, baseline: Int, usesZeroBaseline: Bool) -> Int {
+        usesZeroBaseline ? max(0, vp - baseline) : vp
     }
     /// 마지막 성공 제출 시각. 시간 비례 캡 계산(서버측) + UI 표시용.
     @Published var rankingLastSubmittedAt: Date? {
@@ -1491,6 +1496,29 @@ final class Settings: ObservableObject {
         guildID = ""
         guildName = ""
         isGuildLeader = false
+    }
+
+    /// 제출 단위를 서버 누적(`serverTotal`)에 맞춰 재정렬한다. 호출 직후
+    /// `rankingSubmittableTotal == rankingLastSubmittedTotal` 이 되어 delta=0에서 재개하고,
+    /// 이후 로컬 VP 증가분만 정확히 제출된다(중복/누락 없음).
+    ///
+    /// 계정 모드와 **무관하게** zeroBaseline 단위로 통일하는 게 핵심이다 (#197).
+    /// 레거시(절대 누적) 모드는 제출 단위가 로컬 VP 절대값인데, 백업 payload에 VP가 없어
+    /// 새 디바이스·재설치 복구 시 로컬 VP가 0부터 시작한다 → delta = 0 - serverTotal 이
+    /// 영구 음수가 되어 `submitRankingIfNeeded`의 `delta > 0` 가드에 막혀 제출이 멈췄다.
+    /// baseline은 음수를 허용한다 — `rankingSubmittableTotal`이 `VP - baseline`이므로
+    /// 로컬 VP가 서버 누적보다 작아도 서버 누적 위에 정확히 이어 쌓인다.
+    ///
+    /// 어뷰징 무관: 리베이스는 항상 delta를 0으로 맞출 뿐 코인을 credit 하지 않는다.
+    nonisolated static func rebasedRankingBaseline(localVP: Int, serverTotal: Int) -> Int {
+        localVP - serverTotal
+    }
+
+    func rebaseRankingBaseline(serverTotal: Int) {
+        rankingUsesZeroBaseline = true
+        rankingBaselineCoins = Settings.rebasedRankingBaseline(
+            localVP: rankingScoreEarnedVP, serverTotal: serverTotal)
+        rankingLastSubmittedTotal = serverTotal
     }
 
     /// 새 디바이스 복구 직후 서버에서 받은 backup payload를 로컬 상태에 적용.
