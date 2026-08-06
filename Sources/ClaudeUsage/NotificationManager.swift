@@ -120,6 +120,15 @@ final class NotificationManager {
         }
     }
 
+    /// 개인 순위 정산 RP 알림 — 주간(월요일)·월간(1일) claim 성공 시 각 1회.
+    /// 원래는 "소액·상시라 조용히" 적립했으나, 알림도 이력도 없어 정상 적립이 "안 들어온다"로
+    /// 체감되던 문제(#191)로 정책을 뒤집었다. 주 1회 + 월 1회라 빈도상 스팸이 되지 않는다.
+    func rankRpRewardEarned(periodType: String, period: String, rank: Int, rp: Int) {
+        let kind = periodType == "weekly" ? "주간" : "월간"
+        send(title: "✦ \(period) \(kind) 정산",
+             body: "\(rank)등 — +\(rp) RP가 적립되었습니다!")
+    }
+
     /// 길드 월간 시상대 RP 보상 알림 — RP claim 성공 시 1회 (dedup은 claimedRpRewards가 담당).
     func guildRpRewardEarned(period: String, guildRank: Int, rp: Int) {
         let medal: String

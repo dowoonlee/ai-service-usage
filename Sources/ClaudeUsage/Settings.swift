@@ -210,6 +210,12 @@ final class Settings: ObservableObject {
     @Published var rpTotalEarned: Int {
         didSet { UserDefaults.standard.set(rpTotalEarned, forKey: Keys.rpTotalEarned) }
     }
+    /// RP 증감 이력 (오래된 것 먼저, 최대 `RankPointLedger.historyLimit`건). `RankPointLedger`
+    /// 경유로만 추가 — 직접 mutate 금지. 정산이 조용히 적립돼 "안 들어온다"로 체감되던 문제(#191)의
+    /// 근거 자료라, 백업에는 넣지 않는다(디바이스별 관찰 기록이고 복원 시 시점이 뒤엉킨다).
+    @Published var rpHistory: [RPHistoryEntry] {
+        didSet { persist(rpHistory, forKey: Keys.rpHistory) }
+    }
     /// PetKind별 **보유** 이펙트 (구매한 것). variant/이로치와 무관 — 종 단위 귀속.
     @Published var petEffects: [PetKind: Set<EffectKind>] {
         didSet { persist(petEffects, forKey: Keys.petEffects) }
@@ -818,6 +824,8 @@ final class Settings: ObservableObject {
         self.petUsageSeconds = (usageData.flatMap { try? JSONDecoder().decode([PetKind: TimeInterval].self, from: $0) }) ?? [:]
         self.rp = (d.object(forKey: Keys.rp) as? Int) ?? 0
         self.rpTotalEarned = (d.object(forKey: Keys.rpTotalEarned) as? Int) ?? 0
+        let rpHistoryData = d.data(forKey: Keys.rpHistory)
+        self.rpHistory = (rpHistoryData.flatMap { try? JSONDecoder().decode([RPHistoryEntry].self, from: $0) }) ?? []
         self.shinyShards = (d.object(forKey: Keys.shinyShards) as? Int) ?? 0
         let effectsData = d.data(forKey: Keys.petEffects)
         self.petEffects = (effectsData.flatMap { try? JSONDecoder().decode([PetKind: Set<EffectKind>].self, from: $0) }) ?? [:]
@@ -1707,6 +1715,7 @@ final class Settings: ObservableObject {
         static let shinyShards                 = "settings.shinyShards"
         static let hasSeededShardOverflow      = "settings.hasSeededShardOverflow"
         static let rpTotalEarned               = "settings.rpTotalEarned"
+        static let rpHistory                   = "settings.rpHistory"
         static let petEffects                  = "settings.petEffects"
         static let equippedEffects             = "settings.equippedEffects"
         static let hasReceivedV032TicketBonus  = "settings.hasReceivedV032TicketBonus"

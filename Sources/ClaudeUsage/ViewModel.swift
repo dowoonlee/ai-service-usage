@@ -815,6 +815,11 @@ final class ViewModel: ObservableObject {
             if d.periodType == "guild-monthly" {
                 NotificationManager.shared.guildRpRewardEarned(
                     period: d.period, guildRank: d.rank, rp: d.amount)
+            } else {
+                // 개인 정산(주간·월간)도 알림 — 조용한 적립이 "안 들어온다"로 읽히던 문제 (#191).
+                NotificationManager.shared.rankRpRewardEarned(
+                    periodType: d.periodType ?? "monthly", period: d.period,
+                    rank: d.rank, rp: d.amount)
             }
         case "grant":
             switch d.currency {
