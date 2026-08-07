@@ -1212,6 +1212,11 @@
       <sparkle:version>0.17.15</sparkle:version>
       <sparkle:shortVersionString>0.17.15</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <!-- 0.17.11 미만에서 올라오는 경우에만 critical (Skip 버튼 없음, 즉시 알림).
+           그 이전 버전은 쪽지 8s·게시판 60s 폴링 + PollGate 부재로 무료 플랜 invocation
+           쿼터를 잠식한다. 서버(dm-thread/dm-read/board)도 426으로 막고 있어 업데이트 전엔
+           해당 기능이 동작하지 않는다. 이미 0.17.11+ 인 사용자에겐 평소와 동일하게 보인다. -->
+      <sparkle:criticalUpdate sparkle:version="0.17.11"></sparkle:criticalUpdate>
       <enclosure url="https://github.com/dowoonlee/ai-service-usage/releases/download/v0.17.15/AIUsage.zip"
                  type="application/octet-stream"
                  sparkle:edSignature="ztNV/owhDKXVHY/eh4kl/TqJ3Hqju4BUFIxRGIXtpLdr6pkvJyy90eJiaD29yF7d9GMj4z3C9OrIiAp0M3XCDg==" length="6426514" />

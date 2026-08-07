@@ -9,6 +9,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { outdatedClientResponse } from "../_shared/min_version.ts";
 import { DM_THREAD_PAGE } from "../_shared/dm_policy.ts";
 
 interface ThreadPayload {
@@ -50,11 +51,14 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, app_version")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
   if (user.status === "banned") return errorResponse(403, "banned");
+  // 구버전 게이트 — 서명 검증(CPU) 앞에 둬서 막을 요청은 최대한 일찍 끊는다.
+  const outdated = outdatedClientResponse(user.app_version);
+  if (outdated) return outdated;
 
   const ok = await verifyHmac(
     { deviceId: p.deviceId, peerDevice: p.peerDevice, ts: p.ts },
