@@ -17,6 +17,23 @@ DENO_TLS_CA_STORE=system deno run --allow-net --allow-read --allow-env admin/ser
 | `server.ts` | service_role 키를 들고 PostgREST를 호출하는 로컬 프록시. 브라우저엔 키가 안 내려간다. |
 | `index.html` | 대시보드 SPA. 외부 의존성 없음(SVG 직접 렌더). |
 | `../supabase/migrations/20260810000000_admin_views.sql` | 집계 로직 SSOT. 쿼리를 고칠 땐 **여기**를 고친다. |
+| `gen-pet-catalog.ts` | 클라 소스에서 펫 표시 이름·희귀도·스프라이트 메타를 추출 → `pets.json` |
+| `pets.json` | 위 산출물(커밋 대상). 대시보드가 아이콘·이름·희귀도를 그리는 데 쓴다. |
+
+### 펫 카탈로그 재생성
+
+펫을 추가·수정했다면 다시 돌린다:
+
+```bash
+deno run --allow-read --allow-write admin/gen-pet-catalog.ts
+```
+
+표시 이름·희귀도·스프라이트의 SSOT가 전부 클라 코드다 — `pet_metadata` 테이블은 일부만 담은
+override용이고, 서버는 희귀도를 아예 모른다(`Gacha.pool`은 클라 상수). 그래서 파싱해서 굳힌다.
+갱신을 잊어도 대시보드는 깨지지 않고 그 펫만 rawValue로 표시된다.
+
+스프라이트 PNG는 서버가 `/sprite/<basename>.png`로 중계한다. SwiftPM 리소스 번들이 경로를
+평탄화해 basename이 유일하다는 전제를 쓰며, 생성 스크립트가 그 전제를 검증한다.
 
 키는 `scripts/ranking.env`(gitignore됨)에서 읽는다. 이 디렉토리에는 secret이 없다.
 

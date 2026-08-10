@@ -185,6 +185,43 @@ tbody tr:hover td { background: color-mix(in srgb, var(--text-primary) 4%, trans
 .pill.warning  { color: var(--serious); }
 .pill.good     { color: var(--success-text); }
 .dim { color: var(--muted); }
+
+/* ── 펫 목록 — 아이콘·이름·희귀도를 앱과 같은 형태로 보여준다 ── */
+.controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.controls label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+select {
+  font: inherit; font-size: 12px; color: var(--text-primary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 8px; padding: 4px 8px;
+}
+.pet-row {
+  display: grid; grid-template-columns: 72px minmax(150px, 1fr) minmax(80px, 2fr) 92px;
+  align-items: center; gap: 12px; padding: 3px 0;
+}
+.pet-row + .pet-row { border-top: 1px solid var(--grid); }
+.pet-icon {
+  /* 스프라이트 스트립의 첫 프레임만 노출 — 높이를 셀 기준으로 맞추면 폭은 비례해 따라온다.
+     픽셀 아트라 보간을 끈다. */
+  background-repeat: no-repeat; background-position: 0 0;
+  image-rendering: pixelated;
+  justify-self: center;
+}
+.pet-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pet-name b { font-weight: 600; }
+.pet-name .kind { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.pet-bar { background: var(--grid); border-radius: 4px; height: 14px; overflow: hidden; }
+.pet-bar i { display: block; height: 100%; border-radius: 4px; }
+.pet-val { text-align: right; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.pet-row.unowned { opacity: 0.55; }
+.rarity {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.02em;
+  padding: 1px 6px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap;
+}
+/* 앱 `Rarity.color`와 동일 매핑 — 색만으로 구분하지 않도록 등급명을 항상 함께 적는다. */
+.rarity.common    { color: #8e8e93; }
+.rarity.rare      { color: #007aff; }
+.rarity.epic      { color: #af52de; }
+.rarity.legendary { color: #ff9500; }
+.rarity.mythic    { color: #db143d; }   /* Rarity.color의 Color(0.86, 0.08, 0.24) */
 .err {
   background: var(--surface-1); border: 1px solid var(--critical);
   border-radius: 12px; padding: 14px 16px; color: var(--critical);
@@ -314,9 +351,23 @@ tbody tr:hover td { background: color-mix(in srgb, var(--text-primary) 4%, trans
 
   <section id="tab-pets" hidden>
     <figure>
-      <figcaption>펫 보유 분포 — 상위 25종</figcaption>
-      <div class="figsub">보유자 수 기준. 가챠 확률·컬렉션 밸런스 점검용</div>
-      <div class="chart-wrap" data-chart="pets"></div>
+      <figcaption>펫 보유 분포</figcaption>
+      <div class="figsub">
+        가챠 확률·컬렉션 밸런스 점검용. 아이콘과 이름은 앱과 같은 것을 씁니다
+        (<code>admin/gen-pet-catalog.ts</code>가 클라 소스에서 추출).
+      </div>
+      <div class="controls">
+        <label>정렬
+          <select id="pet-sort">
+            <option value="owners">보유자 많은 순</option>
+            <option value="rarity">희귀도 순</option>
+            <option value="name">이름 순</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="pet-unowned"> 미보유 종 포함</label>
+        <span class="dim" id="pet-count"></span>
+      </div>
+      <div id="pet-list"></div>
       <details><summary>표로 보기</summary><div class="tablescroll" data-table="pets"></div></details>
     </figure>
   </section>
@@ -757,11 +808,16 @@ const pill = (cls, text) => `<span class="pill ${cls}">${text}</span>`;
 
 // ─────────────────────────────────────────────────────────────────── 데이터 로드
 let DATA = null;
+/** 펫 표시 메타(이름·희귀도·스프라이트). gen-pet-catalog.ts 산출물. 없으면 rawValue로 폴백. */
+let CATALOG = {};
 
 async function load() {
   document.getElementById("loading").hidden = false;
   document.getElementById("error").innerHTML = "";
   try {
+    // 카탈로그는 실패해도 대시보드가 죽으면 안 된다 — 이름이 투박해질 뿐이다.
+    CATALOG = await fetch("/pets.json").then((r) => r.json())
+      .then((j) => j.pets ?? {}).catch(() => ({}));
     const [overview, daily, progress, abuse, versions, pets, badges] = await Promise.all([
       api("admin_overview", "select=*"),
       api("admin_daily_activity", "select=*&order=day_kst.asc"),
@@ -1063,24 +1119,89 @@ function renderVersions() {
   ], v);
 }
 
+const RARITY_LABEL = {
+  mythic: "Mythic", legendary: "Legendary", epic: "Epic", rare: "Rare", common: "Common",
+};
+/** 카탈로그에 없는 kind는 rawValue로 폴백 — 펫을 추가하고 gen-pet-catalog.ts를 안 돌렸을 때. */
+const petMeta = (kind) => CATALOG[kind] ?? {
+  name: kind, rarity: "common", rarityRank: 9, sprite: null, cellW: 32, cellH: 32,
+};
+
 function renderPets() {
-  const p = DATA.pets;
-  barChart(q('[data-chart="pets"]'), {
-    rows: p.slice(0, 25).map((r) => ({
-      label: r.pet_kind, value: r.owners,
-      sub: `획득 ${r.acquisitions_total} · 장착 ${r.equipped_claude + r.equipped_cursor}`,
-    })),
-    unit: "명",
+  const rows = DATA.pets;
+  const byKind = new Map(rows.map((r) => [r.pet_kind, r]));
+  const sort = document.getElementById("pet-sort").value;
+  const showUnowned = document.getElementById("pet-unowned").checked;
+
+  // 카탈로그를 기준으로 삼아야 "아무도 못 뽑은 펫"이 보인다 — 보유 분포에서 그게 제일 중요하다.
+  const kinds = showUnowned && Object.keys(CATALOG).length
+    ? Object.keys(CATALOG) : rows.map((r) => r.pet_kind);
+
+  const list = kinds.map((k) => {
+    const m = petMeta(k);
+    const d = byKind.get(k);
+    return {
+      kind: k, meta: m,
+      owners: d ? d.owners : 0,
+      acquisitions: d ? d.acquisitions_total : 0,
+      equipped: d ? d.equipped_claude + d.equipped_cursor : 0,
+      prestige: d ? d.prestige_owners : 0,
+    };
   });
+
+  const byName = (a, b) => a.meta.name.localeCompare(b.meta.name, "ko");
+  list.sort(
+    sort === "rarity" ? (a, b) => a.meta.rarityRank - b.meta.rarityRank || byName(a, b)
+    : sort === "name" ? byName
+    : (a, b) => b.owners - a.owners || a.meta.rarityRank - b.meta.rarityRank || byName(a, b),
+  );
+
+  const maxOwners = Math.max(1, ...list.map((r) => r.owners));
+  const ICON_H = 34;   // 셀 높이를 이 값으로 정규화 — 종마다 원본 크기가 32~90으로 제각각이다.
+  document.getElementById("pet-count").textContent =
+    `${list.length}종 · 미보유 ${list.filter((r) => !r.owners).length}종`;
+
+  document.getElementById("pet-list").innerHTML = list.map((r) => {
+    const m = r.meta;
+    const scale = ICON_H / m.cellH;
+    const icon = m.sprite
+      ? `<div class="pet-icon" style="width:${Math.round(m.cellW * scale)}px;height:${ICON_H}px;` +
+        `background-image:url('/sprite/${m.sprite}');background-size:auto ${ICON_H}px;` +
+        `${m.facingLeft ? "transform:scaleX(-1);" : ""}"></div>`
+      : `<div class="pet-icon"></div>`;
+    return `
+      <div class="pet-row${r.owners ? "" : " unowned"}">
+        ${icon}
+        <div class="pet-name">
+          <b>${m.name}</b>
+          <span class="rarity ${m.rarity}">${RARITY_LABEL[m.rarity] ?? m.rarity}</span>
+          <span class="kind">${r.kind}</span>
+        </div>
+        <div class="pet-bar" title="보유자 ${r.owners}명">
+          <i style="width:${(r.owners / maxOwners) * 100}%;background:${
+            r.owners ? "var(--series-1)" : "transparent"}"></i>
+        </div>
+        <div class="pet-val">${r.owners}명${r.equipped ? ` · 장착 ${r.equipped}` : ""}</div>
+      </div>`;
+  }).join("");
+
   renderTable(q('[data-table="pets"]'), [
-    { key: "pet_kind", label: "펫" },
+    { key: "pet_kind", label: "펫", render: (r) => petMeta(r.pet_kind).name },
+    {
+      key: "rarity", label: "희귀도",
+      render: (r) => {
+        const m = petMeta(r.pet_kind);
+        return `<span class="rarity ${m.rarity}">${RARITY_LABEL[m.rarity] ?? m.rarity}</span>`;
+      },
+    },
     { key: "owners", label: "보유자" },
     { key: "acquisitions_total", label: "획득 총량" },
     { key: "avg_variants", label: "평균 이로치" },
     { key: "prestige_owners", label: "레인보우" },
     { key: "equipped_claude", label: "장착(Claude)" },
     { key: "equipped_cursor", label: "장착(Cursor)" },
-  ], p);
+    { key: "pet_kind", label: "kind", render: (r) => `<span class="dim">${r.pet_kind}</span>` },
+  ], rows);
 }
 
 const q = (sel) => document.querySelector(sel);
@@ -1108,6 +1229,9 @@ nav.addEventListener("click", (e) => {
   if (b) show(b.dataset.tab);
 });
 document.getElementById("reload").addEventListener("click", load);
+for (const id of ["pet-sort", "pet-unowned"]) {
+  document.getElementById(id).addEventListener("change", () => { if (DATA) renderPets(); });
+}
 document.getElementById("theme").addEventListener("click", () => {
   const cur = document.documentElement.getAttribute("data-theme");
   const next = cur === "dark" ? "light" : "dark";
