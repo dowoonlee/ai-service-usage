@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>스프라이트 방향 검수</title>
+<style>
+/* 방향 검수 전용 화면 — 스프라이트를 "원본 그대로"(반전 없이) 늘어놓고 현재 플래그와 대조한다.
+   팩 단위로 묶는 게 핵심이다: facing이 팩 전체에서 통째로 뒤집혀 있으면 "팩 내 소수파 찾기"로는
+   절대 안 걸린다(grafxkid 계열이 실제로 그랬다). 팩별로 보면 한 줄만 훑어도 드러난다. */
+body {
+  margin: 0; padding: 16px 20px 60px; background: #fcfcfb; color: #0b0b0b;
+  font-family: system-ui, -apple-system, sans-serif; font-size: 13px;
+}
+h1 { font-size: 16px; margin: 0 0 4px; }
+.lede { color: #52514e; font-size: 12px; margin-bottom: 18px; }
+h2 {
+  font-size: 14px; margin: 22px 0 8px; padding-bottom: 4px;
+  border-bottom: 1px solid rgba(11,11,11,0.12);
+}
+h2 .cnt { color: #898781; font-weight: 400; font-size: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.cell {
+  border: 1px solid rgba(11,11,11,0.12); border-radius: 8px; padding: 6px 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px; background: #fff;
+}
+.art { height: 84px; display: flex; align-items: flex-end; }
+.icon { image-rendering: pixelated; background-repeat: no-repeat; background-position: 0 0; }
+.nm { font-weight: 600; font-size: 11px; text-align: center; line-height: 1.2; }
+.kd { color: #898781; font-size: 9px; }
+.exp { font-size: 11px; font-weight: 700; }
+.exp.left  { color: #2a78d6; }
+.exp.right { color: #eb6834; }
+/* 팩 안에서 플래그가 갈리는 종은 테두리로 표시 — 의도된 예외인지 실수인지 바로 확인할 지점. */
+.cell.odd { border-color: #eb6834; border-width: 2px; }
+</style>
+</head>
+<body>
+<h1>스프라이트 방향 검수</h1>
+<div class="lede">
+  스프라이트는 <b>원본 그대로</b>(반전 없음) 표시된다. 아래 화살표는 현재
+  <code>defaultFacingLeft</code> 값이고, <b>그림이 실제로 보는 방향과 화살표가 일치해야</b> 정상이다.
+  어긋나면 앱에서 그 펫이 뒤로 걷는다. 주황 테두리는 팩 안에서 값이 갈리는 종.
+</div>
+<div id="out"></div>
+
+<script type="module">
+const { pets } = await fetch("/pets.json").then((r) => r.json());
+const H = 76;
+
+const byPack = new Map();
+for (const [kind, m] of Object.entries(pets)) {
+  if (!byPack.has(m.pack)) byPack.set(m.pack, []);
+  byPack.get(m.pack).push([kind, m]);
+}
+
+const cell = ([kind, m], odd) => {
+  const scale = H / m.cellH;
+  return `<div class="cell${odd ? " odd" : ""}">
+    <div class="art"><div class="icon" style="
+      width:${Math.round(m.cellW * scale)}px;height:${H}px;
+      background-image:url('/sprite/${m.sprite}');background-size:auto ${H}px"></div></div>
+    <div class="nm">${m.name}</div>
+    <div class="kd">${kind}</div>
+    <div class="exp ${m.facingLeft ? "left" : "right"}">${m.facingLeft ? "◀ 왼쪽" : "오른쪽 ▶"}</div>
+  </div>`;
+};
+
+const packs = [...byPack].sort((a, b) => b[1].length - a[1].length);
+document.getElementById("out").innerHTML = packs.map(([pack, list]) => {
+  const L = list.filter(([, m]) => m.facingLeft).length;
+  const majorityLeft = L * 2 > list.length;
+  const sorted = [...list].sort((a, b) => a[1].name.localeCompare(b[1].name, "ko"));
+  return `<h2>${pack}
+      <span class="cnt">${list.length}종 · 왼쪽 ${L} / 오른쪽 ${list.length - L}</span></h2>
+    <div class="grid">${
+      sorted.map((e) => cell(e, e[1].facingLeft !== majorityLeft)).join("")}</div>`;
+}).join("");
+</script>
+</body>
+</html>

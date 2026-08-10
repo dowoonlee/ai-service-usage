@@ -88,7 +88,14 @@ Two behaviors that depend on chart shape live in WalkingCat (not the controller)
 
 The CC-BY packs require attribution — kept in each pack's `LICENSE_*.txt`. The OGA mirror of the Pixel Frog packs is CC-BY 4.0 even though the itch.io distribution is CC0; treat all as CC-BY for safety.
 
-The Wild Animals pack faces left while every other pack faces right, so `PetKind.defaultFacingLeft` flag drives the `scaleEffect` flip in `WalkingCat`. Adding a new kind needs only an `enum case` and a `PetDefinition` entry (cellSize, suffixes, defaultTheme, defaultFacingLeft); `PetTheme.defaultFor(_:)` reads from the def directly. SwiftPM bundles flatten resource paths, so every PNG/LICENSE basename across `Resources/` must be unique.
+The `Facing` column above is the pack's *majority* only, and the table itself predates several
+packs — **do not treat it as authoritative**. Facing is per-sprite: `pixel-adventure-2`,
+`kings-and-pigs` and `sunnyland` are mostly left-facing despite the "right" above, and
+`superpowers-dino` is left-facing except `pterodactyl`/`dinoBug`. The SSOT is
+`defaultFacingLeft` on each `PetDefinition`, and the only way to verify it is to open the PNG
+and look — a wrong flag makes the pet walk backwards in `WalkingCat`.
+
+`PetKind.defaultFacingLeft` drives the `scaleEffect` flip in `WalkingCat`. Adding a new kind needs only an `enum case` and a `PetDefinition` entry (cellSize, suffixes, defaultTheme, defaultFacingLeft); `PetTheme.defaultFor(_:)` reads from the def directly. SwiftPM bundles flatten resource paths, so every PNG/LICENSE basename across `Resources/` must be unique.
 
 For the dungeon-tileset pack: 7 enemies (`necromancer`, `slug`, `iceZombie`, `muddy`, `swampy`, `tinySlug`, `zombie`) have only a single anim cycle in the source — their `Idle.png` and `Run.png` are intentionally identical strips so the `walkSuffix`/`runSuffix`/`idleSuffix` aliasing in `PetDefinition` keeps the existing renderer happy. The Pirate Bomb and Treasure Hunters source files are individual frame PNGs (no strips), stitched into horizontal strips by the asset-import script that lives outside the build.
 
