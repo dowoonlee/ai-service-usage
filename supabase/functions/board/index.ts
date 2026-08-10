@@ -11,6 +11,7 @@
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { outdatedClientResponse } from "../_shared/min_version.ts";
 import { resolveTenant } from "../_shared/tenant.ts";
 import {
   DISPLAY_WINDOW_HOURS,
@@ -79,6 +80,17 @@ Deno.serve(async (req: Request) => {
   const deviceIdLower = deviceId ? deviceId.toLowerCase() : null;
 
   const db = getDb();
+
+  // 구버전 게이트 — 아래 글/좋아요/댓글 조회 전에 끊는다. 익명(deviceId 없음)은 버전을 알 수 없어 통과.
+  if (deviceIdLower) {
+    const { data: caller } = await db
+      .from("users")
+      .select("app_version")
+      .eq("device_id", deviceIdLower)
+      .maybeSingle();
+    const outdated = outdatedClientResponse(caller?.app_version);
+    if (outdated) return outdated;
+  }
 
   // 호출자 테넌트 — 미등록/익명(deviceId 없음)은 기본(public) 게시판. 클라는 tenant를 주장 못 한다(§2-1).
   let tenant = "public";
