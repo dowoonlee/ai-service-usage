@@ -20,6 +20,18 @@ DENO_TLS_CA_STORE=system deno run --allow-net --allow-read --allow-env admin/ser
 | `gen-pet-catalog.ts` | 클라 소스에서 펫 표시 이름·희귀도·스프라이트 메타를 추출 → `pets.json` |
 | `pets.json` | 위 산출물(커밋 대상). 대시보드가 아이콘·이름·희귀도를 그리는 데 쓴다. |
 
+### 스프라이트 방향 검수 — `/audit`
+
+`http://127.0.0.1:8787/audit` 는 전 펫의 스프라이트를 **원본 그대로**(반전 없이) 팩별로 늘어놓고
+현재 `defaultFacingLeft` 값을 화살표로 함께 보여준다. **그림이 보는 방향과 화살표가 일치해야**
+정상이고, 어긋나면 앱에서 그 펫이 뒤로 걷는다.
+
+팩 단위로 묶는 게 핵심이다. facing이 팩 전체에서 통째로 뒤집혀 있으면 "팩 안에서 튀는 종 찾기"
+로는 절대 안 걸린다 — 실제로 `luizmelo-pets` 12종과 `superpowers-prehistoric-char` 6종이
+전부 좌향인데 팩째로 `false`였고, 이 화면을 만들기 전에는 표본 검사로 놓쳤다.
+
+펫을 추가하거나 방향이 의심되면 이 화면부터 열 것.
+
 ### 펫 카탈로그 재생성
 
 펫을 추가·수정했다면 다시 돌린다:

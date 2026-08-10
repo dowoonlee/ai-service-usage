@@ -112,6 +112,19 @@ async function handler(req: Request): Promise<Response> {
     }
   }
 
+  // 스프라이트 방향 검수 화면 — 펫을 추가하거나 facing이 의심될 때 여는 별도 페이지.
+  if (url.pathname === "/audit" || url.pathname === "/sprite-audit.html") {
+    try {
+      const html = await Deno.readTextFile(
+        new URL("./sprite-audit.html", import.meta.url).pathname);
+      return new Response(html, {
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },
+      });
+    } catch {
+      return new Response("sprite-audit.html not found", { status: 500 });
+    }
+  }
+
   if (url.pathname === "/" || url.pathname === "/index.html") {
     try {
       // 매 요청마다 읽는다 — 대시보드를 고치고 새로고침만 하면 반영되도록.

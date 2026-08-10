@@ -93,6 +93,9 @@ for (const d of defs) {
     rarity: rarity ?? "common",
     rarityRank: RARITY_ORDER.indexOf(rarity ?? "common"),
     sprite: file,
+    // 팩 이름 — 방향 검수는 팩 단위로 봐야 한다. facing이 팩 전체에서 통째로 뒤집혀 있으면
+    // "팩 내 소수파 찾기"로는 절대 안 걸린다(실제로 grafxkid 계열이 그랬다).
+    pack: (spriteIndex.get(file) ?? "").split("/")[3] ?? "?",
     cellW: d.cellW,
     cellH: d.cellH,
     facingLeft: d.facingLeft,
