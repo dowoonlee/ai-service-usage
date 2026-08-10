@@ -17,7 +17,6 @@ struct BoardView: View {
     @State private var error: String?
     @State private var lastRefresh: Date?
     @State private var refreshTask: Task<Void, Never>?
-    @State private var pollTask: Task<Void, Never>?
 
     @State private var draft: String = ""
     @State private var posting: Bool = false
@@ -90,18 +89,20 @@ struct BoardView: View {
             // 윈도우 표시 → 미확인 카운트 즉시 0. 활성자만 fetch.
             if rankingActive {
                 NotificationCenter.default.post(name: .boardSeen, object: nil)
-                // 이 창이 떠 있는 동안은 메인 폴링 사이클의 unread 조회가 같은 `board`
-                // 엔드포인트를 중복 호출하지 않게 한다.
+                // 창이 열린 동안은 sync가 `want`에 board를 실어 게시판 섹션을 함께 받아온다.
                 PollGate.boardViewIsOpen = true
                 refresh()
-                startPolling()
                 startClockTick()
             }
+        }
+        // 주기 갱신은 sync가 밀어준다 — 자체 폴링 루프 없음.
+        .onReceive(NotificationCenter.default.publisher(for: .boardSynced)) { note in
+            guard rankingActive, let resp = note.object as? RankingAPI.BoardResponse else { return }
+            applySynced(resp)
         }
         .onDisappear {
             PollGate.boardViewIsOpen = false
             refreshTask?.cancel()
-            pollTask?.cancel()
             cooldownTickTask?.cancel()
             clockTask?.cancel()
         }
@@ -382,19 +383,19 @@ struct BoardView: View {
         }
     }
 
-    private func startPolling() {
-        pollTask?.cancel()
-        pollTask = Task { @MainActor in
-            while !Task.isCancelled {
-                // 180s 주기 — 게시판이 채팅 아닌 게시판 톤이고, 실제 글 유입은 주 단위라
-                // 1분은 과했다(무료 플랜 550K invocations/mo 대비 board 단독 26%).
-                try? await Task.sleep(for: .seconds(180))
-                if Task.isCancelled { return }
-                // 패널이 숨겨졌거나 시스템 sleep이면 건너뛴다 — 창을 다시 열면 곧 재개된다.
-                guard PollGate.shouldPoll else { continue }
-                refresh()
-            }
+    /// 자체 폴링 루프는 없다 — 주기 갱신은 `ViewModel`의 sync(600s)가 `.boardSynced`로 밀어준다.
+    /// 창을 여는 순간의 즉시 조회(`refresh()`)와 글쓰기·좋아요 후 갱신만 직접 호출한다.
+    ///
+    /// 예전엔 여기서 180s 루프를 돌렸는데(그전엔 60s), 화면마다 각자 폴링하는 구조가 무료 플랜
+    /// invocation 쿼터를 넘긴 주원인이었다.
+    private func applySynced(_ resp: RankingAPI.BoardResponse) {
+        posts = resp.posts
+        if let n = resp.commentMaxLen, n > 0 { commentMaxLen = n }
+        if let s = resp.deleteCommentWindowSec, s > 0 {
+            deleteCommentWindowSec = TimeInterval(s)
         }
+        applyServerCooldown(resp.cooldownRemainingSec)
+        NotificationCenter.default.post(name: .boardSeen, object: nil)
     }
 
     private func submitDraft() {
@@ -902,7 +903,7 @@ private struct BoardRow: View {
 // MARK: - Window Controller
 
 @MainActor
-final class BoardWindowController: NSWindowController, SingleWindowPresenting {
+final class BoardWindowController: NSWindowController, NSWindowDelegate, SingleWindowPresenting {
     static let shared = BoardWindowController()
 
     private convenience init() {
@@ -915,9 +916,17 @@ final class BoardWindowController: NSWindowController, SingleWindowPresenting {
         window.minSize = NSSize(width: 460, height: 480)
         window.center()
         self.init(window: window)
+        window.delegate = self
+    }
+
+    /// 타이틀바 닫기 버튼은 SwiftUI `onDisappear`를 부르지 않는다(`isReleasedWhenClosed = false`).
+    /// 게시판 폴링은 이 플래그로만 멈출 수 있다.
+    func windowWillClose(_ notification: Notification) {
+        PollGate.boardViewIsOpen = false
     }
 
     func present() {
+        PollGate.boardViewIsOpen = true
         bringToFront()
     }
 }
@@ -928,4 +937,9 @@ extension Notification.Name {
     static let openRankingSettings = Notification.Name("openRankingSettings")
     /// BoardView가 윈도우 표시될 때 emit. ViewModel이 받아 boardUnreadCount = 0 + boardLastSeenAt 갱신.
     static let boardSeen = Notification.Name("boardSeen")
+    /// ViewModel의 sync가 게시판 섹션을 받아왔을 때 emit — object가 `RankingAPI.BoardResponse`.
+    /// BoardView는 자체 폴링을 돌리지 않고 이걸 받아 갱신한다.
+    static let boardSynced = Notification.Name("boardSynced")
+    /// sync가 랭킹 섹션을 받아왔을 때 emit — object가 `RankingSyncPayload`.
+    static let rankingSynced = Notification.Name("rankingSynced")
 }

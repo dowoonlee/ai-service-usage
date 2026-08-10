@@ -14,7 +14,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
-import { listPendingInvites } from "../_shared/guild_invites.ts";
+import { fetchInbox } from "../_shared/dm_inbox_query.ts";
 
 interface InboxPayload {
   deviceId: string;
@@ -25,7 +25,6 @@ interface InboxRequest {
   signature: string;
 }
 const MAX_CLOCK_SKEW_SEC = 3600;
-const SCAN_LIMIT = 500; // 최근 메시지 스캔 상한 (스레드 요약 조립용)
 
 Deno.serve(async (req: Request) => {
   const preflight = handleOptions(req);
@@ -63,83 +62,9 @@ Deno.serve(async (req: Request) => {
     { deviceId: p.deviceId, ts: p.ts }, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
-  // 받은 것 + 보낸 것 (각각 내 쪽 tombstone 제외), 최근 순. 테넌트 필터 없음 — 전환(one-way) 후에도
-  // 본인 과거 쪽지는 열람 가능(§2-4 재검토). 교차 테넌트 격리는 dm-send의 발신 차단이 담당한다.
-  const [{ data: received }, { data: sent }] = await Promise.all([
-    db.from("direct_messages")
-      .select("id, sender_device, ciphertext, sender_id_pub, created_at, read_at")
-      .eq("recipient_device", deviceId).eq("del_recipient", false)
-      .order("created_at", { ascending: false }).limit(SCAN_LIMIT),
-    db.from("direct_messages")
-      .select("id, recipient_device, ciphertext, sender_id_pub, created_at")
-      .eq("sender_device", deviceId).eq("del_sender", false)
-      .order("created_at", { ascending: false }).limit(SCAN_LIMIT),
-  ]);
-
-  // peer별 최근 1건 + 미확인 수 집계.
-  interface Thread {
-    peerDevice: string;
-    lastId: string; lastCiphertext: string; lastSenderIdPub: string;
-    lastFromMe: boolean; lastAt: string; unreadCount: number;
-  }
-  const threads = new Map<string, Thread>();
-  const bump = (peer: string, m: {
-    id: string; ciphertext: string; sender_id_pub: string; created_at: string; fromMe: boolean;
-  }) => {
-    const cur = threads.get(peer);
-    if (!cur || m.created_at > cur.lastAt) {
-      threads.set(peer, {
-        peerDevice: peer, lastId: m.id, lastCiphertext: m.ciphertext,
-        lastSenderIdPub: m.sender_id_pub, lastFromMe: m.fromMe, lastAt: m.created_at,
-        unreadCount: cur?.unreadCount ?? 0,
-      });
-    }
-  };
-  for (const m of received ?? []) {
-    bump(m.sender_device, { ...m, fromMe: false });
-    if (!m.read_at) {
-      const t = threads.get(m.sender_device);
-      if (t) t.unreadCount += 1;
-    }
-  }
-  for (const m of sent ?? []) bump(m.recipient_device, { ...m, fromMe: true });
-
-  const list = [...threads.values()].sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1));
-
-  // peer 닉네임 + 공개키 일괄 조회.
-  const peerIds = list.map((t) => t.peerDevice);
-  const nickById = new Map<string, string>();
-  const pubById = new Map<string, string>();
-  if (peerIds.length > 0) {
-    const [{ data: usrs }, { data: keys }] = await Promise.all([
-      db.from("users").select("device_id, nickname").in("device_id", peerIds),
-      db.from("user_keys").select("device_id, x25519_pub").in("device_id", peerIds),
-    ]);
-    for (const u of usrs ?? []) nickById.set(u.device_id, u.nickname);
-    for (const k of keys ?? []) pubById.set(k.device_id, k.x25519_pub);
-  }
-
-  // 받은 길드 초대 — 실패해도 쪽지 목록은 내려간다(빈 배열). 구버전 클라는 이 필드를
-  // 무시하고 guild-invite(list)를 계속 쓰므로 응답 추가는 하위호환이다.
-  let invites: Awaited<ReturnType<typeof listPendingInvites>> = [];
-  try {
-    invites = await listPendingInvites(db, deviceId);
-  } catch (error) {
-    console.error("dm-inbox invite list failed", error);
-  }
-
-  return jsonResponse({
-    invites,
-    threads: list.map((t) => ({
-      peerDevice: t.peerDevice,
-      peerNickname: nickById.get(t.peerDevice) ?? null,
-      peerIdPub: pubById.get(t.peerDevice) ?? null,
-      lastId: t.lastId,
-      lastCiphertext: t.lastCiphertext,
-      lastSenderIdPub: t.lastSenderIdPub,
-      lastFromMe: t.lastFromMe,
-      lastAt: t.lastAt,
-      unreadCount: t.unreadCount,
-    })),
-  });
+  // 조회 본체는 `_shared/dm_inbox_query.ts` — sync가 같은 로직을 쓴다.
+  // `invites`는 받은 길드 초대. 구버전 클라는 이 필드를 무시하고 guild-invite(list)를 계속
+  // 쓰므로 응답 추가는 하위호환이다.
+  const { threads, invites } = await fetchInbox(db, deviceId);
+  return jsonResponse({ invites, threads });
 });

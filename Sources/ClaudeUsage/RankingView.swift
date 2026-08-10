@@ -62,7 +62,15 @@ struct RankingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { startAutoRefresh() }
-        .onDisappear { refreshTask?.cancel() }
+        // 주기 갱신은 sync가 밀어준다 — 자체 폴링 루프 없음.
+        .onReceive(NotificationCenter.default.publisher(for: .rankingSynced)) { note in
+            guard let payload = note.object as? RankingSyncPayload else { return }
+            applySynced(payload)
+        }
+        .onDisappear {
+            PollGate.rankingViewIsOpen = false
+            refreshTask?.cancel()
+        }
         .alert("시상대 한마디", isPresented: $editingPodium) {
             TextField("축하 인사를 남겨보세요", text: $podiumDraft)
                 .onChange(of: podiumDraft) { newValue in
@@ -363,20 +371,29 @@ struct RankingView: View {
         GateMessageView(icon: "trophy", message: msg)
     }
 
-    /// 최초 1회 즉시 갱신 + 5분 주기 자동 갱신 루프 시작. `refreshTask`가 루프를 소유하고,
-    /// `onDisappear`에서 취소된다(GuildView.startAutoRefresh와 동일 패턴 — 임베드 탭 형제 뷰).
+    /// 화면에 들어올 때 1회 즉시 갱신. 이후 주기 갱신은 `ViewModel`의 sync(600s)가 `.rankingSynced`로
+    /// 밀어준다 — 자체 폴링 루프는 없다.
+    ///
+    /// 예전엔 여기서 300s 루프를 돌리며 매번 `leaderboard` + `tenant-announcements` 두 함수를
+    /// 호출했다(사용자당 576회/일). 화면마다 각자 폴링하는 구조가 무료 플랜 쿼터를 넘긴 주원인이다.
     private func startAutoRefresh() {
+        PollGate.rankingViewIsOpen = true
         refresh()
-        refreshTask?.cancel()
-        refreshTask = Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(300))
-                if Task.isCancelled { break }
-                // 패널이 숨겨졌거나 시스템 sleep이면 건너뛴다 (PollGate).
-                guard PollGate.shouldPoll else { continue }
-                refresh()
-            }
-        }
+    }
+
+    /// sync가 실어 보낸 랭킹 섹션 반영 — `refresh()`의 성공 경로와 같은 필드를 채운다.
+    private func applySynced(_ payload: RankingSyncPayload) {
+        let resp = payload.leaderboard
+        entries = resp.entries
+        myRank = resp.myRank
+        myTotal = resp.myTotalCoins
+        settings.applyMyMedals(resp.myMedals)
+        totalPlayers = resp.total
+        periodResetAt = resp.periodResetAt
+        previousMonth = resp.previousMonth
+        settings.currentTenant = resp.tenant
+        lastRefresh = Date()
+        tenantAnnouncements = payload.tenantAnnouncements
     }
 
     private func refresh() {

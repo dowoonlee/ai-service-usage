@@ -1381,6 +1381,47 @@ actor RankingAPI {
     struct DMSendRequest: Encodable { let payload: DMSendPayload; let signature: String }
     struct DMInboxPayload: Encodable { let deviceId: String; let ts: Int64 }
     struct DMInboxRequest: Encodable { let payload: DMInboxPayload; let signature: String }
+
+    // MARK: - sync (주기 폴링 통합)
+
+    /// `want`는 배열이 아니라 CSV 문자열이다 — 서버 `_shared/hmac.ts`의 canonicalize()가 flat
+    /// object만 지원해서(배열/중첩은 미지원) 배열을 넣으면 서명이 항상 어긋난다.
+    struct SyncPayload: Encodable {
+        let boardSeenAt: Int64
+        let deviceId: String
+        let ts: Int64
+        let want: String
+    }
+    struct SyncRequest: Encodable { let payload: SyncPayload; let signature: String }
+
+    struct SyncBadges: Decodable, Sendable {
+        let dmUnread: Int
+        let boardUnread: Int
+    }
+    struct SyncInboxSection: Decodable, Sendable { let threads: [DMThread] }
+
+    /// 요청한 섹션만 채워져 온다(`want`에 없으면 nil). 배지·초대는 항상 포함.
+    struct SyncResponse: Decodable, Sendable {
+        let badges: SyncBadges
+        let invites: [GuildReceivedInvite]
+        let inbox: SyncInboxSection?
+        let board: BoardResponse?
+        let leaderboard: LeaderboardResponse?
+        let tenantAnnouncements: [TenantAnnouncementRow]?
+        let tenant: String?
+    }
+
+    /// 열려 있는 화면(`want`)의 데이터 + 배지를 한 번에. 화면별 폴링을 이 호출 하나로 대체한다.
+    func sync(deviceId: String, want: String, boardSeenAt: Date?,
+              hmacKeyBase64: String) async throws -> SyncResponse {
+        let payload = SyncPayload(
+            boardSeenAt: boardSeenAt.map { Int64($0.timeIntervalSince1970) } ?? 0,
+            deviceId: deviceId,
+            ts: nowTs(),
+            want: want)
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "sync", body: SyncRequest(payload: payload, signature: sig))
+    }
     struct DMThreadPayload: Encodable { let deviceId: String; let peerDevice: String; let ts: Int64 }
     struct DMThreadRequest: Encodable { let payload: DMThreadPayload; let signature: String }
     struct DMReadPayload: Encodable {
