@@ -65,8 +65,51 @@ if (!SUPABASE_URL || !SERVICE_KEY) {
   Deno.exit(1);
 }
 
+// 스프라이트 basename → 실제 경로. SwiftPM 리소스 번들이 경로를 평탄화하므로 basename은
+// 프로젝트 전체에서 유일하다(CLAUDE.md). 기동 시 1회만 훑는다.
+const spriteIndex = new Map<string, string>();
+async function indexSprites(dir: string) {
+  try {
+    for await (const e of Deno.readDir(dir)) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory) await indexSprites(p);
+      else if (e.name.endsWith(".png") && !spriteIndex.has(e.name)) spriteIndex.set(e.name, p);
+    }
+  } catch { /* 리소스 디렉토리가 없으면 아이콘만 안 나온다 — 대시보드는 그대로 동작 */ }
+}
+await indexSprites(new URL("../Sources/ClaudeUsage/Resources", import.meta.url).pathname);
+
 async function handler(req: Request): Promise<Response> {
   const url = new URL(req.url);
+
+  // 펫 카탈로그 — gen-pet-catalog.ts가 클라 소스에서 뽑아둔 이름·희귀도·스프라이트 메타.
+  if (url.pathname === "/pets.json") {
+    try {
+      const json = await Deno.readTextFile(new URL("./pets.json", import.meta.url).pathname);
+      return new Response(json, {
+        headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+      });
+    } catch {
+      // 아직 생성 전 — 대시보드는 rawValue로 폴백한다.
+      return Response.json({ pets: {} });
+    }
+  }
+
+  // 스프라이트 PNG. basename만 받고 인덱스에서 조회 — 경로 조립이 없으니 traversal이 성립하지 않는다.
+  if (url.pathname.startsWith("/sprite/")) {
+    const name = url.pathname.slice("/sprite/".length);
+    if (!/^[A-Za-z0-9_.-]+\.png$/.test(name)) return new Response("bad name", { status: 400 });
+    const path = spriteIndex.get(name);
+    if (!path) return new Response("not found", { status: 404 });
+    try {
+      const bytes = await Deno.readFile(path);
+      return new Response(bytes, {
+        headers: { "content-type": "image/png", "cache-control": "max-age=3600" },
+      });
+    } catch {
+      return new Response("read failed", { status: 500 });
+    }
+  }
 
   if (url.pathname === "/" || url.pathname === "/index.html") {
     try {
