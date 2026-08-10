@@ -233,6 +233,9 @@ select {
 
 <header>
   <h1>AIUsage 운영 대시보드</h1>
+  <label class="meta">테넌트
+    <select id="tenant"><option value="">전체</option></select>
+  </label>
   <span class="meta" id="stamp"></span>
   <span class="spacer"></span>
   <button id="theme">테마</button>
@@ -415,6 +418,49 @@ async function api(view, qs) {
   const body = await res.json();
   if (!res.ok) throw new Error(`${view}: ${body.error ?? body.message ?? res.status}`);
   return body;
+}
+
+// ───────────────────────────────────────────────────────── 테넌트 필터 / 합산
+/** 선택된 테넌트 slug. 빈 문자열이면 전체(= 모든 테넌트를 합산). */
+let TENANT = "";
+
+/** 테넌트 행 필터. 뷰는 테넌트별 행만 내므로 전체 보기는 아래 rollup으로 합친다. */
+const forTenant = (rows) => TENANT ? rows.filter((r) => r.tenant_id === TENANT) : rows;
+
+/**
+ * 테넌트 축을 접어 key 단위로 합산한다.
+ * 합계가 성립하는 이유: 한 유저는 한 테넌트에만 속하므로 카운트·합계·DISTINCT 디바이스 수가
+ * 겹치지 않는다. 비율은 합산할 수 없어 `after`에서 원시 분자·분모로 재계산한다.
+ */
+function rollup(rows, keyFn, sumKeys, { merge, after } = {}) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = keyFn(r);
+    let acc = m.get(k);
+    if (!acc) {
+      acc = { ...r };
+      for (const s of sumKeys) acc[s] = 0;
+      m.set(k, acc);
+    }
+    for (const s of sumKeys) acc[s] = (Number(acc[s]) || 0) + (Number(r[s]) || 0);
+    merge?.(acc, r);
+  }
+  const out = [...m.values()];
+  if (after) out.forEach(after);
+  return out;
+}
+
+/** admin_overview는 전 필드가 카운트라 통째로 더하면 된다. */
+function overviewFor() {
+  const rows = forTenant(DATA.overview);
+  const out = {};
+  for (const r of rows) {
+    for (const [k, v] of Object.entries(r)) {
+      if (k === "tenant_id") continue;
+      out[k] = (out[k] ?? 0) + (Number(v) || 0);
+    }
+  }
+  return out;
 }
 
 // ─────────────────────────────────────────────────────────────── 차트 프리미티브
@@ -819,7 +865,7 @@ async function load() {
     // 카탈로그는 실패해도 대시보드가 죽으면 안 된다 — 이름이 투박해질 뿐이다.
     CATALOG = await fetch("/pets.json").then((r) => r.json())
       .then((j) => j.pets ?? {}).catch(() => ({}));
-    const [overview, daily, progress, abuse, versions, pets, badges] = await Promise.all([
+    const [overview, daily, progress, abuse, versions, pets, badges, tenants] = await Promise.all([
       api("admin_overview", "select=*"),
       api("admin_daily_activity", "select=*&order=day_kst.asc"),
       api("admin_user_progress", "select=*&order=server_total_coins.desc"),
@@ -827,10 +873,20 @@ async function load() {
       api("admin_version_spread", "select=*&order=users.desc"),
       api("admin_pet_popularity", "select=*&order=owners.desc,acquisitions_total.desc"),
       api("admin_badge_progress", "select=*&order=category.asc,tier.asc"),
+      api("admin_tenants", "select=*&order=users.desc"),
     ]);
-    DATA = { overview: overview[0] ?? {}, daily, progress, abuse, versions, pets, badges };
-    document.getElementById("stamp").textContent =
-      `갱신 ${new Date().toLocaleTimeString("ko-KR")} · 유저 ${fmt(DATA.overview.users_total)}명`;
+    DATA = { overview, daily, progress, abuse, versions, pets, badges, tenants };
+
+    // 테넌트 셀렉터 — 선택은 유지한다(새로고침해도 보던 테넌트에 머문다).
+    const sel = document.getElementById("tenant");
+    const keep = TENANT;
+    sel.innerHTML = `<option value="">전체 (${fmt(
+      tenants.reduce((s, t) => s + Number(t.users), 0))}명)</option>` +
+      tenants.map((t) =>
+        `<option value="${t.slug}">${t.display_name} · ${t.users}명</option>`).join("");
+    sel.value = tenants.some((t) => t.slug === keep) ? keep : "";
+    TENANT = sel.value;
+
     document.getElementById("loading").hidden = true;
     renderAll();
   } catch (e) {
@@ -842,6 +898,11 @@ async function load() {
 
 function renderAll() {
   if (!DATA) return;
+  const label = TENANT
+    ? (DATA.tenants.find((t) => t.slug === TENANT)?.display_name ?? TENANT)
+    : "전체";
+  document.getElementById("stamp").textContent =
+    `갱신 ${new Date().toLocaleTimeString("ko-KR")} · ${label} · 유저 ${fmt(overviewFor().users_total)}명`;
   renderOverview();
   renderUsage();
   renderProgress();
@@ -851,7 +912,7 @@ function renderAll() {
 }
 
 function renderOverview() {
-  const o = DATA.overview;
+  const o = overviewFor();
   const tiles = [
     { label: "활성 유저 (7일)", value: fmt(o.active_7d), sub: `24시간 ${fmt(o.active_24h)} · 30일 ${fmt(o.active_30d)}` },
     { label: "전체 유저", value: fmt(o.users_total), sub: `신규 7일 ${fmt(o.new_7d)} · 30일 ${fmt(o.new_30d)}` },
@@ -880,15 +941,30 @@ function renderOverview() {
       <div class="sub">${t.sub}</div>
     </div>`).join("");
 
-  const recent = DATA.daily.slice(-30);
+  const recent = dailyFor().slice(-30);
   lineChart(q('[data-chart="overview-active"]'), {
     dates: recent.map((r) => new Date(r.day_kst + "T00:00:00")),
     series: [{ name: "활성 디바이스", color: S[1], values: recent.map((r) => r.active_devices) }],
   });
 }
 
+/** 일자별 시계열 — 테넌트 축을 접고 비율은 원시값으로 다시 낸다. */
+function dailyFor() {
+  return rollup(
+    forTenant(DATA.daily), (r) => r.day_kst,
+    ["active_devices", "submissions", "accepted", "rejected", "capped",
+     "accepted_coins", "reported_coins"],
+    {
+      after: (r) => {
+        r.accept_ratio = r.reported_coins
+          ? (r.accepted_coins / r.reported_coins).toFixed(3) : null;
+      },
+    },
+  ).sort((a, b) => a.day_kst.localeCompare(b.day_kst));
+}
+
 function renderUsage() {
-  const d = DATA.daily;
+  const d = dailyFor();
   const dates = d.map((r) => new Date(r.day_kst + "T00:00:00"));
 
   lineChart(q('[data-chart="usage-devices"]'), {
@@ -932,8 +1008,9 @@ const TIERS = ["localhost", "dev", "staging", "production"];
 const TIER_COLORS = ["var(--tier-1)", "var(--tier-2)", "var(--tier-3)", "var(--tier-4)"];
 
 function renderProgress() {
-  const p = DATA.progress;
-  const petTotal = Math.max(PET_KINDS_KNOWN, DATA.pets.length);
+  const p = forTenant(DATA.progress);
+  const petsRows = petsFor();
+  const petTotal = Math.max(PET_KINDS_KNOWN, petsRows.length);
   const active = p.filter((r) => r.status === "active");
   const avg = (f) => active.length
     ? Math.round(active.reduce((s, r) => s + (Number(f(r)) || 0), 0) / active.length) : 0;
@@ -1007,8 +1084,14 @@ function renderProgress() {
   });
 
   // ── 관장별 난이도 히트맵.
-  const byKey = new Map(DATA.badges.map((b) => [`${b.category}|${b.tier}`, b]));
-  const categories = [...new Set(DATA.badges.map((b) => b.category))].sort();
+  const activeTotal = overviewFor().users_active || 0;
+  const badges = rollup(
+    forTenant(DATA.badges), (b) => b.badge_key, ["cleared_by"],
+    { after: (b) => { b.cleared_pct = activeTotal
+        ? Math.round((b.cleared_by / activeTotal) * 1000) / 10 : 0; } },
+  );
+  const byKey = new Map(badges.map((b) => [`${b.category}|${b.tier}`, b]));
+  const categories = [...new Set(badges.map((b) => b.category))].sort();
   heatmap(q('[data-chart="progress-heatmap"]'), {
     rowKeys: categories, colKeys: TIERS,
     cell: (cat, tier) => {
@@ -1102,11 +1185,20 @@ function renderAbuse() {
     { key: "app_version", label: "버전" },
     { key: "review_note", label: "메모", render: (r) => r.review_note ?? '<span class="dim">–</span>' },
     { key: "device_id", label: "device_id", render: (r) => `<span class="dim">${r.device_id}</span>` },
-  ], DATA.abuse);
+  ], forTenant(DATA.abuse));
 }
 
 function renderVersions() {
-  const v = DATA.versions;
+  const v = rollup(
+    forTenant(DATA.versions), (r) => r.app_version,
+    ["users", "active_7d", "active_30d"],
+    {
+      merge: (acc, r) => {
+        // last_seen은 합계가 아니라 최댓값 — 테넌트를 합칠 때 가장 최근 것을 남긴다.
+        if (r.last_seen && (!acc.last_seen || r.last_seen > acc.last_seen)) acc.last_seen = r.last_seen;
+      },
+    },
+  ).sort((a, b) => b.users - a.users);
   barChart(q('[data-chart="versions"]'), {
     rows: v.map((r) => ({ label: r.app_version, value: r.active_7d, sub: `전체 ${r.users}명` })),
     unit: "명",
@@ -1135,8 +1227,25 @@ const petMeta = (kind) => CATALOG[kind] ?? {
   name: kind, rarity: "common", rarityRank: 9, sprite: null, cellW: 32, cellH: 32,
 };
 
+/** 펫 분포 — 테넌트 축을 접는다. avg_variants만 단순합이 아니라 보유자 수 가중평균. */
+function petsFor() {
+  return rollup(
+    forTenant(DATA.pets), (r) => r.pet_kind,
+    ["owners", "acquisitions_total", "prestige_owners", "equipped_claude", "equipped_cursor"],
+    {
+      merge: (acc, r) => {
+        acc._vw = (acc._vw ?? 0) + (Number(r.avg_variants) || 0) * (Number(r.owners) || 0);
+      },
+      after: (r) => {
+        r.avg_variants = r.owners ? (r._vw / r.owners).toFixed(2) : "0.00";
+        delete r._vw;
+      },
+    },
+  ).sort((a, b) => b.owners - a.owners || b.acquisitions_total - a.acquisitions_total);
+}
+
 function renderPets() {
-  const rows = DATA.pets;
+  const rows = petsFor();
   const byKind = new Map(rows.map((r) => [r.pet_kind, r]));
   const sort = document.getElementById("pet-sort").value;
   const showUnowned = document.getElementById("pet-unowned").checked;
@@ -1241,6 +1350,10 @@ nav.addEventListener("click", (e) => {
   if (b) show(b.dataset.tab);
 });
 document.getElementById("reload").addEventListener("click", load);
+document.getElementById("tenant").addEventListener("change", (e) => {
+  TENANT = e.target.value;
+  if (DATA) renderAll();
+});
 for (const id of ["pet-sort", "pet-unowned"]) {
   document.getElementById(id).addEventListener("change", () => { if (DATA) renderPets(); });
 }

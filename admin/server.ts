@@ -27,6 +27,7 @@ const HTML_PATH = new URL("./index.html", import.meta.url).pathname;
 // 로컬 전용이라 공격면은 좁지만, 오타 한 번으로 users 원본(백업 blob 포함)을
 // 브라우저로 끌어오는 사고를 구조적으로 차단한다.
 const ALLOWED_VIEWS = new Set([
+  "admin_tenants",
   "admin_overview",
   "admin_user_progress",
   "admin_daily_activity",
