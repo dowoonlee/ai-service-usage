@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIUsage 운영 대시보드</title>
+<style>
+/* ── 팔레트 (dataviz 레퍼런스 인스턴스, validator 통과: light/dark 3슬롯 all-pairs) ── */
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --page: #f9f9f7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --baseline: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --success-text: #006300;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --page: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --baseline: #383835;
+    --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --success-text: #0ca30c;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --page: #0d0d0d;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --baseline: #383835;
+  --border: rgba(255,255,255,0.10);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --success-text: #0ca30c;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+header {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 20px 24px 0;
+}
+h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+.spacer { flex: 1; }
+.meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+button {
+  font: inherit; color: var(--text-secondary); background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px; cursor: pointer;
+}
+button:hover { color: var(--text-primary); }
+
+nav { display: flex; gap: 4px; padding: 16px 24px 0; flex-wrap: wrap; }
+nav button[aria-selected="true"] {
+  color: var(--text-primary); font-weight: 600;
+  border-color: var(--text-primary);
+}
+main { padding: 20px 24px 48px; }
+section[hidden] { display: none; }
+
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+.tile {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px;
+}
+.tile .label { color: var(--text-secondary); font-size: 12px; }
+.tile .value { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+.tile .sub { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.tile .value.alert { color: var(--critical); }
+.tile .value.warn { color: var(--serious); }
+
+figure {
+  margin: 0 0 16px; background: var(--surface-1);
+  border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+}
+figcaption { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.figsub { color: var(--text-secondary); font-size: 12px; margin-bottom: 10px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; }
+.chart-wrap { position: relative; }
+.tooltip {
+  position: absolute; pointer-events: none; opacity: 0; transition: opacity .1s;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px; font-size: 12px; font-variant-numeric: tabular-nums;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.14); white-space: nowrap; z-index: 5;
+}
+.tooltip b { font-weight: 600; }
+.tooltip .row { display: flex; align-items: center; gap: 6px; }
+
+details { margin-top: 10px; }
+summary { color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+.tablescroll { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th, td {
+  text-align: right; padding: 6px 10px; white-space: nowrap;
+  border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums;
+}
+th { color: var(--text-secondary); font-weight: 600; position: sticky; top: 0; background: var(--surface-1); }
+th:first-child, td:first-child { text-align: left; font-variant-numeric: normal; }
+tbody tr:hover td { background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.pill {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--border);
+}
+.pill.critical { color: var(--critical); }
+.pill.warning  { color: var(--serious); }
+.pill.good     { color: var(--success-text); }
+.dim { color: var(--muted); }
+.err {
+  background: var(--surface-1); border: 1px solid var(--critical);
+  border-radius: 12px; padding: 14px 16px; color: var(--critical);
+}
+.loading { color: var(--muted); padding: 24px 0; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AIUsage 운영 대시보드</h1>
+  <span class="meta" id="stamp"></span>
+  <span class="spacer"></span>
+  <button id="theme">테마</button>
+  <button id="reload">새로고침</button>
+</header>
+
+<nav id="tabs"></nav>
+
+<main>
+  <div id="error"></div>
+  <div id="loading" class="loading">불러오는 중…</div>
+
+  <section id="tab-overview" hidden>
+    <div class="grid" id="tiles"></div>
+    <div style="height:16px"></div>
+    <figure>
+      <figcaption>최근 30일 활성 디바이스</figcaption>
+      <div class="figsub">하루라도 제출한 디바이스 수 (KST 기준)</div>
+      <div class="chart-wrap" data-chart="overview-active"></div>
+    </figure>
+  </section>
+
+  <section id="tab-usage" hidden>
+    <figure>
+      <figcaption>일별 활성 디바이스</figcaption>
+      <div class="figsub">제출한 고유 디바이스 수</div>
+      <div class="chart-wrap" data-chart="usage-devices"></div>
+      <details><summary>표로 보기</summary><div class="tablescroll" data-table="usage-devices"></div></details>
+    </figure>
+    <figure>
+      <figcaption>일별 제출 처리 결과</figcaption>
+      <div class="figsub">전체 제출 대비 거부·캡 적용 건수 — 셋이 함께 뛰면 조작 시도, 캡만 뛰면 정상 헤비유저</div>
+      <div class="legend" data-legend="usage-submissions"></div>
+      <div class="chart-wrap" data-chart="usage-submissions"></div>
+      <details><summary>표로 보기</summary><div class="tablescroll" data-table="usage-submissions"></div></details>
+    </figure>
+    <figure>
+      <figcaption>일별 반영 코인</figcaption>
+      <div class="figsub">accepted_coins 합계 — 서버가 실제로 인정한 사용량</div>
+      <div class="chart-wrap" data-chart="usage-coins"></div>
+      <details><summary>표로 보기</summary><div class="tablescroll" data-table="usage-coins"></div></details>
+    </figure>
+  </section>
+
+  <section id="tab-progress" hidden>
+    <figure>
+      <figcaption>유저별 펫 보유 수</figcaption>
+      <div class="figsub">도감 해금 진척 — 상위 20명</div>
+      <div class="chart-wrap" data-chart="progress-pets"></div>
+    </figure>
+    <figure>
+      <figcaption>유저별 진척 상세</figcaption>
+      <div class="figsub">
+        stats/backup은 클라이언트 자가 신고 값, 코인·제출은 서버 권위 값입니다.
+        <b>획득합</b>(펫별 count 합)이 <b>가챠</b>(stats.totalPulls)와 크게 어긋나면 확인 대상.
+      </div>
+      <div class="tablescroll" data-table="progress"></div>
+    </figure>
+  </section>
+
+  <section id="tab-abuse" hidden>
+    <figure>
+      <figcaption>abuse 트리아지 큐</figcaption>
+      <div class="figsub">
+        미검토 플래그 우선. 검토 결과는 <code>abuse_flags.reviewed_at / review_note</code>를
+        service_role로 UPDATE 하세요 (이 대시보드는 읽기 전용).
+      </div>
+      <div class="tablescroll" data-table="abuse"></div>
+    </figure>
+  </section>
+
+  <section id="tab-version" hidden>
+    <figure>
+      <figcaption>앱 버전 분포</figcaption>
+      <div class="figsub">최근 7일 활성 사용자 기준 — 클라 게이트/강제 업데이트 판단용</div>
+      <div class="chart-wrap" data-chart="versions"></div>
+      <details><summary>표로 보기</summary><div class="tablescroll" data-table="versions"></div></details>
+    </figure>
+  </section>
+
+  <section id="tab-pets" hidden>
+    <figure>
+      <figcaption>펫 보유 분포 — 상위 25종</figcaption>
+      <div class="figsub">보유자 수 기준. 가챠 확률·컬렉션 밸런스 점검용</div>
+      <div class="chart-wrap" data-chart="pets"></div>
+      <details><summary>표로 보기</summary><div class="tablescroll" data-table="pets"></div></details>
+    </figure>
+  </section>
+</main>
+
+<script type="module">
+const TABS = [
+  ["overview", "개요"],
+  ["usage", "사용량"],
+  ["progress", "해금 진척"],
+  ["abuse", "abuse"],
+  ["version", "버전"],
+  ["pets", "펫"],
+];
+
+const S = { 1: "var(--series-1)", 2: "var(--series-2)", 3: "var(--series-3)" };
+const fmt = (n) => (n === null || n === undefined ? "–" : Number(n).toLocaleString("ko-KR"));
+const fmtDate = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+
+/** 초 → "3d 4h" / "5h 12m" */
+function fmtDuration(sec) {
+  if (sec == null) return "–";
+  const h = Math.floor(sec / 3600), d = Math.floor(h / 24);
+  if (d >= 2) return `${d}d ${h % 24}h`;
+  return `${h}h ${Math.floor((sec % 3600) / 60)}m`;
+}
+function fmtAgo(iso) {
+  if (!iso) return "–";
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+  return `${Math.floor(diff / 86400)}일 전`;
+}
+
+async function api(view, qs) {
+  const res = await fetch(`/api/${view}?${qs}`);
+  const body = await res.json();
+  if (!res.ok) throw new Error(`${view}: ${body.error ?? body.message ?? res.status}`);
+  return body;
+}
+
+// ─────────────────────────────────────────────────────────────── 차트 프리미티브
+const NS = "http://www.w3.org/2000/svg";
+const el = (tag, attrs = {}) => {
+  const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  return n;
+};
+
+/** 눈금 값 — 0부터 max까지 "예쁜" 4~5단계. */
+function ticks(max) {
+  if (max <= 0) return [0, 1];
+  const raw = max / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].find((m) => m * mag >= raw) * mag;
+  const out = [];
+  for (let v = 0; v <= max + step * 0.001; v += step) out.push(v);
+  return out;
+}
+
+/**
+ * 시계열 라인 차트. series: [{name, color, values: [y|null]}] — x축은 공통 dates.
+ * 단일 시리즈면 범례 없이(제목이 곧 이름), 복수면 마지막 점에 직접 라벨을 붙인다.
+ */
+function lineChart(wrap, { dates, series }) {
+  wrap.innerHTML = "";
+  if (!dates.length) { wrap.innerHTML = '<div class="loading">데이터 없음</div>'; return; }
+
+  const W = wrap.clientWidth || 720, H = 260;
+  const M = { t: 12, r: series.length > 1 ? 54 : 16, b: 26, l: 46 };
+  const iw = W - M.l - M.r, ih = H - M.t - M.b;
+  const svg = el("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img" });
+
+  const maxY = Math.max(1, ...series.flatMap((s) => s.values.filter((v) => v != null)));
+  const tk = ticks(maxY);
+  const top = tk[tk.length - 1];
+  const X = (i) => M.l + (dates.length === 1 ? iw / 2 : (i / (dates.length - 1)) * iw);
+  const Y = (v) => M.t + ih - (v / top) * ih;
+
+  for (const t of tk) {
+    svg.appendChild(el("line", {
+      x1: M.l, x2: M.l + iw, y1: Y(t), y2: Y(t),
+      stroke: "var(--grid)", "stroke-width": 1,
+    }));
+    const lb = el("text", {
+      x: M.l - 8, y: Y(t) + 4, "text-anchor": "end",
+      fill: "var(--muted)", "font-size": 11,
+    });
+    lb.textContent = t >= 1000 ? `${t / 1000}k` : String(t);
+    svg.appendChild(lb);
+  }
+  svg.appendChild(el("line", {
+    x1: M.l, x2: M.l + iw, y1: M.t + ih, y2: M.t + ih,
+    stroke: "var(--baseline)", "stroke-width": 1,
+  }));
+
+  const every = Math.max(1, Math.ceil(dates.length / 8));
+  dates.forEach((d, i) => {
+    if (i % every && i !== dates.length - 1) return;
+    const lb = el("text", {
+      x: X(i), y: H - 8, "text-anchor": "middle", fill: "var(--muted)", "font-size": 11,
+    });
+    lb.textContent = fmtDate(d);
+    svg.appendChild(lb);
+  });
+
+  const labels = [];
+  for (const s of series) {
+    let path = "", pen = false;
+    s.values.forEach((v, i) => {
+      if (v == null) { pen = false; return; }
+      path += `${pen ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`;
+      pen = true;
+    });
+    svg.appendChild(el("path", {
+      d: path, fill: "none", stroke: s.color, "stroke-width": 2,
+      "stroke-linejoin": "round", "stroke-linecap": "round",
+    }));
+    // 직접 라벨 — 복수 시리즈일 때 색 없이도 식별 가능하도록(범례와 이중 표기).
+    if (series.length > 1) {
+      const li = s.values.reduce((acc, v, i) => (v != null ? i : acc), -1);
+      if (li >= 0) labels.push({ name: s.name, x: X(li) + 7, y: Y(s.values[li]) + 4 });
+    }
+  }
+  // 라벨 충돌 회피 — 값이 같거나 가까운 시리즈(예: 거부·캡이 나란히 0)는 텍스트가 정확히
+  // 포개져 읽을 수 없게 된다. y로 정렬 후 최소 간격을 강제하고, 아래로 넘치면 전체를 되민다.
+  const LH = 13;
+  labels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < labels.length; i++) {
+    if (labels[i].y - labels[i - 1].y < LH) labels[i].y = labels[i - 1].y + LH;
+  }
+  const overflow = labels.length ? labels[labels.length - 1].y - (M.t + ih + 4) : 0;
+  if (overflow > 0) for (const l of labels) l.y -= overflow;
+  for (const l of labels) {
+    const lb = el("text", { x: l.x, y: l.y, fill: "var(--text-secondary)", "font-size": 11 });
+    lb.textContent = l.name;
+    svg.appendChild(lb);
+  }
+
+  // 호버 레이어 — crosshair + 툴팁.
+  const cross = el("line", {
+    y1: M.t, y2: M.t + ih, stroke: "var(--baseline)", "stroke-width": 1, opacity: 0,
+  });
+  svg.appendChild(cross);
+  const dots = series.map((s) => {
+    const c = el("circle", {
+      r: 4.5, fill: s.color, stroke: "var(--surface-1)", "stroke-width": 2, opacity: 0,
+    });
+    svg.appendChild(c);
+    return c;
+  });
+
+  const tip = document.createElement("div");
+  tip.className = "tooltip";
+  wrap.appendChild(tip);
+
+  svg.addEventListener("mousemove", (ev) => {
+    const r = svg.getBoundingClientRect();
+    const i = Math.max(0, Math.min(dates.length - 1,
+      Math.round(((ev.clientX - r.left - M.l) / iw) * (dates.length - 1))));
+    cross.setAttribute("x1", X(i)); cross.setAttribute("x2", X(i));
+    cross.setAttribute("opacity", 1);
+    series.forEach((s, k) => {
+      const v = s.values[i];
+      if (v == null) { dots[k].setAttribute("opacity", 0); return; }
+      dots[k].setAttribute("cx", X(i)); dots[k].setAttribute("cy", Y(v));
+      dots[k].setAttribute("opacity", 1);
+    });
+    tip.innerHTML = `<b>${dates[i].getFullYear()}.${fmtDate(dates[i])}</b>` +
+      series.map((s, k) => `<div class="row"><span class="swatch" style="background:${s.color}"></span>` +
+        `${s.name} <b>${fmt(s.values[i])}</b></div>`).join("");
+    tip.style.opacity = 1;
+    const left = Math.min(Math.max(X(i) + 12, 4), W - tip.offsetWidth - 4);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${M.t + 4}px`;
+  });
+  svg.addEventListener("mouseleave", () => {
+    tip.style.opacity = 0; cross.setAttribute("opacity", 0);
+    dots.forEach((d) => d.setAttribute("opacity", 0));
+  });
+
+  wrap.appendChild(svg);
+}
+
+/** 가로 막대. rows: [{label, value, sub?}] — 값 쪽 끝만 4px 라운드. */
+function barChart(wrap, { rows, color = S[1], unit = "" }) {
+  wrap.innerHTML = "";
+  if (!rows.length) { wrap.innerHTML = '<div class="loading">데이터 없음</div>'; return; }
+
+  const W = wrap.clientWidth || 720;
+  const BH = 22, GAP = 2, LW = Math.min(190, Math.max(90, W * 0.24));
+  const H = rows.length * (BH + GAP) + 8;
+  const iw = W - LW - 56;
+  const svg = el("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img" });
+  const max = Math.max(1, ...rows.map((r) => r.value));
+
+  const tip = document.createElement("div");
+  tip.className = "tooltip";
+  wrap.appendChild(tip);
+
+  rows.forEach((r, i) => {
+    const y = i * (BH + GAP);
+    const lb = el("text", {
+      x: LW - 10, y: y + BH / 2 + 4, "text-anchor": "end",
+      fill: "var(--text-secondary)", "font-size": 12,
+    });
+    lb.textContent = r.label;
+    svg.appendChild(lb);
+
+    const w = Math.max(2, (r.value / max) * iw);
+    const bar = el("rect", {
+      x: LW, y, width: w, height: BH, fill: color, rx: 4,
+    });
+    svg.appendChild(bar);
+
+    const val = el("text", {
+      x: LW + w + 8, y: y + BH / 2 + 4,
+      fill: "var(--text-secondary)", "font-size": 12,
+    });
+    val.textContent = fmt(r.value) + unit;
+    svg.appendChild(val);
+
+    bar.addEventListener("mouseenter", () => {
+      tip.innerHTML = `<b>${r.label}</b><div class="row">${fmt(r.value)}${unit}` +
+        (r.sub ? ` <span class="dim">${r.sub}</span>` : "") + "</div>";
+      tip.style.opacity = 1;
+      tip.style.left = `${Math.min(LW + w + 12, W - 180)}px`;
+      tip.style.top = `${y - 4}px`;
+    });
+    bar.addEventListener("mouseleave", () => { tip.style.opacity = 0; });
+  });
+
+  wrap.appendChild(svg);
+}
+
+/** columns: [{key, label, render?}] */
+function renderTable(host, columns, rows) {
+  const t = document.createElement("table");
+  const thead = document.createElement("thead");
+  const htr = document.createElement("tr");
+  for (const c of columns) {
+    const th = document.createElement("th");
+    th.textContent = c.label;
+    htr.appendChild(th);
+  }
+  thead.appendChild(htr);
+  t.appendChild(thead);
+  const tb = document.createElement("tbody");
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    for (const c of columns) {
+      const td = document.createElement("td");
+      const v = c.render ? c.render(r) : r[c.key];
+      if (v instanceof Node) td.appendChild(v);
+      else td.innerHTML = v ?? "–";
+      tr.appendChild(td);
+    }
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb);
+  host.innerHTML = "";
+  host.appendChild(t);
+}
+
+const pill = (cls, text) => `<span class="pill ${cls}">${text}</span>`;
+
+// ─────────────────────────────────────────────────────────────────── 데이터 로드
+let DATA = null;
+
+async function load() {
+  document.getElementById("loading").hidden = false;
+  document.getElementById("error").innerHTML = "";
+  try {
+    const [overview, daily, progress, abuse, versions, pets] = await Promise.all([
+      api("admin_overview", "select=*"),
+      api("admin_daily_activity", "select=*&order=day_kst.asc"),
+      api("admin_user_progress", "select=*&order=server_total_coins.desc"),
+      api("admin_abuse_queue", "select=*&order=unreviewed.desc,flagged_at.desc"),
+      api("admin_version_spread", "select=*&order=users.desc"),
+      api("admin_pet_popularity", "select=*&order=owners.desc,acquisitions_total.desc"),
+    ]);
+    DATA = { overview: overview[0] ?? {}, daily, progress, abuse, versions, pets };
+    document.getElementById("stamp").textContent =
+      `갱신 ${new Date().toLocaleTimeString("ko-KR")} · 유저 ${fmt(DATA.overview.users_total)}명`;
+    document.getElementById("loading").hidden = true;
+    renderAll();
+  } catch (e) {
+    document.getElementById("loading").hidden = true;
+    document.getElementById("error").innerHTML =
+      `<div class="err"><b>불러오기 실패</b><br>${e.message}</div>`;
+  }
+}
+
+function renderAll() {
+  if (!DATA) return;
+  renderOverview();
+  renderUsage();
+  renderProgress();
+  renderAbuse();
+  renderVersions();
+  renderPets();
+}
+
+function renderOverview() {
+  const o = DATA.overview;
+  const tiles = [
+    { label: "활성 유저 (7일)", value: fmt(o.active_7d), sub: `24시간 ${fmt(o.active_24h)} · 30일 ${fmt(o.active_30d)}` },
+    { label: "전체 유저", value: fmt(o.users_total), sub: `신규 7일 ${fmt(o.new_7d)} · 30일 ${fmt(o.new_30d)}` },
+    { label: "오늘 제출", value: fmt(o.submissions_today), sub: `반영 코인 ${fmt(o.coins_today)}` },
+    {
+      label: "미검토 플래그", value: fmt(o.flags_unreviewed),
+      sub: `최근 7일 ${fmt(o.flags_unreviewed_7d)}`,
+      cls: o.flags_unreviewed > 0 ? "alert" : "",
+    },
+    {
+      label: "무결성 위반", value: fmt(o.integrity_violations),
+      sub: "클라 자가 탐지", cls: o.integrity_violations > 0 ? "warn" : "",
+    },
+    {
+      label: "미수령 보상", value: fmt(Number(o.grants_pending) + Number(o.rp_rewards_pending)),
+      sub: `grant ${fmt(o.grants_pending)} · RP ${fmt(o.rp_rewards_pending)}`,
+      cls: (Number(o.grants_pending) + Number(o.rp_rewards_pending)) > 0 ? "warn" : "",
+    },
+    { label: "제재 계정", value: fmt(Number(o.users_banned) + Number(o.users_shadow_banned)), sub: `ban ${fmt(o.users_banned)} · shadow ${fmt(o.users_shadow_banned)}` },
+    { label: "길드", value: fmt(o.guilds_total), sub: `PvP 7일 ${fmt(o.pvp_matches_7d)}전 · 글 ${fmt(o.posts_7d)}` },
+  ];
+  document.getElementById("tiles").innerHTML = tiles.map((t) => `
+    <div class="tile">
+      <div class="label">${t.label}</div>
+      <div class="value ${t.cls ?? ""}">${t.value}</div>
+      <div class="sub">${t.sub}</div>
+    </div>`).join("");
+
+  const recent = DATA.daily.slice(-30);
+  lineChart(q('[data-chart="overview-active"]'), {
+    dates: recent.map((r) => new Date(r.day_kst + "T00:00:00")),
+    series: [{ name: "활성 디바이스", color: S[1], values: recent.map((r) => r.active_devices) }],
+  });
+}
+
+function renderUsage() {
+  const d = DATA.daily;
+  const dates = d.map((r) => new Date(r.day_kst + "T00:00:00"));
+
+  lineChart(q('[data-chart="usage-devices"]'), {
+    dates, series: [{ name: "활성 디바이스", color: S[1], values: d.map((r) => r.active_devices) }],
+  });
+  renderTable(q('[data-table="usage-devices"]'),
+    [{ key: "day_kst", label: "날짜" }, { key: "active_devices", label: "활성 디바이스" }],
+    [...d].reverse());
+
+  const subSeries = [
+    { name: "전체", color: S[1], values: d.map((r) => r.submissions) },
+    { name: "캡 적용", color: S[2], values: d.map((r) => r.capped) },
+    { name: "거부", color: S[3], values: d.map((r) => r.rejected) },
+  ];
+  q('[data-legend="usage-submissions"]').innerHTML = subSeries.map((s) =>
+    `<span><span class="swatch" style="background:${s.color}"></span>${s.name}</span>`).join("");
+  lineChart(q('[data-chart="usage-submissions"]'), { dates, series: subSeries });
+  renderTable(q('[data-table="usage-submissions"]'), [
+    { key: "day_kst", label: "날짜" },
+    { key: "submissions", label: "전체" },
+    { key: "accepted", label: "수용" },
+    { key: "capped", label: "캡 적용" },
+    { key: "rejected", label: "거부" },
+  ], [...d].reverse());
+
+  lineChart(q('[data-chart="usage-coins"]'), {
+    dates, series: [{ name: "반영 코인", color: S[1], values: d.map((r) => r.accepted_coins) }],
+  });
+  renderTable(q('[data-table="usage-coins"]'), [
+    { key: "day_kst", label: "날짜" },
+    { key: "accepted_coins", label: "반영 코인" },
+    { key: "reported_coins", label: "신고 코인" },
+    { key: "accept_ratio", label: "반영률", render: (r) => r.accept_ratio ?? "–" },
+  ], [...d].reverse());
+}
+
+function renderProgress() {
+  const p = DATA.progress;
+  barChart(q('[data-chart="progress-pets"]'), {
+    rows: [...p].sort((a, b) => b.pets_owned - a.pets_owned).slice(0, 20)
+      .map((r) => ({ label: r.nickname, value: r.pets_owned, sub: `이로치 ${r.variants_unlocked}` })),
+    unit: "종",
+  });
+
+  renderTable(q('[data-table="progress"]'), [
+    { key: "nickname", label: "닉네임" },
+    {
+      key: "status", label: "상태",
+      render: (r) => r.status === "active"
+        ? (r.integrity_violation ? pill("critical", "⚠ 무결성") : '<span class="dim">정상</span>')
+        : pill("critical", r.status),
+    },
+    { key: "app_version", label: "버전", render: (r) => r.app_version ?? '<span class="dim">–</span>' },
+    { key: "pets_owned", label: "펫", render: (r) => fmt(r.pets_owned) },
+    { key: "variants_unlocked", label: "이로치" },
+    { key: "total_pulls", label: "가챠", render: (r) => fmt(r.total_pulls) },
+    { key: "pulls_accounted", label: "획득합", render: (r) => fmt(r.pulls_accounted) },
+    { key: "badges_cleared", label: "뱃지", render: (r) => `${r.badges_cleared ?? "–"}/${r.badges_total ?? "–"}` },
+    { key: "collections_complete", label: "컬렉션", render: (r) => `${r.collections_complete ?? "–"}/${r.collections_total ?? "–"}` },
+    { key: "play_seconds", label: "플레이", render: (r) => fmtDuration(r.play_seconds) },
+    { key: "server_total_coins", label: "서버 코인", render: (r) => fmt(r.server_total_coins) },
+    { key: "coin_balance", label: "잔액", render: (r) => fmt(r.coin_balance) },
+    { key: "submissions_total", label: "제출", render: (r) => fmt(r.submissions_total) },
+    {
+      key: "flag_unreviewed", label: "플래그",
+      render: (r) => r.flag_count > 0
+        ? pill(r.flag_unreviewed > 0 ? "critical" : "warning", `${r.flag_unreviewed}/${r.flag_count}`)
+        : '<span class="dim">0</span>',
+    },
+    { key: "last_submitted_at", label: "최근 활동", render: (r) => fmtAgo(r.last_submitted_at) },
+  ], p);
+}
+
+function renderAbuse() {
+  renderTable(q('[data-table="abuse"]'), [
+    {
+      key: "unreviewed", label: "상태",
+      render: (r) => r.unreviewed ? pill("critical", "● 미검토") : pill("good", "✓ 검토됨"),
+    },
+    { key: "flagged_at", label: "시각", render: (r) => new Date(r.flagged_at).toLocaleString("ko-KR") },
+    { key: "nickname", label: "닉네임", render: (r) => r.nickname ?? '<span class="dim">(삭제됨)</span>' },
+    { key: "reason", label: "사유" },
+    {
+      key: "account_age_days_at_flag", label: "계정 나이",
+      render: (r) => r.account_age_days_at_flag == null ? "–"
+        : (r.account_age_days_at_flag < 1
+            ? pill("warning", `${r.account_age_days_at_flag}d`)
+            : `${r.account_age_days_at_flag}d`),
+    },
+    { key: "device_flag_count", label: "누적", render: (r) => r.device_flag_count > 1 ? pill("warning", r.device_flag_count) : r.device_flag_count },
+    { key: "submissions_7d", label: "제출(7d)" },
+    { key: "capped_7d", label: "캡(7d)" },
+    { key: "rejected_7d", label: "거부(7d)" },
+    { key: "max_delta_7d", label: "최대 delta", render: (r) => fmt(r.max_delta_7d) },
+    { key: "total_pulls", label: "가챠", render: (r) => fmt(r.total_pulls) },
+    {
+      key: "integrity_violation", label: "무결성",
+      render: (r) => r.integrity_violation ? pill("critical", "⚠ 위반") : '<span class="dim">–</span>',
+    },
+    { key: "app_version", label: "버전" },
+    { key: "review_note", label: "메모", render: (r) => r.review_note ?? '<span class="dim">–</span>' },
+    { key: "device_id", label: "device_id", render: (r) => `<span class="dim">${r.device_id}</span>` },
+  ], DATA.abuse);
+}
+
+function renderVersions() {
+  const v = DATA.versions;
+  barChart(q('[data-chart="versions"]'), {
+    rows: v.map((r) => ({ label: r.app_version, value: r.active_7d, sub: `전체 ${r.users}명` })),
+    unit: "명",
+  });
+  renderTable(q('[data-table="versions"]'), [
+    { key: "app_version", label: "버전" },
+    { key: "users", label: "전체" },
+    { key: "active_7d", label: "활성(7일)" },
+    { key: "active_30d", label: "활성(30일)" },
+    { key: "last_seen", label: "최근", render: (r) => fmtAgo(r.last_seen) },
+  ], v);
+}
+
+function renderPets() {
+  const p = DATA.pets;
+  barChart(q('[data-chart="pets"]'), {
+    rows: p.slice(0, 25).map((r) => ({
+      label: r.pet_kind, value: r.owners,
+      sub: `획득 ${r.acquisitions_total} · 장착 ${r.equipped_claude + r.equipped_cursor}`,
+    })),
+    unit: "명",
+  });
+  renderTable(q('[data-table="pets"]'), [
+    { key: "pet_kind", label: "펫" },
+    { key: "owners", label: "보유자" },
+    { key: "acquisitions_total", label: "획득 총량" },
+    { key: "avg_variants", label: "평균 이로치" },
+    { key: "prestige_owners", label: "레인보우" },
+    { key: "equipped_claude", label: "장착(Claude)" },
+    { key: "equipped_cursor", label: "장착(Cursor)" },
+  ], p);
+}
+
+const q = (sel) => document.querySelector(sel);
+
+// ─────────────────────────────────────────────────────────────────────── 탭/제어
+const nav = document.getElementById("tabs");
+let active = location.hash.slice(1) || "overview";
+if (!TABS.some(([id]) => id === active)) active = "overview";
+
+nav.innerHTML = TABS.map(([id, label]) =>
+  `<button data-tab="${id}" aria-selected="${id === active}">${label}</button>`).join("");
+
+function show(id) {
+  active = id;
+  location.hash = id;
+  for (const [tid] of TABS) {
+    q(`#tab-${tid}`).hidden = tid !== id;
+    q(`[data-tab="${tid}"]`).setAttribute("aria-selected", String(tid === id));
+  }
+  renderAll();   // 숨김 상태에선 clientWidth=0이라 탭 전환 시 재렌더 필요.
+}
+
+nav.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-tab]");
+  if (b) show(b.dataset.tab);
+});
+document.getElementById("reload").addEventListener("click", load);
+document.getElementById("theme").addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const next = cur === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  renderAll();
+});
+
+let rt;
+addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(renderAll, 150); });
+
+show(active);
+await load();
+</script>
+</body>
+</html>
