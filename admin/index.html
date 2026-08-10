@@ -346,7 +346,10 @@ select {
   <section id="tab-version" hidden>
     <figure>
       <figcaption>앱 버전 분포</figcaption>
-      <div class="figsub">최근 7일 활성 사용자 기준 — 클라 게이트/강제 업데이트 판단용</div>
+      <div class="figsub">
+        최근 7일 활성 사용자 기준, 최신 버전이 위 — 클라 게이트/강제 업데이트 판단용.
+        <span data-slot="version-hidden"></span>
+      </div>
       <div class="chart-wrap" data-chart="versions"></div>
       <details><summary>표로 보기</summary><div class="tablescroll" data-table="versions"></div></details>
     </figure>
@@ -390,6 +393,24 @@ const TABS = [
 const S = { 1: "var(--series-1)", 2: "var(--series-2)", 3: "var(--series-3)" };
 const fmt = (n) => (n === null || n === undefined ? "–" : Number(n).toLocaleString("ko-KR"));
 const fmtDate = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+
+/**
+ * 앱 버전 비교 — 숫자 컴포넌트 단위. 사전순으로 정렬하면 "0.9.0"이 "0.17.16"보다 뒤로 가서
+ * 버전 축이 통째로 뒤집힌다. 서버 min_version.ts의 compareVersions와 같은 규칙.
+ * 값이 없는 "(unknown)"은 항상 끝으로 보낸다.
+ */
+function cmpVersion(a, b) {
+  if (a === b) return 0;
+  if (a === "(unknown)") return -1;
+  if (b === "(unknown)") return 1;
+  const pa = a.split(".").map((s) => parseInt(s, 10) || 0);
+  const pb = b.split(".").map((s) => parseInt(s, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? 0, y = pb[i] ?? 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
 
 /** 그 날짜가 속한 주(월요일 시작)의 시작 시각. 주 경계 판정용 — getDay()는 일=0이라 월=0으로 보정. */
 function weekStart(d) {
@@ -1198,9 +1219,19 @@ function renderVersions() {
         if (r.last_seen && (!acc.last_seen || r.last_seen > acc.last_seen)) acc.last_seen = r.last_seen;
       },
     },
-  ).sort((a, b) => b.users - a.users);
+  ).sort((a, b) => cmpVersion(b.app_version, a.app_version));   // 최신이 위
+
+  // 활성 0인 버전은 막대가 길이 0으로 남아 축만 늘린다 — 차트에서는 뺀다.
+  // 표에는 남겨야 "그 버전에 몇 명이 묶여 있는지"를 잃지 않는다.
+  const shown = v.filter((r) => r.active_7d > 0);
+  const hidden = v.length - shown.length;
+  for (const el of document.querySelectorAll('[data-slot="version-hidden"]')) {
+    el.textContent = hidden
+      ? `활성 0인 ${hidden}개 버전은 차트에서 제외했습니다(표에는 있음).` : "";
+  }
+
   barChart(q('[data-chart="versions"]'), {
-    rows: v.map((r) => ({ label: r.app_version, value: r.active_7d, sub: `전체 ${r.users}명` })),
+    rows: shown.map((r) => ({ label: r.app_version, value: r.active_7d, sub: `전체 ${r.users}명` })),
     unit: "명",
   });
   renderTable(q('[data-table="versions"]'), [
