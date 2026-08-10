@@ -33,6 +33,7 @@ const ALLOWED_VIEWS = new Set([
   "admin_abuse_queue",
   "admin_version_spread",
   "admin_pet_popularity",
+  "admin_badge_progress",
 ]);
 
 /** shell 형식 env 파일 파서 — `KEY=value` / `export KEY="value"` 만 인식. */

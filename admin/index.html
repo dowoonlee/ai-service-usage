@@ -24,6 +24,25 @@
   --serious: #ec835a;
   --critical: #d03b3b;
   --success-text: #006300;
+  /* tier ordinal ramp (blue 250→550) — 난이도는 순서가 있는 값이라 카테고리 색이 아니라
+     단일 hue의 단계로 인코딩한다. light는 surface에서 멀어지는 방향(밝음→어두움).
+     가장 밝은 단계가 step 250 이상이어야 2:1 대비를 지킨다. */
+  --tier-1: #86b6ef;
+  --tier-2: #5598e7;
+  --tier-3: #2a78d6;
+  --tier-4: #1c5cab;
+  /* sequential ramp (히트맵 — 연속 magnitude). 낮음→높음. */
+  --seq-1: #b7d3f6;
+  --seq-2: #6da7ec;
+  --seq-3: #2a78d6;
+  --seq-4: #184f95;
+  --seq-empty: #f0efec;
+  /* 셀 잉크 — 단계별 배경 밝기에 맞춘 짝. light는 1·2가 밝은 배경(어두운 잉크),
+     3·4가 어두운 배경(밝은 잉크). dark에서는 이 관계가 통째로 뒤집힌다. */
+  --seq-ink-1: #0b0b0b;
+  --seq-ink-2: #0b0b0b;
+  --seq-ink-3: #ffffff;
+  --seq-ink-4: #ffffff;
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
@@ -40,6 +59,21 @@
     --series-2: #d95926;
     --series-3: #199e70;
     --success-text: #0ca30c;
+    /* dark에서는 배경이 어두우므로 방향이 뒤집힌다 — 상위 tier가 밝아진다.
+       가장 어두운 단계가 step 600을 넘지 않아야 대비가 유지된다. */
+    --tier-1: #184f95;
+    --tier-2: #256abf;
+    --tier-3: #3987e5;
+    --tier-4: #6da7ec;
+    --seq-1: #184f95;
+    --seq-2: #256abf;
+    --seq-3: #5598e7;
+    --seq-4: #9ec5f4;
+    --seq-empty: #2c2c2a;
+    --seq-ink-1: #ffffff;
+    --seq-ink-2: #ffffff;
+    --seq-ink-3: #0b0b0b;
+    --seq-ink-4: #0b0b0b;
   }
 }
 :root[data-theme="dark"] {
@@ -56,6 +90,19 @@
   --series-2: #d95926;
   --series-3: #199e70;
   --success-text: #0ca30c;
+  --tier-1: #184f95;
+  --tier-2: #256abf;
+  --tier-3: #3987e5;
+  --tier-4: #6da7ec;
+  --seq-1: #184f95;
+  --seq-2: #256abf;
+  --seq-3: #5598e7;
+  --seq-4: #9ec5f4;
+  --seq-empty: #2c2c2a;
+  --seq-ink-1: #ffffff;
+  --seq-ink-2: #ffffff;
+  --seq-ink-3: #0b0b0b;
+  --seq-ink-4: #0b0b0b;
 }
 
 * { box-sizing: border-box; }
@@ -194,11 +241,47 @@ tbody tr:hover td { background: color-mix(in srgb, var(--text-primary) 4%, trans
   </section>
 
   <section id="tab-progress" hidden>
+    <div class="grid" id="progress-tiles"></div>
+    <div style="height:16px"></div>
+
     <figure>
-      <figcaption>유저별 펫 보유 수</figcaption>
-      <div class="figsub">도감 해금 진척 — 상위 20명</div>
+      <figcaption>펫 해금</figcaption>
+      <div class="figsub">보유 종수 / 전체 <span data-slot="pet-total"></span>종 — 상위 20명</div>
       <div class="chart-wrap" data-chart="progress-pets"></div>
     </figure>
+
+    <figure>
+      <figcaption>이로치 해금</figcaption>
+      <div class="figsub">
+        변종 1~3 해금 수 (기본 변종·레인보우 제외). 분모는 <b>보유 펫 × 3</b> —
+        펫을 많이 가질수록 만렙이 멀어지므로 절대 수와 비율을 함께 봅니다.
+      </div>
+      <div class="chart-wrap" data-chart="progress-shiny"></div>
+    </figure>
+
+    <figure>
+      <figcaption>관장 격파</figcaption>
+      <div class="figsub">tier별 클리어 수 — localhost → dev → staging → production 순으로 난이도 상승</div>
+      <div class="legend" data-legend="progress-badges"></div>
+      <div class="chart-wrap" data-chart="progress-badges"></div>
+    </figure>
+
+    <figure>
+      <figcaption>관장별 난이도</figcaption>
+      <div class="figsub">
+        각 관장을 격파한 활성 유저 비율. 오른쪽(상위 tier)으로 갈수록 어두워야 정상이고,
+        중간에서 갑자기 끊기면 그 tier가 벽입니다.
+      </div>
+      <div class="chart-wrap" data-chart="progress-heatmap"></div>
+      <details><summary>표로 보기</summary><div class="tablescroll" data-table="progress-heatmap"></div></details>
+    </figure>
+
+    <figure>
+      <figcaption>컬렉션 완성</figcaption>
+      <div class="figsub">완성한 펫 컬렉션 수 / 전체</div>
+      <div class="chart-wrap" data-chart="progress-collections"></div>
+    </figure>
+
     <figure>
       <figcaption>유저별 진척 상세</figcaption>
       <div class="figsub">
@@ -453,17 +536,21 @@ function lineChart(wrap, { dates, series }) {
   wrap.appendChild(svg);
 }
 
-/** 가로 막대. rows: [{label, value, sub?}] — 값 쪽 끝만 4px 라운드. */
-function barChart(wrap, { rows, color = S[1], unit = "" }) {
+/**
+ * 가로 막대. rows: [{label, value, sub?, valueLabel?}] — 값 쪽 끝만 4px 라운드.
+ * `max`를 주면 그 값을 축 상한으로 고정한다(전체 대비 진척률을 보여줄 때). 생략하면
+ * 관측 최대값에 맞춰 늘어난다.
+ */
+function barChart(wrap, { rows, color = S[1], unit = "", max: maxOpt, labelWidth }) {
   wrap.innerHTML = "";
   if (!rows.length) { wrap.innerHTML = '<div class="loading">데이터 없음</div>'; return; }
 
   const W = wrap.clientWidth || 720;
-  const BH = 22, GAP = 2, LW = Math.min(190, Math.max(90, W * 0.24));
+  const BH = 22, GAP = 2, LW = labelWidth ?? Math.min(190, Math.max(90, W * 0.24));
   const H = rows.length * (BH + GAP) + 8;
-  const iw = W - LW - 56;
+  const iw = W - LW - 96;
+  const max = maxOpt || Math.max(1, ...rows.map((r) => r.value));
   const svg = el("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img" });
-  const max = Math.max(1, ...rows.map((r) => r.value));
 
   const tip = document.createElement("div");
   tip.className = "tooltip";
@@ -488,7 +575,7 @@ function barChart(wrap, { rows, color = S[1], unit = "" }) {
       x: LW + w + 8, y: y + BH / 2 + 4,
       fill: "var(--text-secondary)", "font-size": 12,
     });
-    val.textContent = fmt(r.value) + unit;
+    val.textContent = r.valueLabel ?? (fmt(r.value) + unit);
     svg.appendChild(val);
 
     bar.addEventListener("mouseenter", () => {
@@ -499,6 +586,139 @@ function barChart(wrap, { rows, color = S[1], unit = "" }) {
       tip.style.top = `${y - 4}px`;
     });
     bar.addEventListener("mouseleave", () => { tip.style.opacity = 0; });
+  });
+
+  wrap.appendChild(svg);
+}
+
+/**
+ * 가로 스택 막대 — 순서 있는 구간(tier)의 누적.
+ * rows: [{label, segments: [n, n, …], valueLabel?}] / names·colors는 구간 공통.
+ * 인접 구간 사이에 2px surface gap을 둬 색이 서로 붙어 보이지 않게 한다.
+ */
+function stackedBarChart(wrap, { rows, names, colors, max: maxOpt, unit = "" }) {
+  wrap.innerHTML = "";
+  if (!rows.length) { wrap.innerHTML = '<div class="loading">데이터 없음</div>'; return; }
+
+  const W = wrap.clientWidth || 720;
+  const BH = 22, GAP = 2, SEG_GAP = 2;
+  const LW = Math.min(190, Math.max(90, W * 0.24));
+  const iw = W - LW - 96;
+  const H = rows.length * (BH + GAP) + 8;
+  const sum = (a) => a.reduce((x, y) => x + (y || 0), 0);
+  const max = maxOpt || Math.max(1, ...rows.map((r) => sum(r.segments)));
+  const svg = el("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img" });
+
+  const tip = document.createElement("div");
+  tip.className = "tooltip";
+  wrap.appendChild(tip);
+
+  rows.forEach((r, i) => {
+    const y = i * (BH + GAP);
+    const lb = el("text", {
+      x: LW - 10, y: y + BH / 2 + 4, "text-anchor": "end",
+      fill: "var(--text-secondary)", "font-size": 12,
+    });
+    lb.textContent = r.label;
+    svg.appendChild(lb);
+
+    let x = LW;
+    r.segments.forEach((v, k) => {
+      if (!v) return;
+      const w = (v / max) * iw;
+      const seg = el("rect", {
+        x, y, width: Math.max(1, w - SEG_GAP), height: BH, fill: colors[k], rx: 2,
+      });
+      svg.appendChild(seg);
+      seg.addEventListener("mouseenter", () => {
+        tip.innerHTML = `<b>${r.label}</b>` + r.segments.map((sv, si) =>
+          `<div class="row"><span class="swatch" style="background:${colors[si]}"></span>` +
+          `${names[si]} <b>${fmt(sv)}</b></div>`).join("");
+        tip.style.opacity = 1;
+        tip.style.left = `${Math.min(x + 8, W - 190)}px`;
+        tip.style.top = `${Math.max(0, y - 4)}px`;
+      });
+      seg.addEventListener("mouseleave", () => { tip.style.opacity = 0; });
+      x += w;
+    });
+
+    const total = sum(r.segments);
+    const val = el("text", {
+      x: LW + (total / max) * iw + 8, y: y + BH / 2 + 4,
+      fill: "var(--text-secondary)", "font-size": 12,
+    });
+    val.textContent = r.valueLabel ?? (fmt(total) + unit);
+    svg.appendChild(val);
+  });
+
+  wrap.appendChild(svg);
+}
+
+/**
+ * 격자 히트맵 — 행(카테고리) × 열(tier), 셀 색은 sequential 4단계.
+ * 값이 없는 칸은 빈 셀로 남긴다. 색만으로 읽지 않아도 되게 셀 안에 수치를 함께 찍는다.
+ */
+function heatmap(wrap, { rowKeys, colKeys, cell }) {
+  wrap.innerHTML = "";
+  if (!rowKeys.length) { wrap.innerHTML = '<div class="loading">데이터 없음</div>'; return; }
+
+  const W = wrap.clientWidth || 720;
+  const RH = 22, GAP = 2, LW = Math.min(190, Math.max(110, W * 0.22));
+  const CW = Math.min(140, (W - LW - 16) / colKeys.length);
+  const H = rowKeys.length * (RH + GAP) + 26;
+  const svg = el("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img" });
+
+  colKeys.forEach((c, j) => {
+    const lb = el("text", {
+      x: LW + j * CW + CW / 2, y: 14, "text-anchor": "middle",
+      fill: "var(--muted)", "font-size": 11,
+    });
+    lb.textContent = c;
+    svg.appendChild(lb);
+  });
+
+  const tip = document.createElement("div");
+  tip.className = "tooltip";
+  wrap.appendChild(tip);
+
+  // 0%는 빈 셀, 나머지는 4분위로 잘라 seq 단계에 매핑. 잉크는 같은 인덱스의 짝을 쓴다 —
+  // 배경 밝기 순서가 light/dark에서 뒤집히므로 "진하면 흰 글씨" 같은 고정 규칙은 한쪽에서 깨진다.
+  const stepIndex = (pct) => pct <= 0 ? 0 : pct <= 25 ? 1 : pct <= 50 ? 2 : pct <= 75 ? 3 : 4;
+
+  rowKeys.forEach((r, i) => {
+    const y = 26 + i * (RH + GAP);
+    const lb = el("text", {
+      x: LW - 10, y: y + RH / 2 + 4, "text-anchor": "end",
+      fill: "var(--text-secondary)", "font-size": 12,
+    });
+    lb.textContent = r;
+    svg.appendChild(lb);
+
+    colKeys.forEach((c, j) => {
+      const d = cell(r, c);
+      const si = stepIndex(d.pct);
+      const x = LW + j * CW;
+      const rect = el("rect", {
+        x, y, width: CW - GAP, height: RH, rx: 3,
+        fill: si === 0 ? "var(--seq-empty)" : `var(--seq-${si})`,
+      });
+      svg.appendChild(rect);
+      if (d.count > 0) {
+        const t = el("text", {
+          x: x + (CW - GAP) / 2, y: y + RH / 2 + 4, "text-anchor": "middle",
+          fill: si === 0 ? "var(--text-primary)" : `var(--seq-ink-${si})`, "font-size": 11,
+        });
+        t.textContent = d.count;
+        svg.appendChild(t);
+      }
+      rect.addEventListener("mouseenter", () => {
+        tip.innerHTML = `<b>${r}.${c}</b><div class="row">${d.count}명 격파 · ${d.pct}%</div>`;
+        tip.style.opacity = 1;
+        tip.style.left = `${Math.min(x + CW, W - 170)}px`;
+        tip.style.top = `${Math.max(0, y - 4)}px`;
+      });
+      rect.addEventListener("mouseleave", () => { tip.style.opacity = 0; });
+    });
   });
 
   wrap.appendChild(svg);
@@ -542,15 +762,16 @@ async function load() {
   document.getElementById("loading").hidden = false;
   document.getElementById("error").innerHTML = "";
   try {
-    const [overview, daily, progress, abuse, versions, pets] = await Promise.all([
+    const [overview, daily, progress, abuse, versions, pets, badges] = await Promise.all([
       api("admin_overview", "select=*"),
       api("admin_daily_activity", "select=*&order=day_kst.asc"),
       api("admin_user_progress", "select=*&order=server_total_coins.desc"),
       api("admin_abuse_queue", "select=*&order=unreviewed.desc,flagged_at.desc"),
       api("admin_version_spread", "select=*&order=users.desc"),
       api("admin_pet_popularity", "select=*&order=owners.desc,acquisitions_total.desc"),
+      api("admin_badge_progress", "select=*&order=category.asc,tier.asc"),
     ]);
-    DATA = { overview: overview[0] ?? {}, daily, progress, abuse, versions, pets };
+    DATA = { overview: overview[0] ?? {}, daily, progress, abuse, versions, pets, badges };
     document.getElementById("stamp").textContent =
       `갱신 ${new Date().toLocaleTimeString("ko-KR")} · 유저 ${fmt(DATA.overview.users_total)}명`;
     document.getElementById("loading").hidden = true;
@@ -647,12 +868,115 @@ function renderUsage() {
   ], [...d].reverse());
 }
 
+/** 전체 펫 종수 — 클라 `PetKind.allCases.count`(195). 펫이 추가되면 관측치가 이를 넘으므로
+ *  둘 중 큰 값을 분모로 쓴다. 상수를 갱신하지 않아도 진척률이 100%를 넘지 않는다. */
+const PET_KINDS_KNOWN = 195;
+const TIERS = ["localhost", "dev", "staging", "production"];
+const TIER_COLORS = ["var(--tier-1)", "var(--tier-2)", "var(--tier-3)", "var(--tier-4)"];
+
 function renderProgress() {
   const p = DATA.progress;
+  const petTotal = Math.max(PET_KINDS_KNOWN, DATA.pets.length);
+  const active = p.filter((r) => r.status === "active");
+  const avg = (f) => active.length
+    ? Math.round(active.reduce((s, r) => s + (Number(f(r)) || 0), 0) / active.length) : 0;
+  const pct = (n, d) => d > 0 ? Math.round((n / d) * 100) : 0;
+
+  for (const el of document.querySelectorAll('[data-slot="pet-total"]')) el.textContent = petTotal;
+
+  // ── 요약 타일 — 축별 평균 진척
+  const badgesTotal = Math.max(...p.map((r) => r.badges_total || 0), 1);
+  const collTotal = Math.max(...p.map((r) => r.collections_total || 0), 1);
+  const avgPets = avg((r) => r.pets_owned);
+  const avgShiny = avg((r) => r.shiny_unlocked);
+  const avgBadges = avg((r) => r.badges_cleared);
+  const avgColl = avg((r) => r.collections_complete);
+  document.getElementById("progress-tiles").innerHTML = [
+    { label: "펫 해금 (평균)", value: `${avgPets}`, sub: `/ ${petTotal}종 · ${pct(avgPets, petTotal)}%` },
+    {
+      label: "이로치 해금 (평균)", value: `${avgShiny}`,
+      sub: `보유 펫당 최대 3 · ${pct(avgShiny, avgPets * 3)}%`,
+    },
+    { label: "관장 격파 (평균)", value: `${avgBadges}`, sub: `/ ${badgesTotal} · ${pct(avgBadges, badgesTotal)}%` },
+    { label: "컬렉션 완성 (평균)", value: `${avgColl}`, sub: `/ ${collTotal} · ${pct(avgColl, collTotal)}%` },
+    {
+      label: "레인보우 보유자", value: `${active.filter((r) => r.prestige_pets > 0).length}`,
+      sub: `활성 ${active.length}명 중`,
+    },
+    {
+      label: "관장 미착수", value: `${active.filter((r) => !r.badges_cleared).length}`,
+      sub: "뱃지 0개인 활성 유저",
+    },
+  ].map((t) => `
+    <div class="tile">
+      <div class="label">${t.label}</div>
+      <div class="value">${t.value}</div>
+      <div class="sub">${t.sub}</div>
+    </div>`).join("");
+
+  // ── 펫 해금 — 전체 종수를 축 상한으로 고정해 "얼마나 남았는지"가 보이게.
   barChart(q('[data-chart="progress-pets"]'), {
-    rows: [...p].sort((a, b) => b.pets_owned - a.pets_owned).slice(0, 20)
-      .map((r) => ({ label: r.nickname, value: r.pets_owned, sub: `이로치 ${r.variants_unlocked}` })),
-    unit: "종",
+    rows: [...p].sort((a, b) => b.pets_owned - a.pets_owned).slice(0, 20).map((r) => ({
+      label: r.nickname, value: r.pets_owned,
+      valueLabel: `${r.pets_owned} (${pct(r.pets_owned, petTotal)}%)`,
+      sub: `획득 ${r.pulls_accounted}회`,
+    })),
+    max: petTotal,
+  });
+
+  // ── 이로치 해금 — 분모가 사람마다 다르므로(보유 펫×3) 절대 수로 그리고 비율은 라벨에.
+  barChart(q('[data-chart="progress-shiny"]'), {
+    rows: [...p].sort((a, b) => b.shiny_unlocked - a.shiny_unlocked).slice(0, 20).map((r) => ({
+      label: r.nickname, value: r.shiny_unlocked,
+      valueLabel: `${r.shiny_unlocked} / ${r.pets_owned * 3} (${pct(r.shiny_unlocked, r.pets_owned * 3)}%)`
+        + (r.shiny_maxed ? ` · 만렙 ${r.shiny_maxed}` : ""),
+    })),
+    color: S[3],
+  });
+
+  // ── 관장 격파 — tier 스택. 축 상한을 만점(76)으로 고정.
+  q('[data-legend="progress-badges"]').innerHTML = TIERS.map((t, i) =>
+    `<span><span class="swatch" style="background:${TIER_COLORS[i]}"></span>${t}</span>`).join("");
+  stackedBarChart(q('[data-chart="progress-badges"]'), {
+    rows: [...p].filter((r) => r.badges_cleared > 0)
+      .sort((a, b) => b.badges_cleared - a.badges_cleared).slice(0, 20).map((r) => ({
+        label: r.nickname,
+        segments: [r.badges_localhost, r.badges_dev, r.badges_staging, r.badges_production],
+        // 분모는 축 상한과 같은 현재 만점. 개인 badges_total은 클라 버전마다 달라(40·72·76)
+        // 그걸로 %를 내면 바 길이와 라벨이 어긋난다 — 개인 기준치는 상세 표에서 본다.
+        valueLabel: `${r.badges_cleared} / ${badgesTotal} (${pct(r.badges_cleared, badgesTotal)}%)`,
+      })),
+    names: TIERS, colors: TIER_COLORS, max: badgesTotal,
+  });
+
+  // ── 관장별 난이도 히트맵.
+  const byKey = new Map(DATA.badges.map((b) => [`${b.category}|${b.tier}`, b]));
+  const categories = [...new Set(DATA.badges.map((b) => b.category))].sort();
+  heatmap(q('[data-chart="progress-heatmap"]'), {
+    rowKeys: categories, colKeys: TIERS,
+    cell: (cat, tier) => {
+      const d = byKey.get(`${cat}|${tier}`);
+      return { count: d ? d.cleared_by : 0, pct: d ? Number(d.cleared_pct) : 0 };
+    },
+  });
+  renderTable(q('[data-table="progress-heatmap"]'), [
+    { key: "category", label: "관장" },
+    ...TIERS.map((t) => ({
+      key: t, label: t,
+      render: (r) => {
+        const d = byKey.get(`${r.category}|${t}`);
+        return d ? `${d.cleared_by} (${d.cleared_pct}%)` : '<span class="dim">0</span>';
+      },
+    })),
+  ], categories.map((c) => ({ category: c })));
+
+  // ── 컬렉션 완성.
+  barChart(q('[data-chart="progress-collections"]'), {
+    rows: [...p].sort((a, b) => b.collections_complete - a.collections_complete).slice(0, 20).map((r) => ({
+      label: r.nickname, value: r.collections_complete ?? 0,
+      valueLabel: `${r.collections_complete ?? 0} / ${r.collections_total ?? collTotal}`,
+    })),
+    max: collTotal, color: S[2],
   });
 
   renderTable(q('[data-table="progress"]'), [
@@ -665,7 +989,15 @@ function renderProgress() {
     },
     { key: "app_version", label: "버전", render: (r) => r.app_version ?? '<span class="dim">–</span>' },
     { key: "pets_owned", label: "펫", render: (r) => fmt(r.pets_owned) },
-    { key: "variants_unlocked", label: "이로치" },
+    { key: "shiny_unlocked", label: "이로치" },
+    {
+      key: "prestige_pets", label: "레인보우",
+      render: (r) => r.prestige_pets > 0 ? r.prestige_pets : '<span class="dim">0</span>',
+    },
+    {
+      key: "regions_mastered", label: "지역",
+      render: (r) => r.regions_mastered > 0 ? r.regions_mastered : '<span class="dim">0</span>',
+    },
     { key: "total_pulls", label: "가챠", render: (r) => fmt(r.total_pulls) },
     { key: "pulls_accounted", label: "획득합", render: (r) => fmt(r.pulls_accounted) },
     { key: "badges_cleared", label: "뱃지", render: (r) => `${r.badges_cleared ?? "–"}/${r.badges_total ?? "–"}` },
