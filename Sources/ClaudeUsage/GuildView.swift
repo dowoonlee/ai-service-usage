@@ -657,18 +657,13 @@ struct GuildView: View {
 
     // MARK: - 액션
 
+    /// 화면에 들어올 때 1회 조회. 주기 폴링 루프는 두지 않는다.
+    ///
+    /// 길드 정보는 거의 정적이다(멤버 변동은 가입/탈퇴 시점, 정산은 월 1회). 그런데도 300s
+    /// 루프가 돌아 창을 열어둔 사용자당 하루 288회를 썼다. 멤버 가입·기부 등 화면 안에서 일어나는
+    /// 변화는 각 액션이 끝나고 `refresh()`를 직접 부르므로 즉시 반영된다.
     private func startAutoRefresh() {
         refresh()
-        refreshTask?.cancel()
-        refreshTask = Task { @MainActor in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(300))
-                if Task.isCancelled { break }
-                // 패널이 숨겨졌거나 시스템 sleep이면 건너뛴다 (PollGate).
-                guard PollGate.shouldPoll else { continue }
-                refresh()
-            }
-        }
     }
 
     private func refresh() {

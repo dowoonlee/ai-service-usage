@@ -74,6 +74,11 @@ final class ViewModel: ObservableObject {
     /// 메인 패널 진입점 옆의 미확인 글 카운트. polling cycle마다 board fetch → boardLastSeenAt
     /// 이후 + 본인 글 제외로 계산. BoardView가 윈도우 띄울 때 .boardSeen post로 즉시 0.
     @Published var boardUnreadCount: Int = 0
+    /// 마지막 sync 시각 — 연속 호출 방지용. 메인 사이클은 resetAt 임박 시 sleep을 60초 미만으로
+    /// 줄이는데(`nextPollDelay`의 resetGuard), 그때 sync까지 매번 따라가면 호출이 튄다.
+    private var lastSyncAt: Date?
+    /// sync 최소 간격. 위 resetGuard로 사이클이 촘촘해져도 이 간격은 지킨다.
+    static let syncMinIntervalSec: TimeInterval = 120
     /// Wellness 너지 표시 시각은 `Settings.lastWellnessShownAt`에 영구 저장 — 앱 재실행 시 1시간 쿨다운이 유지되어야 함 (#11).
     private var lastWellnessShownAt: Date? {
         get { Settings.shared.lastWellnessShownAt }
@@ -370,7 +375,7 @@ final class ViewModel: ObservableObject {
                     BadgeRegistry.evaluate()
                     await self.submitRankingIfNeeded()
                     await self.checkPodiumRewardIfNeeded()
-                    await self.refreshBoardUnread()
+                    await self.runSync()
                 }
 
                 // sleep 시간 = base × jitter × backoff multiplier.
@@ -866,31 +871,51 @@ final class ViewModel: ObservableObject {
         }
     }
 
-    /// 게시판 미확인 글 카운트 갱신. boardLastSeenAt 이후 + 본인 글 제외.
-    /// boardLastSeenAt이 nil(첫 fetch)이면 현재 시각으로 시드 — 과거 글 전체를 미확인으로
-    /// 표시하지 않게 함. 미등록자는 게시판 사용 불가 → 카운트 0 유지.
-    private func refreshBoardUnread() async {
+    /// 주기 갱신 통합 — 열려 있는 화면의 데이터 + 배지를 `sync` 한 번으로 받아 배분한다.
+    ///
+    /// 화면별 폴링(게시판 180s·랭킹 300s·인박스 300s)을 전부 이 호출이 대신한다. 무료 플랜
+    /// Edge Function 쿼터가 상태 코드와 무관하게 "호출 횟수"로 매겨져서, 화면 수만큼 호출이
+    /// 곱해지는 구조 자체가 한계였다.
+    ///
+    /// 실패는 조용히 넘긴다 — 다음 cycle에 재시도되고, UI는 직전 값을 유지한다. 메인 backoff
+    /// (Claude/Cursor/Codex 전용)에는 연동하지 않는다.
+    private func runSync() async {
         let s = Settings.shared
-        guard hasRankingPrerequisites else {
+        guard hasRankingPrerequisites, let hmacKey = Keychain.loadRankingHmacKey() else {
             if boardUnreadCount != 0 { boardUnreadCount = 0 }
             return
         }
-        // 게시판 창이 떠 있으면 그쪽 폴링이 같은 `board` 엔드포인트를 이미 치고 있고,
-        // 카운트도 .boardSeen으로 0이라 여기서 또 부를 이유가 없다.
-        guard !PollGate.boardViewIsOpen else { return }
+        if let last = lastSyncAt, Date().timeIntervalSince(last) < Self.syncMinIntervalSec { return }
+
+        // 첫 호출 — boardLastSeenAt 시드. 과거 글이 전부 미확인으로 잡히지 않게 한다.
+        if s.boardLastSeenAt == nil {
+            s.boardLastSeenAt = Date()
+            boardUnreadCount = 0
+        }
+
+        // 열려 있는 화면만 요청한다 — 안 보는 화면 페이로드는 Egress 낭비다.
+        let want = PollGate.openSurfaces
+
         do {
-            let resp = try await RankingAPI.shared.fetchBoard(deviceId: s.rankingDeviceID)
-            // 첫 fetch — boardLastSeenAt 시드. 과거 글이 다 unread로 잡히지 않게.
-            if s.boardLastSeenAt == nil {
-                s.boardLastSeenAt = Date()
-                boardUnreadCount = 0
-                return
+            let resp = try await RankingAPI.shared.sync(
+                deviceId: s.rankingDeviceID,
+                want: want.joined(separator: ","),
+                boardSeenAt: s.boardLastSeenAt,
+                hmacKeyBase64: hmacKey)
+            lastSyncAt = Date()
+
+            // 게시판 창이 열려 있으면 카운트는 .boardSeen이 0으로 유지한다 — 덮어쓰지 않는다.
+            if !PollGate.boardViewIsOpen {
+                boardUnreadCount = resp.badges.boardUnread
             }
-            let lastSeen = s.boardLastSeenAt ?? .distantPast
-            let count = resp.posts.filter { !$0.isMine && $0.createdAt > lastSeen }.count
-            boardUnreadCount = count
+            DMViewModel.shared.applySync(resp)
+            if let board = resp.board { NotificationCenter.default.post(name: .boardSynced, object: board) }
+            if let lb = resp.leaderboard {
+                NotificationCenter.default.post(name: .rankingSynced, object: RankingSyncPayload(
+                    leaderboard: lb, tenantAnnouncements: resp.tenantAnnouncements ?? []))
+            }
         } catch {
-            // 무시 — 다음 cycle 재시도. UI는 직전 카운트 유지.
+            // 무시 — 다음 cycle 재시도. UI는 직전 값 유지.
         }
     }
 

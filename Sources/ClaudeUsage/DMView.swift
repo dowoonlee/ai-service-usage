@@ -36,6 +36,13 @@ final class DMViewModel: ObservableObject {
     private var lastReadSentTs: [String: Int64] = [:]
 
     /// 인박스 행 — 복호/echo로 만든 미리보기 포함.
+    /// 스레드 폴링 루프 재시작 키. 상대가 바뀌거나 대화 활동이 갱신되면 새 값이 되어
+    /// `.task(id:)`가 루프를 다시 띄운다 — idle로 빠져 종료된 루프를 sync wake가 되살리는 경로.
+    struct ThreadPollKey: Equatable {
+        let peer: String?
+        let activityAt: Date
+    }
+
     struct ThreadRow: Identifiable {
         let peerDevice: String
         let nickname: String
@@ -61,7 +68,6 @@ final class DMViewModel: ObservableObject {
     /// 8s 고정이던 시절엔 스레드 하나를 열어둔 채 방치하는 것만으로 월 60만 invocation이
     /// 나갔다(무료 플랜 쿼터 55만). 실제 쪽지 유입은 주 단위라 20s로도 체감 차이가 없다.
     static let threadPollActiveSec: Double = 20
-    static let threadPollIdleSec: Double = 60
     /// 마지막 활동 후 이만큼 조용하면 idle 주기로 전환.
     static let threadPollIdleAfterSec: Double = 120
 
@@ -76,19 +82,36 @@ final class DMViewModel: ObservableObject {
     /// ✉️ 배지 = 미확인 쪽지 + 처리 대기 초대.
     var badgeCount: Int { totalUnread + visibleInvites.count }
 
-    private init() {
-        startAutoRefresh()
-    }
+    private init() {}
 
-    func startAutoRefresh() {
-        refreshTask?.cancel()
-        refreshTask = Task { @MainActor in
-            while !Task.isCancelled {
-                // MainView가 배지 때문에 이 싱글턴을 잡고 있어서 쪽지 창을 한 번도 안 열어도
-                // 앱 수명 내내 돈다 → 가시성 게이트가 없으면 숨긴 패널에서도 계속 나간다.
-                if ready && PollGate.shouldPoll { await refreshInbox(silent: true, full: false) }
-                try? await Task.sleep(for: .seconds(300))
-            }
+    /// 주기 폴링 루프는 없다 — 인박스 갱신은 `ViewModel`의 sync(600s)가 배분한다(`applySync`).
+    /// 창을 여는 순간의 즉시 조회만 `DMWindowController.present()` / `DMView.onAppear`가 맡는다.
+    ///
+    /// 예전엔 이 클래스가 `init`에서 300s 루프를 띄워 앱 수명 내내 돌았다(MainView가 배지 때문에
+    /// 싱글턴을 잡고 있어서). 쪽지 유입이 주 단위인 데 비해 사용자당 288회/일이 고정으로 나가
+    /// 무료 플랜 invocation 쿼터를 잠식했다.
+    func startAutoRefresh() {}
+    func stopAutoRefresh() {}
+
+    /// sync 응답을 인박스 상태에 반영. 배지는 항상, 스레드 목록은 창이 열려 있을 때만 온다.
+    func applySync(_ resp: RankingAPI.SyncResponse) {
+        // 소속 중이면 초대는 어차피 `visibleInvites`에서 걸러지므로 비운다 (refreshInbox와 동일 규칙).
+        invites = Settings.shared.guildID.isEmpty ? resp.invites : []
+        if let inbox = resp.inbox {
+            let rows = makeThreadRows(inbox.threads)
+            threads = rows
+            totalUnread = rows.reduce(0) { $0 + $1.unread }
+        } else {
+            // 목록 없이 배지만 — 창이 닫혀 있어 목록을 쓸 화면이 없다.
+            totalUnread = resp.badges.dmUnread
+        }
+        // 열린 스레드에 새 메시지가 잡히면 즉시 당겨온다 — idle 상태의 주기 폴링을 대신하는 wake.
+        if let peer = openPeer,
+           let t = resp.inbox?.threads.first(where: { $0.peerDevice == peer }),
+           t.unreadCount > 0 {
+            Task { await refreshOpenThread() }
+        } else if resp.inbox == nil, resp.badges.dmUnread > 0, openPeer != nil {
+            Task { await refreshOpenThread() }
         }
     }
 
@@ -119,21 +142,7 @@ final class DMViewModel: ObservableObject {
             let resp = try await RankingAPI.shared.dmInbox(deviceId: device, hmacKeyBase64: hmac)
             embeddedInvites = resp.invites
             inboxOK = true
-            var rows: [ThreadRow] = []
-            for t in resp.threads {
-                var keyChanged = false
-                if let pub = t.peerIdPub {
-                    switch DMStore.shared.evaluate(device: t.peerDevice, serverPub: pub) {
-                    case .firstUse: DMStore.shared.pin(device: t.peerDevice, pub: pub)
-                    case .matches: break
-                    case .changed: keyChanged = true
-                    }
-                }
-                let preview = previewText(for: t)
-                rows.append(ThreadRow(
-                    peerDevice: t.peerDevice, nickname: t.peerNickname ?? "(알 수 없음)",
-                    preview: preview, at: t.lastAt, unread: t.unreadCount, keyChanged: keyChanged))
-            }
+            let rows = makeThreadRows(resp.threads)
             threads = rows
             totalUnread = rows.reduce(0) { $0 + $1.unread }
         } catch {
@@ -153,6 +162,25 @@ final class DMViewModel: ObservableObject {
         // 배지가 깜빡이지 않게.
         // 수신 정책·차단 목록은 스레드의 차단 상태 표시용 — 창을 열 때만 필요하다.
         if full { await loadSettings() }
+    }
+
+    /// 서버 스레드 요약 → 표시용 행. 복호 미리보기 + 상대 공개키 변경(TOFU) 판정이 함께 일어난다.
+    /// `refreshInbox`와 `applySync`가 공유한다 — 두 경로가 같은 규칙을 타야 화면이 일관된다.
+    private func makeThreadRows(_ threads: [RankingAPI.DMThread]) -> [ThreadRow] {
+        threads.map { t in
+            var keyChanged = false
+            if let pub = t.peerIdPub {
+                switch DMStore.shared.evaluate(device: t.peerDevice, serverPub: pub) {
+                case .firstUse: DMStore.shared.pin(device: t.peerDevice, pub: pub)
+                case .matches: break
+                case .changed: keyChanged = true
+                }
+            }
+            return ThreadRow(
+                peerDevice: t.peerDevice, nickname: t.peerNickname ?? "(알 수 없음)",
+                preview: previewText(for: t), at: t.lastAt,
+                unread: t.unreadCount, keyChanged: keyChanged)
+        }
     }
 
     private func previewText(for t: RankingAPI.DMThread) -> String {
@@ -403,7 +431,7 @@ final class DMViewModel: ObservableObject {
 // MARK: - 창
 
 @MainActor
-final class DMWindowController: NSWindowController, SingleWindowPresenting {
+final class DMWindowController: NSWindowController, NSWindowDelegate, SingleWindowPresenting {
     static let shared = DMWindowController()
 
     private convenience init() {
@@ -416,10 +444,20 @@ final class DMWindowController: NSWindowController, SingleWindowPresenting {
         window.minSize = NSSize(width: 360, height: 420)
         window.center()
         self.init(window: window)
+        window.delegate = self
+    }
+
+    /// 타이틀바 닫기 버튼은 SwiftUI `onDisappear`를 부르지 않는다(`isReleasedWhenClosed = false`).
+    /// 인박스 폴링을 반드시 여기서 멈춰야 앱 종료까지 계속 도는 걸 막는다.
+    func windowWillClose(_ notification: Notification) {
+        PollGate.dmViewIsOpen = false
+        DMViewModel.shared.stopAutoRefresh()
     }
 
     func present() {
+        PollGate.dmViewIsOpen = true
         bringToFront()
+        DMViewModel.shared.startAutoRefresh()
         Task { await DMViewModel.shared.refreshInbox() }
     }
 
@@ -657,16 +695,19 @@ private struct DMThreadView: View {
             }
             .padding(8)
         }
-        // 스레드가 열려 있는 동안 새 메시지 폴링 — 뷰가 사라지면 자동 취소.
-        // 새 메시지가 오면 active 주기, 2분간 조용하면 idle 주기로 물러난다.
-        .task(id: vm.openPeer) {
+        // 대화가 오가는 동안(마지막 활동 2분 내)만 20s로 폴링하고, 조용해지면 루프를 끝낸다.
+        // idle 폴링은 없다 — 그 뒤 새 메시지는 sync(600s)가 인박스 미확인으로 감지해
+        // `applySync`가 `refreshOpenThread()`를 깨운다. 그 시점에 활동 시각이 갱신되면서
+        // 이 루프도 `lastThreadActivityAt` 변경으로 다시 살아난다.
+        //
+        // 스레드 하나를 열어둔 채 방치하는 것만으로 idle 폴링이 하루 1,440회를 썼다.
+        // 트레이드오프: idle 상태의 새 메시지 발견이 최대 60s → 최대 600s로 늘어난다.
+        .task(id: DMViewModel.ThreadPollKey(peer: vm.openPeer, activityAt: vm.lastThreadActivityAt)) {
             guard vm.openPeer != nil else { return }
             while !Task.isCancelled {
                 let quietFor = Date().timeIntervalSince(vm.lastThreadActivityAt)
-                let sleepSec = quietFor > DMViewModel.threadPollIdleAfterSec
-                    ? DMViewModel.threadPollIdleSec
-                    : DMViewModel.threadPollActiveSec
-                try? await Task.sleep(for: .seconds(sleepSec))
+                guard quietFor <= DMViewModel.threadPollIdleAfterSec else { break }
+                try? await Task.sleep(for: .seconds(DMViewModel.threadPollActiveSec))
                 if Task.isCancelled { break }
                 // 패널이 숨겨졌거나 시스템 sleep이면 건너뛴다.
                 guard PollGate.shouldPoll else { continue }
