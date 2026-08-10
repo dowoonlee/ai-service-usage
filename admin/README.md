@@ -51,6 +51,20 @@ DB 쪽은 `admin_*` 뷰 전부 `security_invoker = true` + anon/authenticated `R
 (anon 키로 접근 시 `permission denied`). 뷰를 DROP+CREATE로 재정의하면 이 두 설정이
 초기화되므로, 재정의하는 마이그레이션은 반드시 함께 복원할 것.
 
+## 테넌트 필터
+
+헤더의 셀렉터가 **모든 탭에 동시에** 적용된다. 뷰는 테넌트별 행만 내고, "전체"는 대시보드가
+합산한다 — 한 유저는 한 테넌트에만 속하므로 카운트·합계·활성 디바이스 수의 합산이 정확하다.
+
+비율은 합산할 수 없어 원시 분자·분모로 다시 계산한다:
+
+| 값 | 재계산 방식 |
+|---|---|
+| `accept_ratio` | `accepted_coins` 합 ÷ `reported_coins` 합 |
+| `cleared_pct`(관장) | `cleared_by` 합 ÷ 선택 테넌트의 활성 유저 합 |
+| `avg_variants`(펫) | 보유자 수 가중평균 |
+| `last_seen`(버전) | 합계가 아니라 최댓값 |
+
 ## 탭
 
 - **개요** — KPI 타일 + 최근 30일 활성 디바이스
