@@ -359,11 +359,12 @@ select {
       <div class="controls">
         <label>정렬
           <select id="pet-sort">
-            <option value="owners">보유자 많은 순</option>
-            <option value="rarity">희귀도 순</option>
-            <option value="name">이름 순</option>
+            <option value="owners">보유자 수</option>
+            <option value="rarity">희귀도</option>
+            <option value="name">이름</option>
           </select>
         </label>
+        <button id="pet-dir" title="정렬 방향 뒤집기"></button>
         <label><input type="checkbox" id="pet-unowned"> 미보유 종 포함</label>
         <span class="dim" id="pet-count"></span>
       </div>
@@ -1122,6 +1123,13 @@ function renderVersions() {
 const RARITY_LABEL = {
   mythic: "Mythic", legendary: "Legendary", epic: "Epic", rare: "Rare", common: "Common",
 };
+/** 방향 버튼 문구 — [정순, 역순]. 기준마다 방향의 뜻이 달라 "오름/내림"으로는 안 읽힌다. */
+const SORT_DIR_LABEL = {
+  owners: ["↓ 많은 순", "↑ 적은 순"],
+  rarity: ["↓ 높은 등급", "↑ 낮은 등급"],
+  name: ["↓ 가나다순", "↑ 역순"],
+};
+let petSortDesc = false;
 /** 카탈로그에 없는 kind는 rawValue로 폴백 — 펫을 추가하고 gen-pet-catalog.ts를 안 돌렸을 때. */
 const petMeta = (kind) => CATALOG[kind] ?? {
   name: kind, rarity: "common", rarityRank: 9, sprite: null, cellW: 32, cellH: 32,
@@ -1155,6 +1163,10 @@ function renderPets() {
     : sort === "name" ? byName
     : (a, b) => b.owners - a.owners || a.meta.rarityRank - b.meta.rarityRank || byName(a, b),
   );
+  // 방향은 정렬 결과를 통째로 뒤집는다 — 기준마다 "정순"의 의미가 달라(보유는 많은 순,
+  // 이름은 가나다순이 자연스러운 시작점) 비교 함수마다 부호를 뒤집으면 tie-break가 어긋난다.
+  if (petSortDesc) list.reverse();
+  document.getElementById("pet-dir").textContent = SORT_DIR_LABEL[sort][petSortDesc ? 1 : 0];
 
   const maxOwners = Math.max(1, ...list.map((r) => r.owners));
   const ICON_H = 34;   // 셀 높이를 이 값으로 정규화 — 종마다 원본 크기가 32~90으로 제각각이다.
@@ -1232,6 +1244,10 @@ document.getElementById("reload").addEventListener("click", load);
 for (const id of ["pet-sort", "pet-unowned"]) {
   document.getElementById(id).addEventListener("change", () => { if (DATA) renderPets(); });
 }
+document.getElementById("pet-dir").addEventListener("click", () => {
+  petSortDesc = !petSortDesc;
+  if (DATA) renderPets();
+});
 document.getElementById("theme").addEventListener("click", () => {
   const cur = document.documentElement.getAttribute("data-theme");
   const next = cur === "dark" ? "light" : "dark";
