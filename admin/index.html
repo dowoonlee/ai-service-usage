@@ -253,6 +253,13 @@ const S = { 1: "var(--series-1)", 2: "var(--series-2)", 3: "var(--series-3)" };
 const fmt = (n) => (n === null || n === undefined ? "–" : Number(n).toLocaleString("ko-KR"));
 const fmtDate = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
 
+/** 그 날짜가 속한 주(월요일 시작)의 시작 시각. 주 경계 판정용 — getDay()는 일=0이라 월=0으로 보정. */
+function weekStart(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x.getTime();
+}
+
 /** 초 → "3d 4h" / "5h 12m" */
 function fmtDuration(sec) {
   if (sec == null) return "–";
@@ -330,15 +337,43 @@ function lineChart(wrap, { dates, series }) {
     stroke: "var(--baseline)", "stroke-width": 1,
   }));
 
-  const every = Math.max(1, Math.ceil(dates.length / 8));
-  dates.forEach((d, i) => {
-    if (i % every && i !== dates.length - 1) return;
+  // 주(월~일) 구분 — 인접 두 점의 소속 주가 다르면 그 사이에 경계선을 세운다.
+  // 인덱스가 아니라 실제 날짜의 주차로 판정하는 이유: 제출 0건인 날은 행 자체가 없어(sparse)
+  // 인덱스 간격이 곧 날짜 간격이 아니다. 경계선은 두 점의 중점 — 데이터가 하루 간격이면
+  // 정확히 일요일↔월요일 사이에 떨어진다.
+  const weeks = [];
+  for (let i = 1; i < dates.length; i++) {
+    if (weekStart(dates[i]) !== weekStart(dates[i - 1])) {
+      // 라벨은 데이터의 첫 날이 아니라 그 주의 월요일. 월요일에 제출이 0건이면 행이 없어
+      // (sparse) 화요일이 찍히는데, 그러면 "주 단위 눈금"으로 읽히지 않는다.
+      weeks.push({
+        sepX: (X(i - 1) + X(i)) / 2, labelX: X(i), date: new Date(weekStart(dates[i])),
+      });
+    }
+  }
+  for (const w of weeks) {
+    svg.appendChild(el("line", {
+      x1: w.sepX, x2: w.sepX, y1: M.t, y2: M.t + ih,
+      stroke: "var(--baseline)", "stroke-width": 1,
+    }));
+  }
+
+  // x축 라벨 — 각 주의 시작일. 첫 점은 주 중간에서 시작할 수 있어 따로 찍고,
+  // 첫 경계와 너무 붙으면(겹침) 생략한다.
+  const MIN_LABEL_GAP = 34;
+  const xLabels = [{ x: X(0), date: dates[0] }];
+  for (const w of weeks) {
+    const prev = xLabels[xLabels.length - 1];
+    if (w.labelX - prev.x < MIN_LABEL_GAP) continue;
+    xLabels.push({ x: w.labelX, date: w.date });
+  }
+  for (const l of xLabels) {
     const lb = el("text", {
-      x: X(i), y: H - 8, "text-anchor": "middle", fill: "var(--muted)", "font-size": 11,
+      x: l.x, y: H - 8, "text-anchor": "middle", fill: "var(--muted)", "font-size": 11,
     });
-    lb.textContent = fmtDate(d);
+    lb.textContent = fmtDate(l.date);
     svg.appendChild(lb);
-  });
+  }
 
   const labels = [];
   for (const s of series) {
