@@ -79,6 +79,12 @@ final class ViewModel: ObservableObject {
     private var lastSyncAt: Date?
     /// sync 최소 간격. 위 resetGuard로 사이클이 촘촘해져도 이 간격은 지킨다.
     static let syncMinIntervalSec: TimeInterval = 120
+    /// 비활성(패널·메뉴바 모두 숨김) 상태의 claim 체크 시각 — 자체 스로틀용.
+    private var lastIdleClaimCheckAt: Date?
+    /// 비활성 상태 claim 체크 간격. 비활성 루프는 30초마다 도는데(wake 감지용) 거기에 claim을
+    /// 그대로 걸면 leaderboard 호출이 20배로 튄다. 활성 사이클은 이미 interval(기본 600s)이라
+    /// 별도 스로틀이 필요 없다.
+    static let idleClaimCheckIntervalSec: TimeInterval = 600
     /// Wellness 너지 표시 시각은 `Settings.lastWellnessShownAt`에 영구 저장 — 앱 재실행 시 1시간 쿨다운이 유지되어야 함 (#11).
     private var lastWellnessShownAt: Date? {
         get { Settings.shared.lastWellnessShownAt }
@@ -376,6 +382,11 @@ final class ViewModel: ObservableObject {
                     await self.submitRankingIfNeeded()
                     await self.checkPodiumRewardIfNeeded()
                     await self.runSync()
+                } else if self.shouldCheckClaimsWhileIdle() {
+                    // 패널·메뉴바가 모두 숨겨져 있어도 미수령 보상은 소진해야 한다. claim이 활성
+                    // 사이클에만 묶여 있으면, 랭킹 창만 띄워두고 패널을 닫아둔 사용자는 서버가
+                    // 계속 pending을 내려줘도 영영 수령하지 못한다.
+                    await self.checkPodiumRewardIfNeeded()
                 }
 
                 // sleep 시간 = base × jitter × backoff multiplier.
@@ -650,88 +661,110 @@ final class ViewModel: ObservableObject {
             // 현재 소속 테넌트 캐시 — 사내 인증 유도 팝업(TenantVerifyPromptManager)이
             // 다음 실행 시작 시점에 미인증("public") 여부를 판단하는 데 쓴다.
             s.currentTenant = resp.tenant
-            // coins 보상 (명예의 전당 Top3) — credit 먼저 + 로컬 dedup, 서버 claim은 마킹용.
-            if let reward = resp.pendingReward {
-                let dedupKey = reward.dedupKey
-                if !s.claimedPodiumPeriods.contains(dedupKey) {
-                    CoinLedger.shared.creditBonus(reward.coins, reason: "podium.\(dedupKey)")
-                    s.claimedPodiumPeriods.insert(dedupKey)
-                    NotificationManager.shared.podiumRewardEarned(
-                        period: reward.period, rank: reward.rank, coins: reward.coins
-                    )
-                    DebugLog.log("Podium reward: \(dedupKey) +\(reward.coins) coin")
-                }
-                // 서버 측 claim — 실패해도 다음 cycle에 자동 재시도 (idempotent로 안전).
-                do {
-                    _ = try await RankingAPI.shared.claimReward(
-                        deviceId: s.rankingDeviceID,
-                        period: reward.period,
-                        rank: reward.rank,
-                        hmacKeyBase64: hmacKey
-                    )
-                } catch {
-                    DebugLog.log("Podium claim server failed: \(error.localizedDescription) — retry next cycle")
-                }
-            }
-
-            // RP 보상 (순위 정산, 월간/주간) — 서버 claim의 alreadyClaimed로 중복을 판정한 뒤 credit하므로
-            // 백업 복원 후에도 이중 적립되지 않는다 (coins의 credit-먼저 패턴과 의도적으로 다름).
-            if let rp = resp.pendingRpReward, !s.claimedRpRewards.contains(rp.dedupKey) {
-                // claim 호출 "전에" 재시도 디스크립터 기록 — 서버가 claimed_at을 찍고 응답이
-                // 유실되면 pending 목록에서 사라져 이 디스크립터만이 유일한 복구 경로 (#191).
-                let retry = RankingAPI.PendingClaimRetry(
-                    rewardType: "rp", period: rp.period, rank: rp.rank,
-                    periodType: rp.periodType, currency: "rp", amount: rp.rp, dedupKey: rp.dedupKey)
-                upsertPendingClaim(retry)
-                do {
-                    let claimResp = try await RankingAPI.shared.claimReward(
-                        deviceId: s.rankingDeviceID,
-                        period: rp.period,
-                        rank: rp.rank,
-                        rewardType: "rp",
-                        // 같은 (period, rank)에 개인·길드 트랙 row가 공존할 수 있어 서버가
-                        // 정확한 원장 row를 고르도록 전달 (P2a).
-                        periodType: rp.periodType,
-                        hmacKeyBase64: hmacKey
-                    )
-                    // alreadyClaimed=true는 credit하지 않음 — 백업 복원/동시 인스턴스가 이미
-                    // 수령·적립한 경우다. (본인 유실 케이스는 catch → 디스크립터 재시도가 담당.)
-                    if !claimResp.alreadyClaimed {
-                        creditClaimedReward(retry)
-                    }
-                    markClaimed(retry)
-                } catch {
-                    // 디스크립터 유지 — 다음 cycle에 retryPendingClaims가 같은 파라미터로 재시도.
-                    DebugLog.log("RP claim failed: \(error.localizedDescription) — retry next cycle")
-                }
-            }
-
-            // 통합 보상 (ops grant) — RP·코인 공용 per-device 지급. RP와 동일한 claim-first 패턴:
-            // 서버 claim이 !alreadyClaimed일 때만 currency로 원장을 골라 크레딧 → 백업 복원에도 안전.
-            if let grant = resp.pendingGrant, !s.claimedGrants.contains(grant.dedupKey) {
-                let retry = RankingAPI.PendingClaimRetry(
-                    rewardType: "grant", period: grant.grantKey, rank: 1,
-                    periodType: nil, currency: grant.currency, amount: grant.amount,
-                    dedupKey: grant.dedupKey)
-                upsertPendingClaim(retry)
-                do {
-                    let claimResp = try await RankingAPI.shared.claimReward(
-                        deviceId: s.rankingDeviceID,
-                        period: grant.grantKey,   // grant_key를 period 슬롯에 서명 (서버와 합의된 재활용)
-                        rank: 1,                  // grant는 rank 미사용 — 서명 채움용 더미
-                        rewardType: "grant",
-                        hmacKeyBase64: hmacKey
-                    )
-                    if !claimResp.alreadyClaimed {
-                        creditClaimedReward(retry)
-                    }
-                    markClaimed(retry)
-                } catch {
-                    DebugLog.log("Grant claim failed: \(error.localizedDescription) — retry next cycle")
-                }
-            }
+            await processPendingClaims(resp, hmacKey: hmacKey)
         } catch {
             DebugLog.log("Podium check failed: \(error.localizedDescription)")
+        }
+    }
+
+    /// 비활성 사이클에서 claim 체크를 돌릴지 판단한다 — `idleClaimCheckIntervalSec` 스로틀.
+    /// 판단과 동시에 타임스탬프를 갱신하므로, true를 받은 호출자는 반드시 체크를 수행해야 한다.
+    private func shouldCheckClaimsWhileIdle() -> Bool {
+        guard hasRankingPrerequisites else { return false }
+        if let last = lastIdleClaimCheckAt,
+           Date().timeIntervalSince(last) < Self.idleClaimCheckIntervalSec { return false }
+        lastIdleClaimCheckAt = Date()
+        return true
+    }
+
+    /// leaderboard 응답에 실린 미수령 보상 3종을 claim한다.
+    ///
+    /// `checkPodiumRewardIfNeeded`(leaderboard 직접 fetch)와 `runSync`(sync 응답의 leaderboard
+    /// 섹션) 양쪽에서 호출한다 — 응답을 어디서 받았든 claim 기회를 놓치지 않게. 중복 호출은
+    /// 로컬 dedup + 서버 idempotent claim이 흡수하므로 안전하다.
+    private func processPendingClaims(
+        _ resp: RankingAPI.LeaderboardResponse, hmacKey: String
+    ) async {
+        let s = Settings.shared
+        // coins 보상 (명예의 전당 Top3) — credit 먼저 + 로컬 dedup, 서버 claim은 마킹용.
+        if let reward = resp.pendingReward {
+            let dedupKey = reward.dedupKey
+            if !s.claimedPodiumPeriods.contains(dedupKey) {
+                CoinLedger.shared.creditBonus(reward.coins, reason: "podium.\(dedupKey)")
+                s.claimedPodiumPeriods.insert(dedupKey)
+                NotificationManager.shared.podiumRewardEarned(
+                    period: reward.period, rank: reward.rank, coins: reward.coins
+                )
+                DebugLog.log("Podium reward: \(dedupKey) +\(reward.coins) coin")
+            }
+            // 서버 측 claim — 실패해도 다음 cycle에 자동 재시도 (idempotent로 안전).
+            do {
+                _ = try await RankingAPI.shared.claimReward(
+                    deviceId: s.rankingDeviceID,
+                    period: reward.period,
+                    rank: reward.rank,
+                    hmacKeyBase64: hmacKey
+                )
+            } catch {
+                DebugLog.log("Podium claim server failed: \(error.localizedDescription) — retry next cycle")
+            }
+        }
+
+        // RP 보상 (순위 정산, 월간/주간) — 서버 claim의 alreadyClaimed로 중복을 판정한 뒤 credit하므로
+        // 백업 복원 후에도 이중 적립되지 않는다 (coins의 credit-먼저 패턴과 의도적으로 다름).
+        if let rp = resp.pendingRpReward, !s.claimedRpRewards.contains(rp.dedupKey) {
+            // claim 호출 "전에" 재시도 디스크립터 기록 — 서버가 claimed_at을 찍고 응답이
+            // 유실되면 pending 목록에서 사라져 이 디스크립터만이 유일한 복구 경로 (#191).
+            let retry = RankingAPI.PendingClaimRetry(
+                rewardType: "rp", period: rp.period, rank: rp.rank,
+                periodType: rp.periodType, currency: "rp", amount: rp.rp, dedupKey: rp.dedupKey)
+            upsertPendingClaim(retry)
+            do {
+                let claimResp = try await RankingAPI.shared.claimReward(
+                    deviceId: s.rankingDeviceID,
+                    period: rp.period,
+                    rank: rp.rank,
+                    rewardType: "rp",
+                    // 같은 (period, rank)에 개인·길드 트랙 row가 공존할 수 있어 서버가
+                    // 정확한 원장 row를 고르도록 전달 (P2a).
+                    periodType: rp.periodType,
+                    hmacKeyBase64: hmacKey
+                )
+                // alreadyClaimed=true는 credit하지 않음 — 백업 복원/동시 인스턴스가 이미
+                // 수령·적립한 경우다. (본인 유실 케이스는 catch → 디스크립터 재시도가 담당.)
+                if !claimResp.alreadyClaimed {
+                    creditClaimedReward(retry)
+                }
+                markClaimed(retry)
+            } catch {
+                // 디스크립터 유지 — 다음 cycle에 retryPendingClaims가 같은 파라미터로 재시도.
+                DebugLog.log("RP claim failed: \(error.localizedDescription) — retry next cycle")
+            }
+        }
+
+        // 통합 보상 (ops grant) — RP·코인 공용 per-device 지급. RP와 동일한 claim-first 패턴:
+        // 서버 claim이 !alreadyClaimed일 때만 currency로 원장을 골라 크레딧 → 백업 복원에도 안전.
+        if let grant = resp.pendingGrant, !s.claimedGrants.contains(grant.dedupKey) {
+            let retry = RankingAPI.PendingClaimRetry(
+                rewardType: "grant", period: grant.grantKey, rank: 1,
+                periodType: nil, currency: grant.currency, amount: grant.amount,
+                dedupKey: grant.dedupKey)
+            upsertPendingClaim(retry)
+            do {
+                let claimResp = try await RankingAPI.shared.claimReward(
+                    deviceId: s.rankingDeviceID,
+                    period: grant.grantKey,   // grant_key를 period 슬롯에 서명 (서버와 합의된 재활용)
+                    rank: 1,                  // grant는 rank 미사용 — 서명 채움용 더미
+                    rewardType: "grant",
+                    hmacKeyBase64: hmacKey
+                )
+                if !claimResp.alreadyClaimed {
+                    creditClaimedReward(retry)
+                }
+                markClaimed(retry)
+            } catch {
+                DebugLog.log("Grant claim failed: \(error.localizedDescription) — retry next cycle")
+            }
         }
     }
 
@@ -913,6 +946,9 @@ final class ViewModel: ObservableObject {
             if let lb = resp.leaderboard {
                 NotificationCenter.default.post(name: .rankingSynced, object: RankingSyncPayload(
                     leaderboard: lb, tenantAnnouncements: resp.tenantAnnouncements ?? []))
+                // sync 응답의 leaderboard 섹션에도 미수령 보상이 실려 온다. 여기서 claim하지 않으면
+                // 통합 폴링(#202)만 도는 상황에서 보상이 계속 쌓인다 — 실제로 22건이 밀려 있었다.
+                await processPendingClaims(lb, hmacKey: hmacKey)
             }
         } catch {
             // 무시 — 다음 cycle 재시도. UI는 직전 값 유지.
