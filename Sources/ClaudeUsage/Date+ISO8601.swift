@@ -3,7 +3,7 @@ import Foundation
 extension Date {
     /// ISO8601 timestamp 문자열 파싱 — fractional seconds 있는/없는 두 포맷 모두 지원.
     ///
-    /// 기존엔 `UsageAPI.toSnapshot` / `CursorAPI` startOfMonth 파싱 / `Contributors.aggregate`
+    /// 기존엔 `UsageAPI.toSnapshot` / `CursorAPI` startOfMonth 파싱 / `contributors` 응답 파싱
     /// 세 곳에 동일한 두 인스턴스 fallback 페어가 있었고, 매 호출마다 `ISO8601DateFormatter`를
     /// 두 개씩 새로 생성했음. `ISO8601DateFormatter`는 Apple이 thread-safe로 명시(=`DateFormatter`
     /// 와 다름)이므로 nonisolated static let으로 캐싱해 재사용해도 안전.

@@ -994,6 +994,27 @@ actor RankingAPI {
         return resp.announcements
     }
 
+    // MARK: - 외부 PR 기여자 (contributors)
+
+    /// 서버가 GitHub Search API로 긁어 DB에 캐시해 둔 외부 기여자 목록.
+    /// 클라가 직접 GitHub을 치던 경로를 대체한다 — 비인증 API는 IP 단위 60req/h라
+    /// 사내망 NAT에서 소진되고, `/pulls` 100개 창 밖으로 옛 PR이 밀려 목록이 비었다.
+    struct ContributorsResponse: Decodable, Sendable {
+        struct Row: Decodable, Sendable {
+            let login: String
+            let avatarURL: String?
+            let prs: [PullRequest]
+        }
+        let contributors: [Row]
+        /// 서버가 GitHub에서 마지막으로 성공적으로 긁어온 시각.
+        let syncedAt: Date?
+    }
+
+    /// 기여자 목록 조회. 인증 불필요(공개) — 서버가 TTL 만료 시 알아서 갱신한다.
+    func fetchContributors() async throws -> ContributorsResponse {
+        try await get(path: "contributors")
+    }
+
     // MARK: - 테넌트 (완전 격리형 멀티테넌시) — docs/plans/tenant.md
 
     /// 인증 폼 도메인 드롭다운 소스. `[로컬파트] @ [도메인 ▼]` 채우기용. 인증 불필요(공개 목록).
