@@ -38,13 +38,7 @@ actor RankingAPI {
     }
     static var isConfigured: Bool { baseURL != nil && anonKey != nil }
 
-    /// 버전 텔레메트리 — submit 시 서버로 전송하고, 모든 요청에 `X-App-Version` 헤더로도 실린다.
-    ///
-    /// 헤더로 올리는 이유: 서버측 게이트(min_version.ts)는 `users.app_version`을 DB에서 읽어야
-    /// 해서 Edge Function이 실행된 뒤에나 판정할 수 있고, 426을 주더라도 invocation은 그대로
-    /// 과금된다. 앞단 프록시(cloudflare/worker.js)가 이 헤더만 보면 Supabase에 닿기 전에 끊는다.
-    ///
-    /// dev 실행(번들 없음)은 nil — 그땐 헤더를 생략한다(프록시는 fail-open).
+    /// 버전 텔레메트리 — submit 시 서버로 전송. dev 실행(번들 없음)은 nil.
     static var appVersion: String? {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
     }
@@ -1612,7 +1606,6 @@ actor RankingAPI {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("Bearer \(anon)", forHTTPHeaderField: "Authorization")
         req.setValue(anon, forHTTPHeaderField: "apikey")
-        if let v = Self.appVersion { req.setValue(v, forHTTPHeaderField: "X-App-Version") }
 
         let enc = JSONEncoder()
         enc.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -1653,7 +1646,6 @@ actor RankingAPI {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue("Bearer \(anon)", forHTTPHeaderField: "Authorization")
         req.setValue(anon, forHTTPHeaderField: "apikey")
-        if let v = Self.appVersion { req.setValue(v, forHTTPHeaderField: "X-App-Version") }
         return try await execute(req)
     }
 
