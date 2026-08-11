@@ -1247,6 +1247,11 @@
       <sparkle:version>0.17.18</sparkle:version>
       <sparkle:shortVersionString>0.17.18</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <!-- 서버가 새 인프라로 이전됐다(구 프로젝트는 곧 삭제). 이 버전 미만은 옛 DB에 기록되고
+           이전 완료 후 접속이 끊기므로, 건너뛰기 어려운 중요 업데이트로 표시한다.
+           announcements는 "업데이트 후 첫 실행"에 뜨는 구조라 미업데이트 사용자에게 닿지 않는다 —
+           이 마킹이 그들에게 닿는 유일한 경로다. -->
+      <sparkle:criticalUpdate sparkle:version="0.17.18"></sparkle:criticalUpdate>
       <enclosure url="https://github.com/dowoonlee/ai-service-usage/releases/download/v0.17.18/AIUsage.zip"
                  type="application/octet-stream"
                  sparkle:edSignature="nJRSsg/FPXSIZSFqmw9rXRj4EmmFzeSov8UWa4ViOY1zYnWLUY56asyWk2LjcOr2rSlN1rWKt9aBv3rpNZHqAQ==" length="6445316" />
