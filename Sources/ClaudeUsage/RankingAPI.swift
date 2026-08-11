@@ -119,6 +119,9 @@ actor RankingAPI {
         let pendingGrant: PendingGrant?
         /// 호출자의 현재 테넌트 slug — 배지 표시용. 익명/미등록·구버전 서버는 nil("public" 취급).
         let tenant: String?
+        /// 소속 재인증 기한. nil이면 요구 없음. sync에만 실었을 때 랭킹 창을 열어도 최대 10분간
+        /// 배너가 안 뜨는 문제가 있어 leaderboard에도 싣는다.
+        let reverifyDueAt: Date?
     }
 
     struct PreviousMonth: Decodable, Sendable {
