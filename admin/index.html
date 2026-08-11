@@ -493,13 +493,24 @@ const el = (tag, attrs = {}) => {
 };
 
 /** 눈금 값 — 0부터 max까지 "예쁜" 4~5단계. */
+/**
+ * y축 눈금 — **마지막 눈금이 반드시 max 이상**이 되도록 올림한다.
+ *
+ * 예전엔 `v <= max`로 루프를 끊어서 마지막 눈금이 max보다 작을 수 있었다. 차트는 그 마지막
+ * 눈금을 축 상한(top)으로 쓰기 때문에 `값/top > 1`이 되어 선이 플롯 영역 위로 삐져나갔다
+ * (max=13이면 눈금 [0,5,10] → 130% 지점에 점이 찍힘). 자주 나오는 값의 대부분이 여기 걸렸다.
+ *
+ * 누적 덧셈(v += step) 대신 인덱스 곱셈을 쓰는 이유는 step이 2.5처럼 소수일 때
+ * 부동소수 오차가 쌓여 눈금 라벨이 7.500000000000001로 찍히는 걸 막기 위함.
+ */
 function ticks(max) {
   if (max <= 0) return [0, 1];
   const raw = max / 4;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = [1, 2, 2.5, 5, 10].find((m) => m * mag >= raw) * mag;
+  const n = Math.ceil(max / step - 1e-9);
   const out = [];
-  for (let v = 0; v <= max + step * 0.001; v += step) out.push(v);
+  for (let i = 0; i <= n; i++) out.push(Number((i * step).toFixed(6)));
   return out;
 }
 
@@ -579,6 +590,28 @@ function lineChart(wrap, { dates, series }) {
 
   const labels = [];
   for (const s of series) {
+    // 주(월~일) 평균 추세선 — 일별 값은 요일 편차(주말 급감 등)로 튀어서 방향을 읽기 어렵다.
+    // 각 주의 평균을 그 주 데이터 포인트들의 x 중심에 찍고 이어 붙인다.
+    // 실선(일별)과 구분되도록 같은 색 점선 + 반투명. 값이 없는 주는 건너뛴다(선이 끊김).
+    const buckets = new Map();
+    s.values.forEach((v, i) => {
+      if (v == null) return;
+      const k = weekStart(dates[i]);
+      const b = buckets.get(k) ?? { sum: 0, n: 0, xs: 0 };
+      b.sum += v; b.n += 1; b.xs += X(i);
+      buckets.set(k, b);
+    });
+    const avgPts = [...buckets.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, b]) => ({ x: b.xs / b.n, y: Y(b.sum / b.n) }));
+    if (avgPts.length >= 2) {
+      svg.appendChild(el("path", {
+        d: avgPts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(""),
+        fill: "none", stroke: s.color, "stroke-width": 1.5,
+        "stroke-dasharray": "5 4", "stroke-linecap": "round", opacity: 0.65,
+      }));
+    }
+
     let path = "", pen = false;
     s.values.forEach((v, i) => {
       if (v == null) { pen = false; return; }
@@ -622,6 +655,19 @@ function lineChart(wrap, { dates, series }) {
     svg.appendChild(c);
     return c;
   });
+
+  // 점선이 무엇인지 알려주는 최소 범례 — 시리즈 색 구분은 직접 라벨이 대신하므로
+  // 여기선 "점선 = 주 평균"만 한 번 밝힌다.
+  const legendLine = el("line", {
+    x1: M.l + 2, x2: M.l + 18, y1: M.t + 5, y2: M.t + 5,
+    stroke: "var(--muted)", "stroke-width": 1.5, "stroke-dasharray": "5 4",
+  });
+  svg.appendChild(legendLine);
+  const legendText = el("text", {
+    x: M.l + 23, y: M.t + 9, fill: "var(--muted)", "font-size": 10,
+  });
+  legendText.textContent = "주 평균";
+  svg.appendChild(legendText);
 
   const tip = document.createElement("div");
   tip.className = "tooltip";
