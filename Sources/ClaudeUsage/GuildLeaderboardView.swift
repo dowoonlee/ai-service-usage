@@ -27,26 +27,98 @@ struct GuildLeaderboardView: View {
             }
             .padding(.bottom, 2)
             ForEach(board.entries) { entry in
-                let isMine = entry.guildId == highlightGuildId
-                HStack(spacing: 8) {
-                    Text("\(entry.rank)")
-                        .font(.system(size: 11, weight: entry.rank <= 3 ? .bold : .regular))
-                        .monospacedDigit()
-                        .frame(width: 22, alignment: .trailing)
-                    Text(entry.name)
-                        .font(.system(size: 11, weight: isMine ? .semibold : .regular))
-                        .lineLimit(1)
-                    Spacer()
-                    Text("\(entry.memberCount)명").font(.system(size: 10)).foregroundStyle(.secondary)
-                    Text("\(entry.score) VP")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.purple)
-                        .frame(width: 90, alignment: .trailing)
-                }
-                .padding(.vertical, 3)
-                .padding(.horizontal, 4)
-                .background(isMine ? Color.accentColor.opacity(0.12) : Color.clear)
+                guildRow(entry)
             }
+        }
+    }
+
+    /// 길드 한 줄 — 로고 배너 + 이름 + 점수, 그 아래 상위 기여자 펫 줄.
+    /// 한 줄에 다 넣기엔 정보가 많아 2단으로 나눴다(위: 정체성·점수 / 아래: 사람).
+    private func guildRow(_ entry: RankingAPI.GuildLeaderboardEntry) -> some View {
+        let isMine = entry.guildId == highlightGuildId
+        return HStack(alignment: .top, spacing: 10) {
+            Text("\(entry.rank)")
+                .font(.system(size: 15, weight: entry.rank <= 3 ? .bold : .regular))
+                .monospacedDigit()
+                .foregroundStyle(entry.rank <= 3 ? AppColors.gold : .secondary)
+                .frame(width: 26, alignment: .trailing)
+                .padding(.top, 2)
+            GuildLogoBanner(logo: entry.logo, guildID: entry.guildId, width: 72)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(entry.name)
+                        .font(.system(size: 14, weight: .semibold))
+                        .lineLimit(1)
+                    if isMine {
+                        Text("내 길드")
+                            .font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.25)))
+                    }
+                    Spacer(minLength: 4)
+                    Text("\(entry.score) VP")
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.purple)
+                }
+                HStack(spacing: 4) {
+                    Image(systemName: "person.2.fill").font(.system(size: 8))
+                    Text("\(entry.memberCount)명").font(.system(size: 10))
+                }
+                .foregroundStyle(.secondary)
+                topContributorsRow(entry)
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.md)
+                .fill(isMine ? Color.accentColor.opacity(0.12) : Color.gray.opacity(0.06))
+        )
+    }
+
+    /// 점수에 반영되는 상위 기여자 — 펫 아바타 + 닉네임. 구버전 서버(topMembers 없음)에선 숨긴다.
+    @ViewBuilder
+    private func topContributorsRow(_ entry: RankingAPI.GuildLeaderboardEntry) -> some View {
+        if let members = entry.topMembers, !members.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                ForEach(members) { m in
+                    VStack(spacing: 1) {
+                        memberPet(m)
+                        Text(m.nickname)
+                            .font(.system(size: 9))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(maxWidth: 54)
+                        Text("\(m.vp)")
+                            .font(.system(size: 8, design: .monospaced))
+                            .foregroundStyle(.purple.opacity(0.8))
+                    }
+                    .help("\(m.nickname) · \(m.vp) VP")
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    /// 기여자 대표 펫. 프로필이 없거나 모르는 종이면 발자국으로 대체 (시상대와 같은 폴백).
+    @ViewBuilder
+    private func memberPet(_ m: RankingAPI.GuildTopMember) -> some View {
+        if let kind = m.kind,
+           let nsImage = PetSprite.image(for: kind, action: .walk, frameIndex: 0) {
+            Image(nsImage: nsImage)
+                .interpolation(.none)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .hueRotation(.degrees(m.variant == PetOwnership.prestigeVariant
+                    ? 0 : WalkingCat.hueDegrees(for: m.variant)))
+                .scaleEffect(x: kind.defaultFacingLeft ? -1 : 1, y: 1)
+                .frame(width: 34, height: 30)
+        } else {
+            Image(systemName: "pawprint.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 30)
         }
     }
 

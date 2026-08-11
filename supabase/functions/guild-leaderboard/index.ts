@@ -12,6 +12,7 @@ import { getDb } from "../_shared/db.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { stripBackup } from "../_shared/profile.ts";
 import { resolveTenant } from "../_shared/tenant.ts";
+import { TOP_CONTRIBUTORS } from "../_shared/guild_policy.ts";
 
 const TOP_N = 50;
 
@@ -42,13 +43,55 @@ Deno.serve(async (req: Request) => {
 
   const { data: top, error: topErr } = await db
     .from("guild_monthly_scores")
-    .select("guild_id, name, score, member_count, rank")
+    .select("guild_id, name, score, member_count, rank, logo")
     .eq("tenant_id", tenant)
     .order("rank", { ascending: true })
     .limit(TOP_N);
   if (topErr) {
     console.error("guild leaderboard fetch failed", topErr);
     return errorResponse(500, "fetch_failed");
+  }
+
+  // 길드별 상위 기여자 — 점수에 실제로 반영되는 rn <= TOP_CONTRIBUTORS 멤버.
+  // 길드마다 따로 조회하면 N+1이 되므로 한 번에 긁어와 JS에서 그룹핑한다.
+  //
+  // profile_json은 통째로 실으면 안 된다 — 백업 페이로드까지 들어 있어 50길드×5명이면
+  // 응답이 수백 KB로 불어난다. 렌더에 필요한 건 아바타 펫(kind/variant)뿐이라 그것만 뽑는다.
+  const topMembersByGuild = new Map<string, unknown[]>();
+  const guildIds = (top ?? []).map((g) => g.guild_id);
+  if (guildIds.length > 0) {
+    const { data: contributors } = await db
+      .from("guild_member_monthly_vp")
+      .select("guild_id, device_id, monthly_vp, rn")
+      .in("guild_id", guildIds)
+      .lte("rn", TOP_CONTRIBUTORS)
+      .order("rn", { ascending: true });
+
+    const deviceIds = [...new Set((contributors ?? []).map((c) => c.device_id))];
+    const profiles = new Map<string, { nickname: string | null; profile: unknown }>();
+    if (deviceIds.length > 0) {
+      // 뷰(guild_member_monthly_vp)라 PostgREST가 users 관계를 추론하지 못한다 — 별도 조회 후 조인.
+      const { data: users } = await db
+        .from("users")
+        .select("device_id, nickname, profile_json")
+        .in("device_id", deviceIds);
+      for (const u of users ?? []) {
+        profiles.set(u.device_id, { nickname: u.nickname, profile: u.profile_json });
+      }
+    }
+    for (const c of contributors ?? []) {
+      const u = profiles.get(c.device_id);
+      const card = (u?.profile as { card?: { avatar?: { kind?: string; variant?: number } } } | null)
+        ?.card?.avatar;
+      const list = topMembersByGuild.get(c.guild_id) ?? [];
+      list.push({
+        nickname: u?.nickname ?? "(탈퇴)",
+        petKind: typeof card?.kind === "string" ? card.kind : null,
+        petVariant: typeof card?.variant === "number" ? card.variant : 0,
+        vp: Number(c.monthly_vp),
+      });
+      topMembersByGuild.set(c.guild_id, list);
+    }
   }
 
   const { count: totalCount } = await db
@@ -67,7 +110,7 @@ Deno.serve(async (req: Request) => {
     if (membership) {
       const { data: mine } = await db
         .from("guild_monthly_scores")
-        .select("guild_id, name, score, member_count, rank")
+        .select("guild_id, name, score, member_count, rank, logo")
         .eq("guild_id", membership.guild_id)
         .maybeSingle();
       if (mine) {
@@ -77,6 +120,7 @@ Deno.serve(async (req: Request) => {
           score: Number(mine.score),
           memberCount: mine.member_count,
           rank: mine.rank,
+          logo: mine.logo ?? null,
         };
       }
     }
@@ -137,6 +181,8 @@ Deno.serve(async (req: Request) => {
       name: g.name,
       score: Number(g.score),
       memberCount: g.member_count,
+      logo: g.logo ?? null,
+      topMembers: topMembersByGuild.get(g.guild_id) ?? [],
     })),
     myGuild,
     total: totalCount ?? (top ?? []).length,

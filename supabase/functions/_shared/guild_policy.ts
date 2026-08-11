@@ -66,6 +66,46 @@ export function isValidGuildName(s: unknown): s is string {
   return true;
 }
 
+/** 절차적 샘플 로고 개수 — 클라이언트 `GuildLogo.sampleCount`와 반드시 같이 움직인다. */
+export const GUILD_LOGO_SAMPLE_COUNT = 10;
+/** 커스텀 로고 PNG 원본 바이트 상한 — 클라이언트 `GuildLogo.maxCustomBytes`와 동기. */
+export const GUILD_LOGO_MAX_BYTES = 8 * 1024;
+
+/**
+ * 로고 저장 문자열 검증.
+ *   's:<0..9>'   샘플 인덱스
+ *   'p:<base64>' 66×44 픽셀 PNG
+ *
+ * 커스텀 쪽은 base64 문자셋·디코드 크기에 더해 **PNG 시그니처까지** 확인한다.
+ * 이 값은 다른 사용자 화면에 그대로 그려지므로, 임의 바이너리가 로고 슬롯을 타고
+ * 들어오는 경로를 막아 둔다. (해상도까지는 검증하지 않는다 — 클라이언트가 항상
+ * 66×44로 구워서 보내고, 다른 크기가 와도 표시가 깨질 뿐 위험하지 않다.)
+ */
+export function isValidGuildLogo(s: unknown): s is string {
+  if (typeof s !== "string" || s.length < 3) return false;
+  if (s.startsWith("s:")) {
+    const n = Number(s.slice(2));
+    return Number.isInteger(n) && n >= 0 && n < GUILD_LOGO_SAMPLE_COUNT;
+  }
+  if (s.startsWith("p:")) {
+    const b64 = s.slice(2);
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return false;
+    if (Math.floor((b64.length * 3) / 4) > GUILD_LOGO_MAX_BYTES) return false;
+    try {
+      const head = atob(b64.slice(0, 12));
+      return head.charCodeAt(0) === 0x89 && head.slice(1, 4) === "PNG";
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+/** 길드 생성 시 배정할 무작위 샘플 로고. */
+export function randomSampleLogo(): string {
+  return `s:${Math.floor(Math.random() * GUILD_LOGO_SAMPLE_COUNT)}`;
+}
+
 /**
  * 재가입 쿨다운(탈퇴/추방 후 JOIN_COOLDOWN_SEC) 검사. 아직 만료 안 됐으면 403 Response,
  * 통과면 null. guild-{create,join,request,invite(accept),manage(approve_request)} 5곳이
