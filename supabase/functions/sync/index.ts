@@ -73,7 +73,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status, app_version")
+    .select("device_id, hmac_key_b64, status, app_version, tenant_reverify_due_at")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -179,5 +179,11 @@ Deno.serve(async (req: Request) => {
   }
 
   out.tenant = tenant;
+  // 재인증 요구 — 클라가 배너/차단 안내를 띄우는 근거. NULL이면 필드 자체를 안 내려보내
+  // 정상 계정의 응답 크기는 그대로 둔다. 기한이 지나면 위 resolveTenant가 이미 기본 테넌트로
+  // 강등해서 내려주므로, 클라는 이 값으로 "왜 강등됐는지"를 설명만 하면 된다.
+  if (user.tenant_reverify_due_at) {
+    out.reverifyDueAt = user.tenant_reverify_due_at;
+  }
   return jsonResponse(out);
 });

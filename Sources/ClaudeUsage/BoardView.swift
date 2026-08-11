@@ -62,6 +62,9 @@ struct BoardView: View {
     @State private var postCooldownSec: Int = BoardView.fallbackPostCooldownSec
     /// 본인 글 작성 후 삭제 가능한 윈도우(초). BoardRow 삭제 버튼 노출/카운트 표시 기준.
     @State private var deleteWindowSec: TimeInterval = BoardView.fallbackDeleteWindowSec
+    /// 서버 판정 쓰기 권한 — GitHub 미연동이면 false(읽기 전용). 응답 전/구버전 서버는 true로
+    /// 두어 게이트 이전 동작을 유지하고, 실제 차단은 서버 403 `github_required`가 한다.
+    @State private var canInteract: Bool = true
 
     /// 게시판 사용 가능 여부 — 등록 + 활성 둘 다 필요. 일시중지면 false.
     private var rankingActive: Bool {
@@ -174,6 +177,21 @@ struct BoardView: View {
                 Button("랭킹 등록…") { openRankingSettings() }
             }
             .padding(12)
+        } else if !canInteract {
+            // GitHub 미연동 = 읽기 전용. 랭킹 미등록 카드와 같은 형태로, 해소 경로(설정)까지 함께.
+            HStack(spacing: 10) {
+                Image(systemName: "lock.shield")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("게시판 작성·좋아요는 GitHub 인증 후 가능합니다.")
+                        .font(.system(size: 12))
+                    Text("읽기는 그대로 이용할 수 있습니다.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("GitHub 연결…") { openRankingSettings() }
+            }
+            .padding(12)
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 8) {
@@ -228,6 +246,7 @@ struct BoardView: View {
             && !trimmed.isEmpty
             && trimmed.count <= Self.maxContentLength
             && settings.rankingRegistered
+            && canInteract
     }
 
     private func formatCooldown(_ sec: Int) -> String {
@@ -265,7 +284,8 @@ struct BoardView: View {
                                 deleteWindowSec: Int(deleteWindowSec),
                                 commentCount: post.comments.count,
                                 isComposing: composingPost == post.id,
-                                canComment: settings.rankingRegistered,
+                                canComment: settings.rankingRegistered && canInteract,
+                                canLike: canInteract,
                                 onLikeTap: { toggleLike(postId: post.id) },
                                 onDeleteTap: { deletePost(postId: post.id) },
                                 onCommentToggle: {
@@ -339,6 +359,7 @@ struct BoardView: View {
                 if let s = resp.deleteCommentWindowSec, s > 0 {
                     deleteCommentWindowSec = TimeInterval(s)
                 }
+                applyWritePermission(resp)
                 applyServerCooldown(resp.cooldownRemainingSec)
                 // 윈도우 active 동안에는 새 글이 와도 사용자가 즉시 본 셈 — 메인 패널 배지를 0 유지.
                 // 윈도우 닫히면 polling 멈추고 ViewModel cycle만 새 글 카운트.
@@ -394,8 +415,17 @@ struct BoardView: View {
         if let s = resp.deleteCommentWindowSec, s > 0 {
             deleteCommentWindowSec = TimeInterval(s)
         }
+        applyWritePermission(resp)
         applyServerCooldown(resp.cooldownRemainingSec)
         NotificationCenter.default.post(name: .boardSeen, object: nil)
+    }
+
+    /// 쓰기 권한 동기화 — `refresh()`와 `applySynced()` 양쪽 경로에서 같은 판정을 쓰도록 추출.
+    /// 구버전 서버는 두 필드가 nil이므로 게이트 이전 동작(쓰기 허용)을 유지한다.
+    /// 정책이 꺼지면(BOARD_REQUIRES_GITHUB=false) 서버가 전원 true를 내려주므로 안내 카드도
+    /// 자동으로 사라진다 — 클라이언트가 requiresGitHub를 따로 볼 필요는 없다.
+    private func applyWritePermission(_ resp: RankingAPI.BoardResponse) {
+        canInteract = resp.canInteract ?? true
     }
 
     private func submitDraft() {
@@ -776,6 +806,8 @@ private struct BoardRow: View {
     let commentCount: Int
     let isComposing: Bool
     let canComment: Bool
+    /// GitHub 미연동이면 false — 하트 비활성화. 서버 403을 UI에서 미리 막는 용도.
+    let canLike: Bool
     let onLikeTap: () -> Void
     let onDeleteTap: () -> Void
     let onCommentToggle: () -> Void
@@ -843,9 +875,9 @@ private struct BoardRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
-            .disabled(isLikeBusy)
-            .opacity(isLikeBusy ? 0.5 : 1.0)
-            .help(likeHelpText)
+            .disabled(isLikeBusy || !canLike)
+            .opacity(isLikeBusy || !canLike ? 0.5 : 1.0)
+            .help(canLike ? likeHelpText : "좋아요는 GitHub 인증 후 가능")
 
             // 댓글 토글 — 말풍선 + 개수. 클릭 시 입력창 펼침/접힘.
             if canComment || commentCount > 0 {
@@ -863,7 +895,9 @@ private struct BoardRow: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(!canComment)
-                .help(canComment ? "댓글 달기 / 접기" : "댓글은 랭킹 등록 후 가능")
+                // canComment가 false인 이유는 두 갈래(랭킹 미등록 / GitHub 미연동) — canLike로 구분.
+                .help(canComment ? "댓글 달기 / 접기"
+                                 : (canLike ? "댓글은 랭킹 등록 후 가능" : "댓글은 GitHub 인증 후 가능"))
             }
         }
     }
