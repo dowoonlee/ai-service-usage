@@ -28,15 +28,16 @@ import {
   FURNITURE_MAX_INSTANCES,
   FURNITURE_TEXT_MAX,
   isValidGuildName,
+  isValidGuildLogo,
   checkJoinCooldown,
 } from "../_shared/guild_policy.ts";
 
 type ManageAction =
   | "kick" | "rotate_code" | "disband" | "set_furniture" | "invite" | "cancel_invite" | "rename"
-  | "approve_request" | "reject_request";
+  | "set_logo" | "approve_request" | "reject_request";
 const MANAGE_ACTIONS: ReadonlySet<string> = new Set([
   "kick", "rotate_code", "disband", "set_furniture", "invite", "cancel_invite", "rename",
-  "approve_request", "reject_request",
+  "set_logo", "approve_request", "reject_request",
 ]);
 
 interface ManagePayload {
@@ -53,6 +54,8 @@ interface ManagePayload {
   requestId?: string;
   // rename 전용 — 새 길드명 (2~24자, isValidGuildName).
   newName?: string;
+  // set_logo 전용 — "s:<0..9>" 또는 "p:<base64 PNG>" (isValidGuildLogo).
+  logo?: string;
   ts: number;
 }
 interface ManageRequest {
@@ -98,6 +101,10 @@ Deno.serve(async (req: Request) => {
   // rename: 새 길드명 형식(2~24자, 제어문자·앞뒤공백·연속공백 금지) — guild-create와 동일 규칙.
   if (p.action === "rename" && !isValidGuildName(p.newName)) {
     return errorResponse(400, "invalid_guild_name");
+  }
+  // set_logo: 샘플 인덱스이거나 PNG 시그니처를 가진 base64 (상한 8KB).
+  if (p.action === "set_logo" && !isValidGuildLogo(p.logo)) {
+    return errorResponse(400, "invalid_logo");
   }
   // set_furniture: "kind:x:lane[:y[:text]];…" 검증 — 카탈로그 kind 범위, 벽/바닥 lane 정합,
   // 벽 가구 자유 y(4번째 필드), 액자 문구(5번째, percent-encoding). kind 중복 허용.
@@ -193,6 +200,7 @@ Deno.serve(async (req: Request) => {
   if (typeof p.inviteId === "string") verifyObj.inviteId = p.inviteId;
   if (typeof p.requestId === "string") verifyObj.requestId = p.requestId;
   if (typeof p.newName === "string") verifyObj.newName = p.newName;
+  if (typeof p.logo === "string") verifyObj.logo = p.logo;
   const ok = await verifyHmac(verifyObj, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
@@ -489,6 +497,21 @@ Deno.serve(async (req: Request) => {
         return errorResponse(500, "rename_failed");
       }
       return jsonResponse({ ok: true, name: newName });
+    }
+
+    case "set_logo": {
+      // 로고 변경 — 형식은 위에서 검증했고 여기서는 저장만. rename과 달리 유일성 제약이 없다.
+      // RP 200 소모는 rename과 동일하게 클라이언트 로컬 경제라 서버가 검증하지 않는다.
+      const logo = p.logo!;
+      const { error: updErr } = await db
+        .from("guilds")
+        .update({ logo })
+        .eq("id", guild.id);
+      if (updErr) {
+        console.error("guild set_logo failed", updErr);
+        return errorResponse(500, "logo_failed");
+      }
+      return jsonResponse({ ok: true, logo });
     }
   }
 });

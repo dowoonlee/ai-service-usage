@@ -1,21 +1,28 @@
 import Foundation
 
-/// 머지된 PR 기여자 목록을 GitHub `/pulls` 비인증 API로 fetch.
-/// repo가 public이라 token 없이 60req/h 가능 — 6h 캐시로 사용자당 하루 ~4회 호출.
-/// `ContributorBonus`와 별개: 그쪽은 자기 토큰으로 자기 PR 검색 → 코인 적립이 목적이고,
-/// 이쪽은 unauthenticated로 모든 머지된 PR의 author를 모음 → UI 표시가 목적.
+/// 머지된 PR 기여자 목록 — **서버(`contributors` Edge Function)에서** 받아온다.
+///
+/// 예전엔 클라가 각자 GitHub `/pulls?state=closed&per_page=100`을 직접 호출했는데 두 군데서 깨졌다:
+///   1. 비인증 GitHub API는 **IP 단위** 60req/h다. 사내망 NAT이면 전 사용자가 한 IP를 공유해 소진된다.
+///   2. `/pulls`는 생성 역순 100개만 준다. 리포 PR이 215개까지 늘면서 외부 기여자 PR(#3·#8·#45·#59)이
+///      조회 창(#95~#215) 밖으로 밀려 목록이 **조용히 빈 배열**이 됐다(캐시에 `[]`가 그대로 저장됨).
+/// 서버는 Search API로 조건에 맞는 PR만 받아 DB에 캐시하므로 PR 수가 늘어도 재발하지 않는다.
+///
+/// `ContributorBonus`와는 여전히 별개다: 그쪽은 사용자 자기 토큰으로 자기 PR을 검색해 코인을 적립하고,
+/// 이쪽은 공개 목록을 UI에 표시하는 용도다.
 @MainActor
 final class Contributors: ObservableObject {
     static let shared = Contributors()
 
     @Published private(set) var list: [Contributor] = []
 
-    private static let repo = "dowoonlee/ai-service-usage"
-    /// repo owner는 외부 기여자가 아니므로 표시 대상에서 제외.
-    private static let ownerLogin = "dowoonlee"
-    /// 6h 주기 — unauthenticated 60req/h 한도 대비 사용자당 하루 ~4회라 부담 0. PR 머지 반영을 빠르게.
+    /// 로컬 재조회 주기. 서버가 24h TTL로 GitHub을 긁으므로 클라는 자주 물어볼 이유가 없다.
+    /// 실제 GitHub 호출량은 클라 수와 무관하다 — 서버 한 곳에서만 나간다.
+    /// (오너 제외는 서버가 한다 — 클라엔 그 규칙이 남아 있지 않다.)
     private static let cacheTTL: TimeInterval = 6 * 3600
-    private static let cacheKey = "contributors.cache.v1"
+    /// v1에는 옛 경로가 만들어 둔 **빈 배열**이 남아 있다. 키를 올리지 않으면 업데이트 직후에도
+    /// TTL이 만료될 때까지 빈 목록이 그대로 보인다 — 그래서 v2로 끊는다.
+    private static let cacheKey = "contributors.cache.v2"
 
     private struct Cache: Codable {
         let fetchedAt: Date
@@ -43,59 +50,25 @@ final class Contributors: ObservableObject {
     }
 
     private func fetch() async throws -> [Contributor] {
-        var comps = URLComponents(string: "https://api.github.com/repos/\(Self.repo)/pulls")!
-        comps.queryItems = [
-            .init(name: "state", value: "closed"),
-            .init(name: "per_page", value: "100"),
-        ]
-        var req = URLRequest(url: comps.url!)
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
-        let (data, response) = try await URLSession.shared.data(for: req)
-        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
-            throw NSError(domain: "Contributors", code: http.statusCode,
-                          userInfo: [NSLocalizedDescriptionKey: "GitHub API \(http.statusCode)"])
+        guard RankingAPI.isConfigured else {
+            throw NSError(domain: "Contributors", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "랭킹 서버 미설정"])
         }
-        struct PRResp: Decodable {
-            struct User: Decodable { let login: String; let avatar_url: String? }
-            let number: Int
-            let title: String
-            let merged_at: String?
-            let user: User?
-        }
-        let prs = try JSONDecoder().decode([PRResp].self, from: data)
-        return Self.aggregate(prs: prs.map {
-            (number: $0.number, title: $0.title, mergedAt: $0.merged_at, login: $0.user?.login, avatar: $0.user?.avatar_url)
-        }, ownerLogin: Self.ownerLogin)
+        let resp = try await RankingAPI.shared.fetchContributors()
+        // 정렬은 서버가 이미 해 두지만(PR 많은 순 → 최근 머지순), 표시 순서는 클라가 책임진다.
+        // 구버전 서버가 정렬 없이 주더라도 화면이 흔들리지 않도록 여기서 한 번 더 확정한다.
+        return Self.sorted(resp.contributors.map {
+            Contributor(login: $0.login, avatarURL: $0.avatarURL,
+                        prs: $0.prs.sorted { $0.mergedAt > $1.mergedAt })
+        })
     }
 
-    /// 순수 함수 — login 별로 머지된 PR을 그룹화, 가장 최근 머지 시각 기준 정렬.
-    /// (number/title/mergedAt 문자열/login/avatar_url) 튜플 입력으로 받아 외부 의존 없음 → 테스트 가능.
-    nonisolated static func aggregate(
-        prs: [(number: Int, title: String, mergedAt: String?, login: String?, avatar: String?)],
-        ownerLogin: String
-    ) -> [Contributor] {
-        var bucket: [String: (avatarURL: String?, prs: [PullRequest])] = [:]
-        for pr in prs {
-            guard let login = pr.login, login != ownerLogin,
-                  let mergedAt = Date.parseISO8601(pr.mergedAt)
-            else { continue }
-            var entry = bucket[login] ?? (avatarURL: pr.avatar, prs: [])
-            entry.prs.append(PullRequest(number: pr.number, title: pr.title, mergedAt: mergedAt))
-            if entry.avatarURL == nil { entry.avatarURL = pr.avatar }
-            bucket[login] = entry
+    /// 표시 순서 — 1차 PR 개수 내림차순, 동점이면 최근 머지가 위.
+    nonisolated static func sorted(_ list: [Contributor]) -> [Contributor] {
+        list.sorted { lhs, rhs in
+            if lhs.prs.count != rhs.prs.count { return lhs.prs.count > rhs.prs.count }
+            return (lhs.prs.first?.mergedAt ?? .distantPast) > (rhs.prs.first?.mergedAt ?? .distantPast)
         }
-        return bucket
-            .map { (login, v) in
-                Contributor(login: login, avatarURL: v.avatarURL,
-                            prs: v.prs.sorted { $0.mergedAt > $1.mergedAt })
-            }
-            .sorted { lhs, rhs in
-                // 1차: PR 개수 내림차순 → 많이 기여한 사람이 위.
-                if lhs.prs.count != rhs.prs.count { return lhs.prs.count > rhs.prs.count }
-                // 2차: 동점이면 최근 머지가 위.
-                return (lhs.prs.first?.mergedAt ?? .distantPast) > (rhs.prs.first?.mergedAt ?? .distantPast)
-            }
     }
 
     private func loadCache() -> Cache? {

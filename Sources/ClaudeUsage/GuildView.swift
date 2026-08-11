@@ -32,6 +32,9 @@ struct GuildView: View {
     @State private var renameNameDraft: String = ""
     @State private var confirmingRename: Bool = false
 
+    /// 로고 변경 시트 (길드장, RP 200) — 시트가 고른 값을 `performSetLogo`가 서버에 반영.
+    @State private var logoEditorOpen: Bool = false
+
     // 확인 다이얼로그
     @State private var confirmingPermitPurchase: Bool = false
     @State private var confirmingCreate: Bool = false
@@ -246,6 +249,7 @@ struct GuildView: View {
             Text("\(g.rank)")
                 .font(.system(size: 11, weight: g.rank <= 3 ? .bold : .regular))
                 .monospacedDigit().frame(width: 20, alignment: .trailing)
+            GuildLogoBanner(logo: g.logo, guildID: g.guildId, width: 32)
             Text(g.name).font(.system(size: 11)).lineLimit(1)
             Text("\(g.memberCount)명").font(.system(size: 9)).foregroundStyle(.secondary)
             Spacer()
@@ -479,6 +483,63 @@ struct GuildView: View {
         .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.cyan.opacity(0.06)))
     }
 
+    // MARK: - 로고 변경 (길드장, RP 200)
+
+    /// 현재 로고 미리보기 + 변경 시트 진입. 실제 편집(샘플 선택/업로드·크롭)은
+    /// `GuildLogoEditorView`가 맡고, 여기서는 반영과 RP 차감만 한다.
+    private func logoSection(_ guild: RankingAPI.GuildInfo) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("길드 로고", systemImage: "flag.square")
+                .font(.system(size: 12, weight: .semibold))
+            HStack(spacing: 10) {
+                GuildLogoBanner(logo: guild.logo, guildID: guild.id, width: 112)
+                VStack(alignment: .leading, spacing: 4) {
+                    Button("로고 변경…") { logoEditorOpen = true }
+                        .font(.system(size: 11))
+                        .disabled(actionBusy)
+                    HStack(spacing: 4) {
+                        Image(systemName: "diamond.fill").font(.system(size: 9)).foregroundStyle(.cyan)
+                        Text("변경에 \(RankPointLedger.guildLogoCostRP) RP 소모")
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    if settings.rp < RankPointLedger.guildLogoCostRP {
+                        Text("RP 부족 — \(RankPointLedger.guildLogoCostRP - settings.rp) RP 더 필요")
+                            .font(.system(size: 10)).foregroundStyle(.orange)
+                    }
+                }
+                Spacer()
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.cyan.opacity(0.06)))
+        .sheet(isPresented: $logoEditorOpen) {
+            GuildLogoEditorView(
+                currentLogo: guild.logo, guildID: guild.id,
+                costRP: RankPointLedger.guildLogoCostRP, availableRP: settings.rp,
+                onCommit: { value in
+                    logoEditorOpen = false
+                    performSetLogo(value)
+                },
+                onCancel: { logoEditorOpen = false })
+        }
+    }
+
+    /// 로고 반영 — rename과 같은 "서버 성공 후 차감" 순서.
+    private func performSetLogo(_ value: String) {
+        guard settings.rp >= RankPointLedger.guildLogoCostRP else {
+            error = "RP가 부족합니다 (\(RankPointLedger.guildLogoCostRP) 필요)."
+            return
+        }
+        runAction {
+            _ = try await RankingAPI.shared.manageGuild(
+                deviceId: settings.rankingDeviceID, action: .setLogo, logo: value,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            RankPointLedger.shared.spend(RankPointLedger.guildLogoCostRP, reason: "guild.logo")
+            DebugLog.log("Guild: 로고 변경 (\(value.prefix(2)), RP \(RankPointLedger.guildLogoCostRP) 소모)")
+        }
+    }
+
     /// 변경 가능 조건 — 2~24자 + 현재 이름과 다름 + RP 충분. 최종 형식은 서버가 검증.
     private func canRename(current: String) -> Bool {
         let t = renameNameDraft.trimmingCharacters(in: .whitespaces)
@@ -510,6 +571,7 @@ struct GuildView: View {
                 if info.guild.isLeader {
                     requestsSection(info)
                     inviteSection(info)
+                    logoSection(info.guild)
                     renameSection(info.guild)
                 }
                 if let error {
@@ -522,6 +584,7 @@ struct GuildView: View {
 
     private func scoreBanner(_ guild: RankingAPI.GuildInfo) -> some View {
         HStack(spacing: 8) {
+            GuildLogoBanner(logo: guild.logo, guildID: guild.id, width: 56)
             Image(systemName: "trophy.fill").foregroundStyle(.yellow).font(.system(size: 12))
             if let rank = guild.rank {
                 Text("이번 달 \(rank)위").font(.system(size: 12, weight: .semibold))

@@ -460,6 +460,7 @@ actor RankingAPI {
         case invite
         case cancelInvite = "cancel_invite"
         case rename
+        case setLogo = "set_logo"
         case approveRequest = "approve_request"
         case rejectRequest = "reject_request"
     }
@@ -524,6 +525,8 @@ actor RankingAPI {
         let requestId: String?
         /// rename 전용 — 새 길드명. nil이면 키 자체가 직렬화에서 빠진다(서버 present-only).
         let newName: String?
+        /// set_logo 전용 — `GuildLogo` 저장 형식("s:<0..9>" 또는 "p:<base64 PNG>").
+        let logo: String?
         let ts: Int64
     }
     struct GuildManageRequest: Encodable {
@@ -538,6 +541,8 @@ actor RankingAPI {
         let officeFurniture: String?
         /// rename 응답에만 — 반영된 새 길드명.
         let name: String?
+        /// set_logo 응답에만 — 반영된 로고 저장 문자열.
+        let logo: String?
     }
 
     /// 사무실 액션 payload — 액션 무관 고정 형태 {action, deviceId, item, slot, ts}.
@@ -595,6 +600,8 @@ actor RankingAPI {
         /// 가구 자유 배치 직렬화("setId:x:lane;…"). 빈 문자열/nil → 기본 배치.
         /// 렌더 전 `OfficeLayout.sanitizedPlacements`로 검증.
         let officeFurniture: String?
+        /// 길드 로고 (`GuildLogo` 저장 형식). 구버전 서버는 nil → id 해시로 샘플 폴백.
+        let logo: String?
         let createdAt: Date
         let score: Int
         let rank: Int?
@@ -653,12 +660,31 @@ actor RankingAPI {
         let joinRequests: [GuildIncomingRequest]?
     }
 
+    /// 길드 점수에 반영되는 상위 기여자 1명 (guild-leaderboard `topMembers`).
+    /// 서버가 profile_json 전체 대신 렌더에 필요한 필드만 뽑아 보낸다 — 50길드×5명이면
+    /// 프로필 통째로는 응답이 수백 KB가 된다.
+    struct GuildTopMember: Decodable, Identifiable, Sendable {
+        let nickname: String
+        /// `PetKind.rawValue`. 미등록·구버전 프로필이면 nil → 발자국 아이콘으로 대체.
+        let petKind: String?
+        let petVariant: Int?
+        let vp: Int
+        var id: String { nickname }
+
+        var kind: PetKind? { petKind.flatMap(PetKind.init(rawValue:)) }
+        var variant: Int { petVariant ?? 0 }
+    }
+
     struct GuildLeaderboardEntry: Decodable, Identifiable, Sendable {
         let rank: Int
         let guildId: String
         let name: String
         let score: Int
         let memberCount: Int
+        /// 길드 로고 (`GuildLogo` 저장 형식). 구버전 서버는 nil → guildId 해시로 샘플 폴백.
+        let logo: String?
+        /// 점수에 반영되는 상위 기여자(최대 5명). 구버전 서버는 nil.
+        let topMembers: [GuildTopMember]?
         var id: String { guildId }
     }
     struct MyGuildSummary: Decodable, Sendable {
@@ -667,6 +693,7 @@ actor RankingAPI {
         let score: Int
         let memberCount: Int
         let rank: Int
+        let logo: String?
     }
     /// 직전 달 길드 시상대 (P2a) — guild_monthly_winners 동결 스냅샷.
     struct GuildPreviousMonthEntry: Decodable, Identifiable, Sendable {
@@ -967,6 +994,27 @@ actor RankingAPI {
         return resp.announcements
     }
 
+    // MARK: - 외부 PR 기여자 (contributors)
+
+    /// 서버가 GitHub Search API로 긁어 DB에 캐시해 둔 외부 기여자 목록.
+    /// 클라가 직접 GitHub을 치던 경로를 대체한다 — 비인증 API는 IP 단위 60req/h라
+    /// 사내망 NAT에서 소진되고, `/pulls` 100개 창 밖으로 옛 PR이 밀려 목록이 비었다.
+    struct ContributorsResponse: Decodable, Sendable {
+        struct Row: Decodable, Sendable {
+            let login: String
+            let avatarURL: String?
+            let prs: [PullRequest]
+        }
+        let contributors: [Row]
+        /// 서버가 GitHub에서 마지막으로 성공적으로 긁어온 시각.
+        let syncedAt: Date?
+    }
+
+    /// 기여자 목록 조회. 인증 불필요(공개) — 서버가 TTL 만료 시 알아서 갱신한다.
+    func fetchContributors() async throws -> ContributorsResponse {
+        try await get(path: "contributors")
+    }
+
     // MARK: - 테넌트 (완전 격리형 멀티테넌시) — docs/plans/tenant.md
 
     /// 인증 폼 도메인 드롭다운 소스. `[로컬파트] @ [도메인 ▼]` 채우기용. 인증 불필요(공개 목록).
@@ -1147,13 +1195,13 @@ actor RankingAPI {
                               body: GuildLeaveRequest(payload: payload, signature: sig))
     }
 
-    /// 길드장 액션 (kick / 코드 재발급 / 해체 / 가구 재배치 / 초대 발송·취소 / 길드명 변경).
+    /// 길드장 액션 (kick / 코드 재발급 / 해체 / 가구 재배치 / 초대 발송·취소 / 길드명·로고 변경).
     /// kick 외에는 targetDeviceId 생략, furniture는 setFurniture에서만, targetNickname은 invite에서만,
-    /// inviteId는 cancelInvite에서만, newName은 rename에서만
+    /// inviteId는 cancelInvite에서만, newName은 rename에서만, logo는 setLogo에서만
     /// (나머지는 nil → canonical에서 키 제외, 서버 present-only와 일치).
     func manageGuild(deviceId: String, action: GuildManageAction, targetDeviceId: String? = nil,
                      furniture: String? = nil, targetNickname: String? = nil, inviteId: String? = nil,
-                     requestId: String? = nil, newName: String? = nil,
+                     requestId: String? = nil, newName: String? = nil, logo: String? = nil,
                      hmacKeyBase64: String) async throws -> GuildManageResponse {
         let payload = GuildManagePayload(action: action.rawValue, deviceId: deviceId,
                                          targetDeviceId: targetDeviceId ?? "",
@@ -1162,6 +1210,7 @@ actor RankingAPI {
                                          inviteId: inviteId,
                                          requestId: requestId,
                                          newName: newName,
+                                         logo: logo,
                                          ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         return try await post(path: "guild-manage",

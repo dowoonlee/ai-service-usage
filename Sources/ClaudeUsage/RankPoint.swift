@@ -246,6 +246,10 @@ final class RankPointLedger {
     /// (생성권·데코와 동일한 "실패 시 보존" 원칙 — 차감은 `GuildView.performRename`이 직접 수행).
     static let guildRenameCostRP: Int = 300
 
+    /// 길드 로고 변경 비용 (RP). rename과 같은 "실패 시 보존" 원칙으로 서버 성공 응답 후 차감.
+    /// rename보다 싼 이유는 이름과 달리 유일성 제약이 없고 되돌리기가 쉬워서 — 남용 억제만 하면 된다.
+    static let guildLogoCostRP: Int = 200
+
     /// RP 프리미엄 가챠권 1장 가격. 랭킹 월 1등 수입(2000 RP) 대비 ~0.75개월치 — "신중한 한 방".
     static let premiumTicketCostRP: Int = 1500
 

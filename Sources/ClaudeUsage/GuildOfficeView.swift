@@ -84,6 +84,9 @@ struct GuildOfficeView: View {
             ZStack(alignment: .topLeading) {
                 background(scale: scale)
                     .zIndex(-3000)
+                // 길드 로고 — 벽에 걸린 간판. 배경 바로 위라 가구·펫이 앞을 지나갈 수 있다.
+                guildLogoPlaque(scale: scale)
+                    .zIndex(-2900)
                 furnitureLayer(scale: scale)
                 decorLayer(scale: scale)
                 petLayer(scale: scale)
@@ -246,6 +249,21 @@ struct GuildOfficeView: View {
             .sorted().joined(separator: ",")
             + "|furniture:" + OfficeLayout.serializePlacements(placements)
             + "|decor:" + placedDecor.map { "\($0.slotId):\($0.itemKind)" }.sorted().joined(separator: ",")
+    }
+
+    // MARK: - 길드 로고 간판
+
+    /// 벽 좌상단에 걸린 길드 로고. 씬 좌표계 기준이라 창을 줄여도 벽 대비 비율이 유지된다.
+    private func guildLogoPlaque(scale: CGFloat) -> some View {
+        let w = scene.width * 0.2 * scale
+        return GuildLogoBanner(logo: info.guild.logo, guildID: info.guild.id, width: w)
+            .overlay(
+                RoundedRectangle(cornerRadius: AppRadius.sm)
+                    .strokeBorder(Color.black.opacity(0.45), lineWidth: max(1, 1.5 * scale))
+            )
+            .shadow(color: .black.opacity(0.35), radius: 2 * scale, y: 1.5 * scale)
+            .offset(x: scene.width * 0.045 * scale, y: scene.height * 0.06 * scale)
+            .help("길드 로고")
     }
 
     // MARK: - 배경 (floorTheme + wall 틴트 — P2b 인테리어 테마)
@@ -1134,7 +1152,8 @@ enum GuildOfficeDemo {
             let guild = RankingAPI.GuildInfo(
                 id: "demo", name: "데드락클럽", inviteCode: "AB3F9K2M", isLeader: true,
                 floorTheme: isDecorDemo ? 4 : 0, wallTheme: isDecorDemo ? 1 : 0,
-                officeFurniture: furnitureLayout, createdAt: Date(),
+                officeFurniture: furnitureLayout, logo: GuildLogo.encode(sample: 2),
+                createdAt: Date(),
                 score: 8420, rank: 3, memberCount: members.count)
             return RankingAPI.GuildInfoResponse(guild: guild, members: members,
                                                 furniture: decorItems, sentInvites: nil,

@@ -17,6 +17,7 @@ import {
   CREATE_IP_WINDOW_SEC,
   generateInviteCode,
   isValidGuildName,
+  randomSampleLogo,
   checkJoinCooldown,
 } from "../_shared/guild_policy.ts";
 
@@ -119,6 +120,7 @@ Deno.serve(async (req: Request) => {
         name_normalized: normalized,
         invite_code: inviteCode,
         leader_device_id: deviceId,
+        logo: randomSampleLogo(),   // 창설 시 샘플 10종 중 무작위 배정 (길드장이 변경 가능)
         tenant_id: user.tenant_id,   // 창설자 테넌트 스탬프 — 길드는 이 테넌트 안에서만 경쟁·상호작용
       })
       .select("id")

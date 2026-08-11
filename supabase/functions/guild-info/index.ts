@@ -76,7 +76,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: guild } = await db
     .from("guilds")
-    .select("id, name, invite_code, leader_device_id, floor_theme, wall_theme, office_furniture, created_at")
+    .select("id, name, invite_code, leader_device_id, floor_theme, wall_theme, office_furniture, logo, created_at")
     .eq("id", membership.guild_id)
     .maybeSingle();
   if (!guild) return errorResponse(404, "guild_not_found");
@@ -220,7 +220,7 @@ Deno.serve(async (req: Request) => {
       floorTheme: guild.floor_theme,
       wallTheme: guild.wall_theme,
       officeFurniture: guild.office_furniture,   // 가구 자유 배치 직렬화 — 클라 렌더 입력
-
+      logo: guild.logo ?? null,                  // "s:<n>" 샘플 또는 "p:<base64>" 픽셀 PNG
       createdAt: guild.created_at,
       score: scoreRow ? Number(scoreRow.score) : 0,
       rank: scoreRow ? scoreRow.rank : null,
