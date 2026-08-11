@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 ///
 /// 결과는 `GuildLogo` 저장 문자열("s:N" / "p:<base64>")로 `onCommit`에 넘긴다.
 /// 서버 호출·RP 차감은 호출측(`GuildView`)이 맡는다 — 이 뷰는 순수하게 "무엇을 적용할지"만 정한다.
+@MainActor
 struct GuildLogoEditorView: View {
     let currentLogo: String?
     let guildID: String
@@ -243,7 +244,6 @@ struct GuildLogoEditorView: View {
 
     // MARK: - 동작
 
-    @MainActor
     private func pickFile() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image]
@@ -324,6 +324,8 @@ struct GuildLogoEditorView: View {
 }
 
 /// 길드 로고 배너 — 표시 전용 공용 뷰. 리더보드 행/오피스 상단/길드 목록이 함께 쓴다.
+/// `GuildLogo.image(for:)`가 MainActor 격리 캐시를 읽으므로 뷰도 같은 격리에 둔다.
+@MainActor
 struct GuildLogoBanner: View {
     let logo: String?
     let guildID: String
