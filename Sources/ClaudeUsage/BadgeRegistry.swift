@@ -438,16 +438,75 @@ enum BadgeRegistry {
     /// 그 region에서 지금 도전 가능한 tier — metric이 임계를 넘었지만 아직 배틀로 못 깬 최저 tier.
     /// nil = 도전 불가(현재 tier metric 미충족, 또는 available 뱃지 전부 격파).
     /// tier는 localhost→production 순으로 순차 개방된다(낮은 tier를 먼저 격파해야 다음이 열림).
-    static func challengeableTier(_ region: BadgeRegion, _ s: Settings) -> BadgeTier? {
+    /// 도전 개방 기준 — 지역 카테고리 **합산 진행률**이 `카테고리 수 × 이 비율` 이상이면 열린다.
+    ///
+    /// 예전엔 모든 카테고리가 각자 임계를 넘어야 했다(allSatisfy). 그런데 `vibe` 지역이
+    /// [claude, cursor, codex]라서 **셋 다 쓰지 않으면 영영 열리지 않았다** — 실제로 세 도구를
+    /// 모두 쓰는 사용자는 거의 없다(서버 codex 샘플 22명 중 3건). 한 도구만 깊게 파는 사용자도
+    /// 자기 방식대로 관장까지 갈 수 있어야 한다는 판단으로 합산 방식으로 바꿨다.
+    static let challengeProgressRatio = 0.6
+
+    /// 카테고리 하나가 기여할 수 있는 진행률 상한(200%).
+    ///
+    /// 1.0으로 자르면 3개짜리 지역에서 한 도구만 쓰는 사람은 최대 33%라 기준(60%)을 영영 못 넘는다.
+    /// 초과분을 인정해야 "한 도구를 깊게" 경로가 성립한다. 무제한이 아니라 2.0인 이유는,
+    /// 그 이상 열어두면 한 지표만으로 다른 모든 지표를 무의미하게 만들기 때문이다.
+    static let challengeCategoryCap = 2.0
+
+    /// 관장 도전까지 남은 요구치. `isOpen`이면 지금 도전 가능.
+    struct ChallengeRequirement {
+        let tier: BadgeTier
+        /// 합산 진행률(카테고리별 상한 적용 후 합) / 카테고리 수 — 0.0~`challengeCategoryCap`.
+        let progress: Double
+        /// 개방에 필요한 값 (= challengeProgressRatio).
+        let required: Double
+        /// 아직 임계를 못 넘은 카테고리 — 진행률이 낮은(=가장 모자란) 순.
+        /// 개방 여부와 무관하게 채워진다(합산으로 열려도 개별 미달은 있을 수 있다).
+        let unmet: [(category: BadgeCategory, current: Int, threshold: Int)]
+
+        var isOpen: Bool { progress >= required }
+    }
+
+    /// 다음으로 도전할 tier와 그 요구치. 전 tier를 이미 정복했으면 nil.
+    static func nextChallenge(_ region: BadgeRegion, _ s: Settings) -> ChallengeRequirement? {
         let cats = region.categories.filter { $0.isAvailable(s) }
         guard !cats.isEmpty else { return nil }
         for tier in BadgeTier.allCases {
             let allCleared = cats.allSatisfy { s.clearedBadges.contains(BadgeID(category: $0, tier: tier).key) }
             if allCleared { continue }
-            let allMet = cats.allSatisfy { $0.currentValue(s) >= ($0.thresholds[tier] ?? Int.max) }
-            return allMet ? tier : nil
+
+            var sum = 0.0
+            var unmet: [(category: BadgeCategory, current: Int, threshold: Int)] = []
+            for cat in cats {
+                let threshold = cat.thresholds[tier] ?? Int.max
+                let current = cat.currentValue(s)
+                // 임계가 0이면(localhost 등) 이미 채운 것으로 본다 — 0으로 나누지 않는다.
+                let ratio = threshold > 0
+                    ? min(challengeCategoryCap, Double(current) / Double(threshold))
+                    : 1.0
+                sum += ratio
+                if current < threshold {
+                    unmet.append((category: cat, current: current, threshold: threshold))
+                }
+            }
+            unmet.sort { lhs, rhs in
+                let lp = lhs.threshold > 0 ? Double(lhs.current) / Double(lhs.threshold) : 1
+                let rp = rhs.threshold > 0 ? Double(rhs.current) / Double(rhs.threshold) : 1
+                return lp < rp
+            }
+            return ChallengeRequirement(tier: tier,
+                                        progress: sum / Double(cats.count),
+                                        required: challengeProgressRatio,
+                                        unmet: unmet)
         }
         return nil
+    }
+
+    /// 지금 도전 가능한 tier. `nextChallenge`와 단일 소스 — 두 판정이 갈리면
+    /// "버튼은 있는데 서버가 거부"·"조건은 다 찼는데 버튼이 없음" 같은 어긋남이 생긴다.
+    static func challengeableTier(_ region: BadgeRegion, _ s: Settings) -> BadgeTier? {
+        guard let req = nextChallenge(region, s), req.isOpen else { return nil }
+        return req.tier
     }
 
     /// 관장 배틀 승리 — region의 해당 tier 뱃지(모든 available category)를 클리어 + 코인 + 파생 재평가.

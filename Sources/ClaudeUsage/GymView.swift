@@ -110,7 +110,8 @@ struct GymView: View {
         .padding(.vertical, 4)
     }
 
-    /// 관장 도전 게이트 바 — metric이 다음 tier 임계를 넘으면 "도전" 버튼, 아니면 안내 문구.
+    /// 관장 도전 게이트 바 — 자격이 열렸으면 "도전" 버튼, 아니면 **무엇이 얼마나 모자란지** 보여준다.
+    /// 예전엔 "다음 tier 기준을 채우면 열립니다"만 떠서, 지역의 어떤 지표가 병목인지 알 수 없었다.
     @ViewBuilder
     private func challengeBar(_ tier: BadgeTier?) -> some View {
         if let tier {
@@ -136,6 +137,8 @@ struct GymView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 4)
+        } else if let req = BadgeRegistry.nextChallenge(selectedRegion, settings), !req.unmet.isEmpty {
+            requirementList(req)
         } else {
             Text("다음 tier 기준을 채우면 관장 도전이 열립니다")
                 .font(.system(size: 9))
@@ -143,6 +146,51 @@ struct GymView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
         }
+    }
+
+    /// 도전까지 남은 지표 — 가장 모자란 것부터 최대 3개. 전부 나열하면 카드가 길어진다.
+    /// 게이트는 합산이라 여기 있는 걸 다 채울 필요는 없고, 상단 퍼센트만 넘기면 열린다.
+    private func requirementList(_ req: BadgeRegistry.ChallengeRequirement) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: "lock.fill").font(.system(size: 8))
+                Text("\(req.tier.displayName) 관장 도전까지")
+                    .font(.system(size: 9, weight: .semibold))
+                Spacer()
+                // 합산 진행률 — 전부 채울 필요는 없고 이 수치만 넘기면 열린다.
+                Text("\(Int(req.progress * 100))% / \(Int(req.required * 100))%")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Self.strokeColor(for: req.tier))
+            }
+            .foregroundStyle(.secondary)
+            Text("지표 합산 기준 — 하나를 깊게 파도 열립니다")
+                .font(.system(size: 8))
+                .foregroundStyle(.secondary)
+            ForEach(req.unmet.prefix(3), id: \.category) { item in
+                let pct = item.threshold > 0
+                    ? min(1.0, Double(item.current) / Double(item.threshold)) : 0
+                HStack(spacing: 5) {
+                    Text(item.category.displayName)
+                        .font(.system(size: 9))
+                        .frame(width: 74, alignment: .leading)
+                        .lineLimit(1)
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.secondary.opacity(0.18))
+                            Capsule().fill(Self.strokeColor(for: req.tier).opacity(0.85))
+                                .frame(width: max(2, geo.size.width * pct))
+                        }
+                    }
+                    .frame(height: 4)
+                    Text("\(item.current)/\(item.threshold)")
+                        .font(.system(size: 8, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 58, alignment: .trailing)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
     }
 
     // MARK: - Header
