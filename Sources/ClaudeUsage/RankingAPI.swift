@@ -461,6 +461,7 @@ actor RankingAPI {
         case cancelInvite = "cancel_invite"
         case rename
         case setLogo = "set_logo"
+        case setLogoPos = "set_logo_pos"
         case approveRequest = "approve_request"
         case rejectRequest = "reject_request"
     }
@@ -527,6 +528,9 @@ actor RankingAPI {
         let newName: String?
         /// set_logo 전용 — `GuildLogo` 저장 형식("s:<0..9>" 또는 "p:<base64 PNG>").
         let logo: String?
+        /// set_logo_pos 전용 — 사무실 벽에서의 로고 중심(씬 논리 좌표).
+        let logoX: Int?
+        let logoY: Int?
         let ts: Int64
     }
     struct GuildManageRequest: Encodable {
@@ -543,6 +547,9 @@ actor RankingAPI {
         let name: String?
         /// set_logo 응답에만 — 반영된 로고 저장 문자열.
         let logo: String?
+        /// set_logo_pos 응답에만 — 반영된 로고 좌표.
+        let logoX: Int?
+        let logoY: Int?
     }
 
     /// 사무실 액션 payload — 액션 무관 고정 형태 {action, deviceId, item, slot, ts}.
@@ -602,6 +609,9 @@ actor RankingAPI {
         let officeFurniture: String?
         /// 길드 로고 (`GuildLogo` 저장 형식). 구버전 서버는 nil → id 해시로 샘플 폴백.
         let logo: String?
+        /// 사무실 벽에서의 로고 중심(씬 논리 좌표). nil이면 클라 기본 위치.
+        let logoX: Int?
+        let logoY: Int?
         let createdAt: Date
         let score: Int
         let rank: Int?
@@ -1202,6 +1212,7 @@ actor RankingAPI {
     func manageGuild(deviceId: String, action: GuildManageAction, targetDeviceId: String? = nil,
                      furniture: String? = nil, targetNickname: String? = nil, inviteId: String? = nil,
                      requestId: String? = nil, newName: String? = nil, logo: String? = nil,
+                     logoX: Int? = nil, logoY: Int? = nil,
                      hmacKeyBase64: String) async throws -> GuildManageResponse {
         let payload = GuildManagePayload(action: action.rawValue, deviceId: deviceId,
                                          targetDeviceId: targetDeviceId ?? "",
@@ -1211,6 +1222,7 @@ actor RankingAPI {
                                          requestId: requestId,
                                          newName: newName,
                                          logo: logo,
+                                         logoX: logoX, logoY: logoY,
                                          ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         return try await post(path: "guild-manage",

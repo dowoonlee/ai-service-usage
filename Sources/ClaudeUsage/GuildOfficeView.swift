@@ -22,6 +22,8 @@ struct GuildOfficeView: View {
     @Binding var previewWallTheme: Int?
     /// 가구 드래그 종료 시 — 직렬화된 전체 배치("setId:x:lane;…"). 호출 측이 서버 반영.
     let onSetFurniture: (String) -> Void
+    /// 로고 드래그 종료 시 — 씬 논리 좌표의 로고 중심. 호출 측이 서버 반영(무료 조작).
+    let onSetLogoPos: (Int, Int) -> Void
     /// 가구 구매 확정 (카탈로그 아이템, 새 인스턴스가 포함된 직렬화) — 호출 측이 코인 검증·서버 반영.
     let onBuyFurniture: (OfficeLayout.FurnitureKind, String) -> Void
     /// 데코 구매 (slot, item) — 호출 측이 코인 검증·서버 반영.
@@ -36,6 +38,9 @@ struct GuildOfficeView: View {
     @State private var draftPlacements: [OfficeLayout.FurniturePlacement]?
     /// 현재 드래그 중인 가구 인스턴스 uid (하이라이트용).
     @State private var draggingUid: Int?
+    /// 로고 드래그 작업 사본 — nil이면 서버 값. 드롭 후 서버 값이 따라오면 해제된다.
+    @State private var draftLogoPos: CGPoint?
+    @State private var draggingLogo = false
     /// 데코 구매 확인 전 미리보기 — 씬에는 보이지만 아직 결제 안 됨 (구매/취소로 해소).
     @State private var previewDecor: (slot: Int, kind: String)?
     /// 가구 구매 popover 열림 — 컨트롤 행의 "가구 구매" 버튼이 재배치 진입과 함께 열 수
@@ -84,9 +89,10 @@ struct GuildOfficeView: View {
             ZStack(alignment: .topLeading) {
                 background(scale: scale)
                     .zIndex(-3000)
-                // 길드 로고 — 벽에 걸린 간판. 배경 바로 위라 가구·펫이 앞을 지나갈 수 있다.
+                // 길드 로고 — 벽에 걸린 간판. 평소엔 배경 바로 위(가구·펫이 앞을 지나감)지만,
+                // 재배치 중에는 최상단으로 올려 드래그가 가구/펫에 가로막히지 않게 한다.
                 guildLogoPlaque(scale: scale)
-                    .zIndex(-2900)
+                    .zIndex(rearrangeMode ? 3600 : -2900)
                 furnitureLayer(scale: scale)
                 decorLayer(scale: scale)
                 petLayer(scale: scale)
@@ -253,17 +259,63 @@ struct GuildOfficeView: View {
 
     // MARK: - 길드 로고 간판
 
-    /// 벽 좌상단에 걸린 길드 로고. 씬 좌표계 기준이라 창을 줄여도 벽 대비 비율이 유지된다.
+    /// 벽에 걸린 길드 로고. 재배치 모드(길드장)에서는 **가구와 똑같이 드래그로 이동**한다.
+    /// 고정 위치였을 땐 창문·액자와 겹쳐 배치가 어색했다.
+    ///
+    /// 좌표는 씬 논리 좌표(280×150)의 **중심** 기준이고 벽 밴드 안으로 클램프한다.
+    /// 가구(x=중심 / y=baseline)와 규칙이 다른 이유는 벽에 걸린 판이라 중심이 다루기 쉬워서다.
     private func guildLogoPlaque(scale: CGFloat) -> some View {
-        let w = scene.width * 0.2 * scale
-        return GuildLogoBanner(logo: info.guild.logo, guildID: info.guild.id, width: w)
+        let size = Self.logoSceneSize
+        let pos = draftLogoPos ?? Self.logoPosition(info.guild)
+        let dragging = draggingLogo
+        return GuildLogoBanner(logo: info.guild.logo, guildID: info.guild.id,
+                               width: size.width * scale)
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.sm)
                     .strokeBorder(Color.black.opacity(0.45), lineWidth: max(1, 1.5 * scale))
             )
+            .overlay {
+                if rearrangeMode {
+                    RoundedRectangle(cornerRadius: 3)
+                        .strokeBorder(style: StrokeStyle(lineWidth: dragging ? 2 : 1, dash: [3]))
+                        .foregroundStyle(dragging ? Color.orange : Color.accentColor)
+                }
+            }
             .shadow(color: .black.opacity(0.35), radius: 2 * scale, y: 1.5 * scale)
-            .offset(x: scene.width * 0.045 * scale, y: scene.height * 0.06 * scale)
-            .help("길드 로고")
+            .modifier(LogoDragModifier(enabled: rearrangeMode, scale: scale,
+                                       onChanged: { p in
+                                           draggingLogo = true
+                                           draftLogoPos = Self.clampLogo(p)
+                                       },
+                                       onEnded: {
+                                           draggingLogo = false
+                                           if let p = draftLogoPos {
+                                               onSetLogoPos(Int(p.x.rounded()), Int(p.y.rounded()))
+                                           }
+                                       }))
+            .position(x: pos.x * scale, y: pos.y * scale)
+            .help(rearrangeMode ? "드래그해서 로고 위치를 옮기세요" : "길드 로고")
+    }
+
+    /// 로고의 씬 논리 크기. 벽 밴드(높이 60)에 여유를 두고 들어가는 값.
+    static let logoSceneSize = CGSize(width: 52, height: 52 * CGFloat(GuildLogo.pixelHeight)
+                                                        / CGFloat(GuildLogo.pixelWidth))
+
+    /// 서버 좌표 → 씬 좌표. 값이 없으면 벽 좌측 기본 자리.
+    static func logoPosition(_ guild: RankingAPI.GuildInfo) -> CGPoint {
+        if let x = guild.logoX, let y = guild.logoY {
+            return clampLogo(CGPoint(x: CGFloat(x), y: CGFloat(y)))
+        }
+        return clampLogo(CGPoint(x: 46, y: 26))
+    }
+
+    /// 벽 밴드 안으로 가둔다 — 로고가 화면 밖이나 바닥으로 내려가지 않게.
+    static func clampLogo(_ p: CGPoint) -> CGPoint {
+        let half = CGSize(width: logoSceneSize.width / 2, height: logoSceneSize.height / 2)
+        let minX = half.width + 2, maxX = OfficeLayout.sceneSize.width - half.width - 2
+        let minY = half.height + 2, maxY = OfficeLayout.wallBottom - half.height
+        return CGPoint(x: min(max(p.x, minX), max(minX, maxX)),
+                       y: min(max(p.y, minY), max(minY, maxY)))
     }
 
     // MARK: - 배경 (floorTheme + wall 틴트 — P2b 인테리어 테마)
@@ -1060,6 +1112,30 @@ private struct FrameTextEditor: View {
     }
 }
 
+/// 재배치 모드에서만 드래그를 붙이는 모디파이어.
+/// 조건부로 `.gesture`를 다는 이유: 평소에도 제스처가 붙어 있으면 로고가 펫 클릭·스크롤을 가로챈다.
+private struct LogoDragModifier: ViewModifier {
+    let enabled: Bool
+    let scale: CGFloat
+    let onChanged: (CGPoint) -> Void
+    let onEnded: () -> Void
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content.gesture(
+                DragGesture(coordinateSpace: .named("officeScene"))
+                    .onChanged { v in
+                        onChanged(CGPoint(x: v.location.x / scale, y: v.location.y / scale))
+                    }
+                    .onEnded { _ in onEnded() }
+            )
+        } else {
+            content
+        }
+    }
+}
+
 // MARK: - DEBUG 데모 (`AIUSAGE_OFFICE_DEMO=1 swift run`)
 
 #if DEBUG
@@ -1144,6 +1220,9 @@ enum GuildOfficeDemo {
             ]
         }()
 
+        /// 데모에서 로고를 실제로 옮겨볼 수 있게 상태로 둔다 (서버 없이 좌표만 갱신).
+        @State private var logoPos: (Int, Int) = (46, 26)
+
         private var isDecorDemo: Bool {
             ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] == "decor"
         }
@@ -1153,6 +1232,7 @@ enum GuildOfficeDemo {
                 id: "demo", name: "데드락클럽", inviteCode: "AB3F9K2M", isLeader: true,
                 floorTheme: isDecorDemo ? 4 : 0, wallTheme: isDecorDemo ? 1 : 0,
                 officeFurniture: furnitureLayout, logo: GuildLogo.encode(sample: 2),
+                logoX: logoPos.0, logoY: logoPos.1,
                 createdAt: Date(),
                 score: 8420, rank: 3, memberCount: members.count)
             return RankingAPI.GuildInfoResponse(guild: guild, members: members,
@@ -1170,6 +1250,11 @@ enum GuildOfficeDemo {
                     onSetFurniture: { serialized in
                         furnitureLayout = serialized
                         print("OFFICE_DEMO_FURNITURE=\(serialized)")
+                        fflush(stdout)
+                    },
+                    onSetLogoPos: { x, y in
+                        logoPos = (x, y)
+                        print("OFFICE_DEMO_LOGO_POS=\(x),\(y)")
                         fflush(stdout)
                     },
                     onBuyFurniture: { kind, serialized in
