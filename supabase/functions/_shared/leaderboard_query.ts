@@ -229,6 +229,19 @@ export async function fetchLeaderboard(
   const nextResetSeoul = new Date(Date.UTC(seoulNow.getUTCFullYear(), seoulNow.getUTCMonth() + 1, 1));
   const nextResetUtc = new Date(nextResetSeoul.getTime() - seoulOffsetMs);
 
+  // 재인증 요구 — 랭킹 화면을 여는 즉시 배너가 뜨도록 leaderboard에도 싣는다.
+  // sync(최대 10분 주기)에만 실었더니 창을 열어도 한동안 안내가 안 나왔고, 유예 중에는
+  // 소속이 게이트 테넌트라 헤더의 '사내 인증' 버튼도 숨겨져 진입로가 아예 없었다.
+  let reverifyDueAt: string | null = null;
+  if (deviceId) {
+    const { data: caller } = await db
+      .from("users")
+      .select("tenant_reverify_due_at")
+      .eq("device_id", deviceId.toLowerCase())
+      .maybeSingle();
+    reverifyDueAt = (caller?.tenant_reverify_due_at as string | null) ?? null;
+  }
+
   return {
     entries,
     myRank,
@@ -242,5 +255,6 @@ export async function fetchLeaderboard(
     pendingRpReward,
     pendingGrant,   // 통합 ops 보상(RP·코인 공용) — 구클라는 미인식 필드라 무시
     tenant,   // 클라 배지용 — 호출자 현재 테넌트(익명/미등록은 "public")
+    reverifyDueAt,   // 소속 재인증 기한. null이면 요구 없음
   };
 }

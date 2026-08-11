@@ -105,7 +105,19 @@ struct RankingView: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             // 테넌트 배지 / 사내 인증 진입 — gated 소속이면 배지, 기본(public) 등록자면 인증 버튼.
-            if let tenant = settings.currentTenant, tenant != "public" {
+            // 재인증 대상은 소속이 게이트 테넌트라 아래 배지 분기에 걸려 진입로가 사라진다.
+            // 그래서 배지 대신 '재인증' 버튼을 먼저 태운다(배너와 함께 두 진입로 확보).
+            if settings.tenantReverifyDueAt != nil, settings.rankingRegistered {
+                Button { showingVerify = true } label: {
+                    Label("재인증", systemImage: "exclamationmark.shield")
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(Color.orange))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .help("소속 재인증이 필요합니다. 회사 이메일로 다시 인증해 주세요.")
+            } else if let tenant = settings.currentTenant, tenant != "public" {
                 Text(tenant.uppercased())
                     .font(.system(size: 9, weight: .bold))
                     .padding(.horizontal, 5).padding(.vertical, 2)
@@ -432,6 +444,7 @@ struct RankingView: View {
         periodResetAt = resp.periodResetAt
         previousMonth = resp.previousMonth
         settings.currentTenant = resp.tenant
+        settings.tenantReverifyDueAt = resp.reverifyDueAt
         lastRefresh = Date()
         tenantAnnouncements = payload.tenantAnnouncements
     }
@@ -455,6 +468,7 @@ struct RankingView: View {
                 // 현재 소속 캐시 — 헤더 배지(단일 소스)이자 자동 팝업 판정용. 랭킹 탭만 열고 폴링
                 // 전이어도 최신 소속을 반영한다.
                 settings.currentTenant = resp.tenant
+                settings.tenantReverifyDueAt = resp.reverifyDueAt
                 lastRefresh = Date()
                 // 테넌트 전용 공지 — 실패해도 보드를 가리지 않게 조용히 무시.
                 if let ann = try? await RankingAPI.shared.fetchTenantAnnouncements(deviceId: deviceId) {

@@ -70,18 +70,29 @@ struct TenantVerifyView: View {
     }
 
     /// 인증 유도 보상 CTA — 지금 인증하면 coin·RP를 준다는 배너(v0.16.2 캠페인).
+    /// 최초 편입이면 보상 안내, 재인증이면 사유 안내. 이미 보상을 받은 사람에게 "+3,000 coin"을
+    /// 다시 띄우면 지급되지 않을 보상을 약속하는 셈이라 문구를 갈라 놓는다.
+    @ViewBuilder
     private var rewardBanner: some View {
+        let isReverify = Settings.shared.tenantReverifyDueAt != nil
         HStack(spacing: 6) {
-            Text("🎁").font(.system(size: 14))
-            (Text("지금 인증하면 ")
-                + Text("+3,000 coin · +3,000 RP").fontWeight(.bold).foregroundColor(.teal))
-                .font(.system(size: 11))
-                .fixedSize(horizontal: false, vertical: true)
+            Text(isReverify ? "🔒" : "🎁").font(.system(size: 14))
+            Group {
+                if isReverify {
+                    Text("서버 마이그레이션으로 소속 확인이 필요합니다. 인증하면 사내 보드가 그대로 유지됩니다.")
+                } else {
+                    Text("지금 인증하면 ")
+                        + Text("+3,000 coin · +3,000 RP").fontWeight(.bold).foregroundColor(.teal)
+                }
+            }
+            .font(.system(size: 11))
+            .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 10).padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.teal.opacity(0.12)))
+        .background(RoundedRectangle(cornerRadius: 8)
+            .fill((isReverify ? Color.orange : Color.teal).opacity(0.12)))
     }
 
     /// 시트/윈도우 어느 쪽에서든 자신을 닫는다.
@@ -218,6 +229,8 @@ struct TenantVerifyView: View {
                 // 새 소속을 캐시에 즉시 반영 — 자동 팝업/시트 어느 경로든 랭킹 헤더 배지와 팝업
                 // 재표시 판정이 곧바로 정확해진다(폴링 왕복을 기다리는 stale UI 방지).
                 s.currentTenant = resp.tenant
+                // 재인증 요구 해제 — 다음 폴링까지 배너/헤더 버튼이 남지 않도록 즉시 지운다.
+                s.tenantReverifyDueAt = nil
                 // 인증 성공 보상 — coin은 클라 로컬 원장에 즉시 지급(RP 3,000은 서버 rp_rewards가
                 // 다음 폴링 때 전달). one-way 인증이라 성공은 1회뿐이지만 방어적으로 플래그 dedup.
                 if !s.hasReceivedTenantVerifyBonus {
