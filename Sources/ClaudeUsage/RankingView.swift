@@ -51,6 +51,7 @@ struct RankingView: View {
             } else if !settings.rankingRegistered {
                 placeholderView("설정 → 랭킹에서 참여를 시작하세요.")
             } else {
+                if settings.tenantReverifyDueAt != nil { reverifyBanner }
                 if !tenantAnnouncements.isEmpty { tenantAnnouncementBanner }
                 scopePicker
                 Divider()
@@ -365,6 +366,45 @@ struct RankingView: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.teal.opacity(0.08)))
         .padding(.horizontal, 12)
         .padding(.top, 8)
+    }
+
+    /// 소속 재인증 요구 배너. 기한 전(유예)엔 남은 기간 안내, 지나면 이미 강등된 상태라 톤을 바꾼다.
+    /// 진입점은 기존 사내 인증 시트를 그대로 재사용 — 서버가 재인증 대상을 통과시켜 준다.
+    @ViewBuilder
+    private var reverifyBanner: some View {
+        let due = settings.tenantReverifyDueAt ?? Date()
+        let expired = due <= Date()
+        HStack(spacing: 8) {
+            Image(systemName: expired ? "exclamationmark.triangle.fill" : "clock.badge.exclamationmark")
+                .font(.system(size: 11))
+                .foregroundStyle(expired ? .red : .orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(expired ? "소속 인증이 만료되었습니다" : "소속 재인증이 필요합니다")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(expired
+                     ? "사내 랭킹·게시판이 잠겼습니다. 재인증하면 바로 복구됩니다."
+                     : "\(reverifyRemainingLabel(until: due)) 안에 인증하지 않으면 사내 랭킹·게시판이 잠깁니다.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button("재인증") { showingVerify = true }
+                .controlSize(.small)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8)
+            .fill((expired ? Color.red : Color.orange).opacity(0.10)))
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+
+    /// 남은 유예 기간 라벨 — 하루 미만이면 시간 단위로 떨어뜨려 임박함을 드러낸다.
+    private func reverifyRemainingLabel(until: Date) -> String {
+        let sec = max(0, until.timeIntervalSinceNow)
+        let days = Int(sec / 86_400)
+        if days >= 1 { return "\(days)일" }
+        return "\(max(1, Int(ceil(sec / 3_600))))시간"
     }
 
     private func placeholderView(_ msg: String) -> some View {

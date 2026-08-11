@@ -9,7 +9,11 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
-import { COMMENT_MAX_LEN, COMMENT_COOLDOWN_SEC } from "../_shared/board_policy.ts";
+import {
+  COMMENT_MAX_LEN,
+  COMMENT_COOLDOWN_SEC,
+  boardInteractionBlocked,
+} from "../_shared/board_policy.ts";
 
 interface CommentPayload {
   deviceId: string;
@@ -59,11 +63,13 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, nickname, status, tenant_id")
+    .select("device_id, hmac_key_b64, nickname, status, tenant_id, github_login")
     .eq("device_id", p.deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
   if (user.status === "banned") return errorResponse(403, "banned");
+  // GitHub 미연동 = 읽기 전용(board_policy.ts SSOT).
+  if (boardInteractionBlocked(user)) return errorResponse(403, "github_required");
 
   const ok = await verifyHmac(
     { content: p.content, deviceId: p.deviceId, postId: p.postId, ts: p.ts },

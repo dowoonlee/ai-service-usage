@@ -13,3 +13,18 @@ export const DELETE_POST_WINDOW_SEC = 60;
 export const COMMENT_MAX_LEN = 200;
 export const COMMENT_COOLDOWN_SEC = 30;      // 글(600s)보다 짧게 — 대화 흐름 허용, 스팸만 차단
 export const DELETE_COMMENT_WINDOW_SEC = 60;
+
+// 쓰기 게이트 — GitHub 미연동 계정은 읽기 전용. 익명 어뷰징 대응(작성자 추적 수단이
+// device_id뿐이라 실효 제재가 어려움) + 최소한의 신원 담보.
+//
+// 적용 범위: post / like / comment / comment-like (쓰기 4종).
+// 비적용: 조회, delete-post / delete-comment — 본인이 이미 만든 콘텐츠 정리는 게이트와
+// 무관하게 허용한다(게이트 도입 후엔 새 글 자체가 안 생기므로 사실상 사문화된 경로).
+export const BOARD_REQUIRES_GITHUB = true;
+
+/** 게시판 쓰기가 막혀야 하는 계정인지. 호출부는 403 `github_required`로 매핑. */
+export function boardInteractionBlocked(
+  user: { github_login?: string | null },
+): boolean {
+  return BOARD_REQUIRES_GITHUB && !user.github_login;
+}

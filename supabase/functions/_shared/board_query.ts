@@ -10,6 +10,8 @@ import {
   DELETE_POST_WINDOW_SEC,
   COMMENT_MAX_LEN,
   DELETE_COMMENT_WINDOW_SEC,
+  BOARD_REQUIRES_GITHUB,
+  boardInteractionBlocked,
 } from "./board_policy.ts";
 
 const POST_LIMIT = 100;
@@ -198,6 +200,20 @@ export async function fetchBoard(
     };
   });
 
+  // 3.5) 쓰기 권한 — GitHub 미연동 계정은 읽기 전용(board_policy.ts SSOT).
+  // 서버가 권위이고 여기 값은 클라 UI 비활성화/안내용일 뿐 — 실제 차단은 post/like/
+  // comment/comment-like 각 함수의 403 `github_required`가 한다.
+  // 익명(미등록) 조회는 애초에 쓰기 경로가 없으므로 false.
+  let canInteract = false;
+  if (deviceId) {
+    const { data: caller } = await db
+      .from("users")
+      .select("github_login")
+      .eq("device_id", deviceId)
+      .maybeSingle();
+    canInteract = caller ? !boardInteractionBlocked(caller) : false;
+  }
+
   // 4) cooldown — 본인 마지막 글 시각 기준
   let cooldownRemainingSec = 0;
   if (deviceId) {
@@ -229,5 +245,7 @@ export async function fetchBoard(
     deletePostWindowSec: DELETE_POST_WINDOW_SEC,
     commentMaxLen: COMMENT_MAX_LEN,
     deleteCommentWindowSec: DELETE_COMMENT_WINDOW_SEC,
+    canInteract,
+    requiresGitHub: BOARD_REQUIRES_GITHUB,
   };
 }

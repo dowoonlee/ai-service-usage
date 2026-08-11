@@ -936,6 +936,8 @@ final class ViewModel: ObservableObject {
                 boardSeenAt: s.boardLastSeenAt,
                 hmacKeyBase64: hmacKey)
             lastSyncAt = Date()
+            // 재인증 요구 상태 — 서버가 요구를 해제하면 필드가 사라지므로 nil도 그대로 반영한다.
+            s.tenantReverifyDueAt = resp.reverifyDueAt
 
             // 게시판 창이 열려 있으면 카운트는 .boardSeen이 0으로 유지한다 — 덮어쓰지 않는다.
             if !PollGate.boardViewIsOpen {

@@ -16,17 +16,36 @@ export function normDeviceId(deviceId: string): string {
   return deviceId.toLowerCase();
 }
 
+/** 기본(비게이트) 테넌트 slug. tenants.is_default=TRUE 인 행과 일치해야 한다. */
+export const DEFAULT_TENANT = "public";
+
 // device_id → 현재 테넌트 slug. 미등록이면 null (호출부가 404 등으로 처리).
+//
+// 재인증 기한(tenant_reverify_due_at)이 지난 계정은 users.tenant_id 값과 무관하게 기본
+// 테넌트로 강등해서 돌려준다. 게이트 콘텐츠 차단이 여기 한 곳에서 전 상호작용 함수(게시판·
+// 랭킹·길드·쪽지…)에 일괄 적용되도록 하기 위함 — 함수마다 만료 체크를 흩뿌리지 않는다.
+// tenant_id 자체는 건드리지 않으므로 재인증만 하면 길드·랭킹 귀속이 그대로 복구된다.
 export async function resolveTenant(
   db: SupabaseClient,
   deviceId: string,
 ): Promise<string | null> {
   const { data } = await db
     .from("users")
-    .select("tenant_id")
+    .select("tenant_id, tenant_reverify_due_at")
     .eq("device_id", normDeviceId(deviceId))
     .maybeSingle();
-  return (data?.tenant_id as string | undefined) ?? null;
+  if (!data) return null;
+  const tenant = (data.tenant_id as string | undefined) ?? null;
+  if (tenant && tenant !== DEFAULT_TENANT && isReverifyExpired(data.tenant_reverify_due_at)) {
+    return DEFAULT_TENANT;
+  }
+  return tenant;
+}
+
+/** 재인증 기한이 지났는지. NULL(요구 없음)이거나 아직 유예 중이면 false. */
+export function isReverifyExpired(dueAt: string | null | undefined): boolean {
+  if (!dueAt) return false;
+  return new Date(dueAt).getTime() <= Date.now();
 }
 
 // 여러 device의 tenant를 한 번에 조회 → device_id(소문자) → tenant_id 맵.

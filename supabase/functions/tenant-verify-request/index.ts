@@ -54,7 +54,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status, tenant_id")
+    .select("device_id, hmac_key_b64, status, tenant_id, tenant_reverify_due_at")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -68,9 +68,14 @@ Deno.serve(async (req: Request) => {
   if (!ok) return errorResponse(401, "bad_signature");
 
   // 기본 테넌트에서만 편입 가능(one-way) — 이미 gated면 재편입 거부.
+  // 예외: 재인증 대상(tenant_reverify_due_at NOT NULL)은 이미 gated 상태에서 다시 인증해야
+  // 하므로 통과시킨다. 단 아래에서 "같은 테넌트로만" 제한을 걸어 one-way 원칙은 유지한다.
   const { data: def } = await db.from("tenants").select("slug").eq("is_default", true).maybeSingle();
   const defaultSlug = def?.slug ?? "public";
-  if (user.tenant_id !== defaultSlug) return errorResponse(409, "already_gated");
+  const isReverify = user.tenant_reverify_due_at != null;
+  if (user.tenant_id !== defaultSlug && !isReverify) {
+    return errorResponse(409, "already_gated");
+  }
 
   // 도메인 → 게이트 테넌트 해석. tenant_email_domains 정확 일치(is_active)만 통과.
   const domain = emailDomain(p.email);
@@ -83,6 +88,12 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
   if (!domRow) return errorResponse(400, "domain_not_allowed");
   const tenantSlug = domRow.tenant_slug as string;
+
+  // 재인증은 "지금 소속된 그 테넌트"를 다시 증명하는 절차다. 다른 도메인으로 옮겨타는 경로가
+  // 되면 one-way 원칙이 무너지므로 소속이 다른 이메일은 거부한다.
+  if (isReverify && user.tenant_id !== tenantSlug) {
+    return errorResponse(409, "already_gated");
+  }
 
   // rate-limit — device 기준(이메일 미저장이라 per-email 불가). 최근 60초 1회 / 24h 5회.
   const since60 = new Date(Date.now() - REQ_COOLDOWN_SEC * 1000).toISOString();
@@ -104,11 +115,15 @@ Deno.serve(async (req: Request) => {
   const code = String(Math.floor(100000 + Math.random() * 900000));
   const codeHash = await sha256Hex(code);
   const expiresAt = new Date(Date.now() + OTP_TTL_SEC * 1000).toISOString();
+  // [D8 개정] 이메일을 OTP row에 잠시 얹는다 — confirm payload엔 주소가 없어서, 인증 성공
+  // 시점에 신원 로그를 남기려면 여기서 넘겨줄 수밖에 없다. confirm이 로그로 옮긴 뒤 NULL로
+  // 지우므로, 완료된 인증의 주소는 tenant_verification_log에만 남는다.
   const { data: otpRow, error: insErr } = await db.from("tenant_otp").insert({
     device_id: deviceId,
     tenant_slug: tenantSlug,
     code_hash: codeHash,
     expires_at: expiresAt,
+    email: p.email.trim(),
   }).select("id").single();
   if (insErr || !otpRow) {
     console.error("tenant_otp insert failed", insErr);

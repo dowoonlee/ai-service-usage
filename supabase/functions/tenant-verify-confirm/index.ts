@@ -58,7 +58,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, tenant_id, tenant_reverify_due_at")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -74,7 +74,7 @@ Deno.serve(async (req: Request) => {
   // 이 device의 최신 미소비 OTP.
   const { data: otp } = await db
     .from("tenant_otp")
-    .select("id, tenant_slug, code_hash, expires_at, attempts")
+    .select("id, tenant_slug, code_hash, expires_at, attempts, email")
     .eq("device_id", deviceId)
     .is("consumed_at", null)
     .order("created_at", { ascending: false })
@@ -91,18 +91,53 @@ Deno.serve(async (req: Request) => {
     return errorResponse(400, "bad_code");
   }
 
-  // 편입 — tenant_id 갱신 + 타 테넌트 길드 자동탈퇴 원자 처리.
-  const { data: switchResult, error: rpcErr } = await db.rpc("apply_tenant_switch", {
-    p_device: deviceId,
-    p_tenant: otp.tenant_slug,
-  });
-  if (rpcErr) {
-    console.error("apply_tenant_switch failed", rpcErr);
-    return errorResponse(500, "switch_failed");
+  // 재인증인지(이미 그 테넌트 소속 + 재인증 요구 플래그) 최초 편입인지 분기.
+  // 재인증은 소속이 이미 맞으므로 apply_tenant_switch를 부르면 안 된다 — 그 RPC는 게이트
+  // 상태에서 already_gated로 거부하도록 되어 있어 정상 재인증이 409로 튕긴다.
+  const isReverify = user.tenant_reverify_due_at != null && user.tenant_id === otp.tenant_slug;
+
+  if (isReverify) {
+    // 소속은 그대로 두고 재인증 요구만 해제. 유예 만료로 강등돼 있던 계정도 이 시점에 복귀한다.
+    const { error: clearErr } = await db
+      .from("users")
+      .update({ tenant_reverify_due_at: null })
+      .eq("device_id", deviceId);
+    if (clearErr) {
+      console.error("reverify clear failed", clearErr);
+      return errorResponse(500, "switch_failed");
+    }
+  } else {
+    // 편입 — tenant_id 갱신 + 타 테넌트 길드 자동탈퇴 원자 처리.
+    const { data: switchResult, error: rpcErr } = await db.rpc("apply_tenant_switch", {
+      p_device: deviceId,
+      p_tenant: otp.tenant_slug,
+    });
+    if (rpcErr) {
+      console.error("apply_tenant_switch failed", rpcErr);
+      return errorResponse(500, "switch_failed");
+    }
+    if (switchResult === "already_gated") return errorResponse(409, "already_gated");
+    if (switchResult === "not_registered") return errorResponse(404, "device_not_registered");
+    if (switchResult !== "ok") return errorResponse(500, "switch_failed");
   }
-  if (switchResult === "already_gated") return errorResponse(409, "already_gated");
-  if (switchResult === "not_registered") return errorResponse(404, "device_not_registered");
-  if (switchResult !== "ok") return errorResponse(500, "switch_failed");
+
+  // 신원 로그 — 인증 성공 건만 남긴다(실패 시도까지 쌓으면 무관한 사람의 주소를 보관하게 됨).
+  // 전환은 이미 끝났으므로 로그 실패로 인증 자체를 되돌리지는 않고, 대신 반드시 남아야 하는
+  // 기록이라 오류를 크게 찍어 운영자가 눈치채도록 한다.
+  if (otp.email) {
+    const { error: logErr } = await db.from("tenant_verification_log").insert({
+      device_id: deviceId,
+      tenant_slug: otp.tenant_slug,
+      email: otp.email,
+      is_reverify: isReverify,
+    });
+    if (logErr) console.error("tenant_verification_log insert FAILED", logErr);
+    // 로그로 옮겼으니 OTP의 임시 사본은 지운다 — 완료된 인증의 주소는 로그 한 곳에만 둔다.
+    await db.from("tenant_otp").update({ email: null }).eq("id", otp.id);
+  } else {
+    // 이 컬럼이 생기기 전에 발급된 OTP로 confirm한 경우. 인증은 정상 처리하되 로그는 비게 된다.
+    console.error("tenant verify without email on otp row", { otpId: otp.id });
+  }
 
   // OTP 소비 마킹 — 재사용 방지. best-effort(이미 전환 완료).
   await db.from("tenant_otp").update({ consumed_at: new Date().toISOString() }).eq("id", otp.id);

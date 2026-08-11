@@ -460,6 +460,11 @@ final class Settings: ObservableObject {
     @Published var currentTenant: String? {
         didSet { UserDefaults.standard.set(currentTenant, forKey: Keys.currentTenant) }
     }
+    /// 소속 재인증 기한(서버 sync가 내려줌). nil이면 재인증 요구 없음. 기한 전까지는 유예—
+    /// 기존 소속 권한이 유지되고, 지나면 서버가 기본 테넌트로 강등해 게이트 콘텐츠가 막힌다.
+    @Published var tenantReverifyDueAt: Date? {
+        didSet { UserDefaults.standard.set(tenantReverifyDueAt, forKey: Keys.tenantReverifyDueAt) }
+    }
     /// 사내 인증 유도 팝업을 마지막으로 띄운 시각. 하루 1회로 억제(24h 경과 시 재표시).
     @Published var lastTenantPromptAt: Date? {
         didSet { UserDefaults.standard.set(lastTenantPromptAt, forKey: Keys.lastTenantPromptAt) }
@@ -948,6 +953,7 @@ final class Settings: ObservableObject {
         self.hasViewedGuide        = (d.object(forKey: Keys.hasViewedGuide) as? Bool) ?? false
         self.hasReceivedCoffeeReward = (d.object(forKey: Keys.hasReceivedCoffeeReward) as? Bool) ?? false
         self.currentTenant = d.string(forKey: Keys.currentTenant)
+        self.tenantReverifyDueAt = d.object(forKey: Keys.tenantReverifyDueAt) as? Date
         self.lastTenantPromptAt = d.object(forKey: Keys.lastTenantPromptAt) as? Date
         self.hasReceivedTenantVerifyBonus = (d.object(forKey: Keys.hasReceivedTenantVerifyBonus) as? Bool) ?? false
         self.tenantPromptOptedOut = (d.object(forKey: Keys.tenantPromptOptedOut) as? Bool) ?? false
@@ -1777,6 +1783,7 @@ final class Settings: ObservableObject {
         static let hasViewedGuide              = "settings.hasViewedGuide"
         static let hasReceivedCoffeeReward     = "settings.hasReceivedCoffeeReward"
         static let currentTenant               = "settings.currentTenant"
+        static let tenantReverifyDueAt         = "settings.tenantReverifyDueAt"
         static let lastTenantPromptAt          = "settings.lastTenantPromptAt"
         static let hasReceivedTenantVerifyBonus = "settings.hasReceivedTenantVerifyBonus"
         static let tenantPromptOptedOut        = "settings.tenantPromptOptedOut"

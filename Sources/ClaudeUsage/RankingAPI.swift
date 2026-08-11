@@ -303,6 +303,12 @@ actor RankingAPI {
         let commentMaxLen: Int?
         /// 본인 댓글 삭제 윈도우(초). nil이면 BoardView fallback(60s).
         let deleteCommentWindowSec: Int?
+        /// 이 계정이 글/댓글/좋아요를 쓸 수 있는지. GitHub 미연동이면 false → 읽기 전용.
+        /// nil은 구버전 서버(필드 없음) — 게이트 이전 동작대로 쓰기 허용으로 간주한다.
+        /// 실제 차단은 서버 403 `github_required`가 하고, 이 값은 UI 비활성화용.
+        let canInteract: Bool?
+        /// 서버가 GitHub 연동을 요구하는 정책인지. 안내 문구 노출 여부 판정용.
+        let requiresGitHub: Bool?
     }
 
     struct PostBoardPayload: Encodable {
@@ -697,6 +703,8 @@ actor RankingAPI {
         case privacyNotAccepted
         /// 게시판 cooldown 위반 (10분 / post). retryAfterSec은 서버가 응답 body에 포함.
         case rateLimited(retryAfterSec: Int)
+        /// 게시판 쓰기 게이트 — GitHub 미연동 계정의 작성/좋아요/댓글 시도(403 `github_required`).
+        case githubRequired
         /// 길드 관련 서버 거부 — 서버 error 코드 그대로 (already_in_guild / name_taken /
         /// slot_taken / not_in_guild / invalid_code / not_leader / …). 호출 측이 코드로 분기.
         case guildConflict(String)
@@ -726,6 +734,8 @@ actor RankingAPI {
                 let m = s / 60, r = s % 60
                 if m > 0 { return "다음 글 작성까지 \(m)분 \(r)초 남았습니다." }
                 return "다음 글 작성까지 \(r)초 남았습니다."
+            case .githubRequired:
+                return "게시판 작성·좋아요는 GitHub 인증 후 가능합니다. 설정에서 GitHub 계정을 연결하세요."
             case .guildConflict(let code):
                 switch code {
                 case "already_in_guild":    return "이미 길드에 소속되어 있습니다."
@@ -1409,6 +1419,10 @@ actor RankingAPI {
         let leaderboard: LeaderboardResponse?
         let tenantAnnouncements: [TenantAnnouncementRow]?
         let tenant: String?
+        /// 소속 재인증 기한. nil이면 재인증 요구 없음(서버가 필드 자체를 안 내려보냄).
+        /// 기한이 지나면 서버가 이미 기본 테넌트로 강등해 응답하므로, 클라는 이 값으로
+        /// "왜 강등됐는지"를 안내하고 재인증 진입점을 띄우는 역할만 한다.
+        let reverifyDueAt: Date?
     }
 
     /// 열려 있는 화면(`want`)의 데이터 + 배지를 한 번에. 화면별 폴링을 이 호출 하나로 대체한다.
@@ -2024,6 +2038,11 @@ actor RankingAPI {
         // 길드 도메인 에러 — 전역 상태코드 매핑보다 먼저 (409/403의 의미가 endpoint마다 다름).
         if let body = try? JSONDecoder().decode(ServerErrorBody.self, from: data),
            let errCode = body.error {
+            // 게시판 쓰기 게이트(403) — body 코드 우선 처리해 전역 403→banned 오매핑 방지.
+            // "차단된 계정" 문구가 뜨면 원인을 오해하게 되므로 반드시 여기서 먼저 잡는다.
+            if errCode == "github_required" {
+                throw RankingError.githubRequired
+            }
             if errCode == "join_cooldown" {
                 let until = body.until.flatMap {
                     Self.iso8601WithFractional.date(from: $0) ?? Self.iso8601Basic.date(from: $0)
