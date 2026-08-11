@@ -101,6 +101,18 @@ export function isValidGuildLogo(s: unknown): s is string {
   return false;
 }
 
+/**
+ * 로고 위치 검증 — 씬 논리 좌표(280×150)의 벽 밴드(y 0..60) 안이어야 한다.
+ * 클라 OfficeLayout.sceneSize/wallBottom과 쌍이며 DB CHECK(guilds_logo_pos_range)와도 같이 움직인다.
+ */
+export const GUILD_LOGO_POS_MAX_X = 280;
+export const GUILD_LOGO_POS_MAX_Y = 60;
+
+export function isValidGuildLogoPos(x: unknown, y: unknown): boolean {
+  return typeof x === "number" && Number.isInteger(x) && x >= 0 && x <= GUILD_LOGO_POS_MAX_X &&
+         typeof y === "number" && Number.isInteger(y) && y >= 0 && y <= GUILD_LOGO_POS_MAX_Y;
+}
+
 /** 길드 생성 시 배정할 무작위 샘플 로고. */
 export function randomSampleLogo(): string {
   return `s:${Math.floor(Math.random() * GUILD_LOGO_SAMPLE_COUNT)}`;

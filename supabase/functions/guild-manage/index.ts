@@ -29,15 +29,16 @@ import {
   FURNITURE_TEXT_MAX,
   isValidGuildName,
   isValidGuildLogo,
+  isValidGuildLogoPos,
   checkJoinCooldown,
 } from "../_shared/guild_policy.ts";
 
 type ManageAction =
   | "kick" | "rotate_code" | "disband" | "set_furniture" | "invite" | "cancel_invite" | "rename"
-  | "set_logo" | "approve_request" | "reject_request";
+  | "set_logo" | "set_logo_pos" | "approve_request" | "reject_request";
 const MANAGE_ACTIONS: ReadonlySet<string> = new Set([
   "kick", "rotate_code", "disband", "set_furniture", "invite", "cancel_invite", "rename",
-  "set_logo", "approve_request", "reject_request",
+  "set_logo", "set_logo_pos", "approve_request", "reject_request",
 ]);
 
 interface ManagePayload {
@@ -56,6 +57,9 @@ interface ManagePayload {
   newName?: string;
   // set_logo 전용 — "s:<0..9>" 또는 "p:<base64 PNG>" (isValidGuildLogo).
   logo?: string;
+  // set_logo_pos 전용 — 사무실 벽에서의 로고 중심 좌표(씬 논리 좌표).
+  logoX?: number;
+  logoY?: number;
   ts: number;
 }
 interface ManageRequest {
@@ -105,6 +109,10 @@ Deno.serve(async (req: Request) => {
   // set_logo: 샘플 인덱스이거나 PNG 시그니처를 가진 base64 (상한 8KB).
   if (p.action === "set_logo" && !isValidGuildLogo(p.logo)) {
     return errorResponse(400, "invalid_logo");
+  }
+  // set_logo_pos: 벽 밴드 안의 정수 좌표.
+  if (p.action === "set_logo_pos" && !isValidGuildLogoPos(p.logoX, p.logoY)) {
+    return errorResponse(400, "invalid_logo_pos");
   }
   // set_furniture: "kind:x:lane[:y[:text]];…" 검증 — 카탈로그 kind 범위, 벽/바닥 lane 정합,
   // 벽 가구 자유 y(4번째 필드), 액자 문구(5번째, percent-encoding). kind 중복 허용.
@@ -201,6 +209,8 @@ Deno.serve(async (req: Request) => {
   if (typeof p.requestId === "string") verifyObj.requestId = p.requestId;
   if (typeof p.newName === "string") verifyObj.newName = p.newName;
   if (typeof p.logo === "string") verifyObj.logo = p.logo;
+  if (typeof p.logoX === "number") verifyObj.logoX = p.logoX;
+  if (typeof p.logoY === "number") verifyObj.logoY = p.logoY;
   const ok = await verifyHmac(verifyObj, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
@@ -512,6 +522,20 @@ Deno.serve(async (req: Request) => {
         return errorResponse(500, "logo_failed");
       }
       return jsonResponse({ ok: true, logo });
+    }
+
+    case "set_logo_pos": {
+      // 사무실 벽에서의 로고 위치. 가구 재배치와 같은 무료 조작이라 RP를 받지 않는다
+      // (디자인 변경인 set_logo만 RP 200).
+      const { error: updErr } = await db
+        .from("guilds")
+        .update({ logo_x: p.logoX!, logo_y: p.logoY! })
+        .eq("id", guild.id);
+      if (updErr) {
+        console.error("guild set_logo_pos failed", updErr);
+        return errorResponse(500, "logo_pos_failed");
+      }
+      return jsonResponse({ ok: true, logoX: p.logoX, logoY: p.logoY });
     }
   }
 });

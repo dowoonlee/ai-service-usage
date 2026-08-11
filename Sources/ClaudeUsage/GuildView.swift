@@ -525,6 +525,23 @@ struct GuildView: View {
         }
     }
 
+    /// 로고 위치 반영 — 가구 재배치와 같은 무료 조작이라 RP 차감이 없다.
+    /// 실패해도 조용히 넘어간다(다음 드래그에서 다시 시도) — 위치 하나 때문에 에러 배너를 띄우면
+    /// 재배치 중 흐름이 끊긴다.
+    private func performSetLogoPos(x: Int, y: Int) {
+        Task { @MainActor in
+            do {
+                _ = try await RankingAPI.shared.manageGuild(
+                    deviceId: settings.rankingDeviceID, action: .setLogoPos,
+                    logoX: x, logoY: y,
+                    hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+                refresh()
+            } catch {
+                DebugLog.log("Guild: 로고 위치 저장 실패 — \(error.localizedDescription)")
+            }
+        }
+    }
+
     /// 로고 반영 — rename과 같은 "서버 성공 후 차감" 순서.
     private func performSetLogo(_ value: String) {
         guard settings.rp >= RankPointLedger.guildLogoCostRP else {
@@ -609,6 +626,9 @@ struct GuildView: View {
                 previewWallTheme: $previewWallTheme,
                 onSetFurniture: { serialized in
                     performSetFurniture(serialized)
+                },
+                onSetLogoPos: { x, y in
+                    performSetLogoPos(x: x, y: y)
                 },
                 onBuyFurniture: { kind, serialized in
                     performBuyFurniture(kind, serialized: serialized)
