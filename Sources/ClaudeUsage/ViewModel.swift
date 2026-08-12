@@ -341,7 +341,8 @@ final class ViewModel: ObservableObject {
         let amount = Self.wellnessReward(elapsed: elapsed)
         // credit 정책(totalEarned/firstCreditedAt 추적)을 한곳에서만 관리하기 위해 CoinLedger 경유.
         CoinLedger.shared.creditWellness(amount: amount)
-        // Standup 도장 — `.rewarded`(60s 안 응답)만 카운트.
+        // Standup 도장 — 보상 창(`wellnessRewardWindow`, 5분) 안에 응답한 경우만 카운트.
+        // (보상 금액은 1분간 지수감쇠하지만, 카운트 기준은 감쇠와 무관한 5분 창이다.)
         Settings.shared.wellnessRespondedCount += 1
         BadgeRegistry.evaluate()
         return .rewarded(amount)
@@ -1419,8 +1420,9 @@ final class ViewModel: ObservableObject {
     // MARK: - Gym (Rate Limit)
 
     /// Rate Limit 도장 — 7d resetAt이 변경된 cycle에서 *직전* pct가 < 80%면 +1.
-    /// `lastClaudeSevenDayReset`/`lastClaudeSevenDayPctSeen`은 CoinLedger.evaluateClaude가
+    /// `lastClaudeSevenDayReset`/`lastClaudeSevenDayPctSeen`은 `UsageEventProducer.ingestClaude`가
     /// 같은 cycle 안 뒷쪽에서 갱신하므로 *그 전*에 비교해야 직전 값 유지된 상태로 detect.
+    /// (refreshClaude의 호출 순서가 이 전제다 — evaluateRateLimitGym → ingestClaude.)
     private func evaluateRateLimitGym(_ snap: UsageSnapshot) {
         let s = Settings.shared
         guard let newReset = snap.sevenDayResetAt,

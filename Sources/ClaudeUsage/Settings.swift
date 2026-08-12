@@ -339,11 +339,12 @@ final class Settings: ObservableObject {
     @Published var rateLimitWeeksPassed: Int {
         didSet { UserDefaults.standard.set(rateLimitWeeksPassed, forKey: Keys.rateLimitWeeksPassed) }
     }
-    /// Vibe·Claude — `CoinLedger.evaluateClaude`가 credit한 코인 누적 (5h+7d 합산, plan multiplier 포함).
+    /// Vibe·Claude — 사용량 이벤트를 받은 `CoinLedger.consume`이 vibeCategory=.claude로 분기해
+    /// 누적한 코인 (5h+7d 합산, plan multiplier 포함).
     @Published var claudeCoinsEarned: Int {
         didSet { UserDefaults.standard.set(claudeCoinsEarned, forKey: Keys.claudeCoinsEarned) }
     }
-    /// Vibe·Cursor — `CoinLedger.evaluateCursor`가 credit한 코인 누적.
+    /// Vibe·Cursor — 같은 경로에서 vibeCategory=.cursor로 분기해 누적한 코인.
     @Published var cursorCoinsEarned: Int {
         didSet { UserDefaults.standard.set(cursorCoinsEarned, forKey: Keys.cursorCoinsEarned) }
     }
