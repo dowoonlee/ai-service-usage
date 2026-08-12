@@ -1,6 +1,6 @@
-Intersect Engine Free Asset Pack — Jewel & Coin sprites
+Intersect Engine Free Asset Pack — Jewel, Coin, Crown & Ore sprites
 Source:  https://github.com/AscensionGameDev/Intersect-Assets (branch: main_full)
-Folder:  resources/items/Jewel_*.png, Coins_01.png
+Folder:  resources/items/Jewel_*.png, Coins_01.png, Crown_*.png, Ore_*.png
 
 The Intersect Asset Pack is a community collection. Each individual asset's
 specific authorship is not separately documented in the upstream repo's
@@ -32,4 +32,16 @@ Used files in this project (renamed for semantic clarity, content unchanged):
   Jewel_Peridot.png   ← Jewel_09.png  → BadgeCategory.monorepo
   Jewel_Garnet.png    ← Jewel_04.png  → BadgeCategory.fork
 
-Used in: GymView (도장 페이지) tier cells. Displayed at 24-32px.
+클라우드 제도 8 카테고리 전용 (기존 보석 재사용을 끝내면서 추가, 동일 출처·동일 라이선스):
+
+  Crown_Royal.png     ← Crown_02.png  → BadgeCategory.arenaWins
+  Jewel_Rose.png      ← Jewel_07.png  → BadgeCategory.arenaRating
+  Ore_Copper.png      ← Ore_02.png    → BadgeCategory.guildContribution
+  Jewel_Silver.png    ← Jewel_08.png  → BadgeCategory.guildTenure
+  Ore_Cobalt.png      ← Ore_03.png    → BadgeCategory.dailyQuizCorrect
+  Crown_Gold.png      ← Crown_01.png  → BadgeCategory.dailyRitual
+  Ore_Malachite.png   ← Ore_04.png    → BadgeCategory.pullRequest
+  Ore_Obsidian.png    ← Ore_07.png    → BadgeCategory.bugHunter
+
+Used in: GymView (도장 페이지) tier cells, TrainerCardView (레포트 카드 BADGES 행).
+Displayed at 13-32px. 19 categories ↔ 19 files, 1:1 (재사용 없음).

@@ -374,8 +374,9 @@ struct TrainerCardView: View {
         // "N/M badges"가 이미 보여준다. 미획득까지 늘어놓으면 흑백 보석이 행을 채워
         // 밀도만 높아지고, 남은 개수만큼 dot이 작아져 획득분마저 안 보인다.
         let earnedBadges = badges.filter(\.cleared)
+        let completedCollections = collections.filter(\.complete)
         let badgeSize = rowDotSize(count: earnedBadges.count, base: 20)
-        let setSize = rowDotSize(count: collections.count, base: 16)
+        let setSize = rowDotSize(count: completedCollections.count, base: 16)
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Text("BADGES")
@@ -403,8 +404,15 @@ struct TrainerCardView: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .frame(width: 80, alignment: .leading)
                 HStack(spacing: 5) {
-                    ForEach(collections, id: \.collection.rawValue) { c in
-                        collectionDot(size: setSize, collection: c.collection, complete: c.complete)
+                    if completedCollections.isEmpty {
+                        Text("—")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.3))
+                            .frame(height: 16)
+                    } else {
+                        ForEach(completedCollections, id: \.collection.rawValue) { c in
+                            collectionDot(size: setSize, collection: c.collection)
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -446,9 +454,10 @@ struct TrainerCardView: View {
         }
     }
 
-    private func collectionDot(size: CGFloat, collection: PetCollection, complete: Bool) -> some View {
+    /// 완성한 컬렉션만 그린다(뱃지 행과 같은 원칙) — 호출 측이 걸러 넘기므로 상태 분기가 없다.
+    private func collectionDot(size: CGFloat, collection: PetCollection) -> some View {
         Circle()
-            .fill(complete ? collection.accentColor : Color.gray.opacity(0.4))
+            .fill(collection.accentColor)
             .frame(width: size, height: size)
             .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 0.7))
     }
