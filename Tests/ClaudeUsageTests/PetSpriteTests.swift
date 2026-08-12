@@ -68,29 +68,49 @@ final class PetSpriteTests: XCTestCase {
     //
     // 원인은 보통 strip 파일이 cellSize 기준 프레임 수보다 넓게 저장된 경우다. 렌더러는 폭을
     // cellSize로 나눠 프레임 수를 정하므로, 남는 빈 칸까지 애니메이션 프레임으로 세어버린다.
+    //
+    // 검사는 **PNG 파일을 직접 디코딩**해서 한다. `PetSprite.frames`가 돌려주는 NSImage는 strip을
+    // 잘라 다시 그린 결과라 색공간·디스플레이 프로파일이 개입하고, 실제로 같은 파일이 로컬에서는
+    // 통과하고 CI에서는 걸렸다. 파일 바이트를 보면 환경이 달라도 답이 같다.
     func testNoBlankFramesInAnySprite() {
         var offenders: [String] = []
+        var checked = 0
         for kind in PetKind.allCases {
-            var actions: [PetController.Action] = [.sit, .walk, .run]
-            if Mythic.spec(for: kind) != nil { actions += [.special1, .special2] }
-            for action in actions {
-                let frames = PetSprite.frames(for: kind, action: action)
-                for (i, frame) in frames.enumerated() where Self.isFullyTransparent(frame) {
-                    offenders.append("\(kind.rawValue).\(action.rawValue)[\(i)/\(frames.count)]")
+            let def = kind.def
+            for suffix in Set([def.walkSuffix, def.runSuffix, def.idleSuffix]).sorted() {
+                let name = "\(def.prefix)_\(suffix)"
+                guard let url = Bundle.module.url(forResource: name, withExtension: "png"),
+                      let data = try? Data(contentsOf: url),
+                      let rep = NSBitmapImageRep(data: data) else {
+                    offenders.append("\(name): 리소스를 못 읽음")
+                    continue
+                }
+                checked += 1
+                let cw = def.cellSize.w
+                guard cw > 0, rep.pixelsWide >= cw else {
+                    offenders.append("\(name): 폭 \(rep.pixelsWide) < cell \(cw)")
+                    continue
+                }
+                let frames = rep.pixelsWide / cw
+                for i in 0..<frames where Self.cellIsBlank(rep, originX: i * cw, width: cw) {
+                    offenders.append("\(kind.rawValue)/\(name)[\(i)/\(frames)]")
                 }
             }
         }
+        XCTAssertGreaterThan(checked, 150, "검사한 strip이 너무 적다 — 리소스 조회가 깨진 것")
         XCTAssertTrue(offenders.isEmpty,
                       "빈 프레임 — 재생 중 펫이 사라진다: \(offenders.joined(separator: ", "))")
     }
 
-    /// alpha가 전부 0인지. 한 픽셀이라도 불투명하면 false.
-    private static func isFullyTransparent(_ image: NSImage) -> Bool {
-        guard let tiff = image.tiffRepresentation,
-              let rep = NSBitmapImageRep(data: tiff) else { return false }
+    /// strip의 [originX, originX+width) 열이 전부 투명한지. 알파 바이트를 직접 본다.
+    private static func cellIsBlank(_ rep: NSBitmapImageRep, originX: Int, width: Int) -> Bool {
+        guard rep.hasAlpha, let base = rep.bitmapData else { return false }
+        let spp = rep.samplesPerPixel
+        let alpha = spp - 1          // 알파는 마지막 샘플(RGBA / GA 공통)
         for y in 0..<rep.pixelsHigh {
-            for x in 0..<rep.pixelsWide {
-                if let c = rep.colorAt(x: x, y: y), c.alphaComponent > 0.004 { return false }
+            let row = base + y * rep.bytesPerRow
+            for x in originX..<min(originX + width, rep.pixelsWide) where row[x * spp + alpha] != 0 {
+                return false
             }
         }
         return true
