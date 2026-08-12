@@ -14,22 +14,27 @@ struct GymView: View {
     /// 진행 중인 관장 배틀(sheet 트리거). nil이면 배틀 창 닫힘.
     @State private var activeBattle: GymBattleRequest?
 
+    // 도장 페이지 자연 높이가 ≈658pt인데 가챠 창이 560×640 고정이라(탭 picker 제외 588pt 가용)
+    // 70pt가 넘쳐 마지막 카테고리 행이 잘렸다. 2 카테고리 지역은 그 자리가 `maxCategoryRows`
+    // 패딩용 빈 행이라 티가 안 났고, 3 카테고리인 vibe(Claude/Cursor/Codex)만 실제 항목이
+    // 사라져 보였다. 스크롤로 접근을 보장한다 — 맵은 onTapGesture만 써서 스크롤과 겹치지 않는다.
     var body: some View {
-        VStack(spacing: 12) {
-            header
-            WorldMapView(selected: $selectedRegion)
-                .frame(height: 220)
-                .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
-                .overlay(
-                    RoundedRectangle(cornerRadius: AppRadius.lg)
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
-                )
-            gymLeaderSection
-            Divider()
-            categorySection
-            Spacer(minLength: 0)
+        ScrollView {
+            VStack(spacing: 12) {
+                header
+                WorldMapView(selected: $selectedRegion)
+                    .frame(height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AppRadius.lg)
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
+                    )
+                gymLeaderSection
+                Divider()
+                categorySection
+            }
+            .padding(16)
         }
-        .padding(16)
         .onAppear {
             if !settings.hasViewedGymPage {
                 settings.hasViewedGymPage = true
