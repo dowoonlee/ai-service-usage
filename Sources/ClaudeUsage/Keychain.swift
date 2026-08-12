@@ -1,6 +1,122 @@
 import Foundation
 import Security
 
+/// keychain 항목 R/W의 최소 원시 연산 — 실 keychain(`SystemKeychainBackend`)과 테스트용
+/// in-memory(`InMemoryKeychainBackend`)를 갈아끼우기 위한 경계.
+///
+/// 경계를 vault**보다 아래**(항목 단위)에 둔 이유: vault의 캐시·레거시 이전·덮어쓰기 거부 같은
+/// 실제 버그가 났던 로직(#169)을 테스트가 그대로 통과하게 만들어야 의미가 있기 때문이다.
+/// 경계가 vault 위였다면 정작 검증하고 싶은 코드가 테스트 더블로 대체돼버린다.
+protocol KeychainBackend: AnyObject {
+    /// 값 있음 / 항목 없음 / 접근 실패 3-상태. 절대 뭉개지 말 것(#169).
+    func load(account: String) -> Keychain.Lookup
+    func save(_ value: String, account: String) -> Bool
+    func delete(account: String)
+}
+
+/// 실제 macOS keychain (`SecItem*`). 실사용 경로.
+final class SystemKeychainBackend: KeychainBackend {
+    func load(account: String) -> Keychain.Lookup {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Keychain.service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        switch status {
+        case errSecSuccess:
+            guard let data = item as? Data, let s = String(data: data, encoding: .utf8) else { return .absent }
+            return .value(s)
+        case errSecItemNotFound:
+            return .absent
+        default:
+            return .accessFailed   // errSecAuthFailed / errSecInteractionNotAllowed / errSecNotAvailable 등
+        }
+    }
+
+    /// SecItemAdd 우선, 이미 존재하면 SecItemUpdate. 기존 Delete+Add 방식은 한 번의 save에
+    /// keychain access를 2번 트리거해 ad-hoc 서명 + ACL 무효화 상황에서 사용자에게 다이얼로그가
+    /// 두 번 뜨던 문제 — Add/Update 한 번으로 1회로 축소.
+    func save(_ value: String, account: String) -> Bool {
+        let data = Data(value.utf8)
+        let matchQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Keychain.service,
+            kSecAttrAccount as String: account,
+        ]
+        var addAttrs = matchQuery
+        addAttrs[kSecValueData as String] = data
+        addAttrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        let status = SecItemAdd(addAttrs as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            let updateAttrs: [String: Any] = [kSecValueData as String: data]
+            return SecItemUpdate(matchQuery as CFDictionary, updateAttrs as CFDictionary) == errSecSuccess
+        }
+        return status == errSecSuccess
+    }
+
+    func delete(account: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Keychain.service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}
+
+/// 프로세스 메모리에만 사는 keychain. 샌드박스(테스트·데모) 전용.
+///
+/// 실 keychain을 안 쓰는 건 사용자 데이터 오염 방지 때문만이 아니다 — ad-hoc 서명 환경에서
+/// 테스트가 ACL 재승인 다이얼로그를 띄우면 실행이 그대로 멈춘다.
+final class InMemoryKeychainBackend: KeychainBackend {
+    private let queue = DispatchQueue(label: "Keychain.memory")
+    private var items: [String: String] = [:]
+
+    /// true면 모든 조회가 `.accessFailed`, 모든 저장이 실패한다. keychain 잠김/ACL 거부 상황
+    /// (#169: 그 상태에서 vault를 덮어써 값을 영구 유실시켰던 버그)을 테스트가 재현하기 위한 스위치.
+    var simulateAccessFailure = false
+
+    /// 여기 담긴 account만 `.accessFailed`가 된다. ad-hoc ACL 재승인을 **일부 항목만** 거부/취소한
+    /// 상황 — 레거시 이전이 못 읽은 원본까지 지워 값을 영구 유실시켰던 버그의 재현 조건이다.
+    var failingAccounts: Set<String> = []
+
+    init(seed: [String: String] = [:]) { self.items = seed }
+
+    private func failing(_ account: String) -> Bool {
+        simulateAccessFailure || failingAccounts.contains(account)
+    }
+
+    func load(account: String) -> Keychain.Lookup {
+        queue.sync {
+            if failing(account) { return .accessFailed }
+            return items[account].map(Keychain.Lookup.value) ?? .absent
+        }
+    }
+
+    func save(_ value: String, account: String) -> Bool {
+        queue.sync {
+            if failing(account) { return false }
+            items[account] = value
+            return true
+        }
+    }
+
+    func delete(account: String) {
+        queue.sync {
+            if failing(account) { return }
+            items.removeValue(forKey: account)
+        }
+    }
+
+    /// 백엔드에 실제로 남은 항목 — 테스트 단언용(예: 레거시 항목이 이전 후 삭제됐는지).
+    var storedAccounts: Set<String> { queue.sync { Set(items.keys) } }
+    func rawValue(account: String) -> String? { queue.sync { items[account] } }
+}
+
 /// 앱의 모든 민감 값(세션키·토큰·HMAC키·복구코드·무결성키·쪽지키)을 **단일 keychain 항목**
 /// (`vaultAccount`)에 JSON `{논리키: 값}` 하나로 담는다.
 ///
@@ -33,7 +149,16 @@ enum Keychain {
         rankingRecoveryCodeAccount, integrityKeyAccount, dmIdentityKeyAccount,
     ]
 
-    private static let vault = Vault()
+    /// 샌드박스에서 `resetForTesting()`이 통째로 갈아끼운다 — vault는 in-memory 캐시를 들고 있어서
+    /// 백엔드만 새로 줘도 이전 테스트가 읽어둔 dict가 그대로 살아남기 때문이다.
+    private static var vault = Vault()
+
+    /// 테스트 간 keychain 상태 격리 — 캐시를 버리고 빈 백엔드로 되돌린다. 샌드박스에서만 동작.
+    static func resetForTesting() {
+        guard AppEnv.isSandboxed else { return }
+        AppEnv.setKeychainBackend(InMemoryKeychainBackend())
+        vault = Vault()
+    }
 
     // MARK: - Claude session (legacy API, 인자 없음 — 호환 유지)
 
@@ -204,58 +329,18 @@ enum Keychain {
         return saveItem(json, account: vaultAccount)
     }
 
-    /// SecItemAdd 우선, 이미 존재하면 SecItemUpdate. 기존 Delete+Add 방식은 한 번의 save에
-    /// keychain access를 2번 트리거해 ad-hoc 서명 + ACL 무효화 상황에서 사용자에게 다이얼로그가
-    /// 두 번 뜨던 문제 — Add/Update 한 번으로 1회로 축소.
+    /// 항목 R/W는 백엔드에 위임한다(실 keychain / in-memory). 3-상태 구분·덮어쓰기 거부 같은
+    /// 판단 로직은 위쪽 vault에 그대로 남아 있어, 백엔드를 바꿔도 검증 대상은 실제 코드다.
     @discardableResult
     private static func saveItem(_ value: String, account: String) -> Bool {
-        let data = Data(value.utf8)
-        let matchQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        var addAttrs = matchQuery
-        addAttrs[kSecValueData as String] = data
-        addAttrs[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let status = SecItemAdd(addAttrs as CFDictionary, nil)
-        if status == errSecDuplicateItem {
-            let updateAttrs: [String: Any] = [kSecValueData as String: data]
-            return SecItemUpdate(matchQuery as CFDictionary, updateAttrs as CFDictionary) == errSecSuccess
-        }
-        return status == errSecSuccess
+        AppEnv.keychain.save(value, account: account)
     }
 
-    /// keychain 항목 조회 — status를 구분해 3-상태로 반환한다(#169). `errSecItemNotFound`만 `.absent`,
-    /// 그 외 실패(`errSecAuthFailed`·`errSecInteractionNotAllowed`·잠김 등)는 `.accessFailed`로 —
-    /// "값이 없음"과 "지금 못 읽음"을 절대 뭉개지 않는다. 디코딩 실패(손상)도 접근 실패는 아니므로 .absent.
     private static func loadItem(account: String) -> Lookup {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        switch status {
-        case errSecSuccess:
-            guard let data = item as? Data, let s = String(data: data, encoding: .utf8) else { return .absent }
-            return .value(s)
-        case errSecItemNotFound:
-            return .absent
-        default:
-            return .accessFailed   // errSecAuthFailed / errSecInteractionNotAllowed / errSecNotAvailable 등
-        }
+        AppEnv.keychain.load(account: account)
     }
 
     private static func clearItem(account: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(query as CFDictionary)
+        AppEnv.keychain.delete(account: account)
     }
 }

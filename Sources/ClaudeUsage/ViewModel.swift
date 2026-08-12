@@ -113,13 +113,13 @@ final class ViewModel: ObservableObject {
 
     // Section collapse
     @Published var claudeCollapsed: Bool {
-        didSet { UserDefaults.standard.set(claudeCollapsed, forKey: "section.claude.collapsed") }
+        didSet { AppEnv.defaults.set(claudeCollapsed, forKey: "section.claude.collapsed") }
     }
     @Published var cursorCollapsed: Bool {
-        didSet { UserDefaults.standard.set(cursorCollapsed, forKey: "section.cursor.collapsed") }
+        didSet { AppEnv.defaults.set(cursorCollapsed, forKey: "section.cursor.collapsed") }
     }
     @Published var codexCollapsed: Bool {
-        didSet { UserDefaults.standard.set(codexCollapsed, forKey: "section.codex.collapsed") }
+        didSet { AppEnv.defaults.set(codexCollapsed, forKey: "section.codex.collapsed") }
     }
 
     private var pollTask: Task<Void, Never>?
@@ -199,7 +199,7 @@ final class ViewModel: ObservableObject {
         UsageEventBus.shared.register(VPLedger.shared)
         UsageEventBus.shared.register(StreakLedger.shared)
 
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         self.claudeCollapsed = d.bool(forKey: "section.claude.collapsed")
         self.cursorCollapsed = d.bool(forKey: "section.cursor.collapsed")
         self.codexCollapsed = d.bool(forKey: "section.codex.collapsed")
