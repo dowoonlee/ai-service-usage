@@ -990,6 +990,27 @@ final class Settings: ObservableObject {
         self.gachaInventoryCollapsed = (invCollapsedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.showGitHubLoginInCard = (d.object(forKey: Keys.showGitHubLoginInCard) as? Bool) ?? false
 
+        // 1회성 마이그레이션 + 무결성 검증은 여기부터 — 모든 저장 프로퍼티가 초기화된 뒤라
+        // self 메서드 호출이 가능하다(아래 메서드 주석 참조).
+        applyLaunchMigrations(hadLegacyClaudeKind: hadLegacyClaudeKind,
+                              hadLegacyCursorKind: hadLegacyCursorKind,
+                              needsPresetPersist: needsPresetPersist)
+    }
+
+    /// 실행 1회성 마이그레이션 모음 + 무결성 검증. **모든 저장 프로퍼티 초기화가 끝난 뒤**
+    /// `init` 마지막에서만 호출한다 — 그 시점이라야 `persist`/`applyOnceMigration` 같은
+    /// self 메서드를 부를 수 있다(init 본문에 있던 ~190줄을 그대로 옮긴 것이라 동작은 동일).
+    ///
+    /// 여기 블록은 모두 UserDefaults 플래그로 1회만 발동하며, 감시 값(coins·티켓·펫)을 건드리면
+    /// `integrityRebaseNeeded`를 세워 마지막 verify가 비교 대신 리베이스하게 한다.
+    ///
+    /// ⚠️ `BadgeRegistry.evaluate`/`PetCollectionRegistry.evaluate`처럼 `Settings.shared`를
+    /// 재진입하는 것은 여기서도 호출 금지 — lazy init이 깨진다. 그런 마이그레이션은 App 시작
+    /// 훅(`applyGymMigrationIfNeeded` 등)에 둔다.
+    private func applyLaunchMigrations(hadLegacyClaudeKind: Bool,
+                                       hadLegacyCursorKind: Bool,
+                                       needsPresetPersist: Bool) {
+        let d = UserDefaults.standard
         // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
         //   1) 신규 사용자 (hasCompletedGachaMigration 아직 false): 첫 실행 시 3장 지급
         //   2) 기존 사용자 (이미 1장 받고 마이그레이션 완료): v0.3.2 보너스 블록에서 +2장
@@ -998,9 +1019,9 @@ final class Settings: ObservableObject {
         let wasExistingUser = d.bool(forKey: Keys.hasCompletedGachaMigration)
 
         // 아래 1회성 마이그레이션 중 하나라도 무결성 감시 대상 값(coins·티켓·펫 목록 등)을 바꾸면
-        // init 말미 verifyIntegrity의 "저장된 체크섬 vs 현재 값" 비교가 오탐이 된다 — init 중엔
-        // didSet이 안 돌아 recordIntegrityChecksum()이 호출되지 않기 때문. 그런 실행에서는 비교를
-        // 건너뛰고 현재 상태를 신뢰해 체크섬만 재기록(리베이스)하도록 표시한다.
+        // 이 메서드 말미 verifyIntegrity의 "저장된 체크섬 vs 현재 값" 비교가 오탐이 된다 — init
+        // 경로에선 didSet이 안 돌아 recordIntegrityChecksum()이 호출되지 않기 때문. 그런 실행에서는
+        // 비교를 건너뛰고 현재 상태를 신뢰해 체크섬만 재기록(리베이스)하도록 표시한다.
         var integrityRebaseNeeded = false
 
         // (1) 첫 실행 시 1회만: 가챠권 3장 지급 + 기존 사용 중이던 펫이 있으면 보유 목록에 등록.

@@ -18,6 +18,8 @@ interface ChallengePayload { action: string; deviceId: string; ts: number; }
 
 const MAX_CLOCK_SKEW_SEC = 3600;
 const RATING_WINDOW = 200;
+/// 한 번에 받아올 후보 상한. 레이팅 윈도우로 좁힌 뒤 적용되므로 실력대 안에서 고르게 뽑힌다.
+const POOL_LIMIT = 100;
 
 function cryptoU63(): bigint {
   const b = crypto.getRandomValues(new Uint8Array(8));
@@ -69,23 +71,26 @@ Deno.serve(async (req: Request) => {
   // 랭크전은 5v5 대칭 — 도전자도 5마리 풀팀 강제(클라 rankedReady==5 재확인, 서버 authoritative).
   if (!Array.isArray(myTeam) || myTeam.length !== RANKED_TEAM_SIZE) return errorResponse(409, "team_not_full");
 
-  // 3) 상대 추출 — 같은 테넌트, 본인 아님, 유사 레이팅 우선(없으면 확장).
-  let pool: { device_id: string; team_json: unknown; rating: number }[] = [];
-  {
-    const near = await db.from("pvp_teams").select("device_id, team_json, rating")
-      .eq("tenant_id", tenant).neq("device_id", me)
-      .gte("rating", 0).limit(100);   // 전체 후보 로드 후 JS에서 윈도우/무작위(레이팅 인덱스는 적음).
+  // 3) 상대 추출 — 같은 테넌트, 본인 아님, 유사 레이팅 우선(없으면 전체로 확장).
+  //    레이팅 윈도우를 **DB에서** 좁힌다(인덱스 pvp_teams_tenant_rating). 예전엔 정렬도
+  //    윈도우도 없이 100행을 받아 JS에서 걸렀는데, 참가자가 POOL_LIMIT을 넘으면 Postgres가
+  //    돌려주는 임의의 100행에만 매칭이 갇혀 상대가 사실상 고정됐다.
+  type PoolRow = { device_id: string; team_json: unknown; rating: number };
+  const loadPool = async (lo: number | null): Promise<PoolRow[]> => {
+    let q = db.from("pvp_teams").select("device_id, team_json, rating")
+      .eq("tenant_id", tenant).neq("device_id", me);
+    if (lo !== null) q = q.gte("rating", lo).lte("rating", lo + 2 * RATING_WINDOW);
+    const { data } = await q.limit(POOL_LIMIT);
     // 5v5 대칭 강제 — 레거시 <5 등록 팀은 매칭 후보에서 제외(3v5 거저주기 방지). 재등록 시 재편입.
-    pool = ((near.data ?? []) as typeof pool)
+    return ((data ?? []) as PoolRow[])
       .filter((o) => Array.isArray(o.team_json) && (o.team_json as unknown[]).length === RANKED_TEAM_SIZE);
-  }
-  if (pool.length === 0) return errorResponse(409, "no_opponent");
+  };
   const myRatingRow = await db.from("pvp_ratings").select("rating").eq("device_id", me).maybeSingle();
   const myRating = myRatingRow.data ? Number(myRatingRow.data.rating) : 1000;
-  // 유사 레이팅 윈도우 우선.
-  const near = pool.filter((o) => Math.abs(Number(o.rating) - myRating) <= RATING_WINDOW);
-  const candidates = near.length > 0 ? near : pool;
-  const opp = candidates[Math.floor(Math.random() * candidates.length)];
+  let pool = await loadPool(myRating - RATING_WINDOW);
+  if (pool.length === 0) pool = await loadPool(null);   // 윈도우가 비면 전체 확장(기존 폴백 유지)
+  if (pool.length === 0) return errorResponse(409, "no_opponent");
+  const opp = pool[Math.floor(Math.random() * pool.length)];
   const oppTeam = opp.team_json as BattleTeam;
 
   // 4) 일일 카운트 원자적 선점 — 시뮬 **전에** 확정한다. 예전엔 맨 끝에서 (읽은 값 + 1)을
