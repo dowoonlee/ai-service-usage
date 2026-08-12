@@ -454,12 +454,27 @@ struct TrainerCardView: View {
         }
     }
 
+    /// 채운 배경 위에서 읽히는 심볼 색. accentColor에 라임·코럴·핑크처럼 밝은 색이 섞여 있어
+    /// 흰색으로 고정하면 그 위에서 심볼이 사라진다. relative luminance로 흰/검정을 고른다.
+    nonisolated static func symbolColor(on background: Color) -> Color {
+        guard let rgb = NSColor(background).usingColorSpace(.deviceRGB) else { return .white }
+        let luminance = 0.299 * rgb.redComponent + 0.587 * rgb.greenComponent + 0.114 * rgb.blueComponent
+        return luminance > 0.6 ? Color.black.opacity(0.75) : .white
+    }
+
     /// 완성한 컬렉션만 그린다(뱃지 행과 같은 원칙) — 호출 측이 걸러 넘기므로 상태 분기가 없다.
+    /// 도감 업적 그리드와 **같은 아이콘**(`iconSystemImage`)을 얹어, 색만으로는 구분되지 않던
+    /// 원에 정체성을 준다(accentColor는 19종이라 유사 색이 섞인다).
     private func collectionDot(size: CGFloat, collection: PetCollection) -> some View {
-        Circle()
-            .fill(collection.accentColor)
-            .frame(width: size, height: size)
-            .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 0.7))
+        ZStack {
+            Circle()
+                .fill(collection.accentColor)
+                .overlay(Circle().stroke(.white.opacity(0.35), lineWidth: 0.7))
+            Image(systemName: collection.iconSystemImage)
+                .font(.system(size: size * 0.52, weight: .bold))
+                .foregroundStyle(Self.symbolColor(on: collection.accentColor))
+        }
+        .frame(width: size, height: size)
     }
 
     // MARK: - Footer

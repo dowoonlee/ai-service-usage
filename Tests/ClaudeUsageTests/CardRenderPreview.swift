@@ -25,7 +25,8 @@ final class CardRenderPreview: XCTestCase {
         let badges = BadgeCategory.allCases.map {
             TrainerCardView.BadgeRow(category: $0, cleared: earned.contains($0), available: true)
         }
-        let doneCollections: Set<PetCollection> = [.helloWorld, .npmInstall, .dns]
+        let doneCollections: Set<PetCollection> = [.helloWorld, .npmInstall, .dns, .happyPath,
+                                                   .emotionalSupport, .nodeModules, .oomKilled]
         let collections = PetCollection.allCases.map { ($0, doneCollections.contains($0)) }
 
         let stats = TrainerStats(
