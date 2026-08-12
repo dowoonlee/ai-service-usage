@@ -118,10 +118,14 @@ struct GachaView: View {
             }
             .animation(.easeInOut(duration: 0.18), value: selectedTab)
         }
-        // alignment: .top — 콘텐츠가 640pt를 다 못 채우는 탭에서 picker+콘텐츠가 세로 중앙으로
+        // 560×640은 이제 **최소치**다 — 창이 resizable이라 늘린 만큼 콘텐츠도 함께 커져야
+        // 여백만 생기지 않는다. 각 탭이 최상위 ScrollView라 남는 높이는 자연히 흡수된다.
+        //
+        // alignment: .top — 콘텐츠가 높이를 다 못 채우는 탭에서 picker+콘텐츠가 세로 중앙으로
         // 밀려 picker 위 공백이 탭마다 달라지던 문제를 막는다(도장만 Spacer로 꽉 차 공백이 없었음).
         // 이제 모든 탭에서 picker는 상단 고정, 위 공백은 아래 picker의 .padding(.top)으로 일관.
-        .frame(width: 560, height: 640, alignment: .top)
+        .frame(minWidth: 560, maxWidth: .infinity,
+               minHeight: 640, maxHeight: .infinity, alignment: .top)
         .onReceive(NotificationCenter.default.publisher(for: .gachaSwitchTab)) { notif in
             if let tab = notif.object as? Tab { selectedTab = tab }
         }
@@ -1939,10 +1943,22 @@ final class GachaWindowController: NSWindowController, SingleWindowPresenting {
         let host = NSHostingController(rootView: GachaView())
         let window = NSWindow(contentViewController: host)
         window.title = "가챠 · 도감"
-        window.styleMask = [.titled, .closable]
+        // resizable — 고정 560×640이던 시절엔 콘텐츠가 창보다 길어져도 사용자가 늘릴 방법이
+        // 없어 그대로 잘렸다(도장 vibe 지역의 3번째 카테고리, 대련 시트 하단이 그랬다).
+        // 각 탭은 최상위 ScrollView라 잘림 자체는 막혀 있지만, 넓게 쓰고 싶은 사용자에게
+        // 선택지를 준다.
+        // 게시판·쪽지·퀴즈 창과 같은 조합(board/dm/quiz 컨트롤러 참조).
+        window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 560, height: 640))
+        // 아래로는 줄이지 못하게 — 640 미만에선 도장·레포트가 스크롤에 갇혀 쓰기 나빠진다.
+        // 다른 창들이 쓰는 `minSize`(타이틀바 포함 프레임 기준) 대신 `contentMinSize`를 쓰는 건
+        // 위 SwiftUI `.frame(minHeight: 640)`과 같은 축으로 맞추기 위해서다.
+        window.contentMinSize = NSSize(width: 560, height: 640)
         window.center()
         self.init(window: window)
+        // 사용자가 늘린 크기·위치를 다음 실행에도 유지. center() 뒤에 걸어야 저장값이 우선한다.
+        window.setFrameAutosaveName("GachaWindow")
     }
 
     /// 윈도우를 띄우면서 특정 탭으로 전환. `tab=nil`이면 마지막 선택 상태 유지.
