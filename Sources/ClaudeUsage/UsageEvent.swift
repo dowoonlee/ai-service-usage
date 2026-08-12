@@ -103,6 +103,16 @@ final class UsageEventBus {
         DebugLog.log("UsageEventBus: registered \(type(of: consumer)) (total=\(consumers.count))")
     }
 
+    /// 등록된 consumer를 모두 떼어낸다. 샌드박스 전용.
+    ///
+    /// consumer 목록은 프로세스 전역이라 `Settings`를 리셋해도 남는다 — 한 테스트가 `ViewModel()`을
+    /// 만들면 거기서 등록된 `StreakLedger`가 이후 **다른 테스트의 코인 적립에 스트릭 보너스를
+    /// 얹어버린다**(실제로 그렇게 새고 있었다). 테스트마다 원하는 consumer만 붙이도록 비운다.
+    func resetForTesting() {
+        guard AppEnv.isSandboxed else { return }
+        consumers.removeAll()
+    }
+
     /// 이벤트 broadcast. 모든 consumer가 동기 처리. 어떤 consumer 실패해도 다른 consumer는 영향 없음.
     func emit(_ event: UsageEvent) {
         for c in consumers { c.consume(event) }

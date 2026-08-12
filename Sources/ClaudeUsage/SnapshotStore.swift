@@ -179,17 +179,12 @@ final class JSONLStore<T: Codable> {
 }
 
 enum SnapshotStore {
-    /// 저장 위치 오버라이드 — `AIUSAGE_DATA_DIR`가 설정돼 있으면 그 디렉토리를 쓴다.
+    /// 저장 위치 오버라이드 — `AppEnv.dataDirectory`(= `AIUSAGE_DATA_DIR` 또는 샌드박스 임시 경로).
     ///
-    /// dev 실행이 설치된 앱과 **같은** 스냅샷 파일을 읽고 쓰는 걸 피하기 위한 스위치다.
+    /// dev 실행/테스트가 설치된 앱과 **같은** 스냅샷 파일을 읽고 쓰는 걸 피하기 위한 스위치다.
     /// macOS에선 `HOME`을 바꿔도 `applicationSupportDirectory`가 사용자 레코드를 따라가서
-    /// 환경 격리가 안 되므로, 앱이 직접 보는 스위치가 필요하다. 데모/스크린샷 촬영,
-    /// 실사용 데이터를 건드리지 않는 수동 디버깅에 쓴다. 미설정이면 기존 경로 그대로.
-    private static let overrideDirectory: URL? = {
-        guard let path = ProcessInfo.processInfo.environment["AIUSAGE_DATA_DIR"],
-              !path.isEmpty else { return nil }
-        return URL(fileURLWithPath: path, isDirectory: true)
-    }()
+    /// 환경 격리가 안 되므로, 앱이 직접 보는 스위치가 필요하다. 미설정 + 비샌드박스면 기존 경로 그대로.
+    private static let overrideDirectory: URL? = AppEnv.dataDirectory
 
     static let claude = JSONLStore<UsageSnapshot>(
         filename: "snapshots.jsonl",

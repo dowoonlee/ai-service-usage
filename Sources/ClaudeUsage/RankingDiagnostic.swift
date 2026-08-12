@@ -22,15 +22,15 @@ enum RankingDiagnosticStore {
 
     static func record(_ f: RankingDecodeFailure) {
         guard let data = try? JSONEncoder().encode(f) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        AppEnv.defaults.set(data, forKey: key)
     }
 
     static func load() -> RankingDecodeFailure? {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        guard let data = AppEnv.defaults.data(forKey: key) else { return nil }
         return try? JSONDecoder().decode(RankingDecodeFailure.self, from: data)
     }
 
-    static func clear() { UserDefaults.standard.removeObject(forKey: key) }
+    static func clear() { AppEnv.defaults.removeObject(forKey: key) }
 
     /// 첨부 후보 — 최근성 윈도(`attachWindow`) 안의 실패만 돌려준다.
     static func recentForAttach(now: Date) -> RankingDecodeFailure? {

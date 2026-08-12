@@ -30,7 +30,7 @@ final class NotificationManager {
         guard !thresholds.isEmpty else { return }
         guard let t = thresholds.last(where: { Double($0) <= v }) else { return }
 
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         let resetKey = "notify.\(key).resetAt"
         let thrKey   = "notify.\(key).lastThreshold"
 
@@ -53,7 +53,7 @@ final class NotificationManager {
     /// 1회만 사용자에게 알림 — 같은 source 24시간 쿨다운.
     /// 호출은 ViewModel.updateBackoffAfterCycle에서 임계 도달 cycle에 1회.
     func endpointSuspect(source: String) {
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         let key = "notify.endpoint.\(source).firedAt"
         if let last = d.object(forKey: key) as? Date,
            Date().timeIntervalSince(last) < 24 * 3600 { return }
