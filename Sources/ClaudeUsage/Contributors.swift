@@ -72,14 +72,14 @@ final class Contributors: ObservableObject {
     }
 
     private func loadCache() -> Cache? {
-        guard let data = UserDefaults.standard.data(forKey: Self.cacheKey),
+        guard let data = AppEnv.defaults.data(forKey: Self.cacheKey),
               let c = try? JSONDecoder().decode(Cache.self, from: data) else { return nil }
         return c
     }
 
     private func save(_ c: Cache) {
         if let data = try? JSONEncoder().encode(c) {
-            UserDefaults.standard.set(data, forKey: Self.cacheKey)
+            AppEnv.defaults.set(data, forKey: Self.cacheKey)
         }
     }
 }

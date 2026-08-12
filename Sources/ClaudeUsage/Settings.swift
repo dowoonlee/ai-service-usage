@@ -4,43 +4,62 @@ import ServiceManagement
 
 @MainActor
 final class Settings: ObservableObject {
-    static let shared = Settings()
+    /// 앱 전역 인스턴스. `var`인 이유는 오직 `resetForTesting()` 때문이다 —
+    /// 실사용 코드에서 재대입하지 말 것(구독 중인 뷰의 `@Published` 연결이 끊긴다).
+    static var shared = Settings()
+
+    /// 테스트 간 설정 상태 격리. 샌드박스 suite와 keychain을 비우고 인스턴스를 새로 만든다.
+    ///
+    /// 인스턴스까지 새로 만드는 이유: 값은 전부 `init`에서 UserDefaults를 읽어 메모리에 올라오고,
+    /// 런치 마이그레이션도 `init` 끝에서 한 번 돈다. suite만 비우면 이전 테스트의 메모리 상태가
+    /// 그대로 남아 다음 테스트가 오염된 값을 본다.
+    ///
+    /// 샌드박스가 아니면 no-op — 실사용 프로세스에서 사용자 데이터가 날아가는 경로를 만들지 않는다.
+    static func resetForTesting() {
+        guard AppEnv.isSandboxed else { return }
+        AppEnv.resetSandbox()
+        Keychain.resetForTesting()
+        // 이벤트 버스의 consumer 목록도 프로세스 전역이다 — 비우지 않으면 다른 테스트가 등록해둔
+        // 원장이 이 테스트의 적립에 얹힌다(예: StreakLedger의 첫 사용 보너스).
+        UsageEventBus.shared.resetForTesting()
+        shared = Settings()
+    }
 
     @Published var panelOpacity: Double {
-        didSet { UserDefaults.standard.set(panelOpacity, forKey: Keys.panelOpacity) }
+        didSet { AppEnv.defaults.set(panelOpacity, forKey: Keys.panelOpacity) }
     }
     @Published var notifyEnabled: Bool {
-        didSet { UserDefaults.standard.set(notifyEnabled, forKey: Keys.notifyEnabled) }
+        didSet { AppEnv.defaults.set(notifyEnabled, forKey: Keys.notifyEnabled) }
     }
     @Published var notifyThresholds: [Int] {
-        didSet { UserDefaults.standard.set(notifyThresholds, forKey: Keys.notifyThresholds) }
+        didSet { AppEnv.defaults.set(notifyThresholds, forKey: Keys.notifyThresholds) }
     }
     @Published var showPace: Bool {
-        didSet { UserDefaults.standard.set(showPace, forKey: Keys.showPace) }
+        didSet { AppEnv.defaults.set(showPace, forKey: Keys.showPace) }
     }
     /// 메뉴바 모드 — true 면 패널 close 시 종료 대신 숨김 + 메뉴바에 미니 sparkline + 펫 표시.
     /// 기본 ON. 패널 가시성과 무관하게 메뉴바 item 은 항상 표시 (정주 인디케이터 모델).
     @Published var showMenuBar: Bool {
-        didSet { UserDefaults.standard.set(showMenuBar, forKey: Keys.showMenuBar) }
+        didSet { AppEnv.defaults.set(showMenuBar, forKey: Keys.showMenuBar) }
     }
     /// 메뉴바에 표시할 펫의 데이터 출처 (claude or cursor). 기본 .claude.
     @Published var menuBarPetSource: MenuBarPetSource {
-        didSet { UserDefaults.standard.set(menuBarPetSource.rawValue, forKey: Keys.menuBarPetSource) }
+        didSet { AppEnv.defaults.set(menuBarPetSource.rawValue, forKey: Keys.menuBarPetSource) }
     }
     @Published var petClaudeEnabled: Bool {
-        didSet { UserDefaults.standard.set(petClaudeEnabled, forKey: Keys.petClaudeEnabled) }
+        didSet { AppEnv.defaults.set(petClaudeEnabled, forKey: Keys.petClaudeEnabled) }
     }
     @Published var petCursorEnabled: Bool {
-        didSet { UserDefaults.standard.set(petCursorEnabled, forKey: Keys.petCursorEnabled) }
+        didSet { AppEnv.defaults.set(petCursorEnabled, forKey: Keys.petCursorEnabled) }
     }
     @Published var petCodexEnabled: Bool {
-        didSet { UserDefaults.standard.set(petCodexEnabled, forKey: Keys.petCodexEnabled) }
+        didSet { AppEnv.defaults.set(petCodexEnabled, forKey: Keys.petCodexEnabled) }
     }
     /// (실험) 펫 메타데이터(이름/대사/설명)를 서버에서 받아 코드값 위에 override. 기본 off.
     /// off / 네트워크 실패 / 누락 kind 면 코드 하드코딩 fallback. 켜는 순간 즉시 서버 갱신.
     @Published var experimentalRemotePetMeta: Bool {
         didSet {
-            UserDefaults.standard.set(experimentalRemotePetMeta, forKey: Keys.experimentalRemotePetMeta)
+            AppEnv.defaults.set(experimentalRemotePetMeta, forKey: Keys.experimentalRemotePetMeta)
             if experimentalRemotePetMeta && !oldValue {
                 Task { await PetMetaStore.shared.refresh() }
             }
@@ -48,12 +67,12 @@ final class Settings: ObservableObject {
     }
     /// 패치 공지 표시 여부 — 업데이트 후 첫 실행 시 별도 창. 기본 on. 시작 시 팝업이라 끌 수 있게 노출.
     @Published var patchNotesEnabled: Bool {
-        didSet { UserDefaults.standard.set(patchNotesEnabled, forKey: Keys.patchNotesEnabled) }
+        didSet { AppEnv.defaults.set(patchNotesEnabled, forKey: Keys.patchNotesEnabled) }
     }
     /// 마지막으로 패치 공지를 확인한 버전(CFBundleShortVersionString). nil이면 신규 설치 →
     /// 첫 실행에서 현재 버전으로 seed만 하고 공지는 안 띄운다. `AnnouncementManager` 참조.
     @Published var lastSeenAnnouncementVersion: String? {
-        didSet { UserDefaults.standard.set(lastSeenAnnouncementVersion, forKey: Keys.lastSeenAnnouncementVersion) }
+        didSet { AppEnv.defaults.set(lastSeenAnnouncementVersion, forKey: Keys.lastSeenAnnouncementVersion) }
     }
     /// 한 차트 파티 최대 마리 수.
     static let maxPartySize = 3
@@ -67,20 +86,20 @@ final class Settings: ObservableObject {
     }
     /// 각 데이터소스에 할당된 프리셋 id.
     @Published var claudePresetID: UUID {
-        didSet { UserDefaults.standard.set(claudePresetID.uuidString, forKey: Keys.claudePresetID) }
+        didSet { AppEnv.defaults.set(claudePresetID.uuidString, forKey: Keys.claudePresetID) }
     }
     @Published var cursorPresetID: UUID {
-        didSet { UserDefaults.standard.set(cursorPresetID.uuidString, forKey: Keys.cursorPresetID) }
+        didSet { AppEnv.defaults.set(cursorPresetID.uuidString, forKey: Keys.cursorPresetID) }
     }
     @Published var codexPresetID: UUID {
-        didSet { UserDefaults.standard.set(codexPresetID.uuidString, forKey: Keys.codexPresetID) }
+        didSet { AppEnv.defaults.set(codexPresetID.uuidString, forKey: Keys.codexPresetID) }
     }
 
     /// 무료로 만들 수 있는 파티 프리셋 기본 개수. 이 이상은 코인으로 슬롯을 사서 늘린다.
     static let basePartyPresetLimit = 3
     /// 코인으로 구매한 추가 프리셋 슬롯 수 (영속). 삭제해도 슬롯은 유지된다.
     @Published var purchasedPartyPresetSlots: Int {
-        didSet { UserDefaults.standard.set(purchasedPartyPresetSlots, forKey: Keys.purchasedPartyPresetSlots) }
+        didSet { AppEnv.defaults.set(purchasedPartyPresetSlots, forKey: Keys.purchasedPartyPresetSlots) }
     }
     /// 현재 만들 수 있는 프리셋 최대 개수 (기본 + 구매 슬롯).
     var maxPartyPresets: Int { Self.basePartyPresetLimit + purchasedPartyPresetSlots }
@@ -117,13 +136,13 @@ final class Settings: ObservableObject {
     }
     /// nil = 펫 기본 테마 사용
     @Published var themeClaudeOverride: PetTheme? {
-        didSet { UserDefaults.standard.set(themeClaudeOverride?.rawValue, forKey: Keys.themeClaudeOverride) }
+        didSet { AppEnv.defaults.set(themeClaudeOverride?.rawValue, forKey: Keys.themeClaudeOverride) }
     }
     @Published var themeCursorOverride: PetTheme? {
-        didSet { UserDefaults.standard.set(themeCursorOverride?.rawValue, forKey: Keys.themeCursorOverride) }
+        didSet { AppEnv.defaults.set(themeCursorOverride?.rawValue, forKey: Keys.themeCursorOverride) }
     }
     @Published var themeCodexOverride: PetTheme? {
-        didSet { UserDefaults.standard.set(themeCodexOverride?.rawValue, forKey: Keys.themeCodexOverride) }
+        didSet { AppEnv.defaults.set(themeCodexOverride?.rawValue, forKey: Keys.themeCodexOverride) }
     }
     /// 코인 구매로 unlock한 동적 맵(테마) 인벤토리. PetTheme.rawValue 보관 (정적 4종은 무료라 미포함).
     @Published var ownedThemes: Set<String> {
@@ -143,38 +162,38 @@ final class Settings: ObservableObject {
     /// 차트 한 구간의 |dy|가 전체 y-range 대비 이 비율 이상이면 펫이 AAAH/WHEE 말풍선을 띄움.
     /// 낮을수록 자주 발생, 높을수록 드물게 발생. 기본 0.40.
     @Published var bigDropThreshold: Double {
-        didSet { UserDefaults.standard.set(bigDropThreshold, forKey: Keys.bigDropThreshold) }
+        didSet { AppEnv.defaults.set(bigDropThreshold, forKey: Keys.bigDropThreshold) }
     }
 
     // MARK: - 날씨 이펙트
 
     /// 메인 패널에 실제 날씨(비/눈/뇌우) 파티클을 표시할지. 기본 ON.
     @Published var weatherEffectEnabled: Bool {
-        didSet { UserDefaults.standard.set(weatherEffectEnabled, forKey: Keys.weatherEffectEnabled) }
+        didSet { AppEnv.defaults.set(weatherEffectEnabled, forKey: Keys.weatherEffectEnabled) }
     }
     /// 날씨를 가져올 기준 위치 (고정 2곳). 기본 U타워(정자). IP/위치권한 없이 고정 좌표 사용.
     @Published var weatherLocation: WeatherLocation {
-        didSet { UserDefaults.standard.set(weatherLocation.rawValue, forKey: Keys.weatherLocation) }
+        didSet { AppEnv.defaults.set(weatherLocation.rawValue, forKey: Keys.weatherLocation) }
     }
 
     // MARK: - Gacha (M2)
 
     /// 가챠 화폐 잔액. CoinLedger가 사용량 기반으로 적립.
     @Published var coins: Int {
-        didSet { UserDefaults.standard.set(coins, forKey: Keys.coins); recordIntegrityChecksum() }
+        didSet { AppEnv.defaults.set(coins, forKey: Keys.coins); recordIntegrityChecksum() }
     }
     /// 무료 가챠권 잔여 매수. 첫 실행 시 1장 지급.
     @Published var gachaTickets: Int {
-        didSet { UserDefaults.standard.set(gachaTickets, forKey: Keys.gachaTickets); recordIntegrityChecksum() }
+        didSet { AppEnv.defaults.set(gachaTickets, forKey: Keys.gachaTickets); recordIntegrityChecksum() }
     }
     /// RP 프리미엄 가챠권 보유 수 — `[mythic+legendary]` 제한 풀 1뽑용. RP로만 구매(코인/일반티켓과 별개).
     @Published var premiumTickets: Int {
-        didSet { UserDefaults.standard.set(premiumTickets, forKey: Keys.premiumTickets); recordIntegrityChecksum() }
+        didSet { AppEnv.defaults.set(premiumTickets, forKey: Keys.premiumTickets); recordIntegrityChecksum() }
     }
     /// 길드 생성권 보유 수 — 코인 구매 소모품 (`CoinLedger.purchaseGuildPermit`). 서버
     /// guild-create 성공 응답 후 GuildView가 1 차감. 해체 후 재창설에도 새 생성권 필요.
     @Published var guildPermits: Int {
-        didSet { UserDefaults.standard.set(guildPermits, forKey: Keys.guildPermits); recordIntegrityChecksum() }
+        didSet { AppEnv.defaults.set(guildPermits, forKey: Keys.guildPermits); recordIntegrityChecksum() }
     }
     /// 펫 종별 보유 상태 (count + unlockedVariants).
     @Published var ownedPets: [PetKind: PetOwnership] {
@@ -185,7 +204,7 @@ final class Settings: ObservableObject {
     /// 데만 쓴다. 한 번 켜지면 영속 — 정상 사용자는 didSet이 항상 체크섬을 갱신하므로 켜지지
     /// 않는다. 계산은 `IntegrityGuard` 참조.
     @Published var integrityViolation: Bool {
-        didSet { UserDefaults.standard.set(integrityViolation, forKey: Keys.integrityViolation) }
+        didSet { AppEnv.defaults.set(integrityViolation, forKey: Keys.integrityViolation) }
     }
     /// 펫 종별 누적 사용 시간 (초). `petClaudeKind`/`petCursorKind`로 선택된 종에 polling tick마다
     /// 실시간 누적 — 더블카운트 (양쪽 차트가 같은 종이면 1tick에 2배).
@@ -199,16 +218,16 @@ final class Settings: ObservableObject {
     /// RP(Rank Point) 잔액. 랭킹 순위 보상으로만 적립(coins와 수급처 분리), 이펙트 구매로 소비.
     /// `RankPointLedger` 경유로만 변경 — 직접 mutate 금지 (CoinLedger와 동일 규약).
     @Published var rp: Int {
-        didSet { UserDefaults.standard.set(rp, forKey: Keys.rp) }
+        didSet { AppEnv.defaults.set(rp, forKey: Keys.rp) }
     }
     /// 이로치 조각 잔액. 만렙(variant 3) 펫의 오버플로우로만 적립, Prestige(홀로 이로치) 해금에만 소비.
     /// `ShardLedger` 경유로만 변경 (CoinLedger/RankPointLedger와 동일 규약).
     @Published var shinyShards: Int {
-        didSet { UserDefaults.standard.set(shinyShards, forKey: Keys.shinyShards) }
+        didSet { AppEnv.defaults.set(shinyShards, forKey: Keys.shinyShards) }
     }
     /// 누적 적립 RP (소비 무시). 통계용.
     @Published var rpTotalEarned: Int {
-        didSet { UserDefaults.standard.set(rpTotalEarned, forKey: Keys.rpTotalEarned) }
+        didSet { AppEnv.defaults.set(rpTotalEarned, forKey: Keys.rpTotalEarned) }
     }
     /// RP 증감 이력 (오래된 것 먼저, 최대 `RankPointLedger.historyLimit`건). `RankPointLedger`
     /// 경유로만 추가 — 직접 mutate 금지. 정산이 조용히 적립돼 "안 들어온다"로 체감되던 문제(#191)의
@@ -244,85 +263,85 @@ final class Settings: ObservableObject {
     }
     /// 마지막으로 본 Claude 5h/7d 윈도우의 resetAt. 같은 resetAt 안에서 pct delta로 적립.
     @Published var lastClaudeFiveHourReset: Date? {
-        didSet { UserDefaults.standard.set(lastClaudeFiveHourReset, forKey: Keys.lastClaudeFiveHourReset) }
+        didSet { AppEnv.defaults.set(lastClaudeFiveHourReset, forKey: Keys.lastClaudeFiveHourReset) }
     }
     @Published var lastClaudeSevenDayReset: Date? {
-        didSet { UserDefaults.standard.set(lastClaudeSevenDayReset, forKey: Keys.lastClaudeSevenDayReset) }
+        didSet { AppEnv.defaults.set(lastClaudeSevenDayReset, forKey: Keys.lastClaudeSevenDayReset) }
     }
     /// 같은 윈도우 안에서 마지막으로 본 사용률 — 다음 폴링과의 delta 적립용.
     @Published var lastClaudeFiveHourPctSeen: Double? {
-        didSet { UserDefaults.standard.set(lastClaudeFiveHourPctSeen, forKey: Keys.lastClaudeFiveHourPctSeen) }
+        didSet { AppEnv.defaults.set(lastClaudeFiveHourPctSeen, forKey: Keys.lastClaudeFiveHourPctSeen) }
     }
     @Published var lastClaudeSevenDayPctSeen: Double? {
-        didSet { UserDefaults.standard.set(lastClaudeSevenDayPctSeen, forKey: Keys.lastClaudeSevenDayPctSeen) }
+        didSet { AppEnv.defaults.set(lastClaudeSevenDayPctSeen, forKey: Keys.lastClaudeSevenDayPctSeen) }
     }
     // Codex 5h/7d/monthly 윈도우 적립용 — Claude와 동일한 (resetAt, pctSeen) state machine.
     // monthly는 free 전용 단일 창(Plus/Pro는 5h/7d만 옴). Claude/Cursor Free와 형평을 맞추려고
     // monthly도 적립 대상에 포함 → monthly state machine을 별도로 둔다.
     @Published var lastCodexFiveHourReset: Date? {
-        didSet { UserDefaults.standard.set(lastCodexFiveHourReset, forKey: Keys.lastCodexFiveHourReset) }
+        didSet { AppEnv.defaults.set(lastCodexFiveHourReset, forKey: Keys.lastCodexFiveHourReset) }
     }
     @Published var lastCodexSevenDayReset: Date? {
-        didSet { UserDefaults.standard.set(lastCodexSevenDayReset, forKey: Keys.lastCodexSevenDayReset) }
+        didSet { AppEnv.defaults.set(lastCodexSevenDayReset, forKey: Keys.lastCodexSevenDayReset) }
     }
     @Published var lastCodexMonthlyReset: Date? {
-        didSet { UserDefaults.standard.set(lastCodexMonthlyReset, forKey: Keys.lastCodexMonthlyReset) }
+        didSet { AppEnv.defaults.set(lastCodexMonthlyReset, forKey: Keys.lastCodexMonthlyReset) }
     }
     @Published var lastCodexFiveHourPctSeen: Double? {
-        didSet { UserDefaults.standard.set(lastCodexFiveHourPctSeen, forKey: Keys.lastCodexFiveHourPctSeen) }
+        didSet { AppEnv.defaults.set(lastCodexFiveHourPctSeen, forKey: Keys.lastCodexFiveHourPctSeen) }
     }
     @Published var lastCodexSevenDayPctSeen: Double? {
-        didSet { UserDefaults.standard.set(lastCodexSevenDayPctSeen, forKey: Keys.lastCodexSevenDayPctSeen) }
+        didSet { AppEnv.defaults.set(lastCodexSevenDayPctSeen, forKey: Keys.lastCodexSevenDayPctSeen) }
     }
     @Published var lastCodexMonthlyPctSeen: Double? {
-        didSet { UserDefaults.standard.set(lastCodexMonthlyPctSeen, forKey: Keys.lastCodexMonthlyPctSeen) }
+        didSet { AppEnv.defaults.set(lastCodexMonthlyPctSeen, forKey: Keys.lastCodexMonthlyPctSeen) }
     }
     /// 정수 절단으로 코인이 새지 않도록 폴링마다의 소수부를 누적해서 carry.
     /// (예: 0.835 coin/poll × 60 polls 가 50 coin로 누적되도록)
     @Published var claudeFiveHourCoinFraction: Double {
-        didSet { UserDefaults.standard.set(claudeFiveHourCoinFraction, forKey: Keys.claudeFiveHourCoinFraction) }
+        didSet { AppEnv.defaults.set(claudeFiveHourCoinFraction, forKey: Keys.claudeFiveHourCoinFraction) }
     }
     @Published var claudeSevenDayCoinFraction: Double {
-        didSet { UserDefaults.standard.set(claudeSevenDayCoinFraction, forKey: Keys.claudeSevenDayCoinFraction) }
+        didSet { AppEnv.defaults.set(claudeSevenDayCoinFraction, forKey: Keys.claudeSevenDayCoinFraction) }
     }
     @Published var cursorCoinFraction: Double {
-        didSet { UserDefaults.standard.set(cursorCoinFraction, forKey: Keys.cursorCoinFraction) }
+        didSet { AppEnv.defaults.set(cursorCoinFraction, forKey: Keys.cursorCoinFraction) }
     }
     @Published var codexFiveHourCoinFraction: Double {
-        didSet { UserDefaults.standard.set(codexFiveHourCoinFraction, forKey: Keys.codexFiveHourCoinFraction) }
+        didSet { AppEnv.defaults.set(codexFiveHourCoinFraction, forKey: Keys.codexFiveHourCoinFraction) }
     }
     @Published var codexSevenDayCoinFraction: Double {
-        didSet { UserDefaults.standard.set(codexSevenDayCoinFraction, forKey: Keys.codexSevenDayCoinFraction) }
+        didSet { AppEnv.defaults.set(codexSevenDayCoinFraction, forKey: Keys.codexSevenDayCoinFraction) }
     }
     @Published var codexMonthlyCoinFraction: Double {
-        didSet { UserDefaults.standard.set(codexMonthlyCoinFraction, forKey: Keys.codexMonthlyCoinFraction) }
+        didSet { AppEnv.defaults.set(codexMonthlyCoinFraction, forKey: Keys.codexMonthlyCoinFraction) }
     }
     /// CoinLedger가 처리한 마지막 Cursor 이벤트 timestamp (그 이후만 적립 대상).
     @Published var lastCursorEventCredited: Date? {
-        didSet { UserDefaults.standard.set(lastCursorEventCredited, forKey: Keys.lastCursorEventCredited) }
+        didSet { AppEnv.defaults.set(lastCursorEventCredited, forKey: Keys.lastCursorEventCredited) }
     }
     /// 누적 적립한 코인 총량 (소비 무시). 평균 일일 적립 계산용.
     @Published var coinsTotalEarned: Int {
-        didSet { UserDefaults.standard.set(coinsTotalEarned, forKey: Keys.coinsTotalEarned); recordIntegrityChecksum() }
+        didSet { AppEnv.defaults.set(coinsTotalEarned, forKey: Keys.coinsTotalEarned); recordIntegrityChecksum() }
     }
     /// 첫 적립 시각. 평균 일일 적립의 분모(경과 일수) 계산.
     @Published var firstCreditedAt: Date? {
-        didSet { UserDefaults.standard.set(firstCreditedAt, forKey: Keys.firstCreditedAt) }
+        didSet { AppEnv.defaults.set(firstCreditedAt, forKey: Keys.firstCreditedAt) }
     }
     /// Wellness nudge 마지막 표시 시각. 1시간 쿨다운이 앱 재실행 가로질러 유지되도록 영구화 (#11).
     @Published var lastWellnessShownAt: Date? {
-        didSet { UserDefaults.standard.set(lastWellnessShownAt, forKey: Keys.lastWellnessShownAt) }
+        didSet { AppEnv.defaults.set(lastWellnessShownAt, forKey: Keys.lastWellnessShownAt) }
     }
 
     /// 오늘의 개발 운세 윈도우를 마지막으로 연 날짜. topBar 의 빨간 dot 배지 표시 여부 결정.
     /// 실제 운세 캐시는 Supabase `daily_fortunes` 에 — 여기엔 dot 배지 dedup 용 마지막 표시일자만.
     @Published var dailyFortuneLastShownDate: Date? {
-        didSet { UserDefaults.standard.set(dailyFortuneLastShownDate, forKey: Keys.dailyFortuneLastShownDate) }
+        didSet { AppEnv.defaults.set(dailyFortuneLastShownDate, forKey: Keys.dailyFortuneLastShownDate) }
     }
     /// 오늘의 AI 뉴스 퀴즈를 마지막으로 푼 날짜 — topBar dot(오늘 미완료 표시)용 로컬 캐시.
     /// 실제 제출 상태의 source-of-truth는 서버(daily_quiz_submissions); 이 값은 dot 즉시 반영용.
     @Published var dailyQuizLastSolvedDate: Date? {
-        didSet { UserDefaults.standard.set(dailyQuizLastSolvedDate, forKey: Keys.dailyQuizLastSolvedDate) }
+        didSet { AppEnv.defaults.set(dailyQuizLastSolvedDate, forKey: Keys.dailyQuizLastSolvedDate) }
     }
 
     // MARK: - 도장 (Gym Badges)
@@ -333,68 +352,68 @@ final class Settings: ObservableObject {
 
     /// Standup — `dismissWellnessNudge`의 `.rewarded` 결과 시 +1.
     @Published var wellnessRespondedCount: Int {
-        didSet { UserDefaults.standard.set(wellnessRespondedCount, forKey: Keys.wellnessRespondedCount) }
+        didSet { AppEnv.defaults.set(wellnessRespondedCount, forKey: Keys.wellnessRespondedCount) }
     }
     /// Rate Limit — 7d resetAt 변경 직전 pct가 <80%면 +1.
     @Published var rateLimitWeeksPassed: Int {
-        didSet { UserDefaults.standard.set(rateLimitWeeksPassed, forKey: Keys.rateLimitWeeksPassed) }
+        didSet { AppEnv.defaults.set(rateLimitWeeksPassed, forKey: Keys.rateLimitWeeksPassed) }
     }
     /// Vibe·Claude — 사용량 이벤트를 받은 `CoinLedger.consume`이 vibeCategory=.claude로 분기해
     /// 누적한 코인 (5h+7d 합산, plan multiplier 포함).
     @Published var claudeCoinsEarned: Int {
-        didSet { UserDefaults.standard.set(claudeCoinsEarned, forKey: Keys.claudeCoinsEarned) }
+        didSet { AppEnv.defaults.set(claudeCoinsEarned, forKey: Keys.claudeCoinsEarned) }
     }
     /// Vibe·Cursor — 같은 경로에서 vibeCategory=.cursor로 분기해 누적한 코인.
     @Published var cursorCoinsEarned: Int {
-        didSet { UserDefaults.standard.set(cursorCoinsEarned, forKey: Keys.cursorCoinsEarned) }
+        didSet { AppEnv.defaults.set(cursorCoinsEarned, forKey: Keys.cursorCoinsEarned) }
     }
     @Published var codexCoinsEarned: Int {
-        didSet { UserDefaults.standard.set(codexCoinsEarned, forKey: Keys.codexCoinsEarned) }
+        didSet { AppEnv.defaults.set(codexCoinsEarned, forKey: Keys.codexCoinsEarned) }
     }
     /// Heartbeat — 36h grace streak. polling 진입 시 갱신.
     @Published var heartbeatStreak: Int {
-        didSet { UserDefaults.standard.set(heartbeatStreak, forKey: Keys.heartbeatStreak) }
+        didSet { AppEnv.defaults.set(heartbeatStreak, forKey: Keys.heartbeatStreak) }
     }
     @Published var heartbeatLastActiveAt: Date? {
-        didSet { UserDefaults.standard.set(heartbeatLastActiveAt, forKey: Keys.heartbeatLastActiveAt) }
+        didSet { AppEnv.defaults.set(heartbeatLastActiveAt, forKey: Keys.heartbeatLastActiveAt) }
     }
     /// Night Owl — 자정~6시 polling cycle의 sleep length 누적 (초).
     @Published var nightOwlSecondsAccumulated: Int {
-        didSet { UserDefaults.standard.set(nightOwlSecondsAccumulated, forKey: Keys.nightOwlSecondsAccumulated) }
+        didSet { AppEnv.defaults.set(nightOwlSecondsAccumulated, forKey: Keys.nightOwlSecondsAccumulated) }
     }
     /// 사용량 스트릭 — 실제 usage 이벤트가 발생한 연속 일수. StreakLedger가 그날 첫 이벤트에 갱신.
     /// Heartbeat(폴링 생존)와 달리 실제 사용량이 있어야만 오르므로 조작 불가.
     @Published var usageStreak: Int {
-        didSet { UserDefaults.standard.set(usageStreak, forKey: Keys.usageStreak) }
+        didSet { AppEnv.defaults.set(usageStreak, forKey: Keys.usageStreak) }
     }
     /// 사용량 스트릭 판정 기준일 — 마지막으로 usage가 인정된 날. 같은 날 재발동 방지 + 연속성 판정.
     @Published var usageStreakLastDay: Date? {
-        didSet { UserDefaults.standard.set(usageStreakLastDay, forKey: Keys.usageStreakLastDay) }
+        didSet { AppEnv.defaults.set(usageStreakLastDay, forKey: Keys.usageStreakLastDay) }
     }
     // ── 클라우드 제도 신규 카운터 (gym-expansion.md §5.5) ──
     /// Guild·Contribution — 길드 기여(코인/VP) 누적.
     @Published var guildContributionTotal: Int {
-        didSet { UserDefaults.standard.set(guildContributionTotal, forKey: Keys.guildContributionTotal) }
+        didSet { AppEnv.defaults.set(guildContributionTotal, forKey: Keys.guildContributionTotal) }
     }
     /// Guild·Tenure 기준 — 길드 최초 가입 시각. tenure = now − joinedAt(일).
     @Published var guildJoinedAt: Date? {
-        didSet { UserDefaults.standard.set(guildJoinedAt, forKey: Keys.guildJoinedAt) }
+        didSet { AppEnv.defaults.set(guildJoinedAt, forKey: Keys.guildJoinedAt) }
     }
     /// Daily·Quiz — 데일리 퀴즈 정답 누적.
     @Published var dailyQuizCorrectTotal: Int {
-        didSet { UserDefaults.standard.set(dailyQuizCorrectTotal, forKey: Keys.dailyQuizCorrectTotal) }
+        didSet { AppEnv.defaults.set(dailyQuizCorrectTotal, forKey: Keys.dailyQuizCorrectTotal) }
     }
     /// Daily·Ritual — 일일 방문 streak.
     @Published var dailyRitualStreak: Int {
-        didSet { UserDefaults.standard.set(dailyRitualStreak, forKey: Keys.dailyRitualStreak) }
+        didSet { AppEnv.defaults.set(dailyRitualStreak, forKey: Keys.dailyRitualStreak) }
     }
     /// Daily·Ritual 판정 기준일 — 마지막 방문 인정일(같은 날 재발동 방지).
     @Published var dailyRitualLastDay: Date? {
-        didSet { UserDefaults.standard.set(dailyRitualLastDay, forKey: Keys.dailyRitualLastDay) }
+        didSet { AppEnv.defaults.set(dailyRitualLastDay, forKey: Keys.dailyRitualLastDay) }
     }
     /// OSS·Bug — 버그 리포트 제출 횟수.
     @Published var bugReportCount: Int {
-        didSet { UserDefaults.standard.set(bugReportCount, forKey: Keys.bugReportCount) }
+        didSet { AppEnv.defaults.set(bugReportCount, forKey: Keys.bugReportCount) }
     }
     /// Daily·Ritual streak 갱신 — 하루 1회, 연속 방문이면 +1, 하루라도 끊기면 1로 리셋.
     static func bumpDailyRitual() {
@@ -428,15 +447,15 @@ final class Settings: ObservableObject {
     }
     /// 챔피언 뱃지(33번째) 획득 시각. nil = 미획득.
     @Published var championBadgeEarnedAt: Date? {
-        didSet { UserDefaults.standard.set(championBadgeEarnedAt, forKey: Keys.championBadgeEarnedAt) }
+        didSet { AppEnv.defaults.set(championBadgeEarnedAt, forKey: Keys.championBadgeEarnedAt) }
     }
     /// 클라우드 제도 챔피언 획득 시각.
     @Published var cloudChampionAt: Date? {
-        didSet { UserDefaults.standard.set(cloudChampionAt, forKey: Keys.cloudChampionAt) }
+        didSet { AppEnv.defaults.set(cloudChampionAt, forKey: Keys.cloudChampionAt) }
     }
     /// Grand Champion(모든 대륙 정복) 획득 시각.
     @Published var grandChampionAt: Date? {
-        didSet { UserDefaults.standard.set(grandChampionAt, forKey: Keys.grandChampionAt) }
+        didSet { AppEnv.defaults.set(grandChampionAt, forKey: Keys.grandChampionAt) }
     }
     /// 발견한 region(BadgeRegion.rawValue) — 구름 fog 해제 상태(gym-map-redesign.md).
     @Published var discoveredRegions: Set<String> {
@@ -445,39 +464,39 @@ final class Settings: ObservableObject {
     /// 도장 페이지에서 reveal 강조용 — 앱 launch 후 아직 사용자가 도장 페이지를 안 열어
     /// migration으로 자동 클리어된 뱃지를 처음 보는 상태인지.
     @Published var hasViewedGymPage: Bool {
-        didSet { UserDefaults.standard.set(hasViewedGymPage, forKey: Keys.hasViewedGymPage) }
+        didSet { AppEnv.defaults.set(hasViewedGymPage, forKey: Keys.hasViewedGymPage) }
     }
     /// 인앱 사용 가이드를 아직 안 본 상태인지 — 안 봤으면 가이드 아이콘에 알림 점 표시.
     /// 기본 false라 신규/기존 사용자 모두 처음 한 번은 배지가 뜨고, 가이드를 열면 해제된다.
     @Published var hasViewedGuide: Bool {
-        didSet { UserDefaults.standard.set(hasViewedGuide, forKey: Keys.hasViewedGuide) }
+        didSet { AppEnv.defaults.set(hasViewedGuide, forKey: Keys.hasViewedGuide) }
     }
     /// "Buy me a coffee" 답례 보상(5,000 coin · 2,000 RP)을 1회 수령했는지.
     @Published var hasReceivedCoffeeReward: Bool {
-        didSet { UserDefaults.standard.set(hasReceivedCoffeeReward, forKey: Keys.hasReceivedCoffeeReward) }
+        didSet { AppEnv.defaults.set(hasReceivedCoffeeReward, forKey: Keys.hasReceivedCoffeeReward) }
     }
     /// 마지막 leaderboard 폴링에서 받은 현재 소속 테넌트 slug("public"=미인증). 사내 인증 유도
     /// 자동 팝업(`TenantVerifyPromptManager`)이 시작 시점에 미인증 여부를 판단하는 캐시.
     @Published var currentTenant: String? {
-        didSet { UserDefaults.standard.set(currentTenant, forKey: Keys.currentTenant) }
+        didSet { AppEnv.defaults.set(currentTenant, forKey: Keys.currentTenant) }
     }
     /// 소속 재인증 기한(서버 sync가 내려줌). nil이면 재인증 요구 없음. 기한 전까지는 유예—
     /// 기존 소속 권한이 유지되고, 지나면 서버가 기본 테넌트로 강등해 게이트 콘텐츠가 막힌다.
     @Published var tenantReverifyDueAt: Date? {
-        didSet { UserDefaults.standard.set(tenantReverifyDueAt, forKey: Keys.tenantReverifyDueAt) }
+        didSet { AppEnv.defaults.set(tenantReverifyDueAt, forKey: Keys.tenantReverifyDueAt) }
     }
     /// 사내 인증 유도 팝업을 마지막으로 띄운 시각. 하루 1회로 억제(24h 경과 시 재표시).
     @Published var lastTenantPromptAt: Date? {
-        didSet { UserDefaults.standard.set(lastTenantPromptAt, forKey: Keys.lastTenantPromptAt) }
+        didSet { AppEnv.defaults.set(lastTenantPromptAt, forKey: Keys.lastTenantPromptAt) }
     }
     /// 사내 인증 유도 캠페인(v0.16.2) coin 3,000 보너스를 1회 수령했는지. RP는 서버 rp_rewards가 담당.
     @Published var hasReceivedTenantVerifyBonus: Bool {
-        didSet { UserDefaults.standard.set(hasReceivedTenantVerifyBonus, forKey: Keys.hasReceivedTenantVerifyBonus) }
+        didSet { AppEnv.defaults.set(hasReceivedTenantVerifyBonus, forKey: Keys.hasReceivedTenantVerifyBonus) }
     }
     /// 사내 인증 유도 자동 팝업을 '다시 보지 않기'로 껐는지. true면 팝업은 영구 중단되고, 이후엔
     /// 랭킹 헤더의 '사내 인증 🎁' 버튼으로만 인증 진입할 수 있다.
     @Published var tenantPromptOptedOut: Bool {
-        didSet { UserDefaults.standard.set(tenantPromptOptedOut, forKey: Keys.tenantPromptOptedOut) }
+        didSet { AppEnv.defaults.set(tenantPromptOptedOut, forKey: Keys.tenantPromptOptedOut) }
     }
 
     // MARK: - 펫 컬렉션 (셋 보너스)
@@ -499,7 +518,7 @@ final class Settings: ObservableObject {
     /// 가장 최근에 컴플리트된 컬렉션의 rawValue — 가챠 hatched 화면이 컴플리트 배너를
     /// 띄우고 nil로 소비. UI가 한 번만 읽고 비우는 단발성 플래그.
     @Published var pendingCollectionCelebration: String? {
-        didSet { UserDefaults.standard.set(pendingCollectionCelebration, forKey: Keys.pendingCollectionCelebration) }
+        didSet { AppEnv.defaults.set(pendingCollectionCelebration, forKey: Keys.pendingCollectionCelebration) }
     }
     /// 새로 컴플리트된 컬렉션 강조 — `pendingHighlights`(펫 슬롯)와 동일 패턴.
     /// 사용자가 뱃지를 직접 클릭해 확인하기 전까지 노란 ! 마크 + 외곽 강조 유지. 영속.
@@ -517,7 +536,7 @@ final class Settings: ObservableObject {
 
     /// 트레이너 5자리 ID — 첫 launch 시 랜덤 생성, 영속. 사용자 변경 불가 (포켓몬 트레이너 ID 톤).
     @Published var trainerID: String {
-        didSet { UserDefaults.standard.set(trainerID, forKey: Keys.trainerID) }
+        didSet { AppEnv.defaults.set(trainerID, forKey: Keys.trainerID) }
     }
     /// 트레이너 카드 customization 상태 (avatar/background/frame/title/accessory/layout).
     @Published var trainerCard: TrainerCard {
@@ -535,22 +554,22 @@ final class Settings: ObservableObject {
     // 아레나 칭호 언락용 통계 캐시(서버 SSOT 미러, 표시/칭호 판정 전용). @Published 불요 — 칭호는
     // ReportView 열 때 lazy 평가. ArenaView.loadRankedState 가 leaderboard 응답으로 갱신.
     var pvpBestRating: Int {
-        get { UserDefaults.standard.integer(forKey: "pvp.bestRating") }
-        set { UserDefaults.standard.set(newValue, forKey: "pvp.bestRating") }
+        get { AppEnv.defaults.integer(forKey: "pvp.bestRating") }
+        set { AppEnv.defaults.set(newValue, forKey: "pvp.bestRating") }
     }
     var pvpBestRank: Int {
-        get { (UserDefaults.standard.object(forKey: "pvp.bestRank") as? Int) ?? Int.max }
-        set { UserDefaults.standard.set(newValue, forKey: "pvp.bestRank") }
+        get { (AppEnv.defaults.object(forKey: "pvp.bestRank") as? Int) ?? Int.max }
+        set { AppEnv.defaults.set(newValue, forKey: "pvp.bestRank") }
     }
     var pvpWinsCache: Int {
-        get { UserDefaults.standard.integer(forKey: "pvp.wins") }
-        set { UserDefaults.standard.set(newValue, forKey: "pvp.wins") }
+        get { AppEnv.defaults.integer(forKey: "pvp.wins") }
+        set { AppEnv.defaults.set(newValue, forKey: "pvp.wins") }
     }
     /// 아레나 배틀 팀(순서 = 선봉 순서). 탭 전환·재실행에도 유지 (#156 T3). 소유하지 않은 kind는
     /// 로드 시 ArenaView 에서 필터. @Published 불요 — ArenaView 가 로컬 @State teamKinds 로 미러한다.
     var battleTeam: [PetKind] {
         get {
-            (UserDefaults.standard.data(forKey: Keys.battleTeam)
+            (AppEnv.defaults.data(forKey: Keys.battleTeam)
                 .flatMap { try? JSONDecoder().decode([PetKind].self, from: $0) }) ?? []
         }
         set { persist(newValue, forKey: Keys.battleTeam) }
@@ -558,23 +577,23 @@ final class Settings: ObservableObject {
     /// 카드를 공유 이미지로 export할 때 GitHub login을 노출할지. 기본 false (privacy first) —
     /// GitHub 연결한 사용자가 명시적 opt-in해야 카드에 username 박힘.
     @Published var showGitHubLoginInCard: Bool {
-        didSet { UserDefaults.standard.set(showGitHubLoginInCard, forKey: Keys.showGitHubLoginInCard) }
+        didSet { AppEnv.defaults.set(showGitHubLoginInCard, forKey: Keys.showGitHubLoginInCard) }
     }
 
     // MARK: - GitHub 기여자 보너스
 
     /// 연결된 GitHub login (예: "youznn"). nil이면 미연결. 토큰은 Keychain에 별도 저장.
     @Published var githubLogin: String? {
-        didSet { UserDefaults.standard.set(githubLogin, forKey: Keys.githubLogin) }
+        didSet { AppEnv.defaults.set(githubLogin, forKey: Keys.githubLogin) }
     }
     /// 연결된 GitHub user id — login 변경에 안전한 식별자.
     @Published var githubUserID: Int? {
-        didSet { UserDefaults.standard.set(githubUserID, forKey: Keys.githubUserID) }
+        didSet { AppEnv.defaults.set(githubUserID, forKey: Keys.githubUserID) }
     }
     /// GitHub 계정 생성 시각(ISO 8601 UTC). "오늘의 개발 운세" 의 사주 "생년월일" 로 사용.
     /// 한번 받아 두면 변하지 않음 — 토큰 갱신 때마다 다시 fetch 하지 않음.
     @Published var githubCreatedAt: String? {
-        didSet { UserDefaults.standard.set(githubCreatedAt, forKey: Keys.githubCreatedAt) }
+        didSet { AppEnv.defaults.set(githubCreatedAt, forKey: Keys.githubCreatedAt) }
     }
     /// 이미 보너스가 적립된 PR 번호 집합 (dedupe). 한번 들어가면 영구 보존 — 계정 갈아끼워도 재지급 안 됨.
     @Published var creditedPRNumbers: Set<Int> {
@@ -596,17 +615,17 @@ final class Settings: ObservableObject {
 
     /// 사용자가 랭킹 참여를 켰는지. 기본 false (현재 앱 철학: 로컬 우선, opt-in).
     @Published var rankingEnabled: Bool {
-        didSet { UserDefaults.standard.set(rankingEnabled, forKey: Keys.rankingEnabled) }
+        didSet { AppEnv.defaults.set(rankingEnabled, forKey: Keys.rankingEnabled) }
     }
     /// 디바이스 식별자. 첫 옵트인 시 클라이언트에서 UUID 생성, 서버 register 시 등록.
     /// 재설치하면 잃음 → recovery code/GitHub OAuth로 새 UUID를 같은 user에 매핑.
     @Published var rankingDeviceID: String {
-        didSet { UserDefaults.standard.set(rankingDeviceID, forKey: Keys.rankingDeviceID) }
+        didSet { AppEnv.defaults.set(rankingDeviceID, forKey: Keys.rankingDeviceID) }
     }
     /// 보드에 표시될 닉네임. 기본값은 `NicknameGenerator.generate()` 또는 `githubLogin`.
     /// 사용자가 자유 변경 가능. 서버측 unique 제약(case-insensitive) — 충돌 시 register 실패.
     @Published var rankingNickname: String {
-        didSet { UserDefaults.standard.set(rankingNickname, forKey: Keys.rankingNickname) }
+        didSet { AppEnv.defaults.set(rankingNickname, forKey: Keys.rankingNickname) }
     }
     /// 서버가 register 응답으로 발급한 복구 코드 (XXXX-XXXX-XXXX). 사용자가 1회 보고 별도
     /// 보관. 분실 시 GitHub 연동이 두 번째 복구 수단.
@@ -624,12 +643,12 @@ final class Settings: ObservableObject {
     }
     /// 옵트인 시점의 `coinsTotalEarned` 스냅샷. 서버에 baseline 이전 데이터는 보내지 않음.
     @Published var rankingBaselineCoins: Int {
-        didSet { UserDefaults.standard.set(rankingBaselineCoins, forKey: Keys.rankingBaselineCoins) }
+        didSet { AppEnv.defaults.set(rankingBaselineCoins, forKey: Keys.rankingBaselineCoins) }
     }
     /// 마지막 성공 제출 시점의 `coinsTotalEarned`. 다음 제출 delta = 현재 total - 이 값.
     /// 첫 제출 전엔 baseline과 동일.
     @Published var rankingLastSubmittedTotal: Int {
-        didSet { UserDefaults.standard.set(rankingLastSubmittedTotal, forKey: Keys.rankingLastSubmittedTotal) }
+        didSet { AppEnv.defaults.set(rankingLastSubmittedTotal, forKey: Keys.rankingLastSubmittedTotal) }
     }
     /// [어뷰징 방어] 신규 등록자는 baseline(옵트인 시점 VP) 이후 증가분만 서버에 제출한다.
     /// 과거 register가 클라이언트 누적값(initialCoins)을 한방에 인정하던 farming 통로를 막은 뒤
@@ -637,7 +656,7 @@ final class Settings: ObservableObject {
     /// 기존(레거시) 등록자는 false로 남아 `rankingScoreEarnedVP` 절대 누적 기준 제출을 유지 →
     /// 서버 total_coins와의 동기가 깨지지 않아 완전 무영향. true면 ViewModel.submit이 baseline 차감.
     @Published var rankingUsesZeroBaseline: Bool {
-        didSet { UserDefaults.standard.set(rankingUsesZeroBaseline, forKey: Keys.rankingUsesZeroBaseline) }
+        didSet { AppEnv.defaults.set(rankingUsesZeroBaseline, forKey: Keys.rankingUsesZeroBaseline) }
     }
     /// 현재 "서버 제출 단위"의 누적 total — `rankingLastSubmittedTotal`과 반드시 같은 단위다.
     /// zeroBaseline 계정은 baseline 이후 증가분(서버 total_coins와 동일 단위), 레거시는 절대 VP.
@@ -655,41 +674,41 @@ final class Settings: ObservableObject {
     }
     /// 마지막 성공 제출 시각. 시간 비례 캡 계산(서버측) + UI 표시용.
     @Published var rankingLastSubmittedAt: Date? {
-        didSet { UserDefaults.standard.set(rankingLastSubmittedAt, forKey: Keys.rankingLastSubmittedAt) }
+        didSet { AppEnv.defaults.set(rankingLastSubmittedAt, forKey: Keys.rankingLastSubmittedAt) }
     }
     /// 서버 등록 완료 여부. 등록 전엔 enabled=true 여도 제출 안 함.
     /// enabled OFF/ON 토글로는 변하지 않음 — 계정 삭제 시에만 false.
     @Published var rankingRegistered: Bool {
-        didSet { UserDefaults.standard.set(rankingRegistered, forKey: Keys.rankingRegistered) }
+        didSet { AppEnv.defaults.set(rankingRegistered, forKey: Keys.rankingRegistered) }
     }
     /// 처리방침 동의 여부. 옵트인 UI에서 체크박스로 받음. 미동의면 register 시도 차단.
     @Published var rankingPrivacyAccepted: Bool {
-        didSet { UserDefaults.standard.set(rankingPrivacyAccepted, forKey: Keys.rankingPrivacyAccepted) }
+        didSet { AppEnv.defaults.set(rankingPrivacyAccepted, forKey: Keys.rankingPrivacyAccepted) }
     }
     /// 내 길드 표시 캐시 — 서버(guild-info)가 SSOT, 여기는 탭 첫 로드 전 표시·트레이너 카드
     /// 태그(P2a)용. 빈 문자열 = 무길드. guild-info 응답마다 동기화.
     @Published var guildID: String {
         didSet {
-            UserDefaults.standard.set(guildID, forKey: Keys.guildID)
+            AppEnv.defaults.set(guildID, forKey: Keys.guildID)
             // 도장 Guild·Tenure 기준 — 최초 가입 시각 기록(재가입해도 유지).
             if !guildID.isEmpty && guildJoinedAt == nil { guildJoinedAt = Date() }
         }
     }
     @Published var guildName: String {
-        didSet { UserDefaults.standard.set(guildName, forKey: Keys.guildName) }
+        didSet { AppEnv.defaults.set(guildName, forKey: Keys.guildName) }
     }
     @Published var isGuildLeader: Bool {
-        didSet { UserDefaults.standard.set(isGuildLeader, forKey: Keys.isGuildLeader) }
+        didSet { AppEnv.defaults.set(isGuildLeader, forKey: Keys.isGuildLeader) }
     }
     /// 랭킹 점수 (Vibe Points) — Claude/Cursor 사용량을 "USD 가치"로 환산한 누적값.
     /// 1 VP = 1 cent (= $0.01) 등가. VPLedger가 UsageEvent 받을 때마다 plan price 기반 환산해
     /// 누적. coinsTotalEarned (가챠 코인 누적)과 별도. 보드 제출의 source-of-truth.
     @Published var rankingScoreEarnedVP: Int {
-        didSet { UserDefaults.standard.set(rankingScoreEarnedVP, forKey: Keys.rankingScoreEarnedVP); recordIntegrityChecksum() }
+        didSet { AppEnv.defaults.set(rankingScoreEarnedVP, forKey: Keys.rankingScoreEarnedVP); recordIntegrityChecksum() }
     }
     /// VP 절단 손실 carry — `pureValue × vpFactor`가 소수일 때 누적 보존용.
     @Published var rankingScoreFractionVP: Double {
-        didSet { UserDefaults.standard.set(rankingScoreFractionVP, forKey: Keys.rankingScoreFractionVP) }
+        didSet { AppEnv.defaults.set(rankingScoreFractionVP, forKey: Keys.rankingScoreFractionVP) }
     }
     /// 이미 수령한 명예의 전당 보상 dedup. 형식: "YYYY-MM.rank" (예: "2026-05.1").
     /// 한 번 들어가면 영구 — 서버측 idempotency와 함께 이중 지급 방지.
@@ -714,27 +733,27 @@ final class Settings: ObservableObject {
     /// Cursor Pro/Free 사용자의 request delta 추적용. Ultra는 events 기반이라 불필요.
     /// startOfMonth가 바뀌면 reset.
     @Published var cursorLastRequestsSeen: Int? {
-        didSet { UserDefaults.standard.set(cursorLastRequestsSeen, forKey: Keys.cursorLastRequestsSeen) }
+        didSet { AppEnv.defaults.set(cursorLastRequestsSeen, forKey: Keys.cursorLastRequestsSeen) }
     }
     @Published var cursorLastStartOfMonth: Date? {
-        didSet { UserDefaults.standard.set(cursorLastStartOfMonth, forKey: Keys.cursorLastStartOfMonth) }
+        didSet { AppEnv.defaults.set(cursorLastStartOfMonth, forKey: Keys.cursorLastStartOfMonth) }
     }
     /// 마지막으로 게시판 윈도우를 본 시점. 메인 패널의 진입점에 표시되는 미확인 글 카운트의 기준.
     /// nil이면 처음 — ViewModel.refreshBoard 첫 cycle에서 현재 시각으로 시드해 과거 글 전체를
     /// 미확인으로 표시하지 않게 함.
     @Published var boardLastSeenAt: Date? {
-        didSet { UserDefaults.standard.set(boardLastSeenAt, forKey: Keys.boardLastSeenAt) }
+        didSet { AppEnv.defaults.set(boardLastSeenAt, forKey: Keys.boardLastSeenAt) }
     }
     /// 본인 누적 메달 캐시 — 진실은 서버 `monthly_winners`. leaderboard 응답의 `myMedals`로
     /// 갱신해 리포트 카드가 서버 round-trip 없이 즉시 그릴 수 있게 한다. 백업 대상 아님(재집계 가능).
     @Published var myMedalGold: Int {
-        didSet { UserDefaults.standard.set(myMedalGold, forKey: Keys.myMedalGold) }
+        didSet { AppEnv.defaults.set(myMedalGold, forKey: Keys.myMedalGold) }
     }
     @Published var myMedalSilver: Int {
-        didSet { UserDefaults.standard.set(myMedalSilver, forKey: Keys.myMedalSilver) }
+        didSet { AppEnv.defaults.set(myMedalSilver, forKey: Keys.myMedalSilver) }
     }
     @Published var myMedalBronze: Int {
-        didSet { UserDefaults.standard.set(myMedalBronze, forKey: Keys.myMedalBronze) }
+        didSet { AppEnv.defaults.set(myMedalBronze, forKey: Keys.myMedalBronze) }
     }
     /// 카드 렌더 주입용 — 캐시된 3개 카운트를 `MedalTally`로 묶음.
     var medalTally: MedalTally {
@@ -748,8 +767,10 @@ final class Settings: ObservableObject {
         if myMedalBronze != m.bronze { myMedalBronze = m.bronze }
     }
 
-    private init() {
-        let d = UserDefaults.standard
+    /// 실사용에서는 `shared`가 유일한 인스턴스다. `internal`인 것은 `resetForTesting()`이
+    /// 새 인스턴스를 만들 수 있어야 하기 때문 — 실사용 코드에서 직접 생성하지 말 것.
+    init() {
+        let d = AppEnv.defaults
         self.panelOpacity  = (d.object(forKey: Keys.panelOpacity) as? Double) ?? 1.0
         self.notifyEnabled = (d.object(forKey: Keys.notifyEnabled) as? Bool) ?? true
         self.experimentalRemotePetMeta = (d.object(forKey: Keys.experimentalRemotePetMeta) as? Bool) ?? false
@@ -1011,7 +1032,7 @@ final class Settings: ObservableObject {
     private func applyLaunchMigrations(hadLegacyClaudeKind: Bool,
                                        hadLegacyCursorKind: Bool,
                                        needsPresetPersist: Bool) {
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         // 신규 사용자 / 기존 사용자 모두 최종 가챠권 3장이 되도록 두 단계로 처리:
         //   1) 신규 사용자 (hasCompletedGachaMigration 아직 false): 첫 실행 시 3장 지급
         //   2) 기존 사용자 (이미 1장 받고 마이그레이션 완료): v0.3.2 보너스 블록에서 +2장
@@ -1223,10 +1244,10 @@ final class Settings: ObservableObject {
             guildPermits: guildPermits,
             rankingScoreEarnedVP: rankingScoreEarnedVP,
             ownedPetsSerialized: serialized, keyBase64: key) else { return }
-        UserDefaults.standard.set(cs, forKey: Keys.integrityChecksum)
-        UserDefaults.standard.set(IntegrityGuard.formatVersion, forKey: Keys.integrityChecksumVersion)
+        AppEnv.defaults.set(cs, forKey: Keys.integrityChecksum)
+        AppEnv.defaults.set(IntegrityGuard.formatVersion, forKey: Keys.integrityChecksumVersion)
         // 이 체크섬을 만든 키의 지문도 함께 저장 → 다음 verify가 키 교체(유실→재생성)를 감지.
-        UserDefaults.standard.set(IntegrityGuard.keyFingerprint(keyBase64: key), forKey: Keys.integrityKeyFingerprint)
+        AppEnv.defaults.set(IntegrityGuard.keyFingerprint(keyBase64: key), forKey: Keys.integrityKeyFingerprint)
     }
 
     /// 시작 시 1회 — 저장된 체크섬과 현재 값을 비교해 앱 외부 조작을 탐지. 데이터는 수정하지
@@ -1249,14 +1270,14 @@ final class Settings: ObservableObject {
             guildPermits: guildPermits,
             rankingScoreEarnedVP: rankingScoreEarnedVP,
             ownedPetsSerialized: serialized, keyBase64: key) else { return }
-        guard let stored = UserDefaults.standard.string(forKey: Keys.integrityChecksum) else {
+        guard let stored = AppEnv.defaults.string(forKey: Keys.integrityChecksum) else {
             recordIntegrityChecksum()  // 최초 — 신뢰하고 기록
             return
         }
         // 포맷 버전 마이그레이션 — 구 포맷(v1: guildPermits 없음) 체크섬과는 비교 불가.
         // 업그레이드 직후 1회에 한해 현재 상태를 신뢰하고 새 포맷으로 재기록한다
         // (가드 도입 시점의 "소급 불가"와 동일한 트레이드오프 — 오탐 전면 발생보다 낫다).
-        let storedVersion = UserDefaults.standard.integer(forKey: Keys.integrityChecksumVersion)
+        let storedVersion = AppEnv.defaults.integer(forKey: Keys.integrityChecksumVersion)
         if storedVersion < IntegrityGuard.formatVersion {
             recordIntegrityChecksum()
             return
@@ -1266,7 +1287,7 @@ final class Settings: ObservableObject {
         // 지문이 없던 레거시(이 필드 도입 전) 역시 첫 실행에서 여기로 흡수돼, 이미 이 버그로 잘못
         // 켜진 integrityViolation을 함께 해제한다(가드는 casual deterrent이고 로컬 조작은 타인 피해가
         // 없어, formatVersion 마이그레이션과 동일하게 1회 신뢰 리베이스를 택한다).
-        let storedFingerprint = UserDefaults.standard.string(forKey: Keys.integrityKeyFingerprint)
+        let storedFingerprint = AppEnv.defaults.string(forKey: Keys.integrityKeyFingerprint)
         let currentFingerprint = IntegrityGuard.keyFingerprint(keyBase64: key)
         if storedFingerprint != currentFingerprint {
             if integrityViolation { integrityViolation = false }
@@ -1283,7 +1304,7 @@ final class Settings: ObservableObject {
     /// 도장 (Gym Badges) 마이그레이션 — Stash·Dependency만 소급, 나머지 6 카테고리는 0부터.
     /// `Settings.shared` 초기화가 끝난 뒤 App 시작 훅(`applicationDidFinishLaunching`)에서 1회 호출.
     func applyGymMigrationIfNeeded() {
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         // 게이트 방식(gym-battle.md) 도입 — 기존 자동 획득한 도장 진행을 초기화하고 관장 배틀로 재획득.
         // clearedBadges/챔피언/지역마스터를 리셋. creditedBadgeRewards는 유지 → 뱃지 코인 재지급 방지.
         if !d.bool(forKey: Keys.hasResetBadgesForBattle) {
@@ -1306,7 +1327,7 @@ final class Settings: ObservableObject {
     /// `hasMigratedContributorBonusUpgrade` flag — 두 번 실행 안 됨.
     /// `Settings.shared` 재진입 위험 없음(`creditContributorBonusUpgrade`는 단순 credit).
     func applyContributorBonusUpgradeIfNeeded() {
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         guard !d.bool(forKey: Keys.hasMigratedContributorBonusUpgrade) else { return }
         let prCount = creditedPRNumbers.count
         if prCount > 0 {
@@ -1327,7 +1348,7 @@ final class Settings: ObservableObject {
     ///
     /// `BadgeRegistry`처럼 `Settings.shared`를 재진입하므로 init 안에서 호출 금지 — App 시작 후 호출.
     func applyCollectionMigrationIfNeeded() {
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         if !d.bool(forKey: Keys.hasMigratedCollectionBonuses) {
             PetCollectionRegistry.evaluate(silent: true)
             d.set(true, forKey: Keys.hasMigratedCollectionBonuses)
@@ -1358,7 +1379,7 @@ final class Settings: ObservableObject {
         wasExistingUser: Bool,
         _ apply: () -> Void
     ) {
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         guard !d.bool(forKey: key) else { return }
         if !onlyExisting || wasExistingUser {
             apply()
@@ -1374,7 +1395,7 @@ final class Settings: ObservableObject {
     private static let persistEncoder = JSONEncoder()
     private func persist<T: Encodable>(_ value: T, forKey key: String) {
         if let data = try? Self.persistEncoder.encode(value) {
-            UserDefaults.standard.set(data, forKey: key)
+            AppEnv.defaults.set(data, forKey: key)
         }
     }
 

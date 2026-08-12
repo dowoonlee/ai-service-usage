@@ -56,6 +56,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 디버그 로그 회전 — 5MB 초과 시 .bak으로 rename. 다른 컴포넌트의 첫 log 호출
         // 이전에 회전해야 새 사이클의 로그가 깨끗한 파일에서 시작.
         DebugLog.rotateIfNeeded()
+        // 샌드박스로 뜨면 설정·keychain·JSONL이 전부 임시본이라 사용자에겐 "데이터가 사라진" 것으로
+        // 보인다. 버그 리포트에서 그 상황을 한 줄로 판별할 수 있게 시작 시 기록한다.
+        if AppEnv.isSandboxed {
+            DebugLog.log("⚠️ AppEnv: SANDBOX 모드로 시작 — 설정/keychain/JSONL이 임시 저장소입니다")
+        }
         // 직전 실행 비정상 종료 여부 — setupPanel 보다 *먼저* 호출해서 키 갱신을 끝낸다.
         // 다이얼로그 자체는 패널이 뜬 뒤에 보여야 자연스럽기 때문에 record 만 잡아두고 나중에 띄움.
         let crashRecord = CrashReporter.handleLaunch()
@@ -186,7 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func setupPanel() {
-        let defaults = UserDefaults.standard
+        let defaults = AppEnv.defaults
         let savedOriginX = defaults.object(forKey: "panel.x") as? Double
         let savedOriginY = defaults.object(forKey: "panel.y") as? Double
         let savedW = defaults.object(forKey: "panel.w") as? Double ?? 260
@@ -269,7 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func savePanelFrame() {
         guard let p = panel else { return }
         let f = p.frame
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         d.set(Double(f.origin.x), forKey: "panel.x")
         d.set(Double(f.origin.y), forKey: "panel.y")
         d.set(Double(f.size.width), forKey: "panel.w")

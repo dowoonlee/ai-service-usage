@@ -33,7 +33,7 @@ enum CrashReporter {
     /// 시작 시 1회 호출. 직전 실행이 비정상 종료였고 회수할 `.ips`가 있으면 반환.
     /// 호출 직후 키들을 다음 사이클을 위해 갱신.
     static func handleLaunch() -> CrashRecord? {
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         let now = Date()
 
         // 첫 실행 감지 — lastLaunchAt 키가 없으면 fresh install. 비정상 종료로 오인 금지.
@@ -57,14 +57,14 @@ enum CrashReporter {
     /// `applicationWillTerminate` 에서 호출 — 정상 종료 마킹.
     /// `synchronize()` 는 deprecated 이지만 종료 직전 동기 flush 보장이 필요해서 의도적으로 호출.
     static func markCleanShutdown() {
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         d.set(true, forKey: cleanShutdownKey)
         d.synchronize()
     }
 
     /// 사용자에게 한 번 안내한 `.ips` 는 다시 안 보이도록 등록. "무시하기" 눌러도 호출.
     static func markReported(_ ipsPath: URL) {
-        let d = UserDefaults.standard
+        let d = AppEnv.defaults
         var list = d.stringArray(forKey: reportedIPSKey) ?? []
         let name = ipsPath.lastPathComponent
         if !list.contains(name) {
@@ -87,7 +87,7 @@ enum CrashReporter {
             options: [.skipsHiddenFiles]
         ) else { return nil }
 
-        let reported = Set(UserDefaults.standard.stringArray(forKey: reportedIPSKey) ?? [])
+        let reported = Set(AppEnv.defaults.stringArray(forKey: reportedIPSKey) ?? [])
 
         // `AIUsage-2026-...ips` 패턴 매칭. 번들 ID prefix가 아니라 실행파일명 (CFBundleExecutable) prefix가
         // OS 컨벤션 — package.sh 가 SwiftPM 산출물(ClaudeUsage)을 `AIUsage` 로 rename 해서 넣음.
