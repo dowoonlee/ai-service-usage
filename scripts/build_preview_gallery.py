@@ -47,6 +47,9 @@ HTML = """<!doctype html>
   .imgwrap img {{ max-width:100%; height:auto; image-rendering:pixelated; cursor:zoom-in }}
   figcaption {{ padding:8px 11px 11px; border-top:1px solid var(--line) }}
   .title {{ font-size:12.5px; font-weight:600 }}
+  .badge {{ display:inline-block; font-size:10px; font-weight:600; letter-spacing:.04em;
+            color:#c9caff; background:#2b2c4a; border:1px solid #45467a;
+            border-radius:4px; padding:0 5px; margin-left:6px; vertical-align:1px }}
   .note {{ font-size:11.5px; color:var(--dim); margin-top:3px }}
   .dim {{ font-size:11px; color:#6f7080; margin-top:3px; font-variant-numeric:tabular-nums }}
   body[data-bg="light"] .imgwrap {{ background:#f4f4f6 }}
@@ -130,10 +133,15 @@ def main():
         cards = []
         for it in items:
             note = f'<div class="note">{esc(it["note"])}</div>' if it.get("note") else ""
+            # GIF는 재생 중임을 명시한다 — 정지 컷과 섞여 있으면 "왜 안 움직이지"를 헷갈린다.
+            badge = f'<span class="badge">▶ {it.get("frames", 0)}f</span>' if it.get("animated") else ""
+            dim = f'{it["width"]}×{it["height"]}px'
+            if it.get("animated"):
+                dim += f' · {it.get("frames", 0)}프레임'
             cards.append(
                 f'<figure><div class="imgwrap"><img loading="lazy" src="{esc(it["path"])}" alt="{esc(it["title"])}"></div>'
-                f'<figcaption><div class="title">{esc(it["title"])}</div>{note}'
-                f'<div class="dim">{it["width"]}×{it["height"]}px</div></figcaption></figure>'
+                f'<figcaption><div class="title">{esc(it["title"])}{badge}</div>{note}'
+                f'<div class="dim">{dim}</div></figcaption></figure>'
             )
         body.append(
             f'<section id="{esc(name)}"><h2>{esc(name)} <span class="meta">({len(items)})</span></h2>'

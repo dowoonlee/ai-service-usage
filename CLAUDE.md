@@ -83,11 +83,16 @@ UI is verifiable without launching the app — see "Visual previews" below for t
 
 ```bash
 bash scripts/render-previews.sh          # 전부 굽고 갤러리를 연다
-bash scripts/render-previews.sh pet      # 펫 스프라이트만 (card / scene 도 가능)
+bash scripts/render-previews.sh pet      # 펫 스프라이트만 (card / scene / anim 도 가능)
 NO_OPEN=1 bash scripts/render-previews.sh
 ```
 
-Renders ~140 PNGs into `dist/previews/` and builds `index.html` — a gallery with background toggle (checker / dark / light), size toggle, and click-to-zoom. Covers pet sprite contact sheets per collection, variant tints, trainer card combinations (every background / frame / title / accessory), gacha tabs, world map, guild office, and battle replay.
+Renders ~174 files into `dist/previews/` (140 PNG + 34 animated GIF) and builds `index.html` — a gallery with background toggle (checker / dark / light), size toggle, and click-to-zoom. Covers pet sprite contact sheets per collection, variant tints, trainer card combinations (every background / frame / title / accessory), gacha tabs, world map, guild office, and battle replay.
+
+**Animations render as GIF** (`AnimationPreviews`), which the gallery's `<img>` plays inline — walk cycles per collection at the app's own fps, Mythic special motions, the menu bar icon at 30Hz, battle replay, and guild office pathing. Still frames can't show a reversed frame order, a stutter mid-cycle, a broken loop seam, or a pet walking backwards. Two things to preserve if you extend this:
+
+- Capture at the app's real timing, not a convenient one. A walk cycle rendered at an invented fps tells you nothing about how it looks in the app.
+- `MenuBarRenderer.render` returns `nil` on ticks where nothing visible changed. Dropping those frames compresses the timeline and the GIF plays too fast — repeat the previous frame instead.
 
 Two render paths, and picking the wrong one silently gives you a blank PNG:
 

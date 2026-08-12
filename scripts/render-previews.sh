@@ -5,6 +5,7 @@
 #   bash scripts/render-previews.sh pet        # 펫 스프라이트만
 #   bash scripts/render-previews.sh card       # 트레이너 카드만
 #   bash scripts/render-previews.sh scene      # 화면(가챠 탭·월드맵·길드·배틀)만
+#   bash scripts/render-previews.sh anim       # 애니메이션(GIF)만 — 걷기·특수모션·메뉴바·배틀·사무실
 #   NO_OPEN=1 bash scripts/render-previews.sh  # 브라우저를 열지 않음(CI/원격)
 #
 # 산출물: dist/previews/ (gitignore 대상)
@@ -18,8 +19,9 @@ case "${1:-all}" in
   pet)   FILTER="PetSpritePreviews" ;;
   card)  FILTER="TrainerCardPreviews" ;;
   scene) FILTER="ScenePreviews" ;;
-  all)   FILTER="Previews" ;;          # 세 클래스 이름이 모두 Previews로 끝난다
-  *)     echo "알 수 없는 대상: $1 (pet|card|scene|all)" >&2; exit 2 ;;
+  anim)  FILTER="AnimationPreviews" ;;
+  all)   FILTER="Previews" ;;          # 프리뷰 클래스 이름은 모두 Previews로 끝난다
+  *)     echo "알 수 없는 대상: $1 (pet|card|scene|anim|all)" >&2; exit 2 ;;
 esac
 
 # 이전 실행 잔재를 지운다 — 매니페스트는 append-only라 비우지 않으면 삭제된 프리뷰가 갤러리에 남는다.

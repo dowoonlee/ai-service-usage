@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import UniformTypeIdentifiers
 @testable import ClaudeUsage
 
 /// 시각 검수용 렌더 파이프라인의 공용 도구.
@@ -122,6 +123,115 @@ enum PreviewRenderer {
         try write(image, root: try requireOutputDir(), section: section, title: title, note: note)
     }
 
+    // MARK: - 애니메이션 (GIF)
+
+    /// 뷰를 창에 올린 뒤 시간을 흘리며 연속 캡처해 GIF로 저장한다.
+    ///
+    /// 정지 컷으로는 애니메이션의 실패가 안 보인다 — 프레임 순서가 뒤집혔는지, 중간에 튀는지,
+    /// 반복 이음매가 끊기는지는 움직여봐야 안다. 앱에서 그 확인은 창을 띄우고 타이밍을 기다리는
+    /// 일이라 반복이 비싸다.
+    ///
+    /// 캡처가 실제 애니메이션을 잡는 이유는 창이 살아 있기 때문이다. `TimelineView(.animation)`,
+    /// `withAnimation`, `Task.sleep`으로 도는 재생 루프가 전부 RunLoop을 타므로, 프레임 간격만큼
+    /// 런루프를 돌려주면 앱에서와 같은 속도로 진행한다.
+    ///
+    /// GIF를 쓰는 건 도트 그래픽과 잘 맞아서다(256색 팔레트가 제약이 아니라 정확). 갤러리의
+    /// `<img>`가 그대로 재생하므로 별도 플레이어가 필요 없다.
+    @discardableResult
+    static func renderAnimated(_ view: some View,
+                               size: CGSize,
+                               frameCount: Int,
+                               frameInterval: TimeInterval,
+                               section: String,
+                               title: String,
+                               note: String? = nil,
+                               warmup: TimeInterval = 0.1,
+                               file: StaticString = #filePath,
+                               line: UInt = #line) throws -> Int {
+        let root = try requireOutputDir()
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.backgroundColor = .windowBackgroundColor
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(origin: .zero, size: size)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil); window.contentView = nil }
+
+        host.layoutSubtreeIfNeeded()
+        // onAppear에서 시작하는 재생 루프(배틀 등)가 첫 프레임을 잡기 전에 캡처하지 않도록.
+        RunLoop.current.run(until: Date().addingTimeInterval(warmup))
+
+        var frames: [NSImage] = []
+        frames.reserveCapacity(frameCount)
+        for _ in 0..<frameCount {
+            host.displayIfNeeded()
+            if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
+                host.cacheDisplay(in: host.bounds, to: rep)
+                let img = NSImage(size: size)
+                img.addRepresentation(rep)
+                frames.append(img)
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(frameInterval))
+        }
+        guard !frames.isEmpty else {
+            XCTFail("애니메이션 캡처 실패: \(section)/\(title)", file: file, line: line)
+            return 0
+        }
+        try writeGIF(frames, frameDelay: frameInterval, root: root,
+                     section: section, title: title, note: note, size: size)
+        return frames.count
+    }
+
+    /// 이미 만들어둔 프레임 배열을 GIF로 등록한다. 스프라이트처럼 그림이 이미 프레임 단위로
+    /// 존재하는 경우 — 창을 띄울 필요 없이 앱과 같은 프레임 간격으로 이어 붙이면 된다.
+    static func writeAnimation(_ frames: [NSImage],
+                               frameDelay: TimeInterval,
+                               section: String,
+                               title: String,
+                               note: String? = nil) throws {
+        guard let first = frames.first else { return }
+        try writeGIF(frames, frameDelay: frameDelay, root: try requireOutputDir(),
+                     section: section, title: title, note: note, size: first.size)
+    }
+
+    private static func writeGIF(_ frames: [NSImage],
+                                 frameDelay: TimeInterval,
+                                 root: URL,
+                                 section: String,
+                                 title: String,
+                                 note: String?,
+                                 size: CGSize) throws {
+        let dir = root.appendingPathComponent(slug(section), isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let filename = "\(slug(title)).gif"
+        let url = dir.appendingPathComponent(filename)
+
+        guard let dest = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.gif.identifier as CFString, frames.count, nil) else {
+            throw NSError(domain: "PreviewRenderer", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "GIF destination 생성 실패"])
+        }
+        CGImageDestinationSetProperties(dest, [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0],   // 0 = 무한 반복
+        ] as CFDictionary)
+        for frame in frames {
+            guard let cg = frame.cgImage(forProposedRect: nil, context: nil, hints: nil) else { continue }
+            CGImageDestinationAddImage(dest, cg, [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFUnclampedDelayTime: frameDelay,
+                                                kCGImagePropertyGIFDelayTime: frameDelay],
+            ] as CFDictionary)
+        }
+        guard CGImageDestinationFinalize(dest) else {
+            throw NSError(domain: "PreviewRenderer", code: 3,
+                          userInfo: [NSLocalizedDescriptionKey: "GIF 인코딩 실패: \(section)/\(title)"])
+        }
+        record(section: section, title: title, note: note, path: "\(slug(section))/\(filename)",
+               size: size, animated: true, frames: frames.count, root: root)
+    }
+
     private static func write(_ image: NSImage, root: URL, section: String, title: String, note: String?) throws {
         guard let tiff = image.tiffRepresentation,
               let rep = NSBitmapImageRep(data: tiff),
@@ -133,18 +243,25 @@ enum PreviewRenderer {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let filename = "\(slug(title)).png"
         try png.write(to: dir.appendingPathComponent(filename))
+        record(section: section, title: title, note: note, path: "\(slug(section))/\(filename)",
+               size: image.size, animated: false, frames: 1, root: root)
+    }
 
-        // 갤러리 생성 스크립트가 읽는 매니페스트. 테스트 실행 순서가 보장되지 않으므로 append만 하고
-        // 정렬은 스크립트가 한다. 실행 전 출력 디렉토리를 비우는 것도 스크립트 담당.
+    /// 갤러리 생성 스크립트가 읽는 매니페스트. 테스트 실행 순서가 보장되지 않으므로 append만 하고
+    /// 정렬은 스크립트가 한다. 실행 전 출력 디렉토리를 비우는 것도 스크립트 담당.
+    private static func record(section: String, title: String, note: String?, path: String,
+                               size: CGSize, animated: Bool, frames: Int, root: URL) {
         let entry: [String: Any] = [
             "section": section,
             "title": title,
             "note": note ?? "",
-            "path": "\(slug(section))/\(filename)",
-            "width": Int(image.size.width),
-            "height": Int(image.size.height),
+            "path": path,
+            "width": Int(size.width),
+            "height": Int(size.height),
+            "animated": animated,
+            "frames": frames,
         ]
-        let data = try JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys])
+        guard let data = try? JSONSerialization.data(withJSONObject: entry, options: [.sortedKeys]) else { return }
         appendLine(data, to: root.appendingPathComponent("manifest.jsonl"))
     }
 
