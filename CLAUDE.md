@@ -32,6 +32,8 @@ The tests encode contracts, not just examples — several of them exist because 
 
 ⚠️ A dev run shares the **real** UserDefaults and Keychain with the installed app — it can fire one-time migrations, spend coins, or touch the keychain vault against live user data. Prefer tests for logic changes; use a dev run only when you actually need the GUI.
 
+`AIUSAGE_DATA_DIR=/tmp/demo swift run` redirects the JSONL stores elsewhere, so a dev run neither reads your real usage history nor races the installed app writing the same files. Note it only covers `SnapshotStore` — UserDefaults and Keychain are still shared (macOS resolves `applicationSupportDirectory` from the user record, so overriding `HOME` does **not** isolate anything).
+
 ## Architecture
 
 ### Process shape
@@ -42,6 +44,21 @@ The tests encode contracts, not just examples — several of them exist because 
 - Polling is a single `Task` loop in `ViewModel.startPolling`, default **600s**. One cycle runs: gym counters → `refreshClaude()` → `refreshCursor()` → `refreshCodex()` → weather → appcast version → pet usage accrual → contributor sync → backoff update → badges → ranking submit → reward claims → `runSync()`. Sleep is `base × jitter(±15%) × backoff(≤16×)`, capped at 1h, and shortened near a `resetAt` so the last poll of a window lands before it rolls over.
 - Two gates skip a cycle entirely (`PollGate`): macOS sleep, and "no visible surface" (panel hidden **and** menu bar off). Idle cycles still poll every 30s so wake/visibility is picked up quickly, and unclaimed rewards are still checked on a 600s throttle.
 - Not every step runs at the cycle rate. `runSync` has a 120s floor, the appcast check 1h, weather 30min, and the reward-claim `leaderboard` fetch 1h (`claimLeaderboardIntervalSec`) — that one was ~35% of all Edge Function calls when it ran every cycle, and what it checks for only happens weekly/monthly. When the ranking window is open, `runSync`'s leaderboard section drives the same claim path, so the throttle costs nothing the user can see. Claim **retries** (`retryPendingClaims`) stay unthrottled — they no-op without a stored descriptor.
+
+### Windows and layout
+
+Three shapes of window, each with different rules:
+
+- **Floating panel** (`App.swift`) — the always-on dashboard. Sized by content, position persisted in UserDefaults.
+- **Gacha window** (`GachaWindowController`) — a 7-tab container (shop / party / gym / report / ranking / guild / arena). Resizable, `560×640` **minimum**, size remembered via `setFrameAutosaveName`.
+- **Single-purpose windows** — board, DM, quiz, fortune, contributors, bug report, settings, guide. Each is its own controller with `isReleasedWhenClosed = false`.
+
+Two rules that a past bug turned into hard requirements:
+
+- **Every gacha tab needs a top-level `ScrollView`.** The container is a fixed-minimum frame, so a tab taller than the window is silently clipped — no scrollbar, no indication. `GymView` was the one tab missing it, and vibe's third category row (Codex) simply vanished; the 2-category regions hid the same overflow because the clipped row was `maxCategoryRows` padding.
+- **Sheets need an explicit `minHeight`.** Width-only sizing means the sheet gets whatever height it's handed, and the bottom (controls, result cards) is cut. `GymBattleView` pairs `minHeight` with `maxHeight` + `ScrollView` so it stays inside small screens.
+
+UI sizing is verifiable without launching the app — `ImageRenderer` renders a view and reports its natural size. `CardRenderPreview` writes the trainer card to PNG (`CARD_OUT_DIR=... swift test --filter CardRenderPreview`) and `GymBattleSizeProbe` asserts the battle sheet fits its `minHeight` (`SIZE_PROBE=1`). Both skip without their env var, so CI is unaffected. Caveat: a view wrapped in `ScrollView` reports its *content* height, not what it will occupy — that measurement can't tell you whether clipping will happen, only how tall the content is.
 
 ### Three API actors, deliberately different
 
@@ -155,6 +172,14 @@ Variants per pet: 0 = base, 1–3 = shiny tiers, 4 = Prestige (`PetOwnership.pre
 - `Gacha.pool` is `nonisolated` so `PetCollection.bonusCoins` (a non-isolated computed) can read it without actor hops.
 - `Settings.pendingCollectionCelebration: String?` is a single-shot flag the `.hatched` view consumes (2.5s auto-dismiss + click-to-dismiss in `CollectionCompleteBanner`); persisted across launches so an app kill mid-celebration still surfaces the banner on next gacha.
 - The `GachaView` rarity sections are unchanged — collections live below as a separate "업적" grid with a card per collection (color when complete, gray when not). Subtitle copy stays visible even when locked so the joke lands regardless of progress.
+
+### Badge sprites and the trainer card
+
+`BadgeCategory.jewelSpriteName` maps each of the 19 categories to its **own** file in `Resources/intersect-jewels/` — 19 ↔ 19, no reuse. It used to reuse mainland gems for the cloud-archipelago categories (arenaWins and heartbeat both Ruby); nobody noticed on the gym page because regions are viewed one at a time, but the trainer card lines earned badges up in a single row and the duplicates became obvious. `BadgeRegistryTests` fails if a new category reuses an existing file or points at a missing one.
+
+Picking a sprite is constrained by size, not by taste: badges render at 13–20pt, so anything whose identity lives in 2–3px detail (the Necklace/Ring families in that pack) turns to mush. Only silhouettes or strong color blocks survive. If categories grow past what this pack can distinguish, that's a new-pack research problem, not a re-mapping one.
+
+The trainer card (`TrainerCardView`) shows **earned badges and completed sets only**. Progress totals already live in the stats rows (`N/M badges`), and dot size is inversely proportional to count — listing unearned entries shrank the earned ones to illegibility. Collection dots carry `PetCollection.iconSystemImage` (same icon as the inventory achievement grid) with symbol color chosen by background luminance, since `accentColor` includes light tones where white would disappear.
 
 ### Notification dedup
 
