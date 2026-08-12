@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 트레이너 카드 view — 4:3 비율. `TrainerCard` 데이터 모델의 5 layer를 합성.
@@ -15,9 +16,9 @@ struct TrainerCardView: View {
     let trainerID: String
     let trainerName: String
     let stats: TrainerStats
-    /// (BadgeCategory, cleared, available) tuple — 도장 8 카테고리.
+    /// (BadgeCategory, cleared, available) tuple — 도장 카테고리 전체(현재 19).
     let badges: [BadgeRow]
-    /// (PetCollection, complete) tuple — 컬렉션 11.
+    /// (PetCollection, complete) tuple — 컬렉션 전체(현재 19).
     let collections: [(collection: PetCollection, complete: Bool)]
     /// 캡처용 워터마크. preview에선 보이는 게 자연스럽고 export 시도 그대로 박힘.
     var showWatermark: Bool = true
@@ -25,6 +26,8 @@ struct TrainerCardView: View {
     struct BadgeRow {
         let category: BadgeCategory
         let cleared: Bool
+        /// plan상 진행 가능한 카테고리인지. 카드는 획득분만 그려서 현재 렌더에는 쓰지 않지만,
+        /// 호출 측(`ReportView`/`ProfileState`)이 이미 계산해 넘기고 있어 그대로 받아 둔다.
         let available: Bool
     }
 
@@ -354,7 +357,7 @@ struct TrainerCardView: View {
 
     // MARK: - Badges + Collections
 
-    /// 도장 뱃지 8 + 컬렉션 11. 레이아웃 옵션 제거 — 항상 두 행 노출.
+    /// 도장 뱃지 19 + 컬렉션 19. 레이아웃 옵션 제거 — 항상 두 행 노출.
     /// dot 행이 카드 폭을 넘지 않도록 개수에 맞춰 dot 지름을 축소한다 (base 이하로만, 최소 9).
     /// 컬렉션(sets)이 19개로 늘면서 고정 16pt × 19개 + 라벨이 카드 내부폭을 초과해 body 전체가
     /// 넓어지고 `.frame(width)` center 정렬로 좌우가 잘리던 회귀를 막는다.
@@ -367,7 +370,11 @@ struct TrainerCardView: View {
     }
 
     private var badgesSection: some View {
-        let badgeSize = rowDotSize(count: badges.count, base: 20)
+        // 획득한 뱃지만 노출한다 — 카드는 자랑용 요약이고, 전체 진행도는 위 stats 행의
+        // "N/M badges"가 이미 보여준다. 미획득까지 늘어놓으면 흑백 보석이 행을 채워
+        // 밀도만 높아지고, 남은 개수만큼 dot이 작아져 획득분마저 안 보인다.
+        let earnedBadges = badges.filter(\.cleared)
+        let badgeSize = rowDotSize(count: earnedBadges.count, base: 20)
         let setSize = rowDotSize(count: collections.count, base: 16)
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
@@ -376,8 +383,16 @@ struct TrainerCardView: View {
                     .foregroundStyle(.white.opacity(0.85))
                     .frame(width: 80, alignment: .leading)
                 HStack(spacing: 5) {
-                    ForEach(badges, id: \.category.rawValue) { b in
-                        badgeDot(size: badgeSize, category: b.category, cleared: b.cleared, available: b.available)
+                    if earnedBadges.isEmpty {
+                        // 아직 하나도 없을 때 — 행 높이를 유지해 카드 레이아웃이 흔들리지 않게 한다.
+                        Text("—")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.3))
+                            .frame(height: 20)
+                    } else {
+                        ForEach(earnedBadges, id: \.category.rawValue) { b in
+                            badgeDot(size: badgeSize, category: b.category)
+                        }
                     }
                 }
                 Spacer(minLength: 0)
@@ -397,23 +412,37 @@ struct TrainerCardView: View {
         }
     }
 
-    private func badgeDot(size: CGFloat, category: BadgeCategory, cleared: Bool, available: Bool) -> some View {
-        let color = available
-            ? (cleared ? Color(hex: category.gemColorHex) : Color.gray.opacity(0.5))
-            : Color.black.opacity(0.4)
-        return ZStack {
+    /// 도장 페이지와 **같은 jewel 스프라이트**로 뱃지를 그린다 — 카드와 도장의 시각 언어를 맞춘다.
+    /// 호출 측이 획득분만 넘기므로 여기선 상태 분기가 없다(획득=컬러 원본).
+    ///
+    /// 스프라이트는 32×32라 카드 폭 480 기준 dot(≈13.7pt~20pt)에서 Retina 27~40px — 원본 배율
+    /// 근처라 손실이 거의 없다. `.interpolation(.none)`을 유지해 픽셀 톤을 지킨다.
+    @ViewBuilder
+    private func badgeDot(size: CGFloat, category: BadgeCategory) -> some View {
+        if let jewel = NSImage.gymJewel(named: category.jewelSpriteName) {
+            Image(nsImage: jewel)
+                .resizable()
+                .interpolation(.none)
+                .scaledToFit()
+                .frame(width: size, height: size)
+        } else {
+            // 번들에서 sprite를 못 찾은 경우의 폴백 — jewel 도입 이전의 색 박스 표현.
+            legacyBadgeDot(size: size, category: category)
+        }
+    }
+
+    private func legacyBadgeDot(size: CGFloat, category: BadgeCategory) -> some View {
+        ZStack {
             RoundedRectangle(cornerRadius: size * 0.15)
-                .fill(color)
+                .fill(Color(hex: category.gemColorHex))
                 .frame(width: size, height: size)
                 .overlay(
                     RoundedRectangle(cornerRadius: size * 0.15)
                         .stroke(.white.opacity(0.35), lineWidth: 0.7)
                 )
-            if cleared {
-                Image(systemName: "checkmark")
-                    .font(.system(size: size * 0.55, weight: .black))
-                    .foregroundStyle(.white)
-            }
+            Image(systemName: "checkmark")
+                .font(.system(size: size * 0.55, weight: .black))
+                .foregroundStyle(.white)
         }
     }
 
