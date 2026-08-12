@@ -28,24 +28,31 @@ struct GymBattleView: View {
     private var owned: [PetKind] { PetKind.allCases.filter { settings.ownedPets[$0] != nil } }
 
     var body: some View {
-        VStack(spacing: 12) {
-            header
-            if let r = result {
-                BattleReplayView(aSnaps: aSnaps, bSnaps: bSnaps, result: r) {
-                    outcomeCard
+        ScrollView {
+            VStack(spacing: 12) {
+                header
+                if let r = result {
+                    BattleReplayView(aSnaps: aSnaps, bSnaps: bSnaps, result: r) {
+                        outcomeCard
+                    }
+                    .id(attempt)   // 재도전 시 완전 리셋(새 재생)
+                } else {
+                    VStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("전투 준비 중…").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 176)
                 }
-                .id(attempt)   // 재도전 시 완전 리셋(새 재생)
-            } else {
-                VStack(spacing: 6) {
-                    ProgressView().controlSize(.small)
-                    Text("전투 준비 중…").font(.system(size: 10)).foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 176)
+                footer
             }
-            footer
+            .padding(16)
         }
-        .padding(16)
         .frame(width: 430)
+        // 높이를 명시하지 않으면 시트가 콘텐츠 요구치를 못 받아 아래쪽(컨트롤·결과 카드)이 잘렸다.
+        // 재생 상태 기본 높이가 ≈510pt(측정치)라 minHeight를 그 위로 잡아 평소엔 스크롤이 없고,
+        // 전체 로그 펼침(+130)이나 결과 카드로 더 길어지면 maxHeight에서 내부 스크롤로 넘어간다.
+        // 작은 화면(1280×800)에서도 시트가 화면 밖으로 나가지 않도록 상한을 700에 둔다.
+        .frame(minHeight: 540, maxHeight: 700)
         // 내 진짜 전투력으로 싸우도록 강화 레벨을 먼저 로드(랭킹 유저) 후 첫 배틀 시뮬. 재도전은 재로드 없음.
         .task {
             await loadEnhanceLevels()
