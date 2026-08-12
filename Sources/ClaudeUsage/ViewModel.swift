@@ -481,8 +481,20 @@ final class ViewModel: ObservableObject {
     /// 실패는 조용히 무시(기존 값 유지) — 날씨는 부가 연출이라 에러를 사용자에게 노출하지 않는다.
     /// appcast 최신 버전을 받아 `latestVersion` 갱신 — 메인 패널 버전 칩이 업데이트 유무를 표시.
     /// 실패 시 기존 값 유지(조용히 무시). dev 빌드(feed URL 없음)는 항상 nil이라 칩이 평범한 현재 버전만 보임.
+    ///
+    /// 릴리스는 하루에 몇 번 나오지도 않는데 폴링(600s)마다 appcast.xml을 통째로 받고 있었다.
+    /// Sparkle이 자체 백그라운드 체크를 따로 돌리므로 이쪽은 칩 표시용으로만 1시간 캐시한다.
+    /// 성공했을 때만 시각을 갱신해 실패는 다음 cycle에 곧바로 재시도된다(날씨 캐시와 같은 관례).
+    private var lastVersionFetchAt: Date?
+    private static let versionRefreshInterval: TimeInterval = 3600
+
     func refreshLatestVersion() async {
-        if let v = await Updater.fetchLatestVersion() { latestVersion = v }
+        if let last = lastVersionFetchAt,
+           Date().timeIntervalSince(last) < Self.versionRefreshInterval { return }
+        if let v = await Updater.fetchLatestVersion() {
+            latestVersion = v
+            lastVersionFetchAt = Date()
+        }
     }
 
     func refreshWeather(force: Bool = false) async {
@@ -1484,13 +1496,18 @@ final class ViewModel: ObservableObject {
     /// 동일/역행 timestamp는 1ms씩 밀어 strict ascending 보장 (0-width segment가 차트에서
     /// 갭처럼 렌더되는 문제 — 기존 MainView.buildCumulativePoints의 관례를 그대로 옮김).
     /// cursorEvents didSet에서만 호출되므로 폴링당 최대 2회 (트림 + merge) — 렌더 hot path 밖.
+    ///
+    /// 입력이 역순이어도 정렬 후 계산한다(계약). 다만 **이미 오름차순이면 정렬을 건너뛴다** —
+    /// `cursorEvents`는 초기 로드(sorted)·증분(`mergeSortedByTimestamp`)·트림(prefix 제거)
+    /// 어느 경로로도 시간순 불변식이 유지되므로 실전에서는 항상 이 경로다. 20,000건 기준
+    /// 선형 검사(≈2만 비교)가 재정렬(≈29만 비교)을 대체한다.
     nonisolated static func cumulativeSeries(events: [CursorEvent], maxPoints: Int = cursorChartMaxPoints) -> [(Date, Double)] {
-        let sorted = events.sorted { $0.timestamp < $1.timestamp }
+        let ordered = isAscendingByTimestamp(events) ? events : events.sorted { $0.timestamp < $1.timestamp }
         var points: [(Date, Double)] = []
-        points.reserveCapacity(sorted.count)
+        points.reserveCapacity(ordered.count)
         var running: Double = 0
         var lastTs: Date? = nil
-        for e in sorted {
+        for e in ordered {
             var ts = e.timestamp
             if let prev = lastTs, ts <= prev {
                 ts = prev.addingTimeInterval(0.001)
@@ -1522,6 +1539,13 @@ final class ViewModel: ObservableObject {
             out.append(points[points.count - 1])
         }
         return out
+    }
+
+    /// timestamp 오름차순인지 선형 검사. 정렬 비용을 치를지 판단하는 데만 쓴다.
+    nonisolated static func isAscendingByTimestamp(_ events: [CursorEvent]) -> Bool {
+        guard events.count > 1 else { return true }
+        for i in 1..<events.count where events[i].timestamp < events[i - 1].timestamp { return false }
+        return true
     }
 
     /// 시간순 정렬된 두 배열을 O(n+m) 2-pointer로 병합 (issue #19-3).

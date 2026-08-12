@@ -55,9 +55,11 @@ final class ContributorBonus {
             let newPRs = prs.filter { !already.contains($0.number) }
             guard !newPRs.isEmpty else { return }
 
-            for pr in newPRs {
-                Settings.shared.creditedPRNumbers.insert(pr.number)
-            }
+            // 지역 Set에 모아 한 번만 대입 — 개별 insert는 didSet마다 JSON 인코딩 +
+            // UserDefaults write를 일으켜, 최초 연결(PR 다수 소급)에서 N번 반복됐다.
+            var credited = Settings.shared.creditedPRNumbers
+            for pr in newPRs { credited.insert(pr.number) }
+            Settings.shared.creditedPRNumbers = credited
             RankPointLedger.shared.creditContributorBonus(prCount: newPRs.count)
 
             let total = newPRs.count * RankPointLedger.rpPerContributorPR

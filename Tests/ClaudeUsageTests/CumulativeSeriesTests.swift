@@ -34,6 +34,16 @@ final class CumulativeSeriesTests: XCTestCase {
         XCTAssertTrue(ViewModel.cumulativeSeries(events: []).isEmpty)
     }
 
+    // 정렬 스킵 판정 — 실전 입력(cursorEvents)은 항상 오름차순이라 정렬을 건너뛴다.
+    // 동일 timestamp는 역행이 아니므로 정렬 불필요로 본다(누적 계산이 1ms 보정으로 흡수).
+    func testAscendingDetection() {
+        XCTAssertTrue(ViewModel.isAscendingByTimestamp([]))
+        XCTAssertTrue(ViewModel.isAscendingByTimestamp([event(0, cents: 1)]))
+        XCTAssertTrue(ViewModel.isAscendingByTimestamp([event(0, cents: 1), event(60, cents: 1)]))
+        XCTAssertTrue(ViewModel.isAscendingByTimestamp([event(0, cents: 1), event(0, cents: 1)]))
+        XCTAssertFalse(ViewModel.isAscendingByTimestamp([event(60, cents: 1), event(0, cents: 1)]))
+    }
+
     // maxPoints 이하 입력은 다운샘플 없이 그대로.
     func testDownsamplePassthroughWhenSmall() {
         let points = (0..<10).map { (t0.addingTimeInterval(Double($0)), Double($0)) }
