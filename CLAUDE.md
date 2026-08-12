@@ -17,7 +17,8 @@ SU_PRIVATE_KEY=... VERSION=0.1.6 ZIP=dist/AIUsage.zip bash scripts/update-appcas
 
 git tag v0.1.6 && git push origin v0.1.6        # triggers .github/workflows/release.yml (full release pipeline)
 
-swift test                                      # XCTest target (Tests/ClaudeUsageTests), ~220 tests
+swift test                                      # XCTest target (Tests/ClaudeUsageTests), ~270 tests
+AIUSAGE_SANDBOX=1 swift run                     # GUI against throwaway state (see "Sandboxed state" below)
 deno test supabase/functions/_shared/pvp_engine.parity.test.ts   # client↔server battle parity
 deno check supabase/functions/<name>/index.ts   # Edge Function type check
 ```
@@ -26,13 +27,31 @@ There **is** a test target (`Tests/ClaudeUsageTests`) and `.github/workflows/tes
 
 The tests encode contracts, not just examples — several of them exist because a past refactor broke behavior that looked like dead defensive code (e.g. `CumulativeSeriesTests` pins "unsorted input is still sorted before accumulating"). Read the relevant test before changing the code it covers.
 
+### Sandboxed state (how to test anything that touches `Settings` or `Keychain`)
+
+Persistent state lives in three places — `UserDefaults`, the macOS Keychain, and JSONL under Application Support. `AppEnv` (`AppEnvironment.swift`) is the single entry point for all three and swaps them for throwaway equivalents when `AppEnv.isSandboxed`:
+
+| | production | sandbox |
+|---|---|---|
+| `AppEnv.defaults` | `UserDefaults.standard` | `com.dwlee.AIUsage.sandbox` suite, wiped at process start |
+| `AppEnv.keychain` | `SystemKeychainBackend` (`SecItem*`) | `InMemoryKeychainBackend` |
+| `AppEnv.dataDirectory` | Application Support | per-pid temp dir |
+
+Sandbox turns on automatically under XCTest, or manually with `AIUSAGE_SANDBOX=1`. **Never write `UserDefaults.standard` in app code** — one stray reference leaks that key into the real domain and quietly breaks isolation.
+
+Tests that touch state subclass `SandboxedTestCase` (`Tests/ClaudeUsageTests/TestSupport.swift`), which calls `Settings.resetForTesting()` in `setUp`. That resets three process-global things, and all three matter: the defaults suite, the keychain vault **plus its in-memory cache** (a new backend alone leaves the old dict cached), and `UsageEventBus`'s consumer list — one test constructing a `ViewModel` registers `StreakLedger` for every later test, which silently added a first-use streak bonus on top of unrelated coin assertions.
+
+`InMemoryKeychainBackend` can fake failures: `simulateAccessFailure` (everything unreadable) or `failingAccounts` (only some items). Both exist because the two worst bugs in this file — #169's "overwrite the vault while it's unreadable" and legacy migration deleting originals it never managed to read — are reachable *only* in that state. Keep them reachable.
+
+Note the boundary sits at the **item** level, below the vault. Cache, legacy migration, and refuse-to-overwrite logic run for real in tests; only `SecItem*` is replaced. Moving the seam above the vault would stub out the code worth testing.
+
 ### Bundle-only behaviors when dev-running
 
 `swift run` produces a CLI binary with no `Info.plist` / `bundleIdentifier`. `NotificationManager` and Sparkle's `Updater` no-op in that mode (see the `Bundle.main.bundleIdentifier != nil` guard in `NotificationManager`). Ranking/Supabase features are also inert because `SupabaseURL`/`SupabaseAnonKey` live in `Info.plist` (`RankingAPI.isConfigured == false`). To exercise notifications, auto-update, or "Launch at login" (which uses `SMAppService.mainApp`), you must run the assembled `dist/AIUsage.app`.
 
-⚠️ A dev run shares the **real** UserDefaults and Keychain with the installed app — it can fire one-time migrations, spend coins, or touch the keychain vault against live user data. Prefer tests for logic changes; use a dev run only when you actually need the GUI.
+⚠️ A plain dev run shares the **real Keychain** with the installed app (keychain items are keyed by service name, not by bundle id), so it can touch the live vault — session key, HMAC key, DM identity key. UserDefaults happens to land in a separate `ClaudeUsage` domain (argv[0]-derived, since there's no bundle id) rather than the app's `com.dwlee.AIUsage`, but that domain is still shared across *all* dev runs, so a dev run can fire one-time migrations and spend coins against state another dev run left behind.
 
-`AIUSAGE_DATA_DIR=/tmp/demo swift run` redirects the JSONL stores elsewhere, so a dev run neither reads your real usage history nor races the installed app writing the same files. Note it only covers `SnapshotStore` — UserDefaults and Keychain are still shared (macOS resolves `applicationSupportDirectory` from the user record, so overriding `HOME` does **not** isolate anything).
+Use `AIUSAGE_SANDBOX=1 swift run` when you don't specifically need live data — it isolates all three stores (see "Sandboxed state" above). `AIUSAGE_DATA_DIR=/tmp/demo swift run` still works and takes precedence for the JSONL path alone; use it when you want real settings but a scratch usage history. Note that overriding `HOME` isolates nothing — macOS resolves `applicationSupportDirectory` from the user record.
 
 ## Architecture
 
