@@ -179,20 +179,36 @@ final class JSONLStore<T: Codable> {
 }
 
 enum SnapshotStore {
+    /// 저장 위치 오버라이드 — `AIUSAGE_DATA_DIR`가 설정돼 있으면 그 디렉토리를 쓴다.
+    ///
+    /// dev 실행이 설치된 앱과 **같은** 스냅샷 파일을 읽고 쓰는 걸 피하기 위한 스위치다.
+    /// macOS에선 `HOME`을 바꿔도 `applicationSupportDirectory`가 사용자 레코드를 따라가서
+    /// 환경 격리가 안 되므로, 앱이 직접 보는 스위치가 필요하다. 데모/스크린샷 촬영,
+    /// 실사용 데이터를 건드리지 않는 수동 디버깅에 쓴다. 미설정이면 기존 경로 그대로.
+    private static let overrideDirectory: URL? = {
+        guard let path = ProcessInfo.processInfo.environment["AIUSAGE_DATA_DIR"],
+              !path.isEmpty else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }()
+
     static let claude = JSONLStore<UsageSnapshot>(
         filename: "snapshots.jsonl",
-        label: "ClaudeUsage.ClaudeStore"
+        label: "ClaudeUsage.ClaudeStore",
+        directory: overrideDirectory
     )
     static let cursor = JSONLStore<CursorSnapshot>(
         filename: "cursor-snapshots.jsonl",
-        label: "ClaudeUsage.CursorStore"
+        label: "ClaudeUsage.CursorStore",
+        directory: overrideDirectory
     )
     static let cursorEvents = JSONLStore<CursorEvent>(
         filename: "cursor-events.jsonl",
-        label: "ClaudeUsage.CursorEvents"
+        label: "ClaudeUsage.CursorEvents",
+        directory: overrideDirectory
     )
     static let codex = JSONLStore<CodexSnapshot>(
         filename: "codex-snapshots.jsonl",
-        label: "ClaudeUsage.CodexStore"
+        label: "ClaudeUsage.CodexStore",
+        directory: overrideDirectory
     )
 }
