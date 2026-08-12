@@ -77,7 +77,26 @@ Two rules that a past bug turned into hard requirements:
 - **Every gacha tab needs a top-level `ScrollView`.** The container is a fixed-minimum frame, so a tab taller than the window is silently clipped — no scrollbar, no indication. `GymView` was the one tab missing it, and vibe's third category row (Codex) simply vanished; the 2-category regions hid the same overflow because the clipped row was `maxCategoryRows` padding.
 - **Sheets need an explicit `minHeight`.** Width-only sizing means the sheet gets whatever height it's handed, and the bottom (controls, result cards) is cut. `GymBattleView` pairs `minHeight` with `maxHeight` + `ScrollView` so it stays inside small screens.
 
-UI sizing is verifiable without launching the app — `ImageRenderer` renders a view and reports its natural size. `CardRenderPreview` writes the trainer card to PNG (`CARD_OUT_DIR=... swift test --filter CardRenderPreview`) and `GymBattleSizeProbe` asserts the battle sheet fits its `minHeight` (`SIZE_PROBE=1`). Both skip without their env var, so CI is unaffected. Caveat: a view wrapped in `ScrollView` reports its *content* height, not what it will occupy — that measurement can't tell you whether clipping will happen, only how tall the content is.
+UI is verifiable without launching the app — see "Visual previews" below for the render pipeline, and `GymBattleSizeProbe` (`SIZE_PROBE=1`) for a numeric assertion that the battle sheet fits its `minHeight`. Caveat on measuring: a view wrapped in `ScrollView` reports its *content* height, not what it will occupy — that number can't tell you whether clipping will happen, only how tall the content is.
+
+### Visual previews (what to run before eyeballing a UI change)
+
+```bash
+bash scripts/render-previews.sh          # 전부 굽고 갤러리를 연다
+bash scripts/render-previews.sh pet      # 펫 스프라이트만 (card / scene 도 가능)
+NO_OPEN=1 bash scripts/render-previews.sh
+```
+
+Renders ~140 PNGs into `dist/previews/` and builds `index.html` — a gallery with background toggle (checker / dark / light), size toggle, and click-to-zoom. Covers pet sprite contact sheets per collection, variant tints, trainer card combinations (every background / frame / title / accessory), gacha tabs, world map, guild office, and battle replay.
+
+Two render paths, and picking the wrong one silently gives you a blank PNG:
+
+- `PreviewRenderer.render` — `ImageRenderer`. Fine for value-driven views (trainer card, sprite sheets). **Cannot draw `ScrollView` contents** — it re-renders SwiftUI offscreen and everything inside a scroll view comes out empty, and `GeometryReader` collapses to zero height. Every gacha tab hits this.
+- `PreviewRenderer.renderInWindow` — mounts an `NSHostingView` in an offscreen window and captures through AppKit. Matches what the app draws. Requires an explicit size, and captures only the visible area — which is what you want for clipping checks, since that *is* the user's window.
+
+Previews are XCTest cases that skip unless `PREVIEW_OUT_DIR` is set, so `swift test` and CI are unaffected (19 skipped). They seed a mid-game state via `PreviewDemoState` — an empty profile renders empty screens and shows nothing worth reviewing.
+
+Sprite sheet defects (wrong `cellSize`, clipped frames, flipped facing) are **not** machine-checkable — past attempts produced mostly false positives. That's why this pipeline lays them out with the renderer's own crop on a checkerboard at nearest-neighbor scale instead of asserting anything: the judgment is yours, the tedium is automated.
 
 ### Three API actors, deliberately different
 
