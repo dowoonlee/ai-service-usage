@@ -235,6 +235,29 @@ final class CoinLedger: UsageConsumer {
         return true
     }
 
+    /// 트레이너 카드 액세서리 구매. 이미 보유했거나 잔액이 부족하면 false (아무것도 바꾸지 않음).
+    /// 장착(`trainerCard.accessory`)은 호출 측이 성공 후 처리 — 인벤토리 등록과 장착은 별개 결정.
+    @discardableResult
+    func purchaseAccessory(_ accessory: CardAccessory) -> Bool {
+        let s = Settings.shared
+        guard !s.ownedAccessories.contains(accessory.rawValue) else { return false }
+        guard spend(accessory.price, reason: "액세서리 [\(accessory.displayName)]") else { return false }
+        s.ownedAccessories.insert(accessory.rawValue)
+        return true
+    }
+
+    /// 트레이너 카드 칭호 구매. 구매 불가 칭호(`purchasePrice == nil` — 진행도 자동 unlock 전용)나
+    /// 이미 보유, 잔액 부족이면 false.
+    @discardableResult
+    func purchaseTitle(_ title: CardTitle) -> Bool {
+        let s = Settings.shared
+        guard let price = title.purchasePrice,
+              !s.ownedTitles.contains(title.rawValue) else { return false }
+        guard spend(price, reason: "칭호 [\(title.displayName)]") else { return false }
+        s.ownedTitles.insert(title.rawValue)
+        return true
+    }
+
     /// 파티 프리셋 슬롯 1개 구매. 비용은 `nextPartyPresetSlotCost`(2000부터 구매당 +1000).
     /// 성공 시 코인 차감 + 구매 슬롯 카운터 증가 → `maxPartyPresets`가 1 늘어난다.
     func purchasePartyPresetSlot() -> Bool {

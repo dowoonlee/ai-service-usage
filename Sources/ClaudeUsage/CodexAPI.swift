@@ -16,7 +16,8 @@ import Foundation
 enum CodexPlan: String, Codable, Hashable { case pro, plus, business, free, unknown
     static func from(_ raw: String?) -> CodexPlan {
         guard let r = raw?.lowercased() else { return .unknown }
-        // "prolite"(2026 신규)도 pro 계열로 흡수. 순서 주의 — "pro"를 "prolite"보다 먼저 검사하지 말 것.
+        // `contains("pro")`가 "prolite"(2026 신규)까지 함께 흡수한다 — 의도된 동작(같은 pro 계열).
+        // 나중에 prolite를 별도 등급으로 갈라야 하면 반드시 "pro"보다 **먼저** 검사해야 한다.
         if r.contains("pro") { return .pro }
         if r.contains("plus") { return .plus }
         if r.contains("business") || r.contains("team") || r.contains("enterprise") { return .business }

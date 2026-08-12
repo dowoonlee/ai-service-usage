@@ -18,6 +18,8 @@ interface ChallengePayload { action: string; deviceId: string; ts: number; }
 
 const MAX_CLOCK_SKEW_SEC = 3600;
 const RATING_WINDOW = 200;
+/// 한 번에 받아올 후보 상한. 레이팅 윈도우로 좁힌 뒤 적용되므로 실력대 안에서 고르게 뽑힌다.
+const POOL_LIMIT = 100;
 
 function cryptoU63(): bigint {
   const b = crypto.getRandomValues(new Uint8Array(8));
@@ -55,12 +57,11 @@ Deno.serve(async (req: Request) => {
   if (!ok) return errorResponse(401, "bad_signature");
   const tenant = (user.tenant_id as string) ?? "public";
 
-  // 1) 일일 제한.
+  // 1) 일일 제한 — 빠른 실패용 사전 조회. 실제 소진 확정은 상대까지 정해진 뒤 (4)의 원자적 선점이 한다.
   const today = todayKst();
   const { data: dc } = await db
     .from("pvp_daily_counts").select("count").eq("device_id", me).eq("kst_date", today).maybeSingle();
-  const dailyUsed = dc ? Number(dc.count) : 0;
-  if (dailyUsed >= DAILY_RANK_LIMIT) return errorResponse(409, "daily_limit");
+  if ((dc ? Number(dc.count) : 0) >= DAILY_RANK_LIMIT) return errorResponse(409, "daily_limit");
 
   // 2) 내 등록 팀.
   const { data: myTeamRow } = await db
@@ -70,26 +71,42 @@ Deno.serve(async (req: Request) => {
   // 랭크전은 5v5 대칭 — 도전자도 5마리 풀팀 강제(클라 rankedReady==5 재확인, 서버 authoritative).
   if (!Array.isArray(myTeam) || myTeam.length !== RANKED_TEAM_SIZE) return errorResponse(409, "team_not_full");
 
-  // 3) 상대 추출 — 같은 테넌트, 본인 아님, 유사 레이팅 우선(없으면 확장).
-  let pool: { device_id: string; team_json: unknown; rating: number }[] = [];
-  {
-    const near = await db.from("pvp_teams").select("device_id, team_json, rating")
-      .eq("tenant_id", tenant).neq("device_id", me)
-      .gte("rating", 0).limit(100);   // 전체 후보 로드 후 JS에서 윈도우/무작위(레이팅 인덱스는 적음).
+  // 3) 상대 추출 — 같은 테넌트, 본인 아님, 유사 레이팅 우선(없으면 전체로 확장).
+  //    레이팅 윈도우를 **DB에서** 좁힌다(인덱스 pvp_teams_tenant_rating). 예전엔 정렬도
+  //    윈도우도 없이 100행을 받아 JS에서 걸렀는데, 참가자가 POOL_LIMIT을 넘으면 Postgres가
+  //    돌려주는 임의의 100행에만 매칭이 갇혀 상대가 사실상 고정됐다.
+  type PoolRow = { device_id: string; team_json: unknown; rating: number };
+  const loadPool = async (lo: number | null): Promise<PoolRow[]> => {
+    let q = db.from("pvp_teams").select("device_id, team_json, rating")
+      .eq("tenant_id", tenant).neq("device_id", me);
+    if (lo !== null) q = q.gte("rating", lo).lte("rating", lo + 2 * RATING_WINDOW);
+    const { data } = await q.limit(POOL_LIMIT);
     // 5v5 대칭 강제 — 레거시 <5 등록 팀은 매칭 후보에서 제외(3v5 거저주기 방지). 재등록 시 재편입.
-    pool = ((near.data ?? []) as typeof pool)
+    return ((data ?? []) as PoolRow[])
       .filter((o) => Array.isArray(o.team_json) && (o.team_json as unknown[]).length === RANKED_TEAM_SIZE);
-  }
-  if (pool.length === 0) return errorResponse(409, "no_opponent");
-  const myRatingRow = await db.from("pvp_ratings").select("rating, wins, losses").eq("device_id", me).maybeSingle();
+  };
+  const myRatingRow = await db.from("pvp_ratings").select("rating").eq("device_id", me).maybeSingle();
   const myRating = myRatingRow.data ? Number(myRatingRow.data.rating) : 1000;
-  // 유사 레이팅 윈도우 우선.
-  const near = pool.filter((o) => Math.abs(Number(o.rating) - myRating) <= RATING_WINDOW);
-  const candidates = near.length > 0 ? near : pool;
-  const opp = candidates[Math.floor(Math.random() * candidates.length)];
+  let pool = await loadPool(myRating - RATING_WINDOW);
+  if (pool.length === 0) pool = await loadPool(null);   // 윈도우가 비면 전체 확장(기존 폴백 유지)
+  if (pool.length === 0) return errorResponse(409, "no_opponent");
+  const opp = pool[Math.floor(Math.random() * pool.length)];
   const oppTeam = opp.team_json as BattleTeam;
 
-  // 4) 서버 시뮬.
+  // 4) 일일 카운트 원자적 선점 — 시뮬 **전에** 확정한다. 예전엔 맨 끝에서 (읽은 값 + 1)을
+  //    upsert해서, 동시 요청이 전부 같은 값을 읽고 제한을 통과하는 구멍이 있었다.
+  //    no_team/no_opponent로 끝나는 요청은 여기 도달하지 않으므로 헛되이 소모되지 않는다.
+  const { data: claimed, error: claimErr } = await db.rpc("pvp_claim_daily", {
+    p_device: me, p_date: today, p_limit: DAILY_RANK_LIMIT,
+  });
+  if (claimErr) {
+    console.error("pvp_claim_daily failed", claimErr);
+    return errorResponse(500, "daily_claim_failed");
+  }
+  if (claimed === null) return errorResponse(409, "daily_limit");
+  const dailyUsed = Number(claimed);
+
+  // 5) 서버 시뮬.
   const seed = cryptoU63();
   const result = simulate(myTeam, oppTeam, seed);
   // HP 바 실링(팀 시너지 + HP 스케일 반영). 클라가 로컬 재도출하면 엔진 버전 스큐 때 desync되므로
@@ -98,8 +115,8 @@ Deno.serve(async (req: Request) => {
   const maxHpB = oppTeam.map((m) => finalStats(m, oppTeam).hp);
   const winSide = result.winner;   // "a"(나) | "b"(상대) | null(무승부)
 
-  // 5) Elo.
-  const oppRatingRow = await db.from("pvp_ratings").select("rating, wins, losses").eq("device_id", opp.device_id).maybeSingle();
+  // 6) Elo. wins/losses는 (8)의 RPC가 증분하므로 여기선 rating만 읽는다.
+  const oppRatingRow = await db.from("pvp_ratings").select("rating").eq("device_id", opp.device_id).maybeSingle();
   const oppRating = oppRatingRow.data ? Number(oppRatingRow.data.rating) : 1000;
   const expectedMe = 1 / (1 + Math.pow(10, (oppRating - myRating) / 400));
   const scoreMe = winSide === "a" ? 1 : (winSide === null ? 0.5 : 0);
@@ -109,16 +126,8 @@ Deno.serve(async (req: Request) => {
   const deltaMe = nominalDelta >= 0
     ? Math.min(nominalDelta, oppRating)     // opp → me (패자가 0 아래로는 못 내려감)
     : -Math.min(-nominalDelta, myRating);   // me → opp (내가 0 아래로는 못 내려감)
-  const myNew = myRating + deltaMe;
-  const oppNew = oppRating - deltaMe;
 
-  const myWins = (myRatingRow.data ? Number(myRatingRow.data.wins) : 0) + (winSide === "a" ? 1 : 0);
-  const myLosses = (myRatingRow.data ? Number(myRatingRow.data.losses) : 0) + (winSide === "b" ? 1 : 0);
-  const oppWins = (oppRatingRow.data ? Number(oppRatingRow.data.wins) : 0) + (winSide === "b" ? 1 : 0);
-  const oppLosses = (oppRatingRow.data ? Number(oppRatingRow.data.losses) : 0) + (winSide === "a" ? 1 : 0);
-  const nowIso = new Date().toISOString();
-
-  // 6) 매치 로그.
+  // 7) 매치 로그.
   const winnerDevice = winSide === "a" ? me : (winSide === "b" ? opp.device_id : null);
   // log_json에 팀 스냅샷도 저장 → pvp-history 재생 시 HP 바 렌더 가능. teamA=도전자, teamB=방어자.
   await db.from("pvp_matches").insert({
@@ -127,14 +136,26 @@ Deno.serve(async (req: Request) => {
     log_json: { events: result.log, teamA: myTeam, teamB: oppTeam, maxHpA, maxHpB },
   });
 
-  // 7) 레이팅 갱신(양측) + pvp_teams.rating 캐시.
-  await db.from("pvp_ratings").upsert({ device_id: me, tenant_id: tenant, rating: myNew, wins: myWins, losses: myLosses, updated_at: nowIso });
-  await db.from("pvp_ratings").upsert({ device_id: opp.device_id, tenant_id: tenant, rating: oppNew, wins: oppWins, losses: oppLosses, updated_at: nowIso });
+  // 8) 레이팅 갱신(양측) + pvp_teams.rating 캐시.
+  //    RPC가 `rating + delta`를 단일 문장으로 적용하므로 동시 매치가 겹쳐도 증분이 유실되지
+  //    않는다 — 예전 upsert는 매치 시작 시점에 읽은 값으로 덮어써서, 같은 상대가 동시에 두 번
+  //    도전받으면 먼저 끝난 매치의 결과가 사라졌다. 반환값이 실제 반영된 rating이므로 응답·캐시
+  //    모두 이 값을 쓴다(로컬에서 myRating + deltaMe로 재계산하면 동시 매치와 어긋난다).
+  const { data: myApplied, error: myRatingErr } = await db.rpc("pvp_apply_rating", {
+    p_device: me, p_tenant: tenant, p_delta: deltaMe,
+    p_win: winSide === "a" ? 1 : 0, p_loss: winSide === "b" ? 1 : 0,
+  });
+  const { data: oppApplied, error: oppRatingErr } = await db.rpc("pvp_apply_rating", {
+    p_device: opp.device_id, p_tenant: tenant, p_delta: -deltaMe,
+    p_win: winSide === "b" ? 1 : 0, p_loss: winSide === "a" ? 1 : 0,
+  });
+  if (myRatingErr) console.error("pvp_apply_rating(challenger) failed", myRatingErr);
+  if (oppRatingErr) console.error("pvp_apply_rating(defender) failed", oppRatingErr);
+  // RPC 실패 시엔 매치 로그는 남았으므로 응답만 로컬 추정치로 채운다(다음 매치에서 자연 복구).
+  const myNew = myApplied != null ? Number(myApplied) : Math.max(0, myRating + deltaMe);
+  const oppNew = oppApplied != null ? Number(oppApplied) : Math.max(0, oppRating - deltaMe);
   await db.from("pvp_teams").update({ rating: myNew }).eq("device_id", me);
   await db.from("pvp_teams").update({ rating: oppNew }).eq("device_id", opp.device_id);
-
-  // 8) 일일 카운트 증가.
-  await db.from("pvp_daily_counts").upsert({ device_id: me, kst_date: today, count: dailyUsed + 1 });
 
   // 9) 승리 코인(로컬 경제 — 서버는 금액만 반환, 클라가 CoinLedger로 크레딧).
   let coinReward = winSide === "a" ? WIN_COIN_BASE : (winSide === null ? 10 : 5);
@@ -152,7 +173,7 @@ Deno.serve(async (req: Request) => {
     log: result.log,
     rounds: result.rounds,
     seed: seed.toString(),
-    dailyUsed: dailyUsed + 1,
+    dailyUsed,
     dailyLimit: DAILY_RANK_LIMIT,
   });
 });

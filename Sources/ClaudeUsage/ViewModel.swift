@@ -341,7 +341,8 @@ final class ViewModel: ObservableObject {
         let amount = Self.wellnessReward(elapsed: elapsed)
         // credit 정책(totalEarned/firstCreditedAt 추적)을 한곳에서만 관리하기 위해 CoinLedger 경유.
         CoinLedger.shared.creditWellness(amount: amount)
-        // Standup 도장 — `.rewarded`(60s 안 응답)만 카운트.
+        // Standup 도장 — 보상 창(`wellnessRewardWindow`, 5분) 안에 응답한 경우만 카운트.
+        // (보상 금액은 1분간 지수감쇠하지만, 카운트 기준은 감쇠와 무관한 5분 창이다.)
         Settings.shared.wellnessRespondedCount += 1
         BadgeRegistry.evaluate()
         return .rewarded(amount)
@@ -364,12 +365,16 @@ final class ViewModel: ObservableObject {
             // 영속 history 초기 로드 완료 후 첫 refresh를 돌린다 — append가 초기 로드 대입에
             // 덮어쓰이지 않도록 (issue #19-1). 파일 IO라 보통 첫 네트워크보다 먼저 끝난다.
             await self.initialLoadTask?.value
+            // 직전 cycle이 **실제로** 잔 시간 — Night Owl 누적 단위. 첫 cycle은 잔 적이 없어 0.
+            // 예전엔 `interval`을 그대로 넘겨서 jitter(±15%)·backoff(최대 16×)·비활성 30s
+            // 사이클이 전부 무시됐고, backoff 구간에서 실제 경과의 1/6까지 과소 계상됐다.
+            var lastSleptSec: TimeInterval = 0
             while !Task.isCancelled {
                 // (visibility gate) panel/menu bar 모두 안 보이면 refresh 스킵.
                 // (sleep gate) macOS sleep 동안에도 스킵 — 깨자마자 폭주 방지.
                 let active = self.shouldPollNow()
                 if active {
-                    self.updateGymCountersOnCycleStart(sleepSec: interval)
+                    self.updateGymCountersOnCycleStart(sleepSec: lastSleptSec)
                     await self.refreshClaude()
                     await self.refreshCursor()
                     await self.refreshCodex()
@@ -402,6 +407,7 @@ final class ViewModel: ObservableObject {
                     sleepSec = min(baseSleep, 30)
                 }
                 DebugLog.log("Poll cycle done: active=\(active) base=\(Int(baseSleep))s → sleep=\(Int(sleepSec))s (backoff×\(Int(Self.backoffMultiplier(steps: self.consecutiveBackoffSteps))))")
+                lastSleptSec = sleepSec
                 try? await Task.sleep(nanoseconds: UInt64(sleepSec * 1_000_000_000))
             }
         }
@@ -476,8 +482,20 @@ final class ViewModel: ObservableObject {
     /// 실패는 조용히 무시(기존 값 유지) — 날씨는 부가 연출이라 에러를 사용자에게 노출하지 않는다.
     /// appcast 최신 버전을 받아 `latestVersion` 갱신 — 메인 패널 버전 칩이 업데이트 유무를 표시.
     /// 실패 시 기존 값 유지(조용히 무시). dev 빌드(feed URL 없음)는 항상 nil이라 칩이 평범한 현재 버전만 보임.
+    ///
+    /// 릴리스는 하루에 몇 번 나오지도 않는데 폴링(600s)마다 appcast.xml을 통째로 받고 있었다.
+    /// Sparkle이 자체 백그라운드 체크를 따로 돌리므로 이쪽은 칩 표시용으로만 1시간 캐시한다.
+    /// 성공했을 때만 시각을 갱신해 실패는 다음 cycle에 곧바로 재시도된다(날씨 캐시와 같은 관례).
+    private var lastVersionFetchAt: Date?
+    private static let versionRefreshInterval: TimeInterval = 3600
+
     func refreshLatestVersion() async {
-        if let v = await Updater.fetchLatestVersion() { latestVersion = v }
+        if let last = lastVersionFetchAt,
+           Date().timeIntervalSince(last) < Self.versionRefreshInterval { return }
+        if let v = await Updater.fetchLatestVersion() {
+            latestVersion = v
+            lastVersionFetchAt = Date()
+        }
     }
 
     func refreshWeather(force: Bool = false) async {
@@ -1018,6 +1036,21 @@ final class ViewModel: ObservableObject {
         return max(minSleep, nextDeadline.timeIntervalSince(now))
     }
 
+    // MARK: - 스냅샷 적재 (세 소스 공통)
+
+    /// 인메모리 history 상한 — 세 소스 공통. 차트는 최근 48~96개만 쓰지만 펫·진단이 더 긴
+    /// 구간을 훑을 수 있어 여유를 둔다. 영속 파일 쪽 상한은 `JSONLStore` compaction이 맡는다.
+    static let historyMemoryCap = 1000
+
+    /// history append + 상한 유지. 세 소스가 같은 규칙을 쓰도록 한 곳에 모은다
+    /// (예전엔 `> 1000` 매직 넘버가 refreshClaude/Cursor/Codex에 각각 박혀 있었다).
+    private func appendCapped<S>(_ snapshot: S, to history: inout [S]) {
+        history.append(snapshot)
+        if history.count > Self.historyMemoryCap {
+            history.removeFirst(history.count - Self.historyMemoryCap)
+        }
+    }
+
     // MARK: - Claude
 
     func refreshClaude() async {
@@ -1027,8 +1060,7 @@ final class ViewModel: ObservableObject {
             let snap = try await UsageAPI.shared.refresh()
             SnapshotStore.claude.append(snap)
             claudeCurrent = snap
-            claudeHistory.append(snap)
-            if claudeHistory.count > 1000 { claudeHistory.removeFirst(claudeHistory.count - 1000) }
+            appendCapped(snap, to: &claudeHistory)
             claudeError = nil
             claudeLastSuccess = snap.takenAt
             claudeNeedsLogin = false
@@ -1075,8 +1107,7 @@ final class ViewModel: ObservableObject {
             let snap = try await CursorAPI.shared.refresh()
             SnapshotStore.cursor.append(snap)
             cursorCurrent = snap
-            cursorHistory.append(snap)
-            if cursorHistory.count > 1000 { cursorHistory.removeFirst(cursorHistory.count - 1000) }
+            appendCapped(snap, to: &cursorHistory)
             cursorError = nil
             cursorLastSuccess = snap.takenAt
             cursorNeedsSetup = false
@@ -1121,8 +1152,7 @@ final class ViewModel: ObservableObject {
             let snap = try await CodexAPI.shared.refresh()
             SnapshotStore.codex.append(snap)
             codexCurrent = snap
-            codexHistory.append(snap)
-            if codexHistory.count > 1000 { codexHistory.removeFirst(codexHistory.count - 1000) }
+            appendCapped(snap, to: &codexHistory)
             codexError = nil
             codexLastSuccess = snap.takenAt
             codexNeedsSetup = false
@@ -1165,45 +1195,63 @@ final class ViewModel: ObservableObject {
     // Codex 대표 창 — 우선순위 5h > 주간(7d) > 월간. Plus/Pro는 보통 5h+7d, free는 monthly지만,
     // OpenAI가 특정 상태(5h 사용 0/비활성)에서 5h 창을 생략하고 주간만 내려주는 경우(#151)를 위해
     // 주간을 폴백 계층으로 둔다. 정상(5h 존재) 케이스는 기존과 동일하게 5h가 대표.
-    enum CodexPrimaryWindow { case fiveHour, weekly, monthly, none }
-    var codexPrimaryWindow: CodexPrimaryWindow {
-        guard let c = codexCurrent else { return .none }
-        if c.fiveHourPct != nil { return .fiveHour }
-        if c.sevenDayPct != nil { return .weekly }
-        if c.monthlyPct  != nil { return .monthly }
-        return .none
+    //
+    // 창 종류별 분기는 **전부 이 enum 안에만** 둔다. 예전엔 pct/resetAt/label/periodLength와
+    // codexPrimarySeries의 클로저까지 같은 switch가 다섯 번 흩어져 있어, 창을 추가할 때 한 곳만
+    // 빠뜨려도 조용히 어긋났다.
+    enum CodexPrimaryWindow {
+        case fiveHour, weekly, monthly, none
+
+        /// 스냅샷의 대표 창 — 위 우선순위대로 처음 값이 있는 창.
+        static func resolve(_ snapshot: CodexSnapshot?) -> CodexPrimaryWindow {
+            guard let s = snapshot else { return .none }
+            if s.fiveHourPct != nil { return .fiveHour }
+            if s.sevenDayPct != nil { return .weekly }
+            if s.monthlyPct  != nil { return .monthly }
+            return .none
+        }
+
+        func pct(from s: CodexSnapshot) -> Double? {
+            switch self {
+            case .fiveHour: return s.fiveHourPct
+            case .weekly:   return s.sevenDayPct
+            case .monthly:  return s.monthlyPct
+            case .none:     return nil
+            }
+        }
+
+        func resetAt(from s: CodexSnapshot) -> Date? {
+            switch self {
+            case .fiveHour: return s.fiveHourResetAt
+            case .weekly:   return s.sevenDayResetAt
+            case .monthly:  return s.monthlyResetAt
+            case .none:     return nil
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .fiveHour: return "5시간 창"
+            case .weekly:   return "주간"
+            case .monthly, .none: return "월간"
+            }
+        }
+
+        var periodLength: TimeInterval {
+            switch self {
+            case .fiveHour: return 5 * 3600
+            case .weekly:   return 7 * 86400
+            case .monthly, .none: return 30 * 86400
+            }
+        }
     }
+
+    var codexPrimaryWindow: CodexPrimaryWindow { .resolve(codexCurrent) }
     var codexUsesFiveHour: Bool { codexPrimaryWindow == .fiveHour }
-    var codexPrimaryPct: Double? {
-        switch codexPrimaryWindow {
-        case .fiveHour: return codexCurrent?.fiveHourPct
-        case .weekly:   return codexCurrent?.sevenDayPct
-        case .monthly:  return codexCurrent?.monthlyPct
-        case .none:     return nil
-        }
-    }
-    var codexPrimaryResetAt: Date? {
-        switch codexPrimaryWindow {
-        case .fiveHour: return codexCurrent?.fiveHourResetAt
-        case .weekly:   return codexCurrent?.sevenDayResetAt
-        case .monthly:  return codexCurrent?.monthlyResetAt
-        case .none:     return nil
-        }
-    }
-    var codexPrimaryLabel: String {
-        switch codexPrimaryWindow {
-        case .fiveHour: return "5시간 창"
-        case .weekly:   return "주간"
-        case .monthly, .none: return "월간"
-        }
-    }
-    var codexPrimaryPeriodLength: TimeInterval {
-        switch codexPrimaryWindow {
-        case .fiveHour: return 5 * 3600
-        case .weekly:   return 7 * 86400
-        case .monthly, .none: return 30 * 86400
-        }
-    }
+    var codexPrimaryPct: Double? { codexCurrent.flatMap { codexPrimaryWindow.pct(from: $0) } }
+    var codexPrimaryResetAt: Date? { codexCurrent.flatMap { codexPrimaryWindow.resetAt(from: $0) } }
+    var codexPrimaryLabel: String { codexPrimaryWindow.label }
+    var codexPrimaryPeriodLength: TimeInterval { codexPrimaryWindow.periodLength }
 
     var codexPrimaryProjectedPct: Double? {
         ViewModel.projectedPct(current: codexPrimaryPct, resetAt: codexPrimaryResetAt,
@@ -1223,37 +1271,13 @@ final class ViewModel: ObservableObject {
     }
 
     /// Codex 대표 창 차트 시계열 — 우선순위 5h > 주간(7d) > 월간을 현재 창으로 필터(#151).
-    /// claudeFiveHourSeries와 같은 관례(60s slack으로 현재 창 묶기, pct>0만, 인접 중복 합치기).
+    /// 대표 창은 **가장 최근 스냅샷** 기준으로 정하고, 그 창의 값만 뽑는다.
     nonisolated static func codexPrimarySeries(_ history: [CodexSnapshot]) -> [(Date, Double)] {
         guard let last = history.last else { return [] }
-        let kind: CodexPrimaryWindow =
-            last.fiveHourPct != nil ? .fiveHour :
-            last.sevenDayPct  != nil ? .weekly :
-            last.monthlyPct   != nil ? .monthly : .none
-        func pctOf(_ s: CodexSnapshot) -> Double? {
-            switch kind {
-            case .fiveHour: return s.fiveHourPct
-            case .weekly:   return s.sevenDayPct
-            case .monthly:  return s.monthlyPct
-            case .none:     return nil
-            }
-        }
-        func resetOf(_ s: CodexSnapshot) -> Date? {
-            switch kind {
-            case .fiveHour: return s.fiveHourResetAt
-            case .weekly:   return s.sevenDayResetAt
-            case .monthly:  return s.monthlyResetAt
-            case .none:     return nil
-            }
-        }
-        let currentReset: Date? = history.last(where: { resetOf($0) != nil }).flatMap(resetOf)
-        let filtered: [(Date, Double)] = history.compactMap { s in
-            if let cur = currentReset {
-                guard let r = resetOf(s), abs(r.timeIntervalSince(cur)) < 60 else { return nil }
-            }
-            return pctOf(s).flatMap { v in v > 0 ? (s.takenAt, v) : nil }
-        }
-        return dedupAdjacentByTime(filtered)
+        let kind = CodexPrimaryWindow.resolve(last)
+        return currentWindowSeries(history, takenAt: \.takenAt,
+                                   pct: { kind.pct(from: $0) },
+                                   resetAt: { kind.resetAt(from: $0) })
     }
 
     // MARK: - Pace prediction
@@ -1303,22 +1327,33 @@ final class ViewModel: ObservableObject {
         return out
     }
 
-    /// Claude 5h 차트/펫용 시계열 — **현재 창에 속하는 점만** 남긴다.
+    /// 차트/펫용 시계열 빌더 — **현재 창에 속하는 점만** 남긴다. Claude 5h와 Codex 대표 창이 공유.
+    ///
     /// 이전(만료) 창의 점이 섞이면 두 세션 사이 수시간 빈 구간을 .linear 보간이
     /// 대각선으로 잇고 그 아래가 채워져 "초반부분 색칠이 튀는" 아티팩트가 생긴다.
     /// resetAt 은 폴마다 ±1s 흔들리므로 정확 비교 대신 60s slack 으로 같은 창을 묶는다
     /// (NotificationManager 의 resetAt 비교와 동일한 관례). pct==0/nil 은 제외하고,
     /// 마지막으로 중복 timestamp 를 합친다(`dedupAdjacentByTime` 참조).
-    nonisolated static func claudeFiveHourSeries(_ history: [UsageSnapshot]) -> [(Date, Double)] {
-        let currentReset = history.last(where: { $0.fiveHourResetAt != nil })?.fiveHourResetAt
+    nonisolated static func currentWindowSeries<S>(
+        _ history: [S],
+        takenAt: (S) -> Date,
+        pct: (S) -> Double?,
+        resetAt: (S) -> Date?
+    ) -> [(Date, Double)] {
+        let currentReset = history.last(where: { resetAt($0) != nil }).flatMap(resetAt)
         let filtered: [(Date, Double)] = history.compactMap { s in
             if let cur = currentReset {
-                guard let reset = s.fiveHourResetAt,
-                      abs(reset.timeIntervalSince(cur)) < 60 else { return nil }
+                guard let r = resetAt(s), abs(r.timeIntervalSince(cur)) < 60 else { return nil }
             }
-            return s.fiveHourPct.flatMap { v in v > 0 ? (s.takenAt, v) : nil }
+            return pct(s).flatMap { v in v > 0 ? (takenAt(s), v) : nil }
         }
         return dedupAdjacentByTime(filtered)
+    }
+
+    /// Claude 5h 차트/펫용 시계열.
+    nonisolated static func claudeFiveHourSeries(_ history: [UsageSnapshot]) -> [(Date, Double)] {
+        currentWindowSeries(history, takenAt: \.takenAt,
+                            pct: \.fiveHourPct, resetAt: \.fiveHourResetAt)
     }
 
     var claude5hProjectedPct: Double? {
@@ -1385,8 +1420,9 @@ final class ViewModel: ObservableObject {
     // MARK: - Gym (Rate Limit)
 
     /// Rate Limit 도장 — 7d resetAt이 변경된 cycle에서 *직전* pct가 < 80%면 +1.
-    /// `lastClaudeSevenDayReset`/`lastClaudeSevenDayPctSeen`은 CoinLedger.evaluateClaude가
+    /// `lastClaudeSevenDayReset`/`lastClaudeSevenDayPctSeen`은 `UsageEventProducer.ingestClaude`가
     /// 같은 cycle 안 뒷쪽에서 갱신하므로 *그 전*에 비교해야 직전 값 유지된 상태로 detect.
+    /// (refreshClaude의 호출 순서가 이 전제다 — evaluateRateLimitGym → ingestClaude.)
     private func evaluateRateLimitGym(_ snap: UsageSnapshot) {
         let s = Settings.shared
         guard let newReset = snap.sevenDayResetAt,
@@ -1479,13 +1515,18 @@ final class ViewModel: ObservableObject {
     /// 동일/역행 timestamp는 1ms씩 밀어 strict ascending 보장 (0-width segment가 차트에서
     /// 갭처럼 렌더되는 문제 — 기존 MainView.buildCumulativePoints의 관례를 그대로 옮김).
     /// cursorEvents didSet에서만 호출되므로 폴링당 최대 2회 (트림 + merge) — 렌더 hot path 밖.
+    ///
+    /// 입력이 역순이어도 정렬 후 계산한다(계약). 다만 **이미 오름차순이면 정렬을 건너뛴다** —
+    /// `cursorEvents`는 초기 로드(sorted)·증분(`mergeSortedByTimestamp`)·트림(prefix 제거)
+    /// 어느 경로로도 시간순 불변식이 유지되므로 실전에서는 항상 이 경로다. 20,000건 기준
+    /// 선형 검사(≈2만 비교)가 재정렬(≈29만 비교)을 대체한다.
     nonisolated static func cumulativeSeries(events: [CursorEvent], maxPoints: Int = cursorChartMaxPoints) -> [(Date, Double)] {
-        let sorted = events.sorted { $0.timestamp < $1.timestamp }
+        let ordered = isAscendingByTimestamp(events) ? events : events.sorted { $0.timestamp < $1.timestamp }
         var points: [(Date, Double)] = []
-        points.reserveCapacity(sorted.count)
+        points.reserveCapacity(ordered.count)
         var running: Double = 0
         var lastTs: Date? = nil
-        for e in sorted {
+        for e in ordered {
             var ts = e.timestamp
             if let prev = lastTs, ts <= prev {
                 ts = prev.addingTimeInterval(0.001)
@@ -1517,6 +1558,13 @@ final class ViewModel: ObservableObject {
             out.append(points[points.count - 1])
         }
         return out
+    }
+
+    /// timestamp 오름차순인지 선형 검사. 정렬 비용을 치를지 판단하는 데만 쓴다.
+    nonisolated static func isAscendingByTimestamp(_ events: [CursorEvent]) -> Bool {
+        guard events.count > 1 else { return true }
+        for i in 1..<events.count where events[i].timestamp < events[i - 1].timestamp { return false }
+        return true
     }
 
     /// 시간순 정렬된 두 배열을 O(n+m) 2-pointer로 병합 (issue #19-3).

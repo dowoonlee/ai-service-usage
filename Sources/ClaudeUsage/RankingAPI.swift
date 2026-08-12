@@ -1671,14 +1671,24 @@ actor RankingAPI {
 
     // MARK: - HTTP helpers
 
+    /// 기본 요청 타임아웃. Supabase Edge Function은 cold start가 붙어 Cursor(10/15s)·
+    /// Codex(12s)보다 여유를 두되, 폴링 사이클이 한 호출에 오래 붙잡히지 않도록 제한한다.
+    /// (`URLRequest` 기본값은 60s라, 서버가 늘어지면 sync·leaderboard·claim이 순차로 도는
+    ///  사이클 전체가 그만큼 밀렸다.)
+    private static let defaultTimeout: TimeInterval = 20
+    /// 뒤에 OpenAI 호출이 붙는 endpoint(운세 생성·퀴즈 생성)는 별도로 길게 잡는다.
+    private static let llmTimeout: TimeInterval = 60
+
     /// 서명은 body 내부 `signature` 필드로 전달되며 헤더에는 anon key만 실음 — 호출 측에서
     /// `signed` 플래그를 따로 넘길 필요 없음 (v0.8.12 dead parameter 정리).
-    private func buildPostRequest<Req: Encodable>(path: String, body: Req) throws -> URLRequest {
+    private func buildPostRequest<Req: Encodable>(
+        path: String, body: Req, timeout: TimeInterval = RankingAPI.defaultTimeout
+    ) throws -> URLRequest {
         guard let base = Self.baseURL, let anon = Self.anonKey else {
             throw RankingError.notConfigured
         }
         let url = base.appendingPathComponent("functions/v1/\(path)")
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -1695,8 +1705,10 @@ actor RankingAPI {
         return req
     }
 
-    private func post<Req: Encodable, Resp: Decodable>(path: String, body: Req) async throws -> Resp {
-        let req = try buildPostRequest(path: path, body: body)
+    private func post<Req: Encodable, Resp: Decodable>(
+        path: String, body: Req, timeout: TimeInterval = RankingAPI.defaultTimeout
+    ) async throws -> Resp {
+        let req = try buildPostRequest(path: path, body: body, timeout: timeout)
         return try await execute(req)
     }
 
@@ -1706,7 +1718,10 @@ actor RankingAPI {
         try await executeVoid(req)
     }
 
-    private func get<Resp: Decodable>(path: String, queryItems: [URLQueryItem]? = nil) async throws -> Resp {
+    private func get<Resp: Decodable>(
+        path: String, queryItems: [URLQueryItem]? = nil,
+        timeout: TimeInterval = RankingAPI.defaultTimeout
+    ) async throws -> Resp {
         guard let base = Self.baseURL, let anon = Self.anonKey else {
             throw RankingError.notConfigured
         }
@@ -1716,7 +1731,7 @@ actor RankingAPI {
         var components = URLComponents(url: pathURL, resolvingAgainstBaseURL: false)
         components?.queryItems = queryItems
         guard let url = components?.url else { throw RankingError.notConfigured }
-        var req = URLRequest(url: url)
+        var req = URLRequest(url: url, timeoutInterval: timeout)
         // 라이브 데이터(리더보드/게시판/운세) — 캐시된 옛 응답을 절대 쓰지 않는다.
         // 기본 정책은 URLSession.shared의 URLCache가 Cache-Control 없는 200 GET을 heuristic
         // 캐시해 새 필드(previousMonth.myRank 등)가 없는 옛 응답을 계속 내보내는 문제가 있었다.
@@ -1767,7 +1782,8 @@ actor RankingAPI {
         )
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let req = FortuneRequest(payload: payload, signature: sig)
-        let resp: FortuneResponse = try await post(path: "fortune", body: req)
+        // 캐시 미스면 서버가 OpenAI를 호출하고 나서 응답한다 — 기본 타임아웃으론 잘린다.
+        let resp: FortuneResponse = try await post(path: "fortune", body: req, timeout: Self.llmTimeout)
         return resp.row
     }
 
@@ -1833,7 +1849,8 @@ actor RankingAPI {
             ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let req = DailyQuizTodayRequest(payload: payload, signature: sig)
-        return try await post(path: "daily-quiz", body: req)
+        // 캐시 미스면 RSS fetch + OpenAI 생성까지 이 요청 안에서 끝난다(제출은 채점만이라 기본값).
+        return try await post(path: "daily-quiz", body: req, timeout: Self.llmTimeout)
     }
 
     /// 답안 제출 — 서버 채점 + 코인 지급(reward_grants). 이미 풀었으면 alreadySubmitted=true로 기존 결과.

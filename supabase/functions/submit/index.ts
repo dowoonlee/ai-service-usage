@@ -162,7 +162,10 @@ Deno.serve(async (req: Request) => {
   if (acceptedFlag && accepted > 0 && user.status !== "shadow_banned") {
     updates.total_coins = writeTotal;
   }
-  if (acceptedFlag) {
+  // delta=0(트레이너 카드 편집 시 profile만 push하는 경로)은 코인 제출이 아니므로 캡 기준
+  // 시각을 건드리지 않는다. 갱신해버리면 elapsed가 0부터 다시 시작해 다음 실제 제출의 캡이
+  // floor까지 좁아지고, 오래 미제출 상태에서 쌓인 delta가 truncate + abuse flag로 이어진다.
+  if (acceptedFlag && accepted > 0) {
     updates.last_submitted_at = new Date().toISOString();
   }
   if (body.profileJson !== undefined) {

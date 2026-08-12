@@ -27,6 +27,8 @@ final class DMStore {
             ?? URL(fileURLWithPath: NSTemporaryDirectory())
         let dir = appSupport.appendingPathComponent("ClaudeUsage", isDirectory: true)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        // JSONLStore와 같은 제한 — 어느 쪽이 디렉토리를 먼저 만들든 0700이 되도록.
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
         url = dir.appendingPathComponent("dm-local.json")
         if let raw = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode(Persisted.self, from: raw) {
@@ -34,8 +36,13 @@ final class DMStore {
         }
     }
 
+    /// 저장할 때마다 0600으로 좁힌다. 이 파일엔 E2EE 쪽지의 **평문** 발신 echo와 TOFU 핀이
+    /// 들어가는데, `.atomic` 쓰기는 임시 파일을 만들어 rename하므로 권한이 매번 umask 기본값
+    /// (보통 0644)으로 되돌아간다 — 최초 1회만 설정해두면 다음 저장에서 다시 열린다.
     private func persist() {
-        if let raw = try? JSONEncoder().encode(data) { try? raw.write(to: url, options: .atomic) }
+        guard let raw = try? JSONEncoder().encode(data) else { return }
+        try? raw.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 
     // MARK: - TOFU 핀
