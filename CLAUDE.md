@@ -41,6 +41,7 @@ The tests encode contracts, not just examples — several of them exist because 
 - Single `ViewModel` (`@MainActor ObservableObject`) owns all state; mounted into SwiftUI `MainView` via `NSHostingView`.
 - Polling is a single `Task` loop in `ViewModel.startPolling`, default **600s**. One cycle runs: gym counters → `refreshClaude()` → `refreshCursor()` → `refreshCodex()` → weather → appcast version → pet usage accrual → contributor sync → backoff update → badges → ranking submit → reward claims → `runSync()`. Sleep is `base × jitter(±15%) × backoff(≤16×)`, capped at 1h, and shortened near a `resetAt` so the last poll of a window lands before it rolls over.
 - Two gates skip a cycle entirely (`PollGate`): macOS sleep, and "no visible surface" (panel hidden **and** menu bar off). Idle cycles still poll every 30s so wake/visibility is picked up quickly, and unclaimed rewards are still checked on a 600s throttle.
+- Not every step runs at the cycle rate. `runSync` has a 120s floor, the appcast check 1h, weather 30min, and the reward-claim `leaderboard` fetch 1h (`claimLeaderboardIntervalSec`) — that one was ~35% of all Edge Function calls when it ran every cycle, and what it checks for only happens weekly/monthly. When the ranking window is open, `runSync`'s leaderboard section drives the same claim path, so the throttle costs nothing the user can see. Claim **retries** (`retryPendingClaims`) stay unthrottled — they no-op without a stored descriptor.
 
 ### Three API actors, deliberately different
 

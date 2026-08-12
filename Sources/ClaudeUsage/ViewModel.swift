@@ -82,9 +82,29 @@ final class ViewModel: ObservableObject {
     /// 비활성(패널·메뉴바 모두 숨김) 상태의 claim 체크 시각 — 자체 스로틀용.
     private var lastIdleClaimCheckAt: Date?
     /// 비활성 상태 claim 체크 간격. 비활성 루프는 30초마다 도는데(wake 감지용) 거기에 claim을
-    /// 그대로 걸면 leaderboard 호출이 20배로 튄다. 활성 사이클은 이미 interval(기본 600s)이라
-    /// 별도 스로틀이 필요 없다.
+    /// 그대로 걸면 재시도가 20배로 튄다. leaderboard fetch 자체는 아래 별도 스로틀이 맡는다.
     static let idleClaimCheckIntervalSec: TimeInterval = 600
+
+    /// 보상 claim 확인용 leaderboard fetch의 최소 간격.
+    ///
+    /// 정산은 주 1회·월 1회인데 폴링(600s)마다 10KB짜리 전체 리더보드를 받고 있었다 —
+    /// 실측상 Edge Function 호출의 약 35%, Egress의 대부분이 이 한 호출이었다. 활성 사이클도
+    /// 스로틀 대상이다(예전 주석은 "600s 간격이라 불필요"라고 봤지만, 확인하려는 이벤트의
+    /// 주기가 주/월 단위라 600s는 과하다).
+    ///
+    /// 백그라운드 수령이 최대 이 간격만큼 늦어지는 게 유일한 대가다. 사용자가 랭킹 화면을 열면
+    /// `runSync`의 leaderboard 섹션이 같은 claim 경로(`processPendingClaims`)를 즉시 태우므로,
+    /// 눈으로 보고 있을 때의 반응성은 그대로다.
+    static let claimLeaderboardIntervalSec: TimeInterval = 3600
+    /// 마지막 claim용 leaderboard fetch 시각 — 활성·비활성 경로가 공유한다(따로 세면 간격이 무너진다).
+    private var lastClaimLeaderboardAt: Date?
+
+    /// 마지막 실행 시각 + 간격으로 "지금 돌릴 차례인지" 판정. 첫 호출(nil)은 항상 true.
+    /// 주기 게이트를 쓰는 곳들이 같은 규칙을 공유하도록 순수 함수로 분리(테스트 대상).
+    nonisolated static func isDue(lastAt: Date?, now: Date, interval: TimeInterval) -> Bool {
+        guard let lastAt else { return true }
+        return now.timeIntervalSince(lastAt) >= interval
+    }
     /// Wellness 너지 표시 시각은 `Settings.lastWellnessShownAt`에 영구 저장 — 앱 재실행 시 1시간 쿨다운이 유지되어야 함 (#11).
     private var lastWellnessShownAt: Date? {
         get { Settings.shared.lastWellnessShownAt }
@@ -670,8 +690,13 @@ final class ViewModel: ObservableObject {
         let s = Settings.shared
         guard hasRankingPrerequisites,
               let hmacKey = Keychain.loadRankingHmacKey() else { return }
-        // 응답 유실된 claim 재시도 — leaderboard fetch 성패와 무관하게 매 cycle 선처리 (#191).
+        // 응답 유실된 claim 재시도 — leaderboard fetch 성패·스로틀과 무관하게 매 cycle 선처리 (#191).
+        // 디스크립터가 없으면 즉시 return이라 평상시 네트워크 비용은 0이다.
         await retryPendingClaims(hmacKey: hmacKey)
+        // 여기부터가 비용의 본체(10KB 리더보드) — `claimLeaderboardIntervalSec` 스로틀 대상.
+        guard Self.isDue(lastAt: lastClaimLeaderboardAt, now: Date(),
+                         interval: Self.claimLeaderboardIntervalSec) else { return }
+        lastClaimLeaderboardAt = Date()
         do {
             let resp = try await RankingAPI.shared.fetchLeaderboard(deviceId: s.rankingDeviceID)
             // 본인 누적 메달 캐시 갱신 — pendingReward 유무와 무관하게 매 cycle 반영.
@@ -687,10 +712,11 @@ final class ViewModel: ObservableObject {
 
     /// 비활성 사이클에서 claim 체크를 돌릴지 판단한다 — `idleClaimCheckIntervalSec` 스로틀.
     /// 판단과 동시에 타임스탬프를 갱신하므로, true를 받은 호출자는 반드시 체크를 수행해야 한다.
+    /// (여기를 통과해도 leaderboard fetch는 `claimLeaderboardIntervalSec`가 다시 거른다.)
     private func shouldCheckClaimsWhileIdle() -> Bool {
-        guard hasRankingPrerequisites else { return false }
-        if let last = lastIdleClaimCheckAt,
-           Date().timeIntervalSince(last) < Self.idleClaimCheckIntervalSec { return false }
+        guard hasRankingPrerequisites,
+              Self.isDue(lastAt: lastIdleClaimCheckAt, now: Date(),
+                         interval: Self.idleClaimCheckIntervalSec) else { return false }
         lastIdleClaimCheckAt = Date()
         return true
     }
