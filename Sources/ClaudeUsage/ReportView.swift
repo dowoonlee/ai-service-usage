@@ -43,10 +43,10 @@ struct ReportView: View {
             presenting: pendingAccessoryPurchase
         ) { acc in
             Button("\(acc.price) coin 으로 구매") {
-                guard settings.coins >= acc.price else { return }
-                settings.coins -= acc.price
-                settings.ownedAccessories.insert(acc.rawValue)
-                settings.trainerCard.accessory = acc
+                // 차감·인벤토리 등록은 CoinLedger 경유(소비 로그 단일 경로) — 성공 시에만 장착.
+                if CoinLedger.shared.purchaseAccessory(acc) {
+                    settings.trainerCard.accessory = acc
+                }
             }
             Button("취소", role: .cancel) {}
         } message: { acc in
@@ -316,10 +316,8 @@ struct ReportView: View {
         return Button {
             if available {
                 settings.trainerCard.title = t
-            } else if canPurchase, let price = t.purchasePrice, settings.coins >= price {
-                // 코인 차감 + 인벤토리 등록 → 자동 unlock 평가에 포함됨.
-                settings.coins -= price
-                settings.ownedTitles.insert(t.rawValue)
+            } else if canPurchase, CoinLedger.shared.purchaseTitle(t) {
+                // 차감 + 인벤토리 등록은 CoinLedger가 담당 → 자동 unlock 평가에 포함됨.
                 settings.trainerCard.title = t
             }
         } label: {

@@ -64,14 +64,20 @@ struct PetOwnership: Codable, Hashable {
     }
 
     /// 가챠 중복 + 사용 시간을 합산 unit으로 환산해서 variant 해금 평가.
+    /// 임계를 한 번에 여러 개 넘겼으면 **전부** 해금하고 그중 최고 variant를 반환한다.
+    /// (예전엔 첫 임계 하나만 열고 즉시 반환해서, 백업 복원으로 진행도가 크게 점프하거나
+    ///  10연차로 count가 급증하면 variant 2/3 해금이 다음 폴링·다음 뽑기까지 밀렸다.
+    ///  variant 3을 요구하는 `claimOverflowShards`의 조각 적립도 함께 밀렸다.)
+    /// `variantUnitThresholds`가 오름차순이라 마지막으로 연 것이 최고 variant다.
     private mutating func updateUnlocks(usageSeconds: TimeInterval) -> Int? {
         let units = Self.progressUnits(count: count, usageSeconds: usageSeconds)
+        var highest: Int? = nil
         for (threshold, variant) in Self.variantUnitThresholds
         where units >= threshold && !unlockedVariants.contains(variant) {
             unlockedVariants.insert(variant)
-            return variant
+            highest = variant
         }
-        return nil
+        return highest
     }
 
     /// 합산 진행 단위 환산. 5 중복 = 1 unit, 4일 사용 = 1 unit (variant 1 단독 임계 등가).

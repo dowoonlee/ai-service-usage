@@ -364,12 +364,16 @@ final class ViewModel: ObservableObject {
             // 영속 history 초기 로드 완료 후 첫 refresh를 돌린다 — append가 초기 로드 대입에
             // 덮어쓰이지 않도록 (issue #19-1). 파일 IO라 보통 첫 네트워크보다 먼저 끝난다.
             await self.initialLoadTask?.value
+            // 직전 cycle이 **실제로** 잔 시간 — Night Owl 누적 단위. 첫 cycle은 잔 적이 없어 0.
+            // 예전엔 `interval`을 그대로 넘겨서 jitter(±15%)·backoff(최대 16×)·비활성 30s
+            // 사이클이 전부 무시됐고, backoff 구간에서 실제 경과의 1/6까지 과소 계상됐다.
+            var lastSleptSec: TimeInterval = 0
             while !Task.isCancelled {
                 // (visibility gate) panel/menu bar 모두 안 보이면 refresh 스킵.
                 // (sleep gate) macOS sleep 동안에도 스킵 — 깨자마자 폭주 방지.
                 let active = self.shouldPollNow()
                 if active {
-                    self.updateGymCountersOnCycleStart(sleepSec: interval)
+                    self.updateGymCountersOnCycleStart(sleepSec: lastSleptSec)
                     await self.refreshClaude()
                     await self.refreshCursor()
                     await self.refreshCodex()
@@ -402,6 +406,7 @@ final class ViewModel: ObservableObject {
                     sleepSec = min(baseSleep, 30)
                 }
                 DebugLog.log("Poll cycle done: active=\(active) base=\(Int(baseSleep))s → sleep=\(Int(sleepSec))s (backoff×\(Int(Self.backoffMultiplier(steps: self.consecutiveBackoffSteps))))")
+                lastSleptSec = sleepSec
                 try? await Task.sleep(nanoseconds: UInt64(sleepSec * 1_000_000_000))
             }
         }
