@@ -166,10 +166,11 @@ final class AnimationPreviews: SandboxedTestCase {
             onPlaceDecor: { _, _ in }, onRemoveDecor: { _ in }, onApplyTheme: {},
             purchaseSheetOpen: .constant(false))
 
-        // 10fps × 80프레임 = 8초. 펫이 자리에서 일어나 한 바퀴 도는 데 충분한 길이.
+        // 10fps × 55프레임 ≈ 5.5초. 펫이 자리에서 일어나 한 바퀴 도는 데 충분하고, 이보다 길게
+        // 잡으면 GIF 한 장이 2MB를 넘어 갤러리 한 페이지를 혼자 무겁게 만든다.
         try PreviewRenderer.renderAnimated(
             view, size: CGSize(width: 560, height: 400),
-            frameCount: 80, frameInterval: 0.1,
+            frameCount: 55, frameInterval: 0.1,
             section: "애니 · 길드", title: "사무실-배회",
             note: "펫이 가구를 통과하지 않는지, 벽에 끼지 않는지, 걷는 방향과 그림 방향이 맞는지.")
     }
