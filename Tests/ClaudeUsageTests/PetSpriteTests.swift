@@ -61,4 +61,38 @@ final class PetSpriteTests: XCTestCase {
             XCTAssertFalse(desc?.isEmpty ?? true, "\(kind.rawValue) has empty description")
         }
     }
+
+    // 스프라이트 strip에 **완전히 투명한 프레임**이 있으면 그 구간 동안 펫이 화면에서 사라진다.
+    // 시트 결함 대부분은 자동 판정하면 오탐투성이지만(그래서 프리뷰로 눈으로 본다), "프레임이
+    // 통째로 비었다"만은 예외 없이 결함이다 — 애니메이션 도중 사라지는 걸 의도할 리가 없다.
+    //
+    // 원인은 보통 strip 파일이 cellSize 기준 프레임 수보다 넓게 저장된 경우다. 렌더러는 폭을
+    // cellSize로 나눠 프레임 수를 정하므로, 남는 빈 칸까지 애니메이션 프레임으로 세어버린다.
+    func testNoBlankFramesInAnySprite() {
+        var offenders: [String] = []
+        for kind in PetKind.allCases {
+            var actions: [PetController.Action] = [.sit, .walk, .run]
+            if Mythic.spec(for: kind) != nil { actions += [.special1, .special2] }
+            for action in actions {
+                let frames = PetSprite.frames(for: kind, action: action)
+                for (i, frame) in frames.enumerated() where Self.isFullyTransparent(frame) {
+                    offenders.append("\(kind.rawValue).\(action.rawValue)[\(i)/\(frames.count)]")
+                }
+            }
+        }
+        XCTAssertTrue(offenders.isEmpty,
+                      "빈 프레임 — 재생 중 펫이 사라진다: \(offenders.joined(separator: ", "))")
+    }
+
+    /// alpha가 전부 0인지. 한 픽셀이라도 불투명하면 false.
+    private static func isFullyTransparent(_ image: NSImage) -> Bool {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else { return false }
+        for y in 0..<rep.pixelsHigh {
+            for x in 0..<rep.pixelsWide {
+                if let c = rep.colorAt(x: x, y: y), c.alphaComponent > 0.004 { return false }
+            }
+        }
+        return true
+    }
 }

@@ -83,24 +83,35 @@ enum PreviewRenderer {
                                section: String,
                                title: String,
                                note: String? = nil,
+                               warmup: TimeInterval = 0.35,
+                               appearance: NSAppearance.Name = .aqua,
                                file: StaticString = #filePath,
                                line: UInt = #line) throws -> CGSize {
         let root = try requireOutputDir()
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        // appearance를 명시하지 않으면 창은 시스템 설정을 따르는데, 캡처된 비트맵의 배경은
+        // 흰색으로 남는다. 다크 모드 기계에서 찍으면 `.secondary` 같은 시맨틱 색이 흰 글씨로
+        // 그려져 흰 배경에 그대로 묻힌다(도장 탭의 도전 조건 줄이 통째로 사라져 보였던 원인).
+        window.appearance = NSAppearance(named: appearance)
         window.backgroundColor = .windowBackgroundColor
         // 화면 밖 — 렌더는 되지만 사용자 눈에는 안 띈다.
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
-        let host = NSHostingView(rootView: view)
+        // 배경을 **뷰에** 입힌다. cacheDisplay는 뷰가 그린 것만 캡처하고 창 배경은 담지 않아서,
+        // SwiftUI 뷰가 자체 배경을 안 그리면 비트맵이 흰색으로 남는다. 다크 모드에서는 흰 글씨가
+        // 흰 배경에 묻혀 화면이 통째로 빈 것처럼 보인다.
+        let host = NSHostingView(rootView: view.background(Color(nsColor: .windowBackgroundColor)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()
         defer { window.orderOut(nil); window.contentView = nil }
 
         host.layoutSubtreeIfNeeded()
-        // 이미지·비동기 리소스가 첫 패스에 안 붙는 경우가 있어 런루프를 짧게 돌려 준다.
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        // 첫 레이아웃 패스만으로는 부족하다. GeometryReader는 1패스에서 0 크기를 보고하고 다음
+        // 패스에서야 확정되며, 이미지·비동기 리소스도 첫 패스에 안 붙는 경우가 있다. 너무 짧게
+        // 잡으면 GeometryReader를 쓰는 행이 0폭으로 뭉개진 채 찍힌다(도장 탭에서 실제로 그랬다).
+        RunLoop.current.run(until: Date().addingTimeInterval(warmup))
         host.layoutSubtreeIfNeeded()
         host.displayIfNeeded()
 
@@ -154,7 +165,7 @@ enum PreviewRenderer {
         window.isReleasedWhenClosed = false
         window.backgroundColor = .windowBackgroundColor
         window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
-        let host = NSHostingView(rootView: view)
+        let host = NSHostingView(rootView: view.background(Color(nsColor: .windowBackgroundColor)))
         host.frame = NSRect(origin: .zero, size: size)
         window.contentView = host
         window.orderFrontRegardless()

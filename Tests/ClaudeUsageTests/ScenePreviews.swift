@@ -25,13 +25,21 @@ final class ScenePreviews: SandboxedTestCase {
         await MainActor.run { PreviewDemoState.seed() }
     }
 
-    /// 탭 하나를 창 최소 크기 그대로 찍는다. 잘린다면 그게 실제로 사용자가 보는 화면이다.
+    /// 탭 하나를 창 최소 크기 그대로, **라이트와 다크 양쪽으로** 찍는다.
+    ///
+    /// 두 모드를 다 찍는 이유: 이 앱의 색 대부분이 `.secondary` 같은 시맨틱 색이라 모드에 따라
+    /// 뒤집히고, 한쪽에서만 대비가 무너지는 조합이 실제로 나온다. 한 모드만 보면 그걸 놓친다.
+    /// (프리뷰 도구가 appearance를 명시하지 않던 동안 도장 탭의 도전 조건 줄이 통째로 안 보였다 —
+    /// 다크 모드 글씨가 흰 배경에 묻힌 것이었고, 그때 앱 버그로 오해했다.)
     private func renderTab(_ view: some View, title: String, note: String) throws {
-        try PreviewRenderer.renderInWindow(
-            view, size: CGSize(width: windowWidth, height: windowHeight),
-            section: "화면", title: title,
-            note: "\(note) · 창 최소 \(Int(windowWidth))×\(Int(windowHeight)). 아래가 잘려 보이면 "
-                + "최상위 ScrollView가 있는지 확인할 것.")
+        for (mode, appearance) in [("라이트", NSAppearance.Name.aqua), ("다크", .darkAqua)] {
+            try PreviewRenderer.renderInWindow(
+                view, size: CGSize(width: windowWidth, height: windowHeight),
+                section: "화면 · \(mode)", title: title,
+                note: "\(note) · 창 최소 \(Int(windowWidth))×\(Int(windowHeight)). 아래가 잘려 보이면 "
+                    + "최상위 ScrollView가 있는지 확인할 것.",
+                appearance: appearance)
+        }
     }
 
     // MARK: - 가챠 창 탭
@@ -63,11 +71,14 @@ final class ScenePreviews: SandboxedTestCase {
     /// 좌표로 검증하지만, 실제로 "읽히는 그림"인지는 눈으로만 판정된다.
     func testRenderWorldMap() throws {
         for region in BadgeRegion.allCases.prefix(4) {
-            try PreviewRenderer.renderInWindow(
-                WorldMapView(selected: .constant(region)),
-                size: CGSize(width: windowWidth, height: 360),
-                section: "월드맵", title: "map-\(region.rawValue)",
-                note: "선택 지역 \(region.rawValue) — 카메라가 해당 지역을 담는지, 라벨이 겹치지 않는지.")
+            for (mode, appearance) in [("라이트", NSAppearance.Name.aqua), ("다크", .darkAqua)] {
+                try PreviewRenderer.renderInWindow(
+                    WorldMapView(selected: .constant(region)),
+                    size: CGSize(width: windowWidth, height: 360),
+                    section: "월드맵 · \(mode)", title: "map-\(region.rawValue)",
+                    note: "선택 지역 \(region.rawValue) — 카메라가 해당 지역을 담는지, 라벨이 겹치지 않는지.",
+                    appearance: appearance)
+            }
         }
     }
 
