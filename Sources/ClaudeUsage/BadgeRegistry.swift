@@ -243,8 +243,18 @@ enum BadgeCategory: String, CaseIterable, Codable {
 
     /// 카테고리별 풀컬러 픽셀 sprite (Intersect-Assets, CC BY-SA 3.0).
     /// PNG 32×32, `Resources/intersect-jewels/` 안. nil 반환 case 없음.
+    ///
+    /// **19 카테고리가 서로 다른 파일을 쓴다.** 클라우드 제도 8종은 본토 보석을 재활용하고
+    /// 있었는데(예: arenaWins·heartbeat 둘 다 Ruby), 트레이너 카드가 획득 뱃지를 한 줄에 모아
+    /// 보여주면서 같은 보석이 나란히 뜨는 게 드러나 전용 스프라이트로 분리했다.
+    ///
+    /// 같은 팩 안에서 **작은 크기(13~20pt)에서도 구분되는** 것만 골랐다 — Necklace/Ring 계열은
+    /// 체인·밴드 실루엣이 동일하고 박힌 보석이 2~3px이라 축소하면 서로 뭉개져 제외했다.
+    /// 그래도 Crown 2종·Ore 4종은 계열 안에서 형태가 비슷하니, 지역을 가로질러 흩어 배치해
+    /// 한 화면에 나란히 오지 않게 했다.
     var jewelSpriteName: String {
         switch self {
+        // 본토 — 기존 배정 유지
         case .standup:    return "Jewel_Pearl"
         case .rateLimit:  return "Jewel_Sapphire"
         case .claude:     return "Jewel_Amethyst"
@@ -256,14 +266,15 @@ enum BadgeCategory: String, CaseIterable, Codable {
         case .codex:      return "Jewel_Amber"
         case .monorepo:   return "Jewel_Peridot"
         case .fork:       return "Jewel_Garnet"
-        case .arenaWins:        return "Jewel_Ruby"
-        case .arenaRating:      return "Jewel_Sapphire"
-        case .guildContribution: return "Coins_Gold"
-        case .guildTenure:      return "Jewel_Diamond"
-        case .dailyQuizCorrect: return "Jewel_Amethyst"
-        case .dailyRitual:      return "Jewel_Amber"
-        case .pullRequest:      return "Jewel_Emerald"
-        case .bugHunter:        return "Jewel_Peridot"
+        // 클라우드 제도 — 전용 스프라이트
+        case .arenaWins:         return "Crown_Royal"      // 승자의 관
+        case .arenaRating:       return "Jewel_Rose"       // 사다리 등급
+        case .guildContribution: return "Ore_Copper"       // 길드에 쌓는 광석
+        case .guildTenure:       return "Jewel_Silver"     // 오래 머문 세월
+        case .dailyQuizCorrect:  return "Ore_Cobalt"
+        case .dailyRitual:       return "Crown_Gold"       // 매일의 왕관
+        case .pullRequest:       return "Ore_Malachite"
+        case .bugHunter:         return "Ore_Obsidian"     // 잡아낸 버그
         }
     }
 

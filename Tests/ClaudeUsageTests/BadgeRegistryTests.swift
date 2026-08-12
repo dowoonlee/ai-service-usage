@@ -69,4 +69,23 @@ final class BadgeRegistryTests: XCTestCase {
         XCTAssertLessThan(BadgeTier.dev,       BadgeTier.staging)
         XCTAssertLessThan(BadgeTier.staging,   BadgeTier.production)
     }
+
+    // 카테고리마다 **서로 다른** sprite를 써야 한다. 예전엔 클라우드 제도 8종이 본토 보석을
+    // 재활용해서(arenaWins·heartbeat 둘 다 Ruby) 트레이너 카드에 같은 보석이 나란히 떴다.
+    // 카테고리를 새로 추가할 때 기존 파일을 재사용하면 여기서 걸린다.
+    func testJewelSpritesAreUniquePerCategory() {
+        let names = BadgeCategory.allCases.map(\.jewelSpriteName)
+        let dupes = Dictionary(grouping: names, by: { $0 }).filter { $0.value.count > 1 }.keys
+        XCTAssertTrue(dupes.isEmpty, "여러 카테고리가 같은 sprite를 씀: \(Array(dupes).sorted())")
+        XCTAssertEqual(Set(names).count, BadgeCategory.allCases.count)
+    }
+
+    // 매핑된 sprite가 실제로 번들에 있어야 한다 — 없으면 조용히 폴백(색 박스)으로 떨어진다.
+    @MainActor
+    func testJewelSpritesExistInBundle() {
+        for cat in BadgeCategory.allCases {
+            XCTAssertNotNil(NSImage.gymJewel(named: cat.jewelSpriteName),
+                            "\(cat.rawValue) → \(cat.jewelSpriteName).png 누락")
+        }
+    }
 }
