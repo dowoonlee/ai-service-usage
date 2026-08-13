@@ -155,6 +155,11 @@ final class GachaTests: SandboxedTestCase {
     // 미리 열리지 않게 하는 계약. 이 분리가 무너지면 연출 전에 결과가 노출된다.
     func testRollDoesNotMutateOwnership() throws {
         let s = Settings.shared
+        // 인벤토리를 비우고 시작해야 한다. 신규 사용자 마이그레이션이 기본 여우 1마리를 넣어두기
+        // 때문에(Settings.applyLaunchMigrations), 그대로 두면 roll이 `.fox`를 뽑는 순간
+        // 아래 `assertNil`이 "roll이 해금했다"가 아니라 "원래 있었다"로 깨진다 — Common 1/106,
+        // 약 0.6% 확률의 flaky다.
+        s.ownedPets = [:]
         s.coins = 1000
         let before = s.ownedPets
         let pull = try Gacha.roll(useTicket: false)
@@ -164,6 +169,9 @@ final class GachaTests: SandboxedTestCase {
 
     func testCommitUnlocksPetAndFlagsHighlight() throws {
         let s = Settings.shared
+        // 위와 같은 이유로 비우고 시작. 기본 여우가 남아 있으면 `.fox`가 뽑혔을 때 count가 2가 되고
+        // 신규가 아니라 중복이라 강조 대상에서도 빠진다 — 실제로 CI에서 이렇게 깨졌다.
+        s.ownedPets = [:]
         s.coins = 1000
         let pull = try Gacha.roll(useTicket: false)
         _ = Gacha.commit(pull)
