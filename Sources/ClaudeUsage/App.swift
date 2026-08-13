@@ -426,6 +426,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.addItem(withTitle: toggleTitle, action: #selector(togglePanelMenuAction), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "설정…", action: #selector(presentSettingsMenuAction), keyEquivalent: ",")
+        // 업데이트 확인 — 패널의 버전 칩과 같은 동작이지만 진입점을 하나 더 둔다.
+        // v0.17.27에서 패널 전체가 클릭을 못 받는 회귀가 나갔을 때, 유일한 진입점이 그 칩이라
+        // 사용자가 앱 안에서 업데이트할 방법이 없었다. AppKit 메뉴는 SwiftUI가 막혀도 살아 있다.
+        menu.addItem(withTitle: "업데이트 확인…", action: #selector(checkForUpdatesMenuAction), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "종료", action: #selector(quitMenuAction), keyEquivalent: "q")
         for menuItem in menu.items where menuItem.action != nil {
@@ -442,6 +446,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     @objc private func togglePanelMenuAction() { togglePanel() }
     @objc private func presentSettingsMenuAction() { presentSettings() }
     @objc private func openRankingSettingsAction() { presentSettings() }
+    @objc private func checkForUpdatesMenuAction() { Updater.shared.checkForUpdates() }
     @objc private func quitMenuAction() { NSApp.terminate(nil) }
 
     // MARK: - NSWindowDelegate
