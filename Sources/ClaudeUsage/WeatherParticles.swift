@@ -34,6 +34,8 @@ private struct Particle: Identifiable {
 }
 
 private struct ParticleField: View {
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     let condition: WeatherCondition
     let size: CGSize
 
@@ -100,7 +102,7 @@ private struct ParticleField: View {
         let h = size.height
 
         return AnyView(
-            TimelineView(.animation) { ctx in
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
                 let t = ctx.date.timeIntervalSinceReferenceDate
                 ZStack {
                     if hasThunder {

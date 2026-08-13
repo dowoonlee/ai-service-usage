@@ -709,6 +709,8 @@ private func formatVPLabel(_ n: Int) -> String {
 /// `@MainActor` 사유는 LeaderboardRowView 와 동일 (CI strict concurrency).
 @MainActor
 private struct PodiumAvatar: View {
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     let entry: RankingAPI.PreviousMonthEntry?
     let rank: Int
 
@@ -740,7 +742,7 @@ private struct PodiumAvatar: View {
             if let kind = avatarKind {
                 // 단 위를 좌우로 돌아다니는 펫 — 이동 폭은 컬럼이 주는 가용 공간(상한 둠).
                 GeometryReader { geo in
-                    TimelineView(.animation) { ctx in
+                    TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
                         wanderingPet(kind: kind, width: geo.size.width,
                                      now: ctx.date.timeIntervalSinceReferenceDate)
                     }

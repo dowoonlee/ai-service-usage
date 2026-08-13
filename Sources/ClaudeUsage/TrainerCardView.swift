@@ -12,6 +12,8 @@ import SwiftUI
 /// (로컬 빌드는 통과). v0.6.10 `CollectionBadgeTooltip`과 동일 패턴.
 @MainActor
 struct TrainerCardView: View {
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     let card: TrainerCard
     let trainerID: String
     let trainerName: String
@@ -207,7 +209,7 @@ struct TrainerCardView: View {
                 avatarStack(walkFrame: avatarFrame)
             } else if animatedAvatar {
                 // 미리보기 — walk 사이클 자체 애니메이션 (ImageRenderer 캡처는 한 순간만 잡는다).
-                TimelineView(.animation) { ctx in
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
                     let count = PetSprite.frames(for: card.avatar.kind, action: .walk).count
                     let idx = count > 0 ? Int(ctx.date.timeIntervalSinceReferenceDate * Self.avatarFPS) % count : 0
                     avatarStack(walkFrame: idx)

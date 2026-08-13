@@ -54,6 +54,8 @@ struct SpikyBubble: Shape {
 // 표시는 Animated Wild Animals (CC0) 프레임 strip 기반,
 // 행동/위치/현재 frame은 PetController가 보유.
 struct WalkingCat: View {
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     let points: [(Date, Double)]   // 시간순 정렬 가정
     let proxy: ChartProxy
     let plotFrame: CGRect          // 차트 plot rect (좌표 변환 + 말풍선 클램프 용)
@@ -355,7 +357,7 @@ struct WalkingCat: View {
     private var coinPopOverlay: some View {
         if !coinPops.isEmpty {
             let coinFrames = PetSprite.frames(named: "Coin", cellSize: (18, 20))
-            TimelineView(.animation) { ctx in
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
                 ZStack {
                     ForEach(coinPops) { p in
                         let t = ctx.date.timeIntervalSince(p.createdAt)
@@ -417,7 +419,7 @@ struct WalkingCat: View {
     @ViewBuilder
     private var rewardAmountOverlay: some View {
         if let r = rewardAmountPop {
-            TimelineView(.animation) { ctx in
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
                 let t = ctx.date.timeIntervalSince(r.createdAt)
                 if t < Self.rewardAmountDuration {
                     let yOffset = -t * 38
