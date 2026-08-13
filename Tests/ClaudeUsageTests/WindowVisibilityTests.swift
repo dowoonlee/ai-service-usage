@@ -36,17 +36,10 @@ final class WindowVisibilityTests: XCTestCase {
         }
     }
 
-    /// 버튼 위 클릭이 실제로 버튼에 도달하는지 — 위 테스트가 놓칠 수 있는 통합 경로.
-    func testButtonStillReceivesClicksThroughModifier() {
-        let size = NSSize(width: 200, height: 80)
-        let button = Button("탭") {}.frame(width: size.width, height: size.height)
-        let host = NSHostingView(rootView: button.pauseAnimationsWhenHidden())
-        host.frame = NSRect(origin: .zero, size: size)
-        host.layoutSubtreeIfNeeded()
-
-        let hit = host.hitTest(NSPoint(x: size.width / 2, y: size.height / 2))
-        XCTAssertNotNil(hit, "클릭이 아무 뷰에도 닿지 않는다")
-        XCTAssertFalse(String(describing: type(of: hit!)).contains("Passthrough"),
-                       "accessor 뷰가 버튼 대신 클릭을 받는다 — v0.17.27 회귀")
-    }
+    // "버튼 위를 클릭하면 버튼이 받는다"는 통합 테스트도 시도했으나 뺐다. 두 가지 이유다:
+    //   1. 회귀를 못 잡는다. 버그가 있는 코드에서도 통과했다 — 클릭을 가로챈 SwiftUI 내부 뷰의
+    //      타입 이름을 특정할 수 없어 "누가 받았는지"를 판정하지 못했다.
+    //   2. CI에서 불안정하다. 창에 붙지 않은 NSHostingView는 headless 러너에서 hitTest가 통째로
+    //      nil을 반환해, 로컬에서만 통과하고 CI에서 깨졌다.
+    // 위 accessor 테스트가 원인 지점을 직접 겨냥하고 실제로 회귀에서 실패하므로 그것으로 충분하다.
 }
