@@ -25,6 +25,7 @@ from collections import OrderedDict
 
 # 섹션 → 상단 탭(기능) 묶음. 섹션 이름 컨벤션에서 파생한다:
 #   "애니 · X"      → 애니메이션 탭
+#   "화면 · 라이트/다크" → 화면 탭 (모드별 섹션 칩)
 #   "트레이너 카드*" → 트레이너 카드 탭
 #   그 외          → 섹션 이름이 곧 탭
 # 탭을 명시 필드로 만들지 않은 것은 렌더러 5개 파일을 고치지 않기 위해서다. 컨벤션이 깨지면
@@ -32,6 +33,10 @@ from collections import OrderedDict
 def group_of(section: str) -> str:
     if section.startswith("애니"):
         return "애니메이션"
+    if section.startswith("화면"):
+        return "화면"
+    if section.startswith("월드맵"):
+        return "월드맵"
     if section.startswith("트레이너 카드"):
         return "트레이너 카드"
     if section.startswith("펫"):

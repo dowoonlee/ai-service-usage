@@ -28,8 +28,16 @@ jobs:
         with:
           deno-version: v2.x
 
-      - name: Parity tests (Swift↔TS 골든)
-        run: deno test supabase/functions/_shared/pvp_engine.parity.test.ts
+      # 디렉토리 단위로 돌린다 — 파일을 지정하면 새 테스트를 추가할 때마다 여기를 고쳐야 하고,
+      # 고치는 걸 잊으면 조용히 CI 밖에 남는다(정책 테스트가 실제로 그럴 뻔했다).
+      # 현재 포함: pvp_engine 파리티 골든 / hmac 서명 파리티 / 서버 정책 경계.
+      - name: Server tests (파리티 골든 + 정책 경계)
+        run: deno test supabase/functions/_shared/
+
+      # Edge Function 타입 체크. 지금까지 CI에 없어서 타입 오류가 배포 시점에야 드러났다.
+      # 함수가 늘어도 자동으로 포함되도록 glob으로 훑는다.
+      - name: Edge Function 타입 체크
+        run: deno check supabase/functions/*/index.ts
 
       # pet_meta_gen.ts는 Swift 소스에서 생성한 아티팩트다. 재생성 후 diff가 있으면
       # (uniqueTable 등 수정 후 gen 재실행을 깜빡한 것) 실패시켜 stale 커밋을 막는다.

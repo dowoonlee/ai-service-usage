@@ -25,6 +25,8 @@ deno check supabase/functions/<name>/index.ts   # Edge Function type check
 
 There **is** a test target (`Tests/ClaudeUsageTests`) and `.github/workflows/test.yml` runs `swift test` on PRs — run it before handing work back. Note that `swift build` alone does **not** compile the test target, so a broken test file passes an unwitting build check. There is no lint config; don't invent one.
 
+⚠️ **에셋을 고쳤는데 테스트 결과가 그대로면 `.build` 번들 캐시를 의심할 것.** SwiftPM의 `.process("Resources")`는 PNG 내용만 바뀐 경우 번들을 다시 만들지 않는 일이 있어서, 소스의 스프라이트를 고쳐도 테스트는 옛 파일을 계속 읽는다. `rm -rf .build/*/debug/ClaudeUsage_ClaudeUsage.bundle` 후 다시 돌릴 것 — CI는 clean build라 이 함정이 없고, 그래서 로컬만 통과하고 CI에서 깨질 수 있다.
+
 The tests encode contracts, not just examples — several of them exist because a past refactor broke behavior that looked like dead defensive code (e.g. `CumulativeSeriesTests` pins "unsorted input is still sorted before accumulating"). Read the relevant test before changing the code it covers.
 
 ### Sandboxed state (how to test anything that touches `Settings` or `Keychain`)
