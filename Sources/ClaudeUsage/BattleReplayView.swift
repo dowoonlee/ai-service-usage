@@ -10,6 +10,8 @@ import SwiftUI
 // docs/research/pokemon-gold-battle-ui.md)은 그대로 보존한다.
 @MainActor
 struct BattleReplayView<Extra: View>: View {
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     let aSnaps: [BattlePetSnapshot]
     let bSnaps: [BattlePetSnapshot]
     let result: BattleResult
@@ -196,7 +198,7 @@ struct BattleReplayView<Extra: View>: View {
 
     /// 도트 VFX 스프라이트 1회 재생 — start부터 32fps(재생 배속 연동)로 프레임 진행, 끝나면 빈 뷰.
     private func vfxSprite(_ name: String, start: Date, size: CGFloat) -> some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: !windowIsVisible)) { ctx in
             let frames = PetSprite.frames(named: name, cellSize: (100, 100))
             let idx = Int(ctx.date.timeIntervalSince(start) * 32 * max(1, speed))
             if idx >= 0, idx < frames.count {
@@ -424,7 +426,7 @@ struct BattleReplayView<Extra: View>: View {
         let title = w == .a ? "승리!" : (w == .b ? "패배…" : "무승부")
         let icon = w == .a ? "🏆" : (w == .b ? "💀" : "🤝")
         let color: Color = w == .a ? .green : (w == .b ? .red : .secondary)
-        return TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { ctx in   // 30fps로 제한(방치 시 상시 리렌더 완화)
+        return TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in   // 30fps로 제한(방치 시 상시 리렌더 완화)
             let t = ctx.date.timeIntervalSinceReferenceDate
             let pulse = 0.9 + 0.1 * sin(t * 3)
             ZStack {

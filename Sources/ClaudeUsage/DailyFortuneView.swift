@@ -404,12 +404,14 @@ struct FortuneSpeechBubble: Shape {
 /// 마법사(WizardM) sprite — Idle strip 의 프레임을 0.4초 간격으로 순환.
 /// 픽셀 아트라 `.interpolation(.none)` 으로 보간 비활성화. cellSize 16×28 비율 유지.
 struct WizardSprite: View {
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     let width: CGFloat
     private static let aspect: CGFloat = 28.0 / 16.0  // h/w
 
     var body: some View {
         let height = width * Self.aspect
-        return TimelineView(.animation(minimumInterval: 0.4, paused: false)) { context in
+        return TimelineView(.animation(minimumInterval: 0.4, paused: !windowIsVisible)) { context in
             let frames = PetSprite.frames(for: .wizardM, action: .sit)
             if frames.isEmpty {
                 Image(systemName: "person.fill")
@@ -434,7 +436,7 @@ final class DailyFortuneWindowController: NSWindowController, SingleWindowPresen
     static let shared = DailyFortuneWindowController()
 
     convenience init() {
-        let host = NSHostingController(rootView: DailyFortuneView())
+        let host = NSHostingController(rootView: DailyFortuneView().pauseAnimationsWhenHidden())
         let window = NSWindow(contentViewController: host)
         window.title = "오늘의 개발 운세"
         window.styleMask = [.titled, .closable]
@@ -446,7 +448,7 @@ final class DailyFortuneWindowController: NSWindowController, SingleWindowPresen
     /// 매번 호출마다 새 host 로 — `@StateObject` 가 재생성되어 load() 다시 호출.
     /// 같은 날엔 Supabase get 이 캐시 hit 이라 OpenAI 추가 호출 없음.
     func present() {
-        let host = NSHostingController(rootView: DailyFortuneView())
+        let host = NSHostingController(rootView: DailyFortuneView().pauseAnimationsWhenHidden())
         window?.contentViewController = host
         bringToFront()
     }

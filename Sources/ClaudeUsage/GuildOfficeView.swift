@@ -592,6 +592,8 @@ struct GuildOfficeView: View {
 
 @MainActor
 private struct OfficePetView: View {
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     let pet: OfficeSimulation.PetState
     let scale: CGFloat
     @Binding var showPopover: Bool
@@ -607,7 +609,7 @@ private struct OfficePetView: View {
         let centerX = pet.x * scale
         let centerY = (laneY * scale) - height / 2
 
-        TimelineView(.animation(minimumInterval: 1.0 / 8)) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 8, paused: !windowIsVisible)) { ctx in
             // 액션은 FSM이 결정 (walk/sit/scan/special) — 프레임 없는 액션은 sit으로 폴백.
             let preferred = PetSprite.frames(for: pet.kind, action: pet.displayAction)
             let frames = preferred.isEmpty ? PetSprite.frames(for: pet.kind, action: .sit) : preferred

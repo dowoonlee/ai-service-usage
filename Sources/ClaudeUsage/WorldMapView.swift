@@ -15,6 +15,8 @@ import SwiftUI
 
 @MainActor
 struct WorldMapView: View {
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     @Binding var selected: BadgeRegion
     /// 호버된 region — nil이면 selected만 강조, non-nil이면 그 region도 강조.
     @State private var hovered: BadgeRegion?
@@ -35,7 +37,7 @@ struct WorldMapView: View {
             let size = geo.size
             // 지역 뷰에선 트레이너 아바타가 걸어다니므로 계속 프레임을 돌린다(전환 중에도).
             TimelineView(.animation(minimumInterval: 1.0 / 30.0,
-                                    paused: !animating && mode != .region)) { timeline in
+                                    paused: !windowIsVisible || (!animating && mode != .region))) { timeline in
                 let cam = currentCamera(at: timeline.date, size: size)
                 ZStack {
                     MapTileCanvas(camera: cam, highlighted: highlightedRegions,

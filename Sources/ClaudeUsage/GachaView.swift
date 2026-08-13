@@ -10,6 +10,8 @@ import SwiftUI
 /// 현재는 `performPull` 직후 즉시 `.hatched`로 진입. egg/cracking 단계 사이에 탭/애니메이션을
 /// 끼워넣는 것이 M4.3의 작업.
 struct GachaView: View {
+    /// 창이 안 보이면 연출 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     @ObservedObject var settings = Settings.shared
     @State private var phase: ResultPhase = .idle
     @State private var errorMessage: String?
@@ -497,7 +499,7 @@ struct GachaView: View {
     private func premiumAura(diameter: CGFloat) -> some View {
         let mythic = Rarity.mythic.color
         let gold = Color(red: 1.0, green: 0.82, blue: 0.35)
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let spin = (t * 24).truncatingRemainder(dividingBy: 360)
             let pulse = 0.85 + sin(t * 3) * 0.15
@@ -539,7 +541,7 @@ struct GachaView: View {
     /// - 그 후: 알이 살짝 더 빠르게 진동 (부화 임박).
     private func crackingView(_ pull: GachaPull) -> some View {
         let startedAt = crackStartedAt ?? Date()
-        return TimelineView(.animation) { ctx in
+        return TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let elapsed = ctx.date.timeIntervalSince(startedAt)
             let crackProgress = min(1.0, elapsed / 0.6)
             let pulseFreq = elapsed < 0.6 ? 12.0 : 22.0
@@ -566,7 +568,7 @@ struct GachaView: View {
     ///   - 마지막 0.4s: 검은 배경 fade out (hatched로 자연스럽게 연결)
     private func revealingView(_ pull: GachaPull) -> some View {
         let startedAt = revealStartedAt ?? Date()
-        return TimelineView(.animation) { ctx in
+        return TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let elapsed = ctx.date.timeIntervalSince(startedAt)
             ZStack {
                 // 검은 배경 — 들어올 땐 0.25s fade in. 나갈 때는 부모 cross-fade(0.22s)에
@@ -692,7 +694,7 @@ struct GachaView: View {
     /// 흔들/팝하고 뒤에서 glow가 throb, sparkle 링이 회전해 "곧 터질 듯한" 역동성을 준다.
     /// 자산이 들어오면 이 함수와 `multiRevealDuration`만 교체하면 된다.
     private func multiRollingView(_ pulls: [GachaPull]) -> some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             // 고주파 흔들림 + 팝 스케일 + 상하 바운스.
             let wobble = sin(t * 24) * 16 + sin(t * 9) * 6
@@ -1462,8 +1464,12 @@ private struct PetPreviewView: View {
     let kind: PetKind
     @ObservedObject var settings: Settings
 
-    /// 마운트 시점. 슬라이드 progress(0→1) 계산의 기준.
-    @State private var enteredAt: Date = Date()
+    /// 진입 슬라이드 재생 여부. onAppear에서 true로 넘기면 SwiftUI가 보간한다.
+    ///
+    /// 예전엔 `enteredAt` 기준 elapsed를 TimelineView 안에서 매 프레임 계산했는데, 그러면 연출이
+    /// 끝난 뒤에도 같은 값을 초당 60~120회 다시 구하면서 클로저 안의 카드 전체가 재레이아웃됐다.
+    /// 상태 전환은 Core Animation이 처리하므로 뷰 그래프를 매 프레임 건드리지 않는다.
+    @State private var entered = false
 
     /// 사용자가 dot selector로 토글하는 현재 variant. init 시점의 variant로 시드.
     /// 외부에서 variant 변경은 .id() 재마운트로 처리 (다른 펫 → 새 PetPreviewView 인스턴스).
@@ -1471,6 +1477,8 @@ private struct PetPreviewView: View {
     @State private var selectedVariant: Int
     /// hover 중인 칩의 이펙트 — 구매/장착 전 미리보기 펫에 임시 적용. nil이면 없음. (PetEffectShelf가 콜백으로 갱신.)
     @State private var previewEffect: EffectKind? = nil
+    /// 창이 안 보이면 스프라이트 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
     /// Prestige 해금 시도 확인 alert.
     @State private var showPrestigeConfirm = false
     /// Prestige 시도 결과 메시지(성공/실패) — 있으면 결과 alert 표시.
@@ -1482,26 +1490,14 @@ private struct PetPreviewView: View {
         self.settings = settings
     }
 
-    /// sprite 그룹이 슬라이드 후 멈추는 x offset (center 기준).
-    /// description 카드 폭(160) 대비 펫 sprite + ±60 swing 가동 범위가 겹치지 않도록 좌측으로 충분히 이동.
-    private static let slideEndX: CGFloat = -120
-    /// description 카드의 최종 x offset (center 기준). 슬라이드 시작 직후엔 이보다 +30 더 우측.
-    private static let descEndX: CGFloat = 100
-    /// description 카드 폭. 좁힐수록 펫 가동 범위와의 간격이 늘어남.
-    private static let descCardWidth: CGFloat = 160
-    /// 슬라이드 + 페이드인이 끝나는 시간.
-    private static let slideDuration: TimeInterval = 0.55
-    /// hatched/revealing 단계 sprite의 y offset (영역 center 기준).
-    private static let spriteRestY: CGFloat = -38
-
-    var body: some View {
-        VStack(spacing: 4) {
-        TimelineView(.animation) { ctx in
+    /// 스프라이트 걷기 + 좌우 swing + 말풍선 순환 — 시간에 의존하는 부분만 모았다.
+    ///
+    /// 프레임률을 30fps로 묶는다. 스프라이트는 8fps로 넘어가고 swing은 4초 주기 사인이라
+    /// 디스플레이 주사율(60~120Hz)로 돌 이유가 없다. 창이 보이지 않으면 아예 멈춘다.
+    @ViewBuilder
+    private var animatedPet: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
-            let elapsed = ctx.date.timeIntervalSince(enteredAt)
-            // easeInOut(0..1) — sliding feel.
-            let raw = max(0, min(1, elapsed / Self.slideDuration))
-            let progress = Self.easeInOut(raw)
 
             // walk strip 우선, 없으면 idle (Bee/Plant/Skull 등)
             let walkFrames = PetSprite.frames(for: kind, action: .walk)
@@ -1520,81 +1516,96 @@ private struct PetPreviewView: View {
             let quotes = Quotes.perPet[kind] ?? ["..."]
             let quoteCycleSec: Double = 5.0
             let quoteIdx = Int(t / quoteCycleSec) % max(1, quotes.count)
-            let currentQuote = quotes[quoteIdx]
-
-            // 슬라이드 진행 — sprite 그룹의 x offset (음수 = 좌측 이동).
-            let slideX = Self.slideEndX * progress
-            // description 카드는 우측에서 +30 → descEndX로 살짝 슬라이드인 + 페이드인.
-            // progress 0.3부터 페이드인 시작 → 1.0에 완료 (sprite 슬라이드와 살짝 겹치게).
-            let descOpacity = max(0, (progress - 0.3) / 0.7)
-            let descX = Self.descEndX + (1 - progress) * 30
 
             ZStack {
-                // ─── 펫 그룹 (sprite + 말풍선 + 이름 + 게이지) — 좌측으로 슬라이드 ───
-                ZStack {
-                    if !frames.isEmpty {
-                        // 장착 이펙트 + hover 프리뷰를 펫과 같은 고정 프레임에서 함께 렌더.
-                        let fx = (settings.equippedEffects[kind] ?? [])
-                            .union(previewEffect.map { [$0] } ?? [])
-                        ZStack {
-                            PetEffectOverlay(effects: fx, placement: .backdrop,
-                                             center: CGPoint(x: 55, y: 55), footY: 95,
-                                             petHeight: 70, facingRight: movingRight, isMoving: true)
-                            Image(nsImage: frames[frameIdx])
-                                .resizable()
-                                .interpolation(.none)
-                                .aspectRatio(contentMode: .fit)
-                                .frame(height: 84)
-                                .scaleEffect(x: flip ? -1 : 1, y: 1)
-                                .hueRotation(.degrees(selectedVariant == PetOwnership.prestigeVariant
-                                    ? WalkingCat.prestigeHueDegrees(at: t) : WalkingCat.hueDegrees(for: selectedVariant)))
-                                .saturation(selectedVariant > 0 ? 1.15 : 1.0)
-                                // Prestige는 무채색 펫에도 색이 입도록 순환 색조 곱셈(비-Prestige는 .white=무영향).
-                                .colorMultiply(selectedVariant == PetOwnership.prestigeVariant
-                                    ? WalkingCat.prestigeTint(at: t) : .white)
-                            PetEffectOverlay(effects: fx, placement: .particles,
-                                             center: CGPoint(x: 55, y: 55), footY: 95,
-                                             petHeight: 70, facingRight: movingRight, isMoving: true)
-                        }
-                        .frame(width: 110, height: 110)
-                        .offset(x: swingX, y: Self.spriteRestY)
+                if !frames.isEmpty {
+                    // 장착 이펙트 + hover 프리뷰를 펫과 같은 고정 프레임에서 함께 렌더.
+                    let fx = (settings.equippedEffects[kind] ?? [])
+                        .union(previewEffect.map { [$0] } ?? [])
+                    ZStack {
+                        PetEffectOverlay(effects: fx, placement: .backdrop,
+                                         center: CGPoint(x: 55, y: 55), footY: 95,
+                                         petHeight: 70, facingRight: movingRight, isMoving: true)
+                        Image(nsImage: frames[frameIdx])
+                            .resizable()
+                            .interpolation(.none)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 84)
+                            .scaleEffect(x: flip ? -1 : 1, y: 1)
+                            .hueRotation(.degrees(selectedVariant == PetOwnership.prestigeVariant
+                                ? WalkingCat.prestigeHueDegrees(at: t) : WalkingCat.hueDegrees(for: selectedVariant)))
+                            .saturation(selectedVariant > 0 ? 1.15 : 1.0)
+                            // Prestige는 무채색 펫에도 색이 입도록 순환 색조 곱셈(비-Prestige는 .white=무영향).
+                            .colorMultiply(selectedVariant == PetOwnership.prestigeVariant
+                                ? WalkingCat.prestigeTint(at: t) : .white)
+                        PetEffectOverlay(effects: fx, placement: .particles,
+                                         center: CGPoint(x: 55, y: 55), footY: 95,
+                                         petHeight: 70, facingRight: movingRight, isMoving: true)
                     }
-
-                    Self.bubble(currentQuote)
-                        .fixedSize()
-                        .offset(y: Self.spriteRestY - 56)
-                        .id(quoteIdx)
-                        .transition(.opacity)
-                        .animation(.easeInOut(duration: 0.35), value: quoteIdx)
-
-                    VStack(spacing: 4) {
-                        Text(PetMetaStore.shared.displayName(for: kind))
-                            .font(.title3.weight(.medium))
-                        if selectedVariant == PetOwnership.prestigeVariant {
-                            Text("✦ 레인보우 레어 ✦")
-                                .font(.caption.weight(.semibold))
-                        } else if selectedVariant > 0 {
-                            Text(String(repeating: "✨", count: selectedVariant))
-                                .font(.caption)
-                        } else {
-                            Text("기본")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        variantSelector
-                        usageProgressView()
-                        prestigePurchaseView()
-                    }
-                    .offset(y: 50)
+                    .frame(width: 110, height: 110)
+                    .offset(x: swingX, y: Self.spriteRestY)
                 }
-                .offset(x: slideX)
 
-                // ─── 우측 캐릭터 설명 카드 — 페이드인 + slide-in ───
-                descriptionCard
-                    .opacity(descOpacity)
-                    .offset(x: descX)
+                Self.bubble(quotes[quoteIdx])
+                    .fixedSize()
+                    .offset(y: Self.spriteRestY - 56)
+                    .id(quoteIdx)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.35), value: quoteIdx)
             }
         }
+    }
+
+    /// sprite 그룹이 슬라이드 후 멈추는 x offset (center 기준).
+    /// description 카드 폭(160) 대비 펫 sprite + ±60 swing 가동 범위가 겹치지 않도록 좌측으로 충분히 이동.
+    private static let slideEndX: CGFloat = -120
+    /// description 카드의 최종 x offset (center 기준). 슬라이드 시작 직후엔 이보다 +30 더 우측.
+    private static let descEndX: CGFloat = 100
+    /// description 카드 폭. 좁힐수록 펫 가동 범위와의 간격이 늘어남.
+    private static let descCardWidth: CGFloat = 160
+    /// 슬라이드 + 페이드인이 끝나는 시간.
+    private static let slideDuration: TimeInterval = 0.55
+    /// hatched/revealing 단계 sprite의 y offset (영역 center 기준).
+    private static let spriteRestY: CGFloat = -38
+
+    var body: some View {
+        VStack(spacing: 4) {
+        ZStack {
+            // ─── 펫 그룹 (sprite + 말풍선 + 이름 + 게이지) — 좌측으로 슬라이드 ───
+            ZStack {
+                // 시간에 따라 실제로 바뀌는 것만 TimelineView 안에 둔다. 아래 이름/게이지/설명 카드까지
+                // 감싸면 정적 콘텐츠가 매 프레임 재레이아웃돼 CPU를 통째로 태운다(실측 50%).
+                animatedPet
+
+                VStack(spacing: 4) {
+                    Text(PetMetaStore.shared.displayName(for: kind))
+                        .font(.title3.weight(.medium))
+                    if selectedVariant == PetOwnership.prestigeVariant {
+                        Text("✦ 레인보우 레어 ✦")
+                            .font(.caption.weight(.semibold))
+                    } else if selectedVariant > 0 {
+                        Text(String(repeating: "✨", count: selectedVariant))
+                            .font(.caption)
+                    } else {
+                        Text("기본")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    variantSelector
+                    usageProgressView()
+                    prestigePurchaseView()
+                }
+                .offset(y: 50)
+            }
+            .offset(x: entered ? Self.slideEndX : 0)
+
+            // ─── 우측 캐릭터 설명 카드 — 페이드인 + slide-in ───
+            descriptionCard
+                .opacity(entered ? 1 : 0)
+                .offset(x: entered ? Self.descEndX : Self.descEndX + 30)
+        }
+        .animation(.easeInOut(duration: Self.slideDuration), value: entered)
+        .onAppear { entered = true }
         // 미리보기 영역 고정 높이 — 말풍선(offset -94)·이름/게이지(+50)가 ZStack frame 밖으로 삐져
         // 헤더/도감과 겹치지 않도록 충분히 확보(maxHeight .infinity는 ScrollView와 충돌해 제거).
         .frame(maxWidth: .infinity, minHeight: 230)
@@ -1634,7 +1645,6 @@ private struct PetPreviewView: View {
         } message: {
             Text(prestigeResultMessage ?? "")
         }
-        .onAppear { enteredAt = Date() }
     }
 
     /// 우측 도감 카드 — 포켓몬 도감 톤. 컬러 헤더 (ID + 이름 + rarity 태그) + 어두운 본문 패널.
@@ -1940,7 +1950,9 @@ final class GachaWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = GachaWindowController()
 
     private convenience init() {
-        let host = NSHostingController(rootView: GachaView())
+        // 닫아도 창·hosting controller가 살아남는 구조(isReleasedWhenClosed = false + 싱글턴)라,
+        // 감싸주지 않으면 닫힌 창의 TimelineView가 계속 프레임을 돈다. WindowVisibility.swift 참조.
+        let host = NSHostingController(rootView: GachaView().pauseAnimationsWhenHidden())
         let window = NSWindow(contentViewController: host)
         window.title = "가챠 · 도감"
         // resizable — 고정 560×640이던 시절엔 콘텐츠가 창보다 길어져도 사용자가 늘릴 방법이

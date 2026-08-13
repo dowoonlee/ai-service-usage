@@ -244,7 +244,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // invalidation 이 NSWindow theme frame 과 충돌해 NSException raise (issue #15 재발 — 일부
         // macOS 15.3.x 환경). panel content size 와 동일한 frame 으로 시작 + autoresizingMask 로
         // 후속 resize 추종. container/autolayout 불필요.
-        let host = NSHostingView(rootView: root)
+        // 메뉴바 모드에서 패널을 닫으면 창은 숨겨질 뿐 살아 있다 — 그 상태에서 차트 펫·날씨 파티클이
+        // 계속 돌지 않도록 가시성을 내려보낸다. WindowVisibility.swift 참조.
+        let host = NSHostingView(rootView: root.pauseAnimationsWhenHidden())
         host.frame = NSRect(origin: .zero, size: rect.size)
         host.autoresizingMask = [.width, .height]
         panel.contentView = host

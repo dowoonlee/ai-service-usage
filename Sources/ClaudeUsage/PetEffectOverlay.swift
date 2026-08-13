@@ -10,6 +10,8 @@ import Foundation
 //   .particles — footsteps/trail 파티클. 펫 스프라이트 *앞*에 그려진다.
 struct PetEffectOverlay: View {
     enum Placement { case backdrop, particles }
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
 
     let effects: Set<EffectKind>
     let placement: Placement
@@ -55,7 +57,7 @@ struct PetEffectOverlay: View {
 
     /// 펫 뒤 은은한 노란 광원 + 느린 펄스.
     private var glow: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let pulse = 0.35 + 0.12 * sin(t * 2.2)
             Circle()
@@ -70,7 +72,7 @@ struct PetEffectOverlay: View {
 
     /// 프리미엄 — 천천히 색이 순환하는 강한 광원.
     private var auraGlow: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let hue = (t * 0.15).truncatingRemainder(dividingBy: 1.0)
             let pulse = 0.45 + 0.15 * sin(t * 2.6)
@@ -89,7 +91,7 @@ struct PetEffectOverlay: View {
     /// sudo pull 가챠 연출(`GachaView.premiumAura`)과 같은 톤이라 "Mythic = 진홍/금" 정체성을 공유한다.
     private var mythicAura: some View {
         let (mythic, gold) = Self.auraColors(mythicAuraStyle)
-        return TimelineView(.animation) { ctx in
+        return TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let spin = (t * 20).truncatingRemainder(dividingBy: 360)
             let pulse = 0.40 + 0.12 * sin(t * 2.6)
@@ -144,7 +146,7 @@ struct PetEffectOverlay: View {
         let bandH = petHeight * 0.82
         let block = max(2.0, petHeight * 0.16)   // 픽셀 블록 = 계단 한 칸
         let canvasH = bandH + block * 3          // 위아래 출렁임 여유
-        return TimelineView(.animation) { ctx in
+        return TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             Canvas { gc, size in
                 let cols = max(1, Int((size.width / block).rounded(.up)))
@@ -179,7 +181,7 @@ struct PetEffectOverlay: View {
 
     /// 발밑에서 진행 반대 방향으로 흘러가며 사라지는 먼지/별.
     private var footsteps: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let dir: CGFloat = facingRight ? -1 : 1
             ZStack {
@@ -202,7 +204,7 @@ struct PetEffectOverlay: View {
 
     /// 몸통 높이에서 진행 반대 방향으로 늘어지는 발광 잔상.
     private var trail: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let dir: CGFloat = facingRight ? -1 : 1
             ZStack {
@@ -236,7 +238,7 @@ struct PetEffectOverlay: View {
 
     /// 떠오르는 입자 공통 — 모양/색/개수/흔들림만 바꿔 재사용. 이동과 무관하게 항상 은은히.
     private func riser<S: Shape>(_ shape: S, color: Color, count: Int, sway: Double = 0.3) -> some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             ZStack {
                 ForEach(0..<count, id: \.self) { i in
@@ -256,7 +258,7 @@ struct PetEffectOverlay: View {
 
     /// 별가루 궤적 — 이동 시 뒤로 흐르는 반짝이 점.
     private var stardust: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let dir: CGFloat = facingRight ? -1 : 1
             ZStack {
@@ -279,7 +281,7 @@ struct PetEffectOverlay: View {
 
     /// 불꽃 궤적 — 이동 시 뒤로 흐르는 주황 잔상 (식어가며 빨강으로).
     private var flame: some View {
-        TimelineView(.animation) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             let dir: CGFloat = facingRight ? -1 : 1
             ZStack {
