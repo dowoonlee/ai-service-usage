@@ -90,8 +90,20 @@ actor UsageAPI {
         else if capSet.contains("pro") { base = "Pro" }
         else if capSet.contains("team") { base = "Team" }
         else if capSet.contains("enterprise") { base = "Enterprise" }
+        // ⚠️ "chat"을 Free 판정에 쓰기 **전에** 미지의 등급을 먼저 살린다.
+        //
+        // 실계정 응답을 떠보니 Max 계정의 capabilities가 `["claude_max", "chat"]`이었다 —
+        // "chat"은 무료 표식이 아니라 모든 플랜에 붙는 공통 값이다. 그래서 "chat이 있으면 Free"를
+        // 먼저 두면, Anthropic이 새 등급 문자열(예: claude_ultra)을 추가하는 순간 그 사용자가
+        // Free로 떨어지고 CoinLedger.planMultiplier까지 0.5로 깎인다.
+        //
+        // 모르는 값은 그대로 표시한다: 사용자가 화면에서 보고 리포트할 수 있고, planMultiplier도
+        // 매칭 실패 시 기본 1.0이라 Free(0.5)보다 손해가 없다. "chat"만 있는 계정이 진짜 Free다.
+        else if let unknown = capabilities.first(where: { $0.lowercased() != "chat" }) {
+            base = unknown.capitalized
+        }
         else if capSet.contains("chat") { base = "Free" }
-        else { base = capabilities.first(where: { $0 != "chat" })?.capitalized ?? "?" }
+        else { base = "?" }
 
         // "default_claude_max_20x" → "20x" 추출
         let tier = rateLimitTier.lowercased()
