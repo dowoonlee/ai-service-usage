@@ -196,8 +196,9 @@ final class CoinLedger: UsageConsumer {
         DebugLog.log("CoinLedger: BattleWin +\(amount) coin (pvp-\(winner)) (total=\(Settings.shared.coins))")
     }
 
-    /// 외부 기여자 PR 머지 보너스. PR 1개 = 1,000 coin.
-    static let coinPerContributorPR: Int = 1000
+    /// 외부 기여자 PR 머지 보너스. PR 1개 = 2,000 coin.
+    /// (50 → 1,000: v0.6.10 / 1,000 → 2,000 + RP 병행 지급: 현재. v0.10~ 구간에는 RP만 나갔다.)
+    static let coinPerContributorPR: Int = 2000
     func creditContributorBonus(prCount: Int) {
         guard prCount > 0 else { return }
         let amount = prCount * Self.coinPerContributorPR
@@ -205,10 +206,28 @@ final class CoinLedger: UsageConsumer {
         DebugLog.log("CoinLedger: Contributor +\(amount) coin (\(prCount) PR) (total=\(Settings.shared.coins))")
     }
 
+    /// coin 지급 재개(0 → 2,000/PR) 소급 적립. 1회성.
+    ///
+    /// v0.10에 기여 보상이 coin → RP로 바뀌면서 그 구간의 기여자는 coin을 한 푼도 받지 못했다.
+    /// 차액이 아니라 **전액**을 주는 이유가 그것이다 — 빼줄 이전 지급분 자체가 없다.
+    /// (v0.10 이전 기여자는 당시 단가로 이미 받았고 `creditContributorBonusUpgrade`로 보정도 끝났지만,
+    ///  그들에게도 인상분은 소급되는 게 맞다는 판단. PR 단위로 갈라 계산하지 않는다.)
+    func creditContributorCoinBackfill(prCount: Int) {
+        guard prCount > 0 else { return }
+        let amount = prCount * Self.coinPerContributorPR
+        credit(amount)
+        DebugLog.log("CoinLedger: Contributor backfill +\(amount) coin (\(prCount) PR × \(Self.coinPerContributorPR)) (total=\(Settings.shared.coins))")
+    }
+
     /// v0.6.10 PR 보너스 단가 상향(50 → 1000)의 소급 차액 적립. 1회성.
+    ///
+    /// 차액 950은 **그 시점의 역사값이라 상수로 고정**한다. `coinPerContributorPR`을 참조하면
+    /// 이후 단가를 올릴 때마다 과거 마이그레이션 지급액이 같이 부풀어, 아직 이 플래그를 안 거친
+    /// 사용자(백업 복원·재설치 경로)가 당시 정책과 다른 금액을 받는다.
+    private static let contributorUpgradeDelta = 950
     func creditContributorBonusUpgrade(prCount: Int) {
         guard prCount > 0 else { return }
-        let perPRDelta = Self.coinPerContributorPR - 50
+        let perPRDelta = Self.contributorUpgradeDelta
         let amount = perPRDelta * prCount
         guard amount > 0 else { return }
         credit(amount)

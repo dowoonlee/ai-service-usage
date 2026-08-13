@@ -84,6 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Settings.shared.applyCollectionMigrationIfNeeded()
         // PR 보너스 50 → 1,000 상향(v0.6.10) 소급 — 기존 적립 PR에 차액 950 × N 추가.
         Settings.shared.applyContributorBonusUpgradeIfNeeded()
+        // 기여 보상 인상 소급 — coin 지급 재개(2,000 × N) + RP 차액(500 × N). 위 마이그레이션과
+        // 플래그가 별개라 순서는 무관하지만, 둘 다 coin을 건드리므로 나란히 둔다.
+        Settings.shared.applyContributorRewardV2IfNeeded()
         // (실험) 펫 메타데이터 서버 override — flag on일 때만 디스크 캐시 즉시 로드 + 서버 갱신.
         // flag off면 전부 코드 하드코딩 fallback이라 호출조차 안 함.
         if Settings.shared.experimentalRemotePetMeta {

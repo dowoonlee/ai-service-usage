@@ -44,6 +44,53 @@ final class PetSpritePreviews: SandboxedTestCase {
         }
     }
 
+    /// facing 검수 — `defaultFacingLeft` 표기값으로 묶어서 본다.
+    ///
+    /// 위의 컬렉션별 시트에도 ◀/▶가 붙어 있지만 그것만으로는 새는 게 잡히지 않았다. 컬렉션 시트는
+    /// 종마다 기호와 그림을 하나씩 대조해야 하고, 대량 추가 때 팩 기본값을 복붙한 실수는
+    /// 그 대조를 195번 해야만 드러난다. 실제로 18종이 반대로 커밋된 채 남아 있었다
+    /// (luizmelo-pets 고양이·개 12종 전부 + dino 3종 + percy·chiChiBird·giantRat).
+    ///
+    /// **같은 표기끼리 모아놓으면 대조가 필요 없다.** "전부 오른쪽을 봐야 하는 시트"에서
+    /// 왼쪽을 보는 놈은 훑기만 해도 튄다. 새 펫을 추가하면 이 시트만 확인하면 된다.
+    ///
+    /// 정면 스프라이트는 반전해도 화면상 차이가 없어 어느 그룹에 있든 무해하다 — 옆모습만 본다.
+    func testRenderFacingAudit() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+
+        for facingLeft in [true, false] {
+            let kinds = PetKind.allCases.filter { $0.def.defaultFacingLeft == facingLeft }
+            let expected = facingLeft ? "◀ 왼쪽" : "▶ 오른쪽"
+            // 한 장에 다 넣으면 세로로 길어져 훑기가 안 된다. 24종이 한 화면에 들어오는 상한.
+            let chunkSize = 24
+            let chunks = stride(from: 0, to: kinds.count, by: chunkSize).map {
+                Array(kinds[$0..<min($0 + chunkSize, kinds.count)])
+            }
+            for (index, chunk) in chunks.enumerated() {
+                let rows: [(label: String, images: [NSImage])] = chunk.map { kind in
+                    // idle 첫 프레임 + run 중간 프레임. 정지 컷 하나로는 방향이 애매한 종이
+                    // 달리는 자세에서는 분명해진다(다리가 뻗는 쪽이 진행 방향).
+                    let idle = PetSprite.frames(for: kind, action: .sit)
+                    let run = PetSprite.frames(for: kind, action: .run)
+                    var picked: [NSImage] = []
+                    if let first = idle.first { picked.append(first) }
+                    if !run.isEmpty { picked.append(run[run.count / 2]) }
+                    return ("\(kind.rawValue)", picked)
+                }
+                let sheet = PreviewRenderer.contactSheet(
+                    rows: rows, cell: CGSize(width: 56, height: 56), labelWidth: 170)
+                try PreviewRenderer.writeImage(
+                    sheet,
+                    section: "펫 스프라이트",
+                    title: "0-facing-\(facingLeft ? "left" : "right")-\(index + 1)",
+                    note: "defaultFacingLeft=\(facingLeft) 표기 \(kinds.count)종 중 \(index + 1)번째 묶음. "
+                        + "이 시트의 옆모습은 전부 \(expected)을 봐야 한다 — 반대로 보는 종이 있으면 "
+                        + "그 종의 PetDefinition이 틀린 것이고, WalkingCat에서 뒤로 걷는다. "
+                        + "정면 스프라이트는 반전해도 같아 보이므로 무시.")
+            }
+        }
+    }
+
     /// Mythic 5종의 특수 모션. 일반 펫엔 없는 strip이라 셀 크기가 종마다 제각각이고,
     /// 실제로 프레임 수가 어긋난 채 커밋된 적이 있어 따로 크게 본다.
     func testRenderMythicSpecialMotions() throws {

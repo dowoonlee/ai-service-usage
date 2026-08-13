@@ -1336,6 +1336,24 @@ final class Settings: ObservableObject {
         d.set(true, forKey: Keys.hasMigratedContributorBonusUpgrade)
     }
 
+    /// 기여 보상 인상(coin 재개 2,000/PR + RP 500 → 1,000) 소급 적용. 이미 적립된
+    /// `creditedPRNumbers`의 카운트만큼 coin 전액 × N, RP 차액 500 × N을 1회만 추가 credit.
+    /// dedup은 `hasMigratedContributorRewardV2` flag.
+    ///
+    /// PR 번호는 한 번 `creditedPRNumbers`에 들어가면 영구 제외되므로, 단가만 올리면 기존
+    /// 기여자에게는 아무 일도 일어나지 않는다 — 소급은 코드로 따로 해줘야 한다.
+    /// `Settings.shared` 재진입 위험 없음(두 원장 모두 단순 credit).
+    func applyContributorRewardV2IfNeeded() {
+        let d = AppEnv.defaults
+        guard !d.bool(forKey: Keys.hasMigratedContributorRewardV2) else { return }
+        let prCount = creditedPRNumbers.count
+        if prCount > 0 {
+            CoinLedger.shared.creditContributorCoinBackfill(prCount: prCount)
+            RankPointLedger.shared.creditContributorRPBackfill(prCount: prCount)
+        }
+        d.set(true, forKey: Keys.hasMigratedContributorRewardV2)
+    }
+
     /// 펫 컬렉션 셋 보너스 마이그레이션 — v0.6.x에 컬렉션 시스템이 추가되기 전부터 펫을
     /// 모은 기존 사용자에게 회고적 보상. 이미 한 그룹의 base 펫(variant 0)을 모두 보유한
     /// 상태면 컴플리트로 등록 + 코인 보너스 + `pendingCollectionHighlights`에 추가
@@ -1850,6 +1868,7 @@ final class Settings: ObservableObject {
         static let gachaInventoryCollapsed     = "settings.gachaInventoryCollapsed"
         static let showGitHubLoginInCard       = "settings.showGitHubLoginInCard"
         static let hasMigratedContributorBonusUpgrade = "settings.hasMigratedContributorBonusUpgrade"
+        static let hasMigratedContributorRewardV2 = "settings.hasMigratedContributorRewardV2"
     }
 }
 
