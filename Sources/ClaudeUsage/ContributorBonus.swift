@@ -3,8 +3,9 @@ import Foundation
 // 연결된 GitHub 사용자가 머지한 PR을 찾아 RP 보너스를 적립.
 //
 // 정책:
-//   - PR 1개 = 500 RP (RankPointLedger.rpPerContributorPR) — v0.10에 coin → RP로 교체
-//     (이전: v0.6.10에 50 → 1,000 coin 상향. RP 화폐 도입으로 기여 = 코스메틱 화폐로 전환)
+//   - PR 1개 = 2,000 coin (CoinLedger.coinPerContributorPR) + 1,000 RP (RankPointLedger.rpPerContributorPR)
+//     이력: v0.6.10에 50 → 1,000 coin 상향 → v0.10에 coin을 끊고 RP 500만 지급
+//     → 현재 둘 다 지급(coin 2,000 / RP 1,000). 두 화폐 모두 event bus를 우회하므로 VP는 영향 없다.
 //   - dedupe: Settings.creditedPRNumbers (Set<Int>)에 PR 번호 저장 → 한 번 적립된 PR은 영구 제외
 //   - 소급: 처음 연결 시 과거 머지된 모든 PR이 한꺼번에 적립됨
 //   - 자기 자신(repo owner)도 포함 — 외부 기여자만 분리하지 않음 (사용자 결정 v0.4.0)
@@ -61,11 +62,14 @@ final class ContributorBonus {
             for pr in newPRs { credited.insert(pr.number) }
             Settings.shared.creditedPRNumbers = credited
             RankPointLedger.shared.creditContributorBonus(prCount: newPRs.count)
+            CoinLedger.shared.creditContributorBonus(prCount: newPRs.count)
 
-            let total = newPRs.count * RankPointLedger.rpPerContributorPR
+            let totalRP = newPRs.count * RankPointLedger.rpPerContributorPR
+            let totalCoins = newPRs.count * CoinLedger.coinPerContributorPR
             let prList = newPRs.map { "#\($0.number)" }.joined(separator: ", ")
-            DebugLog.log("ContributorBonus: +\(total) RP for \(newPRs.count) PR (\(prList)) — login=\(login)")
-            NotificationManager.shared.contributorBonus(prCount: newPRs.count, totalRP: total, prList: prList)
+            DebugLog.log("ContributorBonus: +\(totalCoins) coin +\(totalRP) RP for \(newPRs.count) PR (\(prList)) — login=\(login)")
+            NotificationManager.shared.contributorBonus(prCount: newPRs.count, totalCoins: totalCoins,
+                                                        totalRP: totalRP, prList: prList)
         } catch {
             DebugLog.log("ContributorBonus.sync failed: \(error.localizedDescription)")
         }

@@ -192,11 +192,23 @@ final class RankPointLedger {
     }
 
     /// 외부 기여자 PR 머지 보너스. PR 1개 = `rpPerContributorPR` RP.
-    /// (v0.10 이전엔 coin 지급이었으나 RP로 교체 — 기여 = 코스메틱 화폐.)
-    static let rpPerContributorPR: Int = 500
+    /// (v0.10에 coin → RP 교체. 이후 500 → 1,000으로 올리면서 coin 2,000도 함께 지급 —
+    /// RP만으로는 코스메틱 외 쓸 데가 없어 기여 보상이 체감되지 않았다.)
+    static let rpPerContributorPR: Int = 1000
     func creditContributorBonus(prCount: Int) {
         guard prCount > 0 else { return }
         creditReward(prCount * Self.rpPerContributorPR, reason: "contributor.\(prCount)PR")
+    }
+
+    /// RP 단가 상향(500 → 1,000)의 소급 차액 적립. 1회성.
+    ///
+    /// 차액 500은 **그 시점의 역사값이라 상수로 고정**한다. `rpPerContributorPR`에서 빼는 식으로
+    /// 쓰면 다음 인상 때 이 소급액까지 같이 커져서, 아직 플래그를 안 거친 사용자가 당시 정책과
+    /// 다른 금액을 받는다(`creditContributorBonusUpgrade`가 실제로 그 상태였다).
+    private static let contributorRPBackfillDelta = 500
+    func creditContributorRPBackfill(prCount: Int) {
+        guard prCount > 0 else { return }
+        creditReward(prCount * Self.contributorRPBackfillDelta, reason: "contributor.backfill.\(prCount)PR")
     }
 
     /// RP 차감. 잔액이 부족하면 차감하지 않고 `false`를 반환한다.
