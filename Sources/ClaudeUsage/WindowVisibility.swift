@@ -99,12 +99,22 @@ final class WindowVisibilityMonitor: ObservableObject {
     }
 }
 
+/// 마우스 이벤트를 절대 받지 않는 뷰.
+///
+/// SwiftUI의 `.allowsHitTesting(false)`는 SwiftUI 레이어에서만 동작하고, `NSViewRepresentable`이
+/// 실제로 뷰 계층에 꽂아 넣은 AppKit 뷰의 `hitTest`까지 막아주지는 않는다. 그래서 아래 accessor를
+/// `.background`로 깔았을 때 패널 크기만큼 늘어난 투명 NSView가 **모든 클릭을 가로챘다**
+/// (v0.17.27에서 패널의 버튼이 전부 안 눌리는 회귀로 나타났다). AppKit 쪽에서 직접 막는다.
+private final class PassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// 상위 창을 찾아 monitor에 연결하는 0크기 뷰. SwiftUI에서 `NSWindow`에 닿는 표준 우회로다.
 private struct WindowAccessor: NSViewRepresentable {
     let onResolve: (NSWindow?) -> Void
 
     func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
+        let view = PassthroughView(frame: .zero)
         // makeNSView 시점엔 아직 창 계층에 붙기 전이라 view.window가 nil이다. 한 틱 뒤에 읽는다.
         DispatchQueue.main.async { onResolve(view.window) }
         return view
@@ -123,7 +133,13 @@ private struct PauseAnimationsWhenHidden: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.windowIsVisible, monitor.isVisible)
-            .background(WindowAccessor { monitor.attach(to: $0) }.allowsHitTesting(false))
+            // 0×0으로 고정 + PassthroughView. 둘 중 하나만으로도 막히지만, `.background`는 기본적으로
+            // 콘텐츠 크기만큼 늘어나므로 크기와 hitTest 양쪽을 다 잠가둔다.
+            .background(
+                WindowAccessor { monitor.attach(to: $0) }
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+            )
     }
 }
 
