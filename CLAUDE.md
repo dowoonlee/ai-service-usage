@@ -89,7 +89,7 @@ bash scripts/render-previews.sh pet      # 펫 스프라이트만 (card / scene 
 NO_OPEN=1 bash scripts/render-previews.sh
 ```
 
-Renders ~174 files into `dist/previews/` (140 PNG + 34 animated GIF) and builds `index.html` — a gallery with background toggle (checker / dark / light), size toggle, and click-to-zoom. Covers pet sprite contact sheets per collection, variant tints, trainer card combinations (every background / frame / title / accessory), gacha tabs, world map, guild office, and battle replay.
+Renders ~192 files into `dist/previews/` (158 PNG + 34 animated GIF) and builds `index.html` — a gallery with background toggle (checker / dark / light), size toggle, and click-to-zoom. Covers pet sprite contact sheets per collection, variant tints, trainer card combinations (every background / frame / title / accessory), gacha tabs, world map, guild office, and battle replay.
 
 **Animations render as GIF** (`AnimationPreviews`), which the gallery's `<img>` plays inline — walk cycles per collection at the app's own fps, Mythic special motions, the menu bar icon at 30Hz, battle replay, and guild office pathing. Still frames can't show a reversed frame order, a stutter mid-cycle, a broken loop seam, or a pet walking backwards. Two things to preserve if you extend this:
 
@@ -174,9 +174,17 @@ The CC-BY packs require attribution — kept in each pack's `LICENSE_*.txt`. The
 The `Facing` column above is the pack's *majority* only, and the table itself predates most of the
 current roster — **do not treat it as authoritative**. Facing is per-sprite: `pixel-adventure-2`,
 `kings-and-pigs` and `sunnyland` are mostly left-facing despite the "right" above, and
-`superpowers-dino` is left-facing except `pterodactyl`/`dinoBug`. The SSOT is
-`defaultFacingLeft` on each `PetDefinition`, and the only way to verify it is to open the PNG
-and look — a wrong flag makes the pet walk backwards in `WalkingCat`.
+`superpowers-dino` is left-facing except `pterodactyl`/`dinoBug`/`dinoLizard`/`miniRex`/`dinoPlant`.
+The SSOT is `defaultFacingLeft` on each `PetDefinition`, and the only way to verify it is to open
+the PNG and look — a wrong flag makes the pet walk backwards in `WalkingCat`.
+
+Assuming a pack-wide value is exactly how 18 species shipped reversed (all 12 cats/dogs of
+`luizmelo-pets`, three of the dinos above, plus `percy`/`chiChiBird`/`giantRat`). Per-species
+verification is not optional, and the collection contact sheets don't surface it — matching a ◀/▶
+label against a drawing, 195 times, is not something anyone actually does. `PetSpritePreviews`
+therefore also renders **`0-facing-left-*` / `0-facing-right-*`**, which group every species by its
+declared flag: in a sheet where everything should face right, the one facing left just pops out.
+Check those after adding a pet (`bash scripts/render-previews.sh pet`).
 
 `PetKind.defaultFacingLeft` drives the `scaleEffect` flip in `WalkingCat`. Adding a new kind needs only an `enum case` and a `PetDefinition` entry (cellSize, suffixes, defaultTheme, defaultFacingLeft); `PetTheme.defaultFor(_:)` reads from the def directly. SwiftPM bundles flatten resource paths, so every PNG/LICENSE basename across `Resources/` must be unique.
 

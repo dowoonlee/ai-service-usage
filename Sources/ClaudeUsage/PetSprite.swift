@@ -680,8 +680,9 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .wilderness)
         case .chiChiBird:
+            // grafxkid-1 팩 대부분은 정면이지만 이 스프라이트만 왼쪽을 본다(부리 기준).
             return PetDefinition(prefix: "ChiChiBird", displayName: "치치 새",
-                                 cellSize: (16, 16), defaultFacingLeft: false,
+                                 cellSize: (16, 16), defaultFacingLeft: true,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         case .diverFish:
@@ -932,7 +933,7 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  defaultTheme: .wilderness)
         case .percy:
             return PetDefinition(prefix: "Percy", displayName: "퍼시",
-                                 cellSize: (32, 32), defaultFacingLeft: true,
+                                 cellSize: (32, 32), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         case .vessa:
@@ -991,18 +992,21 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .field)
         case .dinoLizard:
+            // dinoBug/pterodactyl과 같은 예외 — 이 팩에서 오른쪽을 본다(주둥이 기준).
             return PetDefinition(prefix: "DinoLizard", displayName: "고대 도마뱀",
-                                 cellSize: (105, 45), defaultFacingLeft: true,
+                                 cellSize: (105, 45), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .desert)
         case .miniRex:
+            // 같은 팩 tRex와 달리 오른쪽을 본다(머리 기준).
             return PetDefinition(prefix: "MiniRex", displayName: "아기 렉스",
-                                 cellSize: (80, 52), defaultFacingLeft: true,
+                                 cellSize: (80, 52), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .wilderness)
         case .dinoPlant:
+            // 벌어진 입이 오른쪽 — 이 팩의 우향 예외.
             return PetDefinition(prefix: "DinoPlant", displayName: "식충 식물룡",
-                                 cellSize: (135, 82), defaultFacingLeft: true,
+                                 cellSize: (135, 82), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .toxic)
         case .pterodactyl:
@@ -1101,8 +1105,9 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .wilderness)
         case .giantRat:
+            // luizmelo-mcf2 팩에서 유일하게 왼쪽을 본다(코 왼쪽, 꼬리 오른쪽).
             return PetDefinition(prefix: "GiantRat", displayName: "거대 쥐",
-                                 cellSize: (59, 20), defaultFacingLeft: false,
+                                 cellSize: (59, 20), defaultFacingLeft: true,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .wilderness)
         case .kingSlime:
@@ -1110,64 +1115,65 @@ enum PetKind: String, CaseIterable, Identifiable, Codable {
                                  cellSize: (46, 20), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .toxic)
+        // luizmelo-pets 팩은 고양이·개 12종 전부 오른쪽을 본다.
         case .cat1:
             return PetDefinition(prefix: "Cat1", displayName: "나비",
-                                 cellSize: (30, 15), defaultFacingLeft: true,
+                                 cellSize: (30, 15), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         case .cat2:
             return PetDefinition(prefix: "Cat2", displayName: "까망",
-                                 cellSize: (30, 15), defaultFacingLeft: true,
+                                 cellSize: (30, 15), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         case .cat3:
             return PetDefinition(prefix: "Cat3", displayName: "모모",
-                                 cellSize: (30, 14), defaultFacingLeft: true,
+                                 cellSize: (30, 14), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         case .cat4:
             return PetDefinition(prefix: "Cat4", displayName: "루비",
-                                 cellSize: (30, 16), defaultFacingLeft: true,
+                                 cellSize: (30, 16), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         case .cat5:
             return PetDefinition(prefix: "Cat5", displayName: "보리",
-                                 cellSize: (30, 16), defaultFacingLeft: true,
+                                 cellSize: (30, 16), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         case .cat6:
             return PetDefinition(prefix: "Cat6", displayName: "고등어",
-                                 cellSize: (30, 15), defaultFacingLeft: true,
+                                 cellSize: (30, 15), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         case .akita:
             return PetDefinition(prefix: "Akita", displayName: "아키타",
-                                 cellSize: (23, 17), defaultFacingLeft: true,
+                                 cellSize: (23, 17), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .field)
         case .goldenRetriever:
             return PetDefinition(prefix: "GoldenRetriever", displayName: "골든 리트리버",
-                                 cellSize: (38, 23), defaultFacingLeft: true,
+                                 cellSize: (38, 23), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .grassland)
         case .greatDane:
             return PetDefinition(prefix: "GreatDane", displayName: "그레이트 데인",
-                                 cellSize: (50, 34), defaultFacingLeft: true,
+                                 cellSize: (50, 34), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .field)
         case .saintBernard:
             return PetDefinition(prefix: "SaintBernard", displayName: "세인트 버나드",
-                                 cellSize: (50, 30), defaultFacingLeft: true,
+                                 cellSize: (50, 30), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .snowMountain)
         case .schnauzer:
             return PetDefinition(prefix: "Schnauzer", displayName: "슈나우저",
-                                 cellSize: (31, 25), defaultFacingLeft: true,
+                                 cellSize: (31, 25), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .field)
         case .husky:
             return PetDefinition(prefix: "Husky", displayName: "허스키",
-                                 cellSize: (34, 26), defaultFacingLeft: true,
+                                 cellSize: (34, 26), defaultFacingLeft: false,
                                  walkSuffix: "Run", runSuffix: "Run", idleSuffix: "Idle",
                                  defaultTheme: .snowMountain)
         }
