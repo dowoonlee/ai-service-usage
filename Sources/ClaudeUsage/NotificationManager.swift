@@ -153,6 +153,10 @@ final class NotificationManager {
 
     private func send(title: String, body: String) {
         guard Bundle.main.bundleIdentifier != nil else { return }
+        // 샌드박스(테스트)에서는 실제 발송을 하지 않는다. xctest 프로세스에도 번들 ID는 있어서
+        // 위 가드를 통과하는데, `UNUserNotificationCenter`는 앱 번들이 아니면 예외를 던지며 죽는다.
+        // 판정 로직(evaluate의 임계·주기 dedup)은 그대로 돌고 부작용만 빠진다.
+        guard !AppEnv.isSandboxed else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body

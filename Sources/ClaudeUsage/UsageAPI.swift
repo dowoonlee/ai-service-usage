@@ -74,14 +74,16 @@ actor UsageAPI {
                let org0 = raw.first {
                 let caps = (org0["capabilities"] as? [String]) ?? []
                 let tier = (org0["rate_limit_tier"] as? String) ?? ""
-                cachedPlanName = derivePlanName(capabilities: caps, rateLimitTier: tier)
+                cachedPlanName = Self.derivePlanName(capabilities: caps, rateLimitTier: tier)
             }
             return first.uuid
         } catch let e as UsageError { throw e }
         catch { throw UsageError.decoding(error) }
     }
 
-    private func derivePlanName(capabilities: [String], rateLimitTier: String) -> String {
+    /// capabilities + rate_limit_tier → 표시용 플랜명. `nonisolated static`인 것은 테스트가
+    /// actor 밖에서 직접 부르기 위해서다 — 인스턴스 상태를 쓰지 않으므로 격리가 필요 없다.
+    nonisolated static func derivePlanName(capabilities: [String], rateLimitTier: String) -> String {
         let capSet = Set(capabilities.map { $0.lowercased() })
         let base: String
         if capSet.contains("claude_max") { base = "Max" }
@@ -171,7 +173,7 @@ actor UsageAPI {
                let org0 = raw.first {
                 let caps = (org0["capabilities"] as? [String]) ?? []
                 let tier = (org0["rate_limit_tier"] as? String) ?? ""
-                d.planName = derivePlanName(capabilities: caps, rateLimitTier: tier)
+                d.planName = Self.derivePlanName(capabilities: caps, rateLimitTier: tier)
             }
         }
         guard let orgID = d.orgID else {

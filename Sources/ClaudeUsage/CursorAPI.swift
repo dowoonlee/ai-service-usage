@@ -72,14 +72,14 @@ actor CursorAPI {
         }
         let jwt = try readAccessToken()
         guard !jwt.isEmpty else { throw CursorError.notLoggedIn }
-        let userId = try decodeUserID(jwt: jwt)
+        let userId = try Self.decodeUserID(jwt: jwt)
         let planName = readString(key: "cursorAuth/stripeMembershipType")
         let plan = CursorPlan.from(planName)
-        let cookie = "\(pctEncode(userId))%3A%3A\(pctEncode(jwt))"
+        let cookie = "\(Self.pctEncode(userId))%3A%3A\(Self.pctEncode(jwt))"
 
         // /api/usage — startOfMonth(리셋 기준)와 Pro용 request 수를 한 번에 얻음
-        let usageData = try await get("https://cursor.com/api/usage?user=\(pctEncode(userId))", cookie: cookie, label: "GET /api/usage")
-        let base = try parseUsage(data: usageData, planName: planName, plan: plan)
+        let usageData = try await get("https://cursor.com/api/usage?user=\(Self.pctEncode(userId))", cookie: cookie, label: "GET /api/usage")
+        let base = try Self.parseUsage(data: usageData, planName: planName, plan: plan)
 
         if plan == .ultra {
             // Ultra는 모델별 센트 단위 집계 엔드포인트를 추가로 호출
@@ -100,8 +100,8 @@ actor CursorAPI {
     // 이벤트 페이지네이션으로 현재 billing 기간 이벤트 증분 fetch
     func fetchEvents(sinceExclusive: Date?, periodStart: Date?) async throws -> [CursorEvent] {
         let jwt = try readAccessToken()
-        let userId = try decodeUserID(jwt: jwt)
-        let cookie = "\(pctEncode(userId))%3A%3A\(pctEncode(jwt))"
+        let userId = try Self.decodeUserID(jwt: jwt)
+        let cookie = "\(Self.pctEncode(userId))%3A%3A\(Self.pctEncode(jwt))"
         let cutoff: Date? = {
             if let s = sinceExclusive, let p = periodStart { return max(s, p) }
             return sinceExclusive ?? periodStart
@@ -212,7 +212,9 @@ actor CursorAPI {
 
     // MARK: - Response parsing
 
-    private func parseUsage(data: Data, planName: String?, plan: CursorPlan) throws -> CursorSnapshot {
+    /// `/api/usage` 응답 → 스냅샷. `nonisolated static`인 것은 테스트가 actor 밖에서 캡처한
+    /// 실제 응답으로 직접 부르기 위해서다 — 인스턴스 상태를 쓰지 않는다.
+    nonisolated static func parseUsage(data: Data, planName: String?, plan: CursorPlan) throws -> CursorSnapshot {
         struct ModelUsage: Decodable { let numRequests: Int?; let maxRequestUsage: Int? }
         // 응답은 동적 키(모델명) + "startOfMonth" 섞임 → Any 딕셔너리로 파싱
         let raw: Any
@@ -284,7 +286,7 @@ actor CursorAPI {
 
     // MARK: - JWT
 
-    private func decodeUserID(jwt: String) throws -> String {
+    nonisolated static func decodeUserID(jwt: String) throws -> String {
         let parts = jwt.split(separator: ".")
         guard parts.count >= 2 else { throw CursorError.tokenRead("JWT 형식 오류") }
         guard let data = Self.base64URLDecode(String(parts[1])) else {
@@ -303,7 +305,7 @@ actor CursorAPI {
         return Data(base64Encoded: b64)
     }
 
-    private func pctEncode(_ s: String) -> String {
+    nonisolated static func pctEncode(_ s: String) -> String {
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
         return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
     }
@@ -322,7 +324,7 @@ actor CursorAPI {
             return d
         }
         d.tokenFound = true
-        guard let userId = try? decodeUserID(jwt: jwt) else {
+        guard let userId = try? Self.decodeUserID(jwt: jwt) else {
             d.fatal = "JWT 디코드 실패"
             return d
         }
@@ -331,12 +333,12 @@ actor CursorAPI {
         let plan = CursorPlan.from(planName)
         d.plan = plan
         d.planName = planName
-        let cookie = "\(pctEncode(userId))%3A%3A\(pctEncode(jwt))"
+        let cookie = "\(Self.pctEncode(userId))%3A%3A\(Self.pctEncode(jwt))"
 
-        let (usageData, usageStatus) = await rawSend(get: "https://cursor.com/api/usage?user=\(pctEncode(userId))", cookie: cookie)
+        let (usageData, usageStatus) = await rawSend(get: "https://cursor.com/api/usage?user=\(Self.pctEncode(userId))", cookie: cookie)
         d.usageStatus = usageStatus
         d.usageRawData = usageData
-        if let usageData, let snap = try? parseUsage(data: usageData, planName: planName, plan: plan) {
+        if let usageData, let snap = try? Self.parseUsage(data: usageData, planName: planName, plan: plan) {
             d.snapshot = snap
         }
 
