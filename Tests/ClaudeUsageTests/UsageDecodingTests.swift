@@ -77,16 +77,19 @@ final class UsageDecodingTests: XCTestCase {
     func testClaudePlanNameIsCaseInsensitiveAndFallsBack() {
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["CHAT", "CLAUDE_MAX"],
                                                rateLimitTier: "DEFAULT_CLAUDE_MAX_20X"), "Max 20x")
-        // ⚠️ 현재 동작을 기록해둔다: "chat"이 있으면 다른 미지의 capability가 함께 와도 "Free"다.
-        // 거의 모든 플랜이 "chat"을 포함하므로, Anthropic이 새 유료 등급 문자열을 추가하면
-        // 그 사용자는 "Free"로 표시되고 코인 배수도 0.5로 깎인다(CoinLedger.planMultiplier).
-        // 지금 고치지 않는 이유는 실제 Free 계정의 capabilities 구성을 모르기 때문이다 —
-        // "chat 외 값이 있으면 그걸 쓴다"로 바꿨다가 Free가 엉뚱한 이름으로 표시될 수 있다.
-        // 실데이터를 확보하면 이 단언과 함께 바꿀 것.
-        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "newtier"], rateLimitTier: ""), "Free")
-        // chat조차 없는 미지 구성만 그대로 표시된다.
+        // 실계정 응답을 떠보니 Max 계정의 capabilities가 ["claude_max", "chat"]이었다 —
+        // "chat"은 무료 표식이 아니라 모든 플랜에 붙는 공통 값이다. 그래서 미지의 등급이
+        // "chat"과 함께 와도 Free로 뭉개지 않고 그 값을 살린다(코인 배수 0.5 강등 방지).
+        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["claude_ultra", "chat"],
+                                               rateLimitTier: ""), "Claude_Ultra")   // capitalized는 _ 뒤도 대문자화한다
+        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "newtier"], rateLimitTier: ""), "Newtier")
+        // "chat"만 있는 계정이 진짜 Free다.
+        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat"], rateLimitTier: ""), "Free")
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["newtier"], rateLimitTier: ""), "Newtier")
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: [], rateLimitTier: ""), "?")
+        // 알려진 등급은 "chat"이 함께 와도 그대로 — 실계정에서 확인한 형태.
+        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["claude_max", "chat"],
+                                               rateLimitTier: "default_claude_max_20x"), "Max 20x")
         // 배수가 접미사가 아니면 붙이지 않는다.
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["pro"], rateLimitTier: "20x_default"), "Pro")
     }
