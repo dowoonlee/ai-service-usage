@@ -52,8 +52,12 @@ final class MenuBarRenderer {
     /// 이로치 sprite 색조 변환용 — CIContext는 생성 비용이 커서 1회만 만들어 재사용.
     private let ciContext = CIContext(options: nil)
     /// 변환 결과 캐시 — (kind, action, frameIdx, variant)당 CI 파이프라인을 1회만 돌린다.
-    /// 키 공간이 유한(펫×액션×프레임×variant)해 무한정 커지지 않는다.
+    /// 키 공간이 유한한 것은 `frameIdx`가 `cacheFrameIndex`로 순환된다는 전제 위에서만 참이다 —
+    /// 누적 카운터를 그대로 넣으면 프레임 축이 무한해져 캐시가 아니라 누수가 된다.
     private var tintedSpriteCache: [TintedSpriteKey: NSImage] = [:]
+
+    /// 테스트 전용 — tint 캐시 적재량. 키가 오염되면 여기가 tick 수만큼 자란다.
+    var tintedSpriteCacheCountForTesting: Int { tintedSpriteCache.count }
 
     private struct TintedSpriteKey: Hashable {
         let kind: PetKind
@@ -359,6 +363,19 @@ final class MenuBarRenderer {
         return (ns.usingColorSpace(.deviceRGB) ?? ns).cgColor
     }
 
+    /// 캐시 키에 쓸 프레임 인덱스 — `PetSprite.image(for:action:frameIndex:)`가 하는 것과
+    /// 똑같이 프레임 수로 순환시킨다.
+    ///
+    /// `render`의 `frameIdx`는 tick마다 `&+= 1` 되는 누적 카운터라 그대로 키에 쓰면 안 된다.
+    /// sprite 조회 쪽은 나머지 연산으로 정규화해 **같은 그림**을 돌려주는데 키만 매번 새로 생겨
+    /// 캐시가 영구 미스하고, CI 파이프라인 결과가 무한 적재됐다 (실측 5시간에 CoreImage 6.2GB /
+    /// 리전 8만 개). 두 쪽의 정규화가 어긋나는 순간 캐시가 통째로 무의미해지는 지점이다.
+    static func cacheFrameIndex(_ frameIdx: Int, kind: PetKind, action: PetController.Action) -> Int {
+        let count = PetSprite.frames(for: kind, action: action).count
+        guard count > 0 else { return 0 }
+        return frameIdx % count
+    }
+
     /// 이로치(shiny) variant 색조를 sprite에 입힌다. in-app `WalkingCat`의
     /// `.hueRotation(.degrees(hueDegrees(for:)))` + `.saturation(1.15)`와 사실상 동일
     /// (SwiftUI와 Core Image의 색 파이프라인이 달라 픽셀 단위로는 근사). variant == 0이면
@@ -366,7 +383,9 @@ final class MenuBarRenderer {
     private func tintedSprite(_ image: NSImage, kind: PetKind, action: PetController.Action,
                               frameIdx: Int, variant: Int) -> NSImage {
         guard variant != 0 else { return image }
-        let key = TintedSpriteKey(kind: kind, action: action, frameIdx: frameIdx, variant: variant)
+        let key = TintedSpriteKey(kind: kind, action: action,
+                                  frameIdx: Self.cacheFrameIndex(frameIdx, kind: kind, action: action),
+                                  variant: variant)
         if let cached = tintedSpriteCache[key] { return cached }
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
