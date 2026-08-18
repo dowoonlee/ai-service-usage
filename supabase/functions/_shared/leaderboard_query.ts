@@ -5,6 +5,13 @@
 // ⚠️ 백업 누출 방지: `profile_json.backup`은 본인 디바이스 복구 전용 페이로드라 다른 사용자에게
 // 노출되면 안 된다. 응답에 profileJson을 싣는 지점은 반드시 `stripBackup()`을 거쳐야 한다.
 // 이 모듈이 그 단일 차단 지점이며, 여기를 쓰는 모든 endpoint(leaderboard·sync)가 보호받는다.
+//
+// 차단선은 **두 겹**이다 (20260818000000_strip_backup_at_db_boundary.sql):
+//   1차 — DB. monthly_leaderboard 뷰와 monthly_winners 스냅샷이 애초에 backup을 담지 않는다.
+//          Egress가 실제로 줄어드는 건 이쪽이다. 함수가 받아서 버리면 이미 전송된 뒤다.
+//   2차 — 아래 stripBackup() 호출. 이제 no-op이지만 심층 방어로 남긴다. users 테이블을
+//          직접 읽는 새 경로(guild-info 등)는 여전히 원본을 보므로 이 습관을 깨면 안 된다.
+// 새 endpoint를 추가할 땐 둘 다 챙길 것 — DB에서 안 담고, 함수에서 한 번 더 떨군다.
 
 import { getDb } from "./db.ts";
 import { stripBackup } from "./profile.ts";
@@ -31,6 +38,8 @@ export async function fetchLeaderboard(
   await db.rpc("finalize_monthly_rp_if_needed");
   await db.rpc("finalize_weekly_rp_if_needed");
   // Top N — 월간 보드(테넌트 파티션) + profile_json. device_id는 메달 매핑 internal용 — 응답엔 절대 미노출.
+  // 뷰가 내려주는 profile_json에는 backup이 이미 빠져 있다 — 보드 전원의 복구 블롭(1인당 ~9KB,
+  // 그 91%가 backup)을 조회마다 끌어오던 Egress가 여기서 사라진다.
   const { data: top, error: topErr } = await db
     .from("monthly_leaderboard")
     .select("device_id, rank, nickname, github_login, monthly_coins, profile_json")

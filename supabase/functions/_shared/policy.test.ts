@@ -35,6 +35,7 @@ import {
   isValidGuildName,
   INVITE_CODE_LEN,
 } from "./guild_policy.ts";
+import { stripBackup } from "./profile.ts";
 
 // ============================================================================
 // caps — 코인 delta 상한
@@ -263,4 +264,41 @@ Deno.test("길드 로고 위치 — 정수 범위 밖은 거절", () => {
   assertFalse(isValidGuildLogoPos(1.5, 0), "정수만");
   assertFalse(isValidGuildLogoPos("10" as unknown, 0), "문자열 거절");
   assertFalse(isValidGuildLogoPos(99_999, 0), "상한 밖");
+});
+
+// ============================================================================
+// profile — backup 누출 차단
+// ============================================================================
+// 보안 경계인데 커버리지가 0이었다. DB 쪽에도 같은 규칙이 SQL로 복제되어 있어서
+// (monthly_leaderboard 뷰 / finalize 스냅샷, 20260818000000 마이그레이션)
+// 두 구현의 의미가 어긋나면 한쪽으로 backup이 샌다 — 여기가 그 기준선이다.
+
+Deno.test("stripBackup — backup 키만 떨구고 나머지는 그대로", () => {
+  const card = { avatar: { kind: "fox", variant: 2 }, title: "t" };
+  assertEquals(
+    stripBackup({ card, nickname: "n", backup: { coins: 999, ownedPets: ["fox"] } }),
+    { card, nickname: "n" },
+    "backup 외 필드는 보존",
+  );
+  // backup이 없으면 손대지 않는다 — 뷰의 `- 'backup'`도 없는 키엔 no-op이라 동일.
+  assertEquals(stripBackup({ card }), { card });
+  assertEquals(stripBackup({}), {});
+});
+
+Deno.test("stripBackup — 객체가 아니면 그대로 통과", () => {
+  // SQL 쪽은 jsonb_typeof(...) = 'object' 가드가 이 케이스를 담당한다.
+  // (`jsonb - text`를 스칼라에 쓰면 "cannot delete from scalar"로 에러가 난다.)
+  assertEquals(stripBackup(null), null);
+  assertEquals(stripBackup(undefined), undefined);
+  assertEquals(stripBackup("backup"), "backup");
+  assertEquals(stripBackup(42), 42);
+  assertEquals(stripBackup([{ backup: 1 }]), [{ backup: 1 }], "배열은 손대지 않는다");
+});
+
+Deno.test("stripBackup — 원본을 변형하지 않는다", () => {
+  // 같은 row 객체를 다른 곳에서 재사용해도 안전해야 한다(복구 경로가 원본을 필요로 함).
+  const original = { card: { title: "t" }, backup: { coins: 1 } };
+  const stripped = stripBackup(original) as Record<string, unknown>;
+  assert("backup" in original, "원본에는 backup이 남아 있어야 한다");
+  assertFalse("backup" in stripped);
 });
