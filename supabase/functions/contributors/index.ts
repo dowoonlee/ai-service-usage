@@ -14,6 +14,7 @@
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
+import { callBestEffortRpc } from "../_shared/rpc_health.ts";
 
 const REPO = "dowoonlee/ai-service-usage";
 /** repo owner는 외부 기여자가 아니므로 집계에서 제외. */
@@ -83,7 +84,9 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
 
   // TTL 만료 시 한 요청만 갱신을 맡는다(동시 호출이 GitHub을 중복으로 두드리지 않게).
-  const { data: claimed } = await db.rpc("claim_contributors_sync", {
+  // 에러 시 claimed가 undefined가 되어 "선점 실패"로 읽히고, GitHub 동기화가 영구히 멈춘 채
+  // 굳은 캐시만 응답하게 된다 — 그 상태를 관측 가능하게 남긴다 (#243).
+  const { data: claimed } = await callBestEffortRpc(db, "claim_contributors_sync", {
     ttl_seconds: TTL_SECONDS,
     retry_seconds: RETRY_SECONDS,
   });

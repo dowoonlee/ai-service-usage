@@ -29,12 +29,8 @@ Deno.serve(async (req: Request) => {
 
   const db = getDb();
 
-  // 직전 달 finalize lazy trigger — 첫 호출자가 트리거. UNIQUE 제약으로 race-safe.
-  // 호출당 1회 추가 쿼리이지만 EXISTS 가드로 이미 finalized면 즉시 return.
-  await db.rpc("finalize_previous_month_if_needed");
-  // RP 정산 — 월간/주간 lazy trigger. 각 함수가 EXISTS 가드로 이미 정산됐으면 즉시 return.
-  await db.rpc("finalize_monthly_rp_if_needed");
-  await db.rpc("finalize_weekly_rp_if_needed");
+  // 정산 lazy trigger는 아래 fetchLeaderboard 안에서 돈다(_shared/leaderboard_query.ts).
+  // 여기서 또 부르면 요청당 3회가 6회가 된다 — 그 사이에 조기 return 경로도 없다.
 
   // 호출자 테넌트 결정. 미등록/익명(deviceId 없음)은 기본 테넌트(public) 보드를 본다.
   // 클라는 tenant를 주장할 수 없다 — 서버가 device_id로만 판정(§2-1).
