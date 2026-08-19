@@ -332,6 +332,24 @@ select {
     </figure>
   </section>
 
+  <section id="tab-earnings" hidden>
+    <div class="grid" id="earn-tiles"></div>
+    <div style="height:16px"></div>
+    <figure>
+      <figcaption>유저별 적립 상세</figcaption>
+      <div class="figsub">
+        <b>통화가 셋이고 이름이 헷갈립니다.</b>
+        <b>VP</b>는 랭킹 점수로 서버가 권위를 가집니다(<code>users.total_coins</code>는
+        컬럼명이 coins지만 가챠 코인이 아닙니다).
+        <b>코인(서버)</b>은 서버가 지급한 분(이벤트·시상대)만이고,
+        사용량으로 번 코인은 클라가 적립해 서버가 보지 못합니다 — 그건
+        <b>코인(클라)</b>이며 자가 신고 값이라 <b>둘을 더하면 안 됩니다</b>.
+        <b>RP</b>는 전부 서버 지급이고, <b>캠페인</b>은 정기 정산이 아닌 일회성 지급입니다.
+      </div>
+      <div class="tablescroll" data-table="earnings"></div>
+    </figure>
+  </section>
+
   <section id="tab-abuse" hidden>
     <figure>
       <figcaption>abuse 트리아지 큐</figcaption>
@@ -385,6 +403,7 @@ const TABS = [
   ["overview", "개요"],
   ["usage", "사용량"],
   ["progress", "해금 진척"],
+  ["earnings", "적립"],
   ["abuse", "abuse"],
   ["version", "버전"],
   ["pets", "펫"],
@@ -932,7 +951,7 @@ async function load() {
     // 카탈로그는 실패해도 대시보드가 죽으면 안 된다 — 이름이 투박해질 뿐이다.
     CATALOG = await fetch("/pets.json").then((r) => r.json())
       .then((j) => j.pets ?? {}).catch(() => ({}));
-    const [overview, daily, progress, abuse, versions, pets, badges, tenants] = await Promise.all([
+    const [overview, daily, progress, abuse, versions, pets, badges, tenants, earnings] = await Promise.all([
       api("admin_overview", "select=*"),
       api("admin_daily_activity", "select=*&order=day_kst.asc"),
       api("admin_user_progress", "select=*&order=server_total_coins.desc"),
@@ -941,8 +960,9 @@ async function load() {
       api("admin_pet_popularity", "select=*&order=owners.desc,acquisitions_total.desc"),
       api("admin_badge_progress", "select=*&order=category.asc,tier.asc"),
       api("admin_tenants", "select=*&order=users.desc"),
+      api("admin_user_earnings", "select=*&order=vp_total.desc"),
     ]);
-    DATA = { overview, daily, progress, abuse, versions, pets, badges, tenants };
+    DATA = { overview, daily, progress, abuse, versions, pets, badges, tenants, earnings };
 
     // 테넌트 셀렉터 — 선택은 유지한다(새로고침해도 보던 테넌트에 머문다).
     const sel = document.getElementById("tenant");
@@ -973,6 +993,7 @@ function renderAll() {
   renderOverview();
   renderUsage();
   renderProgress();
+  renderEarnings();
   renderAbuse();
   renderVersions();
   renderPets();
@@ -1221,6 +1242,92 @@ function renderProgress() {
     },
     { key: "last_submitted_at", label: "최근 활동", render: (r) => fmtAgo(r.last_submitted_at) },
   ], p);
+}
+
+// ──────────────────────────────────────────────────────────── 적립 (VP / RP / 코인)
+/**
+ * 통화가 셋인데 이름이 헷갈리게 붙어 있어, 합치면 안 되는 값을 컬럼으로 물리적으로 갈라 둔다:
+ *   VP         — 서버 authoritative(랭킹 점수). users.total_coins 이며 **가챠 코인이 아니다**.
+ *   코인(서버)  — reward_grants(currency='coin') + 시상대 보상. 서버가 지급한 것만.
+ *   코인(클라)  — profile_json.stats.coinsTotalEarned. 사용량 적립분은 CoinLedger가 클라에서
+ *                 적립해 서버가 못 본다. 자가 신고 값이라 위와 **더하면 안 된다**.
+ *   RP         — 정산(월간/주간) + 캠페인(sentinel period) + ops 지급. 전부 서버 지급.
+ */
+function renderEarnings() {
+  const rows = forTenant(DATA.earnings);
+  const sum = (k) => rows.reduce((s, r) => s + Number(r[k] ?? 0), 0);
+
+  const rpUnclaimed = sum("rp_unclaimed");
+  const coinUnclaimed = sum("coin_unclaimed");
+
+  const tiles = [
+    {
+      label: "VP 누적", value: fmt(sum("vp_total")),
+      sub: `제출 ${fmt(sum("submissions"))}회 · 미반영 ${fmt(sum("vp_trimmed"))}`,
+    },
+    {
+      label: "RP 지급", value: fmt(sum("rp_total")),
+      sub: `정산 ${fmt(sum("rp_monthly") + sum("rp_weekly"))} · 캠페인 ${fmt(sum("rp_campaign"))}`
+        + ` · ops ${fmt(sum("rp_ops_granted"))}`,
+    },
+    {
+      label: "RP 미수령", value: fmt(rpUnclaimed),
+      sub: "지급했는데 클라가 안 받아감", cls: rpUnclaimed > 0 ? "warn" : "",
+    },
+    {
+      label: "코인 (서버 지급)", value: fmt(sum("coin_server_total")),
+      sub: `이벤트 ${fmt(sum("coin_ops_granted"))} · 시상대 ${fmt(sum("coin_podium"))}`,
+    },
+    {
+      label: "코인 미수령", value: fmt(coinUnclaimed),
+      sub: "지급했는데 클라가 안 받아감", cls: coinUnclaimed > 0 ? "warn" : "",
+    },
+    {
+      label: "코인 (클라 신고)", value: fmt(sum("coin_client_earned")),
+      sub: "사용량 적립분 — 서버 미검증. 위와 더하지 말 것",
+    },
+  ];
+  document.getElementById("earn-tiles").innerHTML = tiles.map((t) => `
+    <div class="tile">
+      <div class="label">${t.label}</div>
+      <div class="value ${t.cls ?? ""}">${t.value}</div>
+      <div class="sub">${t.sub}</div>
+    </div>`).join("");
+
+  const zero = (v) => Number(v) > 0 ? fmt(v) : '<span class="dim">0</span>';
+
+  renderTable(q('[data-table="earnings"]'), [
+    { key: "nickname", label: "닉네임" },
+    { key: "vp_total", label: "VP", render: (r) => fmt(r.vp_total) },
+    {
+      // 캡으로 깎였거나 거부된 제출. 캡만 오르면 헤비유저, 거부까지 뛰면 조작·클라 버그 신호.
+      key: "vp_trimmed", label: "VP 미반영",
+      render: (r) => Number(r.vp_trimmed) > 0
+        ? pill(Number(r.submissions_rejected) > 0 ? "critical" : "warning", fmt(r.vp_trimmed))
+        : '<span class="dim">0</span>',
+    },
+    { key: "submissions", label: "제출", render: (r) => fmt(r.submissions) },
+    { key: "rp_monthly", label: "RP 월간", render: (r) => zero(r.rp_monthly) },
+    { key: "rp_weekly", label: "RP 주간", render: (r) => zero(r.rp_weekly) },
+    { key: "rp_campaign", label: "RP 캠페인", render: (r) => zero(r.rp_campaign) },
+    { key: "rp_ops_granted", label: "RP ops", render: (r) => zero(r.rp_ops_granted) },
+    { key: "rp_total", label: "RP 합", render: (r) => fmt(r.rp_total) },
+    {
+      key: "rp_unclaimed", label: "RP 미수령",
+      render: (r) => Number(r.rp_unclaimed) > 0
+        ? pill("warning", fmt(r.rp_unclaimed)) : '<span class="dim">0</span>',
+    },
+    { key: "coin_server_total", label: "코인(서버)", render: (r) => zero(r.coin_server_total) },
+    {
+      key: "coin_unclaimed", label: "코인 미수령",
+      render: (r) => Number(r.coin_unclaimed) > 0
+        ? pill("warning", fmt(r.coin_unclaimed)) : '<span class="dim">0</span>',
+    },
+    { key: "coin_client_earned", label: "코인(클라)", render: (r) => fmt(r.coin_client_earned) },
+    { key: "coin_client_balance", label: "코인 잔액", render: (r) => fmt(r.coin_client_balance) },
+    { key: "podiums", label: "시상대", render: (r) => zero(r.podiums) },
+    { key: "last_submitted_at", label: "최근 활동", render: (r) => fmtAgo(r.last_submitted_at) },
+  ], rows);
 }
 
 function renderAbuse() {
