@@ -14,6 +14,7 @@
 // 새 endpoint를 추가할 땐 둘 다 챙길 것 — DB에서 안 담고, 함수에서 한 번 더 떨군다.
 
 import { getDb } from "./db.ts";
+import { callBestEffortRpc } from "./rpc_health.ts";
 import { stripBackup } from "./profile.ts";
 
 const TOP_N = 100;
@@ -33,10 +34,11 @@ export async function fetchLeaderboard(
 
   // 직전 달 finalize lazy trigger — 첫 호출자가 트리거. UNIQUE 제약으로 race-safe.
   // 호출당 1회 추가 쿼리이지만 EXISTS 가드로 이미 finalized면 즉시 return.
-  await db.rpc("finalize_previous_month_if_needed");
+  // 실패해도 조회는 계속한다. 다만 무음으로 넘기지 않고 rpc_failures에 남긴다 (#243).
+  await callBestEffortRpc(db, "finalize_previous_month_if_needed");
   // RP 정산 — 월간/주간 lazy trigger. 각 함수가 EXISTS 가드로 이미 정산됐으면 즉시 return.
-  await db.rpc("finalize_monthly_rp_if_needed");
-  await db.rpc("finalize_weekly_rp_if_needed");
+  await callBestEffortRpc(db, "finalize_monthly_rp_if_needed");
+  await callBestEffortRpc(db, "finalize_weekly_rp_if_needed");
   // Top N — 월간 보드(테넌트 파티션) + profile_json. device_id는 메달 매핑 internal용 — 응답엔 절대 미노출.
   // 뷰가 내려주는 profile_json에는 backup이 이미 빠져 있다 — 보드 전원의 복구 블롭(1인당 ~9KB,
   // 그 91%가 backup)을 조회마다 끌어오던 Egress가 여기서 사라진다.

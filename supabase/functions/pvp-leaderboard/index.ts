@@ -7,6 +7,7 @@
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
+import { callBestEffortRpc } from "../_shared/rpc_health.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { DAILY_RANK_LIMIT } from "../_shared/pvp_policy.ts";
@@ -47,8 +48,9 @@ Deno.serve(async (req: Request) => {
   const tenant = (user.tenant_id as string) ?? "public";
 
   // 시즌 정산 lazy 트리거 — 직전 달 미정산이면 RP·확정권 지급(멱등). leaderboard 조회 때마다 체크.
-  const { error: finErr } = await db.rpc("finalize_previous_month_pvp_if_needed");
-  if (finErr) console.error("season finalize failed (ignored)", finErr);
+  // 이 호출이 19일간 조용히 실패한 적이 있다(PR #242). console.error만으론 24h 로그 보존을
+  // 넘기지 못해 놓쳤다 — 이제 rpc_failures에도 남는다 (#243).
+  await callBestEffortRpc(db, "finalize_previous_month_pvp_if_needed");
 
   // Top N 레이팅.
   const { data: top, error: topErr } = await db

@@ -9,6 +9,7 @@
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
+import { callBestEffortRpc } from "../_shared/rpc_health.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { stripBackup } from "../_shared/profile.ts";
 import { resolveTenant } from "../_shared/tenant.ts";
@@ -32,7 +33,8 @@ Deno.serve(async (req: Request) => {
   const db = getDb();
 
   // 직전 달 길드 정산 lazy trigger — 개인 leaderboard의 finalize 패턴과 동일(테넌트별 정산은 함수 내부).
-  await db.rpc("finalize_monthly_guild_rp_if_needed");
+  // 실패해도 조회는 계속하되 rpc_failures에 남긴다 (#243).
+  await callBestEffortRpc(db, "finalize_monthly_guild_rp_if_needed");
 
   // 호출자 테넌트 — 미등록/익명은 기본(public) 길드 보드. 클라는 tenant를 주장 못 한다(§2-1).
   let tenant = "public";
