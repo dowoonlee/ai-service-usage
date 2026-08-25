@@ -2,7 +2,7 @@
 // 클라이언트가 폴링 주기 직후 호출. HMAC 서명 검증 + 시간 비례 캡 + append.
 //
 // 어뷰징 캡 정책 (caps.ts):
-//   - 시간 비례 cap = elapsed * 0.05 coins/sec (floor 1000, ceiling 50000)
+//   - 시간 비례 cap = elapsed * 0.05 coins/sec (floor 5000, ceiling 50000)
 //   - delta > cap이면 cap으로 truncate, `cap_applied = true` 기록. silently truncate
 //     (사용자에겐 accepted=true로 응답하되 totalCoins는 cap 적용된 값)
 //   - prev_total 10% drift 초과 시 reject (`prev_total_mismatch`)

@@ -121,7 +121,10 @@ DB 쪽은 `admin_*` 뷰 전부 `security_invoker = true` + anon/authenticated `R
 - **적립 탭 RP 합계** — 뷰 합계는 `rp_rewards` 원본 합보다 작을 수 있다. 버그가 아니다:
   `rp_rewards.device_id`가 `ON DELETE SET NULL`이라(`reward_grants`는 `CASCADE`) 탈퇴
   유저의 정산 기록이 `device_id=NULL`로 남고, 유저별 뷰는 그걸 누구에게도 귀속시킬 수 없다.
-- **VP 미반영** — 제출했으나 반영 안 된 양(캡 + 거부 합). 캡만이면 헤비유저, 거부가 섞이면
+- **VP 미반영** — 제출했으나 반영 안 된 양(캡 + 거부 합). **상한선으로만 볼 것** — 캡에
+  잘린 분이 prev_total_mismatch 바운스로 재제출되면 같은 VP가 delta 합에 다시 잡혀
+  과대 표시된다(실측 2026-08-25: 표시 5,108 중 실손실 808). 실손실 확정은 클라 로컬
+  `rankingScoreEarnedVP`와 서버 `total_coins` 대조로만 가능하다. 캡만이면 헤비유저, 거부가 섞이면
   빨간 pill로 뜬다 — 서명·리플레이 실패이므로 abuse 탭과 함께 볼 것.
 - **미수령 보상** — 지급했는데 클라가 안 받아간 건수. 오래 남아 있으면 해당 유저가
   구버전이거나 폴링이 안 도는 상태다.

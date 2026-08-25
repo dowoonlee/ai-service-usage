@@ -4,12 +4,16 @@
 //   - 사용자가 100% 활동 시 일일 최대 적립 ~500 coin (Claude 7d × max plan multiplier
 //     + 5h 반복 + Cursor Ultra + Wellness + 가끔 PR/컬렉션). 1.3 마진 → 650/day.
 //   - 0.05 coin/sec ≈ 4320/day → 사실상 어떤 정상 사용자도 못 닿는 상한.
-//   - 컬렉션 보너스 burst (Legendary 컬렉션 = 25,000 coin)를 흡수하기 위해 floor 1000.
+//   - 컬렉션 보너스 burst (Legendary 컬렉션 = 25,000 coin) + 몰아서 제출되는 누적분을
+//     흡수하기 위해 floor 5000. (1000이던 시절 정상 헤비유저의 catch-up 제출이 잘려
+//     영구 소실됐다 — 클라는 캡 절삭을 모르고 lastSubmittedTotal을 로컬 total로 올린다.)
+//     floor가 rate를 넘는 구간이 ~28h(5000/0.05s)까지 늘어나는 건 감수 — ceiling과
+//     제출 쿨다운이 여전히 남는다.
 //   - 절대 ceiling 50,000 — 1개월 비활성 후 한 번에 보낼 수 있는 max. 정상 사용자는
 //     월 ~15,000 coin이라 여유 있고, cheater가 한 번에 1M씩 보내는 건 차단.
 
 const MAX_RATE_COINS_PER_SEC = 0.05;
-const FLOOR_COINS = 1000;
+const FLOOR_COINS = 5000;
 const CEILING_COINS = 50000;
 
 export function maxAllowedDelta(elapsedSeconds: number): number {
