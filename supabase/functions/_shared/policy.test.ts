@@ -42,23 +42,25 @@ import { stripBackup } from "./profile.ts";
 // ============================================================================
 
 Deno.test("캡 — 경과 시간에 비례하되 floor/ceiling으로 잘린다", () => {
-  // 짧은 경과라도 floor 1000은 보장한다. 컬렉션 보너스 burst(Legendary 25,000)를 흡수하기 위한 값.
-  assertEquals(maxAllowedDelta(0), 1000);
-  assertEquals(maxAllowedDelta(-99), 1000, "음수 경과는 0으로 클램프");
-  // 0.05 coin/sec — 하루(86400s)면 4320.
-  assertEquals(maxAllowedDelta(86_400), 4320);
+  // 짧은 경과라도 floor 5000은 보장한다. 컬렉션 보너스 burst(Legendary 25,000)와
+  // catch-up 누적 제출을 흡수하기 위한 값 (1000 시절 정상 제출이 잘려 영구 소실됐다).
+  assertEquals(maxAllowedDelta(0), 5000);
+  assertEquals(maxAllowedDelta(-99), 5000, "음수 경과는 0으로 클램프");
+  // 0.05 coin/sec — floor를 넘어서는 건 100,000s(~28h)부터. 하루(86400s)는 아직 floor.
+  assertEquals(maxAllowedDelta(86_400), 5000);
+  assertEquals(maxAllowedDelta(2 * 86_400), 8640);
   // ceiling 50,000을 넘지 않는다. 한 달 비활성 후 복귀해도 여기서 잘린다.
   assertEquals(maxAllowedDelta(30 * 86_400), 50_000);
   assertEquals(maxAllowedDelta(365 * 86_400), 50_000);
 });
 
 Deno.test("캡 — 상한 이하는 통과, 초과는 잘라서 수용", () => {
-  const base = { elapsedSeconds: 86_400, prevTotalReported: 10_000, prevTotalServer: 10_000 };
+  const base = { elapsedSeconds: 2 * 86_400, prevTotalReported: 10_000, prevTotalServer: 10_000 };
   assertEquals(evaluateCap({ ...base, delta: 100 }), { kind: "ok", accepted: 100 });
-  assertEquals(evaluateCap({ ...base, delta: 4320 }), { kind: "ok", accepted: 4320 });
+  assertEquals(evaluateCap({ ...base, delta: 8640 }), { kind: "ok", accepted: 8640 });
   // 초과분은 거절이 아니라 절삭 — 정상 사용자가 오래 쉬었다 돌아온 경우를 막지 않기 위해서다.
   assertEquals(evaluateCap({ ...base, delta: 999_999 }),
-    { kind: "truncated", accepted: 4320, requested: 999_999 });
+    { kind: "truncated", accepted: 8640, requested: 999_999 });
 });
 
 Deno.test("캡 — 망가진 입력은 거절", () => {
