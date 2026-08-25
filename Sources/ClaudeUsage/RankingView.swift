@@ -1041,9 +1041,7 @@ private struct RPHistoryView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("아직 적립 이력이 없습니다.")
                         .font(.system(size: 12, weight: .semibold))
-                    Text("RP는 사용량에 따라 실시간으로 오르지 않습니다. 매주 월요일(주간)·매월 1일(월간) 순위 정산 때 순위에 따라 지급됩니다.")
-                        .font(.system(size: 11)).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    settlementNote
                 }
                 .padding(.vertical, 8)
             } else {
@@ -1056,9 +1054,27 @@ private struct RPHistoryView: View {
                     }
                 }
                 .frame(maxHeight: 260)
+                Divider()
+                settlementNote
             }
         }
         .padding(16).frame(width: 340)
+    }
+
+    /// 정산 기준 안내. **이력이 있을 때도** 보여준다 — 예전엔 빈 상태에만 있어서, 정작 정산을
+    /// 받고 순위가 궁금해진 사용자는 이 설명을 볼 수 없었다.
+    ///
+    /// 두 번째 문장이 #247의 답이다. 주간 정산은 `finalize_weekly_rp_if_needed`가 그 주의
+    /// `accepted_coins` 합으로 순위를 매기는데, 앱에 있는 보드는 월간(`monthly_leaderboard`,
+    /// 이번 달 누적) 하나뿐이라 주간 순위를 대조해볼 화면이 없다. 월간 정산은 보드와 기준이
+    /// 같으므로(둘 다 같은 달 `accepted_coins` 합) 어긋나지 않는다.
+    private var settlementNote: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("RP는 사용량에 따라 실시간으로 오르지 않습니다. 매주 월요일(주간)·매월 1일(월간) 순위 정산 때 순위에 따라 지급됩니다.")
+            Text("주간 정산 순위는 그 주에 오른 VP만으로 매깁니다. 랭킹 보드는 이번 달 누적 VP 순위라서, 같은 시점이라도 두 순위는 다를 수 있습니다.")
+        }
+        .font(.system(size: 11)).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func row(_ e: RPHistoryEntry) -> some View {
