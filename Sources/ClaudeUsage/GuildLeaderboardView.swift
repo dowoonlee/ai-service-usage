@@ -123,7 +123,7 @@ struct GuildLeaderboardView: View {
     }
 
     /// 직전 달 길드 시상대 — 2-1-3 단상 (개인 시상대의 길드판). 단 위에는 정산 시점
-    /// 길드장 대표 펫, 단 안에는 길드명·최종 점수·멤버 수. 내 길드 단은 하이라이트.
+    /// 길드장 대표 펫, 단 안에는 메달·등수·길드명·최종 점수·멤버 수. 내 길드 단은 테두리로 강조.
     private func guildPodiumSection(_ prev: RankingAPI.GuildPreviousMonth) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -132,48 +132,71 @@ struct GuildLeaderboardView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.yellow)
             }
-            HStack(alignment: .bottom, spacing: 0) {
-                ForEach([2, 1, 3], id: \.self) { rank in
-                    guildPodiumBlock(prev.entries.first { $0.rank == rank }, rank: rank,
-                                     isMine: prev.myGuildRank == rank)
+            // 단은 .bottom 정렬로 바닥을 맞추고 등수별 filler로 계단을 만든다.
+            // 개인 시상대와 달리 빈 자리는 아예 그리지 않는다 — 그 달 점수를 낸 길드가
+            // 3개 미만이면 시상대도 2단·1단으로 내려오는데, 빈 단을 남기면 배경색이 거의
+            // 안 보여 "화면이 잘렸다"로 읽힌다.
+            HStack(alignment: .bottom, spacing: 4) {
+                Spacer(minLength: 0)
+                ForEach(Self.podiumOrder(prev.entries)) { entry in
+                    guildPodiumBlock(entry, isMine: prev.myGuildRank == entry.rank)
                 }
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
         }
     }
 
-    private func guildPodiumBlock(_ entry: RankingAPI.GuildPreviousMonthEntry?,
-                                  rank: Int, isMine: Bool) -> some View {
-        let heights: [Int: CGFloat] = [1: 74, 2: 58, 3: 48]
-        let medals: [Int: String] = [1: "🥇", 2: "🥈", 3: "🥉"]
+    /// 시상대 배치 순서 — 1위가 가운데 오도록 2-1-3. 동결되지 않은 등수는 자리째 뺀다.
+    static func podiumOrder(_ entries: [RankingAPI.GuildPreviousMonthEntry])
+        -> [RankingAPI.GuildPreviousMonthEntry] {
+        [2, 1, 3].compactMap { rank in entries.first { $0.rank == rank } }
+    }
+
+    /// 등수별 계단 높이 — 콘텐츠 아래에 채우는 여분(1위가 가장 높다).
+    /// Spacer는 greedy라 조상 maxHeight를 만나면 늘어나므로 고정 filler를 쓴다.
+    private static func podiumExtraHeight(_ rank: Int) -> CGFloat {
+        switch rank { case 1: return 26; case 2: return 13; default: return 0 }
+    }
+
+    /// 시상대 한 단. 개인 시상대와 같은 메탈릭 단(`PodiumPedestal`) + 금/은/동을 써서
+    /// 두 보드의 시각 언어를 맞춘다 (기존 회색 사각형은 등수 위계가 드러나지 않았다).
+    private func guildPodiumBlock(_ entry: RankingAPI.GuildPreviousMonthEntry,
+                                  isMine: Bool) -> some View {
+        let rank = entry.rank
         return VStack(spacing: 2) {
-            if let entry {
-                podiumLeaderAvatar(entry)
-                Text(medals[rank] ?? "").font(.system(size: 12))
-            }
-            VStack(spacing: 1) {
-                Text(entry?.name ?? " ")
-                    .font(.system(size: 10, weight: .semibold))
-                    .lineLimit(1)
-                if let entry {
-                    Text("\(entry.score) VP")
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundStyle(.purple)
-                    Text("\(entry.memberCount)명")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.secondary)
+            podiumLeaderAvatar(entry)
+            VStack(spacing: 3) {
+                HStack(spacing: 3) {
+                    Text(podiumMedal(rank)).font(.system(size: 15))
+                    Text("\(rank)")
+                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .foregroundStyle(podiumColor(rank))
                 }
+                Text(entry.name)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                // 단 배경이 금/은/동이라 리스트의 보라 VP를 그대로 쓰면 1위 금색 위에서
+                // 대비가 무너진다 — 단 안에서만 기본색으로 둔다.
+                Text("\(entry.score) VP")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                HStack(spacing: 3) {
+                    Image(systemName: "person.2.fill").font(.system(size: 7))
+                    Text("\(entry.memberCount)명").font(.system(size: 9))
+                }
+                .foregroundStyle(.secondary)
+                Color.clear.frame(height: Self.podiumExtraHeight(rank))
             }
+            .padding(.top, 8)
+            .padding(.bottom, 6)
+            .padding(.horizontal, 4)
             .frame(maxWidth: .infinity)
-            .frame(height: heights[rank] ?? 48)
-            .background(
-                Rectangle().fill(
-                    isMine ? Color.accentColor.opacity(0.25)
-                           : Color.gray.opacity(rank == 1 ? 0.22 : 0.14))
-            )
-            .overlay(Rectangle().stroke(Color.gray.opacity(0.3), lineWidth: 0.5))
+            .background(PodiumPedestal(rank: rank, highlight: isMine ? Color.accentColor : nil))
         }
-        .frame(maxWidth: .infinity)
+        // 시상 인원이 2명이면 균등 분배 시 단이 과하게 넓어진다 — 폭을 묶고 가운데로 모은다.
+        .frame(maxWidth: 148)
+        .help(isMine ? "내 길드" : "")
     }
 
     /// 정산 시점 길드장 대표 펫 — 스냅샷 프로필에서 렌더 (없으면 발자국 아이콘).
@@ -188,13 +211,13 @@ struct GuildLeaderboardView: View {
                 .hueRotation(.degrees(selection.variant == PetOwnership.prestigeVariant
                     ? 0 : WalkingCat.hueDegrees(for: selection.variant)))
                 .scaleEffect(x: selection.kind.defaultFacingLeft ? -1 : 1, y: 1)
-                .frame(height: 26)
+                .frame(height: 28)
                 .help(entry.leaderNickname.map { "길드장 \($0)" } ?? "")
         } else {
             Image(systemName: "pawprint.fill")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
-                .frame(height: 26)
+                .frame(height: 28)
         }
     }
 

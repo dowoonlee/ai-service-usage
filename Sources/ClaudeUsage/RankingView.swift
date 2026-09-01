@@ -823,7 +823,8 @@ private struct PodiumAvatar: View {
 
 /// 윗변 두 모서리만 둥근 사각형. macOS 13 타깃이라 `UnevenRoundedRectangle`(14+) 대신
 /// 직접 Path로 그린다. 시상대 단의 "윗면만 둥근" 입체 실루엣을 만든다.
-private struct TopRoundedRect: Shape {
+/// 윗변만 둥근 사각형 — 시상대 단(pedestal) 모양. 개인/길드 시상대가 공유한다.
+struct TopRoundedRect: Shape {
     var radius: CGFloat
     func path(in rect: CGRect) -> Path {
         let r = min(radius, rect.width / 2, rect.height)
@@ -899,13 +900,21 @@ private struct PodiumStep: View {
         .padding(.bottom, 6)
         .padding(.horizontal, 4)
         .frame(maxWidth: .infinity)
-        .background(podiumPedestal)
+        .background(PodiumPedestal(rank: rank, highlight: nil))
     }
 
-    /// 입체 단 — 윗변만 둥근 메탈릭 그라데이션 + 윗면 하이라이트 띠 + 테두리.
-    private var podiumPedestal: some View {
+}
+
+/// 입체 단 — 윗변만 둥근 메탈릭 그라데이션 + 윗면 하이라이트 띠 + 테두리.
+/// 개인 시상대(`PodiumStep`)와 길드 시상대가 같은 재질을 쓰도록 공유한다.
+struct PodiumPedestal: View {
+    let rank: Int
+    /// 내 칸 강조 테두리. nil이면 등수 색 기본 테두리.
+    var highlight: Color?
+
+    var body: some View {
         let c = podiumColor(rank)
-        return TopRoundedRect(radius: 8)
+        TopRoundedRect(radius: 8)
             .fill(
                 LinearGradient(
                     colors: [c.opacity(0.55), c.opacity(0.32), c.opacity(0.15)],
@@ -924,20 +933,21 @@ private struct PodiumStep: View {
                     .frame(height: 10)
             }
             .overlay(
-                TopRoundedRect(radius: 8).stroke(c.opacity(0.55), lineWidth: 0.75)
+                TopRoundedRect(radius: 8)
+                    .stroke(highlight ?? c.opacity(0.55), lineWidth: highlight == nil ? 0.75 : 1.75)
             )
     }
 }
 
-// MARK: - 시상대 공용 헬퍼 (PodiumCard / PodiumStep / emptyPodiumSlot 공유)
+// MARK: - 시상대 공용 헬퍼 (PodiumCard / PodiumStep / PodiumPedestal / GuildLeaderboardView 공유)
 
 /// 등수별 메달 이모지. 1/2/3 외에는 트로피.
-private func podiumMedal(_ rank: Int) -> String {
+func podiumMedal(_ rank: Int) -> String {
     switch rank { case 1: return "🥇"; case 2: return "🥈"; case 3: return "🥉"; default: return "🏆" }
 }
 
 /// 등수별 강조 색 — 금/은/동.
-private func podiumColor(_ rank: Int) -> Color {
+func podiumColor(_ rank: Int) -> Color {
     switch rank {
     case 1: return .yellow
     case 2: return .gray
