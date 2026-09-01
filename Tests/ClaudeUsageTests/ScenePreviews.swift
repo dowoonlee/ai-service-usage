@@ -143,4 +143,57 @@ final class ScenePreviews: SandboxedTestCase {
             print("PREVIEW \(title) height=\(size.height)")
         }
     }
+
+    // MARK: - 길드 랭킹 시상대
+
+    /// 길드 명예의 전당 — 시상 인원이 3팀일 때와 2팀일 때.
+    ///
+    /// 2팀 케이스가 이 프리뷰의 존재 이유다. 그 달에 점수를 낸 길드가 3개 미만이면 시상대는
+    /// 2단으로 내려온다. 예전 렌더는 빈 3위 자리를 회색 사각형으로 남겼는데 다크 배경에서
+    /// 그 색이 거의 안 보여 "화면이 잘렸다"로 읽혔다. 빈 자리가 사라졌는지 여기서 확인한다.
+    func testRenderGuildPodium() throws {
+        let cases: [(String, [Int], String)] = [
+            ("길드시상대-3팀", [1, 2, 3], "시상 3팀 — 금·은·동 단이 계단으로 보이는지"),
+            ("길드시상대-2팀", [1, 2], "시상 2팀(꼴찌 제외된 달) — 빈 3위 자리가 남지 않는지"),
+        ]
+        for (title, ranks, note) in cases {
+            try renderTab(ScrollView { guildBoardView(podiumRanks: ranks).padding(12) },
+                          title: title, note: note)
+        }
+    }
+
+    /// 프리뷰용 길드 보드 — 시상대에 올릴 등수만 골라 넣는다.
+    private func guildBoardView(podiumRanks: [Int]) -> some View {
+        let names = [1: "성심당", 2: "AI혁신팀", 3: "@deprecated"]
+        let scores = [1: 6107, 2: 3837, 3: 2427]
+        let leaders: [Int: PetKind] = [1: .fox, 2: .wolf, 3: .bear]
+        let podium = podiumRanks.map { rank in
+            RankingAPI.GuildPreviousMonthEntry(
+                rank: rank, name: names[rank] ?? "-", score: scores[rank] ?? 0,
+                memberCount: 4 - rank, leaderNickname: "leader\(rank)",
+                leaderProfileJson: previewProfile(leaders[rank] ?? .fox))
+        }
+        let entries = (1...3).map { rank in
+            RankingAPI.GuildLeaderboardEntry(
+                rank: rank, guildId: "guild-\(rank)", name: names[rank] ?? "-",
+                score: scores[rank] ?? 0, memberCount: 4 - rank, logo: nil, topMembers: nil)
+        }
+        let board = RankingAPI.GuildLeaderboardResponse(
+            entries: entries, myGuild: nil, total: entries.count,
+            periodResetAt: Date().addingTimeInterval(18 * 86400),
+            previousMonth: RankingAPI.GuildPreviousMonth(
+                period: "2026-08", myGuildRank: 2, entries: podium))
+        // 내 길드는 2위 — 단 테두리 강조가 1위 금색을 이기지 않는지 같이 본다.
+        return GuildLeaderboardView(board: board, highlightGuildId: "guild-2")
+    }
+
+    /// 시상대 아바타용 프로필 스냅샷 — 길드장 대표 펫만 바꾼다.
+    private func previewProfile(_ kind: PetKind) -> ProfileState {
+        var card = Settings.shared.trainerCard
+        card.avatar = PetSelection(kind: kind, variant: 0)
+        return ProfileState(
+            card: card, trainerID: "PREVIEW", stats: TrainerStats.compute(from: Settings.shared),
+            clearedBadges: [], completedCollections: [], backup: nil,
+            equippedEffects: nil, integrityViolation: nil, guildName: nil)
+    }
 }
