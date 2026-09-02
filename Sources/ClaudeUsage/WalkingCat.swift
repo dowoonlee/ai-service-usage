@@ -172,7 +172,9 @@ struct WalkingCat: View {
                 mythicBase: isMythic,
                 mythicJumpY: jumpY,
                 mythicRoll: roll,
-                mythicAuraStyle: Mythic.spec(for: kind)?.aura ?? .crimsonGold
+                mythicAuraStyle: Mythic.spec(for: kind)?.aura ?? .crimsonGold,
+                // 차트 펫은 항상 내 펫이라 내 길드기를 든다 (무소속이면 nil → 기본 깃발).
+                guildFlag: GuildLogo.myFlagImage
             )
         }
     }

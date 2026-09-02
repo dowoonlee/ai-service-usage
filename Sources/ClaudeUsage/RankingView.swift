@@ -729,7 +729,9 @@ private struct PodiumAvatar: View {
     }
 
     var body: some View {
-        PodiumPetAvatar(kind: avatarKind, variant: variant, rank: rank, effects: effects)
+        // 남의 칸은 그 사람 길드를 알 수 없다(제출 스냅샷에 로고가 없음) → nil로 두고 기본 깃발.
+        PodiumPetAvatar(kind: avatarKind, variant: variant, rank: rank, effects: effects,
+                        guildFlag: isMine ? GuildLogo.myFlagImage : nil)
     }
 }
 
@@ -748,6 +750,8 @@ struct PodiumPetAvatar: View {
     var effects: Set<EffectKind> = []
     /// 빈 자리에 그릴 SF Symbol — 개인 시상대는 점선 인물, 길드는 발자국.
     var placeholderSymbol: String = "person.crop.circle.dashed"
+    /// 깃발 이펙트용 길드 로고 — 이 펫의 길드를 아는 칸(= 내 칸)만 채운다.
+    var guildFlag: NSImage? = nil
 
     private var size: CGFloat { rank == 1 ? 46 : 34 }
 
@@ -832,7 +836,8 @@ struct PodiumPetAvatar: View {
                 footY: size * 0.92,
                 petHeight: size * 0.62,
                 facingRight: facingRight,
-                isMoving: true
+                isMoving: true,
+                guildFlag: guildFlag
             )
             .frame(width: size, height: size)
         }

@@ -106,6 +106,14 @@ enum PreviewDemoState {
         s.ownedAccessories = Set(CardAccessory.allCases.map(\.rawValue))
         s.ownedTitles = Set(CardTitle.allCases.map(\.rawValue))
         s.ownedThemes = Set(PetTheme.allCases.map(\.rawValue))
+        // 길드 소속 + 깃발 장착 — 깃발 이펙트는 길드 로고를 물려 그리므로 둘이 같이 있어야
+        // 카드/레포트 프리뷰에서 실제 모습이 나온다(무소속이면 기본 깃발로만 보인다).
+        s.guildID = "preview-guild"
+        s.guildName = "데모길드"
+        s.guildLogo = GuildLogo.encode(sample: 2)
+        let avatar = s.trainerCard.avatar.kind
+        s.petEffects[avatar] = (s.petEffects[avatar] ?? []).union([.flag])
+        s.equippedEffects[avatar] = (s.equippedEffects[avatar] ?? []).union([.flag])
     }
 
     // MARK: - 파생 값
@@ -131,14 +139,16 @@ enum PreviewDemoState {
     /// 창을 띄우지 않고 뷰에 바로 주입할 수 있게 값만 돌려준다.
     static func guildInfo() -> RankingAPI.GuildInfoResponse {
         func member(_ nick: String, kind: PetKind, variant: Int = 0, vp: Int,
-                    top: Bool, me: Bool = false, slot: Int? = nil) -> RankingAPI.GuildMember {
+                    top: Bool, me: Bool = false, slot: Int? = nil,
+                    effects: [EffectKind] = []) -> RankingAPI.GuildMember {
             var card = TrainerCard.default
             card.avatar = PetSelection(kind: kind, variant: variant)
             let profile = ProfileState(
                 card: card, trainerID: "DEMO", stats: trainerStats,
                 clearedBadges: Array(Settings.shared.clearedBadges),
                 completedCollections: Array(Settings.shared.completedCollections),
-                backup: nil, equippedEffects: [], integrityViolation: false,
+                backup: nil, equippedEffects: effects.map(\.rawValue),
+                integrityViolation: false,
                 guildName: "데드락클럽")
             return RankingAPI.GuildMember(
                 nickname: nick, monthlyVP: vp, isTopContributor: top, officeSlot: slot,
@@ -146,8 +156,10 @@ enum PreviewDemoState {
                 githubLogin: nil, profileJson: profile, deviceId: nil)
         }
         let members = [
-            member("dowoon", kind: .fox, variant: 1, vp: 3120, top: true, me: true, slot: 0),
-            member("kimcoder", kind: .warrior, vp: 2400, top: true, slot: 1),
+            // 깃발 장착 멤버 — 사무실은 그 길드의 로고를 알고 있으므로 남의 펫에도 길드기가 걸린다.
+            member("dowoon", kind: .fox, variant: 1, vp: 3120, top: true, me: true, slot: 0,
+                   effects: [.flag]),
+            member("kimcoder", kind: .warrior, vp: 2400, top: true, slot: 1, effects: [.flag]),
             member("vibewolf", kind: .wolf, variant: 4, vp: 1800, top: true, slot: 2),
             member("nightowl", kind: .whale, vp: 700, top: true, slot: 3),
             member("lurker42", kind: .ninjaFrog, vp: 400, top: true),

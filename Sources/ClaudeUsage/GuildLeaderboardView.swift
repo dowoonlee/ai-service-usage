@@ -160,7 +160,7 @@ struct GuildLeaderboardView: View {
                                   isMine: Bool) -> some View {
         let rank = entry.rank
         return VStack(spacing: 2) {
-            podiumLeaderAvatar(entry)
+            podiumLeaderAvatar(entry, isMine: isMine)
             VStack(spacing: 5) {
                 HStack(spacing: 4) {
                     Text(podiumMedal(rank)).font(.system(size: 18))
@@ -197,13 +197,17 @@ struct GuildLeaderboardView: View {
     /// 정산 시점 길드장 대표 펫 — 개인 시상대와 같은 공용 렌더(`PodiumPetAvatar`)를 쓴다.
     /// 단 위를 배회하고 1위는 왕관·금색 glow가 붙으며, 스냅샷에 남은 장착 이펙트도 그대로 입는다.
     /// 프로필이 없는 옛 스냅샷은 발자국으로 대체.
-    private func podiumLeaderAvatar(_ entry: RankingAPI.GuildPreviousMonthEntry) -> some View {
+    private func podiumLeaderAvatar(_ entry: RankingAPI.GuildPreviousMonthEntry,
+                                    isMine: Bool) -> some View {
         let avatar = entry.leaderProfileJson?.card.avatar
         let effects = Set((entry.leaderProfileJson?.equippedEffects ?? [])
             .compactMap { EffectKind(rawValue: $0) })
+        // 시상대 응답에는 길드 로고가 없다. 내 길드 단만 로컬 캐시로 깃발을 채우고, 남의 길드는
+        // 기본 깃발로 둔다 — 남의 로고를 payload에 실으면 리더보드 egress가 다시 커진다(#238).
         return PodiumPetAvatar(kind: avatar?.kind, variant: avatar?.variant ?? 0,
                                rank: entry.rank, effects: effects,
-                               placeholderSymbol: "pawprint.fill")
+                               placeholderSymbol: "pawprint.fill",
+                               guildFlag: isMine ? GuildLogo.myFlagImage : nil)
             .help(entry.leaderNickname.map { "길드장 \($0)" } ?? "")
     }
 

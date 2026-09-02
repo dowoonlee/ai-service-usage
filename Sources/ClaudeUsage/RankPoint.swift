@@ -20,6 +20,7 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
     // 신규 — 궤적류 (이동 시 뒤로 흐름)
     case stardust    // 별가루
     case flame       // 불꽃
+    case flag        // 길드 깃발 — 길드 소속이면 그 길드 로고, 아니면 기본 도트 깃발
 
     var id: String { rawValue }
 
@@ -35,10 +36,11 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .petal:     return "꽃잎"
         case .stardust:  return "별가루"
         case .flame:     return "불꽃"
+        case .flag:      return "깃발"
         }
     }
 
-    /// 구매 가격 (RP). 카탈로그 총합 7600 (기존 5000 + 신규 파티클 3×400 + 궤적 2×700).
+    /// 구매 가격 (RP). 카탈로그 총합 8800 (기존 5000 + 파티클 3×400 + 궤적 2×700 + 깃발 1200).
     /// rainbow가 최상급(2000, 1등 한 달치). 펫 단위 귀속이라 "한 펫에 다 사는" 비용일 뿐. 배포 후 튜닝.
     var price: Int {
         switch self {
@@ -49,6 +51,8 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .rainbow:   return 2000
         case .heart, .star, .petal: return 400
         case .stardust, .flame:     return 700
+        // 길드 정체성을 두르는 아이템이라 궤적류 중 상위. rainbow(2000) 아래로 둔다.
+        case .flag:      return 1200
         }
     }
 
@@ -65,6 +69,7 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .petal:     return "leaf.fill"
         case .stardust:  return "wand.and.stars"
         case .flame:     return "flame.fill"
+        case .flag:      return "flag.fill"
         }
     }
 
@@ -72,7 +77,8 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
     var category: EffectCategory {
         switch self {
         case .glow, .aura:                          return .light
-        case .trail, .rainbow, .stardust, .flame:   return .trail
+        case .trail, .rainbow, .stardust, .flame,
+             .flag:                                 return .trail
         case .footsteps, .heart, .star, .petal:     return .particle
         }
     }

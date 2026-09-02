@@ -27,11 +27,25 @@ private struct WindowIsVisibleKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+/// 창이 **활성(key)** 인지. 보이기만 하면 되는 애니메이션과 달리, 비싼 연출은 사용자가 실제로
+/// 그 창을 보고 있을 때만 돌리려고 쓴다 (예: 깃발 이펙트의 Canvas 파동).
+private struct WindowIsActiveKey: EnvironmentKey {
+    /// `windowIsVisible`과 같은 이유로 기본값 true — 창에 붙지 않은 프리뷰/테스트에서도 돌아야 한다.
+    static let defaultValue = true
+}
+
 extension EnvironmentValues {
     /// 이 뷰가 속한 창이 화면에 보이는지. 닫힘·최소화·완전 가림이면 false.
     var windowIsVisible: Bool {
         get { self[WindowIsVisibleKey.self] }
         set { self[WindowIsVisibleKey.self] = newValue }
+    }
+
+    /// 이 뷰가 속한 창이 키 윈도우(사용자가 지금 조작 중인 창)인지. 다른 앱/다른 창으로 포커스가
+    /// 넘어가면 false — `windowIsVisible`보다 엄격하다(보이지만 뒤에 있는 창도 false).
+    var windowIsActive: Bool {
+        get { self[WindowIsActiveKey.self] }
+        set { self[WindowIsActiveKey.self] = newValue }
     }
 }
 
@@ -39,6 +53,8 @@ extension EnvironmentValues {
 @MainActor
 final class WindowVisibilityMonitor: ObservableObject {
     @Published private(set) var isVisible = true
+    /// 키 윈도우 여부. 앱이 백그라운드로 가면 창이 key를 잃으므로 앱 비활성도 여기서 같이 잡힌다.
+    @Published private(set) var isActive = true
 
     private weak var window: NSWindow?
     private var observers: [NSObjectProtocol] = []
@@ -56,6 +72,8 @@ final class WindowVisibilityMonitor: ObservableObject {
         NSWindow.didDeminiaturizeNotification,
         NSWindow.didBecomeKeyNotification,
         NSWindow.didExposeNotification,
+        // key를 잃는 것은 가시성과 무관하지만 `isActive` 갱신에 필요하다. recompute가 둘 다 계산한다.
+        NSWindow.didResignKeyNotification,
     ]
 
     func attach(to window: NSWindow?) {
@@ -67,7 +85,10 @@ final class WindowVisibilityMonitor: ObservableObject {
         let center = NotificationCenter.default
         for name in Self.hidingNotifications {
             observers.append(center.addObserver(forName: name, object: window, queue: .main) { _ in
-                Task { @MainActor [weak self] in self?.isVisible = false }
+                Task { @MainActor [weak self] in
+                    self?.isVisible = false
+                    self?.isActive = false
+                }
             })
         }
         for name in Self.showingNotifications {
@@ -84,13 +105,28 @@ final class WindowVisibilityMonitor: ObservableObject {
         window = nil
     }
 
+    /// 창 상태 → (보임, 활성). AppKit 없이 단언할 수 있게 순수 함수로 분리한다 — 헤드리스
+    /// 테스트에서는 창이 실제로 화면에 올라오지 않아 `NSWindow`로는 이 규칙을 검증할 수 없다.
+    ///
+    /// `active`가 `visible`을 포함하는 게 핵심이다. 닫히는 중(willClose)처럼 key 플래그가 아직
+    /// 남아 있는 순간에 "안 보이는데 활성"으로 읽히면, 깃발 이펙트처럼 활성일 때만 도는 연출이
+    /// 보이지도 않는 창에서 계속 돌게 된다.
+    static func state(isVisible: Bool, isMiniaturized: Bool,
+                      occluded: Bool, isKey: Bool) -> (visible: Bool, active: Bool) {
+        let visible = isVisible && !isMiniaturized && !occluded
+        return (visible, visible && isKey)
+    }
+
     private func recompute() {
         guard let window else { return }
         // `isVisible`은 orderOut/닫힘을, occlusionState는 다른 창에 완전히 가려진 경우를 잡는다.
         // 둘 다 봐야 하는 이유: 닫힌 창은 occlusionState가 갱신되지 않고 남아 있을 수 있다.
-        let occluded = !window.occlusionState.contains(.visible)
-        let next = window.isVisible && !window.isMiniaturized && !occluded
-        if next != isVisible { isVisible = next }
+        let next = Self.state(isVisible: window.isVisible,
+                              isMiniaturized: window.isMiniaturized,
+                              occluded: !window.occlusionState.contains(.visible),
+                              isKey: window.isKeyWindow)
+        if next.visible != isVisible { isVisible = next.visible }
+        if next.active != isActive { isActive = next.active }
     }
 
     deinit {
@@ -133,6 +169,7 @@ private struct PauseAnimationsWhenHidden: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.windowIsVisible, monitor.isVisible)
+            .environment(\.windowIsActive, monitor.isActive)
             // 0×0으로 고정 + PassthroughView. 둘 중 하나만으로도 막히지만, `.background`는 기본적으로
             // 콘텐츠 크기만큼 늘어나므로 크기와 hitTest 양쪽을 다 잠가둔다.
             .background(
@@ -144,7 +181,8 @@ private struct PauseAnimationsWhenHidden: ViewModifier {
 }
 
 extension View {
-    /// 창 루트에 한 번 붙인다. 하위 `TimelineView`들이 `\.windowIsVisible`로 프레임 루프를 멈춘다.
+    /// 창 루트에 한 번 붙인다. 하위 `TimelineView`들이 `\.windowIsVisible`(보임)과
+    /// `\.windowIsActive`(포커스)로 프레임 루프를 멈춘다.
     func pauseAnimationsWhenHidden() -> some View {
         modifier(PauseAnimationsWhenHidden())
     }

@@ -581,7 +581,8 @@ struct GuildOfficeView: View {
                     set: { if !$0 { popoverPetID = nil } }
                 ),
                 onTap: { popoverPetID = pet.id },
-                member: info.members.first { $0.nickname == pet.id }
+                member: info.members.first { $0.nickname == pet.id },
+                guildFlag: GuildLogo.flagImage(for: info.guild.logo, guildID: info.guild.id)
             )
             .zIndex(Double(pet.y))
         }
@@ -599,6 +600,9 @@ private struct OfficePetView: View {
     @Binding var showPopover: Bool
     let onTap: () -> Void
     let member: RankingAPI.GuildMember?
+    /// 이 사무실 길드의 깃발. 여기 있는 펫은 전원 그 길드 소속이라 깃발 이펙트를 장착한
+    /// 멤버에게 그대로 걸어줄 수 있다 (남의 길드 로고를 모르는 다른 화면과 다른 점).
+    let guildFlag: NSImage?
 
     var body: some View {
         // 펫 바닥선을 가구보다 4논리px 앞(아래)에 — 책상 "위"에 올라간 것처럼 보이는 겹침 방지.
@@ -625,7 +629,8 @@ private struct OfficePetView: View {
                     facingRight: pet.facingRight,
                     isMoving: pet.isWalking,
                     mythicBase: isMythicPet,
-                    mythicAuraStyle: Mythic.spec(for: pet.kind)?.aura ?? .crimsonGold
+                    mythicAuraStyle: Mythic.spec(for: pet.kind)?.aura ?? .crimsonGold,
+                    guildFlag: guildFlag
                 )
                 if !frames.isEmpty {
                     petSprite(frames[frameIdx], height: height)
@@ -696,6 +701,7 @@ private struct OfficePetView: View {
                 badges: profile.badgeRowsForRender(),
                 collections: profile.collectionRowsForRender(),
                 showWatermark: false,
+                guildFlag: guildFlag,
                 width: 460,
                 medals: nil,
                 animatedAvatar: true,

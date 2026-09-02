@@ -768,6 +768,8 @@ struct GuildView: View {
                 // 표시 캐시 동기화 — 서버가 SSOT.
                 settings.guildID = resp.guild.id
                 settings.guildName = resp.guild.name
+                // 깃발 이펙트가 내 펫에 두를 로고 — 길드 화면 밖(차트·트레이너 카드)에서도 필요하다.
+                settings.guildLogo = resp.guild.logo ?? ""
                 settings.isGuildLeader = resp.guild.isLeader
             } catch RankingAPI.RankingError.guildConflict(let code) where code == "not_in_guild" {
                 info = nil
@@ -775,6 +777,7 @@ struct GuildView: View {
                 if !settings.guildID.isEmpty {
                     settings.guildID = ""
                     settings.guildName = ""
+                    settings.guildLogo = ""
                     settings.isGuildLeader = false
                 }
                 // 미가입 → 둘러보기 리스트 + 내가 보낸 신청 로드 (가입신청 UI용).
@@ -898,6 +901,8 @@ struct GuildView: View {
             settings.guildPermits -= 1
             settings.guildID = resp.guildId
             settings.guildName = resp.name
+            // 로고는 서버 배정 → 다음 load()에서 채워진다. 옛 길드 로고가 남지 않게 먼저 비운다.
+            settings.guildLogo = ""
             settings.isGuildLeader = true
             guildNameDraft = ""
             DebugLog.log("Guild: 창설 [\(resp.name)] — 생성권 1 소모 (잔여 \(settings.guildPermits))")
@@ -924,6 +929,7 @@ struct GuildView: View {
             cooldownUntil = resp.cooldownUntil
             settings.guildID = ""
             settings.guildName = ""
+            settings.guildLogo = ""
             settings.isGuildLeader = false
             DebugLog.log("Guild: 탈퇴 — 재가입 쿨다운 \(resp.cooldownUntil?.description ?? "?")")
         }
@@ -936,6 +942,7 @@ struct GuildView: View {
                 hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
             settings.guildID = ""
             settings.guildName = ""
+            settings.guildLogo = ""
             settings.isGuildLeader = false
             DebugLog.log("Guild: 해체")
         }
@@ -1160,6 +1167,8 @@ private struct GuildMemberRow: View {
                     badges: profile.badgeRowsForRender(),
                     collections: profile.collectionRowsForRender(),
                     showWatermark: false,
+                    // 여기 보이는 멤버는 전원 내 길드 소속 — 내 길드기를 그대로 쓴다.
+                    guildFlag: GuildLogo.myFlagImage,
                     width: 460,
                     medals: nil,
                     animatedAvatar: true,

@@ -697,6 +697,12 @@ final class Settings: ObservableObject {
     @Published var guildName: String {
         didSet { AppEnv.defaults.set(guildName, forKey: Keys.guildName) }
     }
+    /// 내 길드 로고의 저장 문자열(`GuildLogo` 형식 — "s:<0..9>" 또는 "p:<base64 PNG>").
+    /// 서버가 SSOT고 이건 표시 캐시다 — 길드 정보를 못 받은 상태에서도 내 펫이 깃발 이펙트를
+    /// 두를 수 있게 들고 있는다 (`GuildView.load`가 동기화, 탈퇴/해체 시 비운다).
+    @Published var guildLogo: String {
+        didSet { AppEnv.defaults.set(guildLogo, forKey: Keys.guildLogo) }
+    }
     @Published var isGuildLeader: Bool {
         didSet { AppEnv.defaults.set(isGuildLeader, forKey: Keys.isGuildLeader) }
     }
@@ -917,6 +923,7 @@ final class Settings: ObservableObject {
         self.rankingRegistered         = (d.object(forKey: Keys.rankingRegistered) as? Bool) ?? false
         self.rankingPrivacyAccepted    = (d.object(forKey: Keys.rankingPrivacyAccepted) as? Bool) ?? false
         self.guildID                   = d.string(forKey: Keys.guildID) ?? ""
+        self.guildLogo                 = d.string(forKey: Keys.guildLogo) ?? ""
         self.guildName                 = d.string(forKey: Keys.guildName) ?? ""
         self.isGuildLeader             = (d.object(forKey: Keys.isGuildLeader) as? Bool) ?? false
         self.rankingScoreEarnedVP      = (d.object(forKey: Keys.rankingScoreEarnedVP) as? Int) ?? 0
@@ -1570,6 +1577,7 @@ final class Settings: ObservableObject {
         // guildPermits(생성권)는 로컬 구매 재화라 유지.
         guildID = ""
         guildName = ""
+        guildLogo = ""
         isGuildLeader = false
     }
 
@@ -1731,6 +1739,7 @@ final class Settings: ObservableObject {
         static let premiumTickets              = "settings.premiumTickets"
         static let guildPermits                = "settings.guildPermits"
         static let guildID                     = "settings.guildID"
+        static let guildLogo                   = "settings.guildLogo"
         static let guildName                   = "settings.guildName"
         static let isGuildLeader               = "settings.isGuildLeader"
         static let integrityChecksumVersion    = "settings.integrityChecksumVersion"
