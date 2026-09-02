@@ -705,12 +705,10 @@ private func formatVPLabel(_ n: Int) -> String {
 
 // MARK: - 시상대 캐릭터 (단 위에 서는 펫)
 
-/// 단 위에 올라간 펫 캐릭터만 렌더. 1위가 가장 크다. 빈 자리는 점선 placeholder.
-/// `@MainActor` 사유는 LeaderboardRowView 와 동일 (CI strict concurrency).
+/// 개인 시상대 아바타 — 남의 칸은 제출 스냅샷, 내 칸은 현재 트레이너 카드(레포트)를 실시간
+/// 반영해 공용 렌더(`PodiumPetAvatar`)에 넘긴다.
 @MainActor
 private struct PodiumAvatar: View {
-    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
-    @Environment(\.windowIsVisible) private var windowIsVisible
     let entry: RankingAPI.PreviousMonthEntry?
     let rank: Int
 
@@ -718,7 +716,6 @@ private struct PodiumAvatar: View {
     var isMine: Bool = false
     @ObservedObject private var settings = Settings.shared
 
-    private var size: CGFloat { rank == 1 ? 46 : 34 }
     private var avatarKind: PetKind? {
         isMine ? settings.trainerCard.avatar.kind : entry?.profileJson?.card.avatar.kind
     }
@@ -732,6 +729,29 @@ private struct PodiumAvatar: View {
     }
 
     var body: some View {
+        PodiumPetAvatar(kind: avatarKind, variant: variant, rank: rank, effects: effects)
+    }
+}
+
+/// 시상대 단 위에 서는 펫 — 개인/길드 공용. 컬럼 폭 안을 좌우로 배회하며 walk 사이클을 돌고,
+/// 1위는 왕관 + 금색 glow, 장착 RP 이펙트를 앞뒤로 겹친다. 빈 자리는 심볼 placeholder.
+/// `@MainActor` 사유는 LeaderboardRowView 와 동일 (CI strict concurrency).
+@MainActor
+struct PodiumPetAvatar: View {
+    /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
+    @Environment(\.windowIsVisible) private var windowIsVisible
+    /// 단 위에 세울 펫. nil이면 placeholder만 그린다.
+    let kind: PetKind?
+    var variant: Int = 0
+    let rank: Int
+    /// 펫에 입힐 RP 코스메틱 이펙트.
+    var effects: Set<EffectKind> = []
+    /// 빈 자리에 그릴 SF Symbol — 개인 시상대는 점선 인물, 길드는 발자국.
+    var placeholderSymbol: String = "person.crop.circle.dashed"
+
+    private var size: CGFloat { rank == 1 ? 46 : 34 }
+
+    var body: some View {
         VStack(spacing: 1) {
             // 1위만 왕관 — 한눈에 챔피언임을 알린다.
             if rank == 1 {
@@ -739,7 +759,7 @@ private struct PodiumAvatar: View {
                     .font(.system(size: 18))
                     .shadow(color: .yellow.opacity(0.7), radius: 4)
             }
-            if let kind = avatarKind {
+            if let kind {
                 // 단 위를 좌우로 돌아다니는 펫 — 이동 폭은 컬럼이 주는 가용 공간(상한 둠).
                 GeometryReader { geo in
                     TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
@@ -749,8 +769,8 @@ private struct PodiumAvatar: View {
                 }
                 .frame(height: size)
             } else {
-                // 참여자가 없는 자리 — 점선 실루엣으로 형태만 유지.
-                Image(systemName: "person.crop.circle.dashed")
+                // 참여자가 없는 자리 — 실루엣으로 형태만 유지.
+                Image(systemName: placeholderSymbol)
                     .font(.system(size: size * 0.72))
                     .foregroundStyle(.secondary.opacity(0.4))
                     .frame(width: size, height: size)
@@ -852,10 +872,6 @@ private struct PodiumStep: View {
     let entry: RankingAPI.PreviousMonthEntry?
     let rank: Int
 
-    /// 계단 형성용 — 콘텐츠 아래에 채우는 여분 높이. 1위가 가장 높다.
-    private var extraHeight: CGFloat {
-        switch rank { case 1: return 22; case 2: return 12; default: return 0 }
-    }
     private var rewardColor: Color {
         switch rank { case 1: return .yellow; case 2: return .gray; default: return .orange }
     }
@@ -892,9 +908,8 @@ private struct PodiumStep: View {
             } else {
                 Text("기록 없음").font(.system(size: 12)).foregroundStyle(.secondary)
             }
-            // 등수별 계단 — 콘텐츠 아래에 정확히 extraHeight만큼 바닥을 채운다.
-            // Spacer는 greedy라 조상 maxHeight를 만나면 블록이 끝까지 늘어나므로 고정 높이 filler 사용.
-            Color.clear.frame(height: extraHeight)
+            // 등수별 계단 — 콘텐츠 아래에 정확히 그만큼 바닥을 채운다.
+            Color.clear.frame(height: podiumExtraHeight(rank))
         }
         .padding(.top, 10)
         .padding(.bottom, 6)
@@ -944,6 +959,12 @@ struct PodiumPedestal: View {
 /// 등수별 메달 이모지. 1/2/3 외에는 트로피.
 func podiumMedal(_ rank: Int) -> String {
     switch rank { case 1: return "🥇"; case 2: return "🥈"; case 3: return "🥉"; default: return "🏆" }
+}
+
+/// 등수별 계단 높이 — 단 콘텐츠 아래에 채우는 여분(1위가 가장 높다). 개인/길드 시상대가 공유한다.
+/// Spacer는 greedy라 조상 maxHeight를 만나면 단이 끝까지 늘어나므로 고정 filler를 쓴다.
+func podiumExtraHeight(_ rank: Int) -> CGFloat {
+    switch rank { case 1: return 22; case 2: return 12; default: return 0 }
 }
 
 /// 등수별 강조 색 — 금/은/동.
