@@ -24,8 +24,9 @@ struct PetEffectOverlay: View {
     let isMoving: Bool         // footsteps/trail은 이동 중에만. glow/aura는 항상.
     /// Mythic 등급 펫의 기본 오라 — 구매 효과(EffectKind)와 별개로 항상 켜진다. WalkingCat이 주입.
     var mythicBase: Bool = false
-    /// 펫 점프(올라가는 큰 낙폭)와 동기화 — 오라를 위로 올리는 offset. WalkingCat이 sprite와 같은 값 주입.
-    var mythicJumpY: CGFloat = 0
+    /// 펫 점프(올라가는 큰 낙폭)와 동기화 — 펫 몸에 붙어 있는 이펙트(Mythic 오라·깃발)를 위로 같은 만큼
+    /// 올리는 offset. WalkingCat이 sprite와 같은 값을 주입한다. 발자국·트레일 같은 지면 이펙트는 안 따라간다.
+    var jumpY: CGFloat = 0
     /// 펫 구르기(내려가는 큰 낙폭)와 동기화 — 오라 회전 각도. sprite의 rollAngle과 동일.
     var mythicRoll: Double = 0
     /// mythic 펫별 오라 스타일(색). WalkingCat이 `Mythic.spec(for:)?.aura`를 주입.
@@ -38,6 +39,12 @@ struct PetEffectOverlay: View {
     /// (트레이너 카드는 셀 안 배치를 손으로 맞춰 0.78). 잘림 방지는 이 값이 아니라
     /// `flagGeometry`가 캔버스 크기를 보고 알아서 한다.
     var flagScale: CGFloat = 1.0
+    /// 깃발 캔버스를 위로 이만큼 늘린다(pt). 깃발은 펫 발끝 위로 `flagReach`만큼 뻗는데 `Canvas`는 자기
+    /// bounds 밖을 잘라내므로, 세로가 빠듯한 호출부(44pt 차트)는 이 값 없이는 `flagGeometry`의 세로
+    /// 클램프가 깃발을 캔버스 꼭대기에 못 박아 펫이 라인을 오르내려도 깃발이 안 따라온다(v0.17.36 회귀).
+    /// 캔버스 바깥 이웃(차트 위 텍스트)을 펫 머리만큼 덮어도 되는 호출부만 `flagReach(petHeight:scale:)`를
+    /// 넘긴다 — 상점 셀·트레이너 카드처럼 셀 안에 가둬야 하는 곳은 0으로 둔다.
+    var flagHeadroom: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -126,7 +133,7 @@ struct PetEffectOverlay: View {
             // 펫 구르기(roll)와 동기화 — 펫과 같은 중심 기준 회전.
             .rotationEffect(.degrees(mythicRoll))
             // 펫 점프(jump)와 동기화 — 위로 같은 만큼 offset.
-            .position(x: center.x, y: center.y - mythicJumpY)
+            .position(x: center.x, y: center.y - jumpY)
         }
     }
 
@@ -207,11 +214,18 @@ struct PetEffectOverlay: View {
                                 paused: !(windowIsVisible && windowIsActive))) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
             Canvas { gc, size in
+                // 캔버스는 `flagHeadroom`만큼 위로 늘어나 있다(아래 padding). 펫 좌표계(footY 등)로
+                // 그리려면 그만큼 내려서 그리고, bounds도 같은 좌표계로 옮긴다.
+                gc.translateBy(x: 0, y: flagHeadroom)
+                let bounds = CGRect(x: 0, y: -flagHeadroom, width: size.width, height: size.height)
+                // 펫이 점프 중이면 깃발도 같이 — 깃대 밑동이 발끝에 붙어 있어야 "들고 있는" 것으로 읽힌다.
+                let footY = self.footY - jumpY
+                let center = CGPoint(x: self.center.x, y: self.center.y - jumpY)
                 // 기하는 캔버스 크기를 보고 정한다 — Canvas는 자기 bounds 밖을 잘라내므로
                 // (다른 이펙트와 달리) 깃발은 "그리고 보니 밖이었다"가 곧 소실이다.
                 let g = Self.flagGeometry(center: center, footY: footY, petHeight: petHeight,
                                           facingRight: facingRight, scale: flagScale,
-                                          in: CGRect(origin: .zero, size: size))
+                                          in: bounds)
                 // 깃대 — 도트 톤에 맞춰 단색 막대 + 꼭지 구슬.
                 gc.fill(Path(CGRect(x: g.poleX - g.poleW / 2, y: g.poleTop,
                                     width: g.poleW, height: max(0, footY - g.poleTop))),
@@ -261,6 +275,8 @@ struct PetEffectOverlay: View {
                                with: .color(shade))
                 }
             }
+            // 음수 padding = 제안받은 크기보다 위로 headroom만큼 큰 캔버스. 레이아웃상 차지하는 크기는 그대로.
+            .padding(.top, -flagHeadroom)
         }
     }
 
@@ -297,6 +313,12 @@ struct PetEffectOverlay: View {
     /// 가로를 클램프로 밀어 넣으면 깃대가 펫 몸통 반대편까지 건너가 천이 펫을 덮고, 세로를 축소로
     /// 맞추면 좁은 차트에서 천이 몇 pt로 뭉개져 로고가 안 읽힌다. 천 크기는 최대한 지키고
     /// 깃대 길이만 양보하는 쪽이 "펫이 깃발을 들고 있다"로 계속 읽힌다.
+    ///
+    /// 단, 깃대 단축에는 **하한**이 있다(`flagClothClearance`). 처음엔 캔버스 꼭대기에 닿을 때까지
+    /// 무제한으로 줄였는데, 44pt 차트에서는 그게 "깃대 없이 천이 발밑에 걸린" 그림이 됐고 — 더 나쁘게는 —
+    /// 펫이 라인을 오르내려도 깃발은 캔버스 꼭대기에 못 박힌 채 안 따라왔다(v0.17.36). 깃발이 펫에 붙어
+    /// 있는 게 캔버스 안에 있는 것보다 우선이라, 하한 아래로는 줄이지 않고 위가 잘리게 둔다. 차트처럼
+    /// 펫이 움직이는 호출부는 `flagHeadroom`으로 캔버스를 위로 늘려 그 잘림까지 없앤다.
     static func flagGeometry(center: CGPoint, footY: CGFloat, petHeight: CGFloat,
                              facingRight: Bool, scale: CGFloat,
                              in bounds: CGRect) -> FlagGeometry {
@@ -343,9 +365,12 @@ struct PetEffectOverlay: View {
 
         if bounded {
             // 세로 — 위로 넘치면 깃대를 짧게 해서 캔버스 안으로 끌어내린다(천 크기는 유지).
+            // 단 천 아랫단(파동 포함)이 발끝 위 clearance에 닿는 길이가 하한 — 거기까지 줄여도 모자라면
+            // 그대로 둔다(위가 잘리더라도 펫에 붙어 있는 쪽이 낫다).
             let minTop = bounds.minY + poleW
+            let shortest = footY - (poleW + clothH + sway + petHeight * s * flagClothClearance)
             let maxTop = bounds.maxY - (poleW + clothH + sway)
-            poleTop = min(max(poleTop, minTop), max(minTop, maxTop))
+            poleTop = min(max(poleTop, min(minTop, shortest)), max(minTop, maxTop))
             // 가로 — 위에서 폭을 맞췄지만 반올림·꼭지 구슬까지 확실히 안쪽에 둔다.
             let lo = bounds.minX + poleW + (onLeft ? span : 0)
             let hi = bounds.maxX - poleW - (onLeft ? 0 : span)
@@ -367,6 +392,18 @@ struct PetEffectOverlay: View {
     /// 폭이 모자랄 때 깃발을 줄일 수 있는 하한. 이보다 더 줄이면 로고가 도트 몇 개로 뭉개져
     /// 안 그리느니만 못하다 — 그 아래는 차라리 조금 잘리는 쪽을 택한다.
     static let flagMinFitScale: CGFloat = 0.45
+
+    /// 깃대를 짧게 할 때 천 아랫단(파동 포함)이 펫 발끝 위로 유지해야 하는 최소 높이(펫 키 배율).
+    /// 0.35 = 배 높이쯤. 이 아래로 내려오면 천이 몸통·발밑에 걸려 "든 깃발"이 아니라 "끌고 다니는 천"이 된다.
+    static let flagClothClearance: CGFloat = 0.35
+
+    /// 자연 기하에서 깃발이 펫 발끝 위로 뻗는 높이(깃대 1.5×펫높이 + 꼭지 구슬 + 반올림 여유). 펫이
+    /// 움직이는 호출부가 `flagHeadroom`에 이 값을 넘기면 세로 클램프가 걸릴 일이 없어, 깃발이 어느
+    /// 높이에서든 같은 모양으로 펫에 붙어 다닌다.
+    static func flagReach(petHeight: CGFloat, scale: CGFloat = 1) -> CGFloat {
+        let h = petHeight * max(0.01, scale)
+        return h * 1.50 + max(2.0, h * 0.055) * 2
+    }
 
     private static let poleColor = Color(red: 0.42, green: 0.30, blue: 0.18)
     private static let finialColor = Color(red: 0.95, green: 0.78, blue: 0.25)

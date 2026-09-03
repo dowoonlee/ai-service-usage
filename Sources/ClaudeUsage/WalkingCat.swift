@@ -160,7 +160,8 @@ struct WalkingCat: View {
             let now = Date().timeIntervalSinceReferenceDate
             // sprite(descent:)와 동일 공식 — Mythic 오라를 펫 구르기(회전)/점프(offset)에 동기화.
             let roll: Double = (isMythic && isMoving && descent > 0) ? now * 360 * 2 : 0
-            let jumpY: CGFloat = (isMythic && isMoving && descent < 0) ? abs(sin(now * 4)) * 14 : 0
+            // 점프는 Mythic 오라뿐 아니라 깃발도 따라가야 하므로 등급과 무관하게 계산.
+            let jumpY: CGFloat = (isMoving && descent < 0) ? abs(sin(now * 4)) * 14 : 0
             PetEffectOverlay(
                 effects: effects,
                 placement: placement,
@@ -170,11 +171,14 @@ struct WalkingCat: View {
                 facingRight: ctrl.facingRight,
                 isMoving: isMoving,
                 mythicBase: isMythic,
-                mythicJumpY: jumpY,
+                jumpY: jumpY,
                 mythicRoll: roll,
                 mythicAuraStyle: Mythic.spec(for: kind)?.aura ?? .crimsonGold,
                 // 차트 펫은 항상 내 펫이라 내 길드기를 든다 (무소속이면 nil → 기본 깃발).
-                guildFlag: GuildLogo.myFlagImage
+                guildFlag: GuildLogo.myFlagImage,
+                // 44pt 차트 안에는 깃발이 설 세로 여유가 없다. 캔버스를 위로 늘려 깃발이 라인 위 어디서든
+                // 펫에 붙어 다니게 한다 — 펫 머리가 그렇듯 라인 꼭대기에서 차트 위 이웃을 조금 덮는 건 감수.
+                flagHeadroom: PetEffectOverlay.flagReach(petHeight: h)
             )
         }
     }

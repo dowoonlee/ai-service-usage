@@ -218,14 +218,17 @@ final class AnimationPreviews: SandboxedTestCase {
                 note: "상점 미리보기 셀(110×110, 점선). 천이 셀 밖으로 나가 잘리지 않는지.")
         }
 
-        // 사용량이 높을수록 펫이 라인 위쪽 = 깃발이 쓸 세로 여유가 없다. 셋 다 깃발이 보여야 한다.
+        // 사용량이 높을수록 펫이 라인 위쪽 = 캔버스 안에는 깃발이 설 세로 여유가 없다. 셋 다 깃발이
+        // 보여야 하고, 펫이 라인을 오르내릴 때 깃발이 **같이** 오르내려야 한다(깃대 밑동이 발끝에 붙어서).
+        // 6초 = 라인의 1/3쯤 걷는 시간이라 마루·골을 하나씩은 지난다 — 2.5초짜리로는 못 잡았던 회귀다.
         for peak in [95.0, 55.0, 15.0] {
             try PreviewRenderer.renderAnimated(
                 FlagChartStage(peak: peak),
                 size: CGSize(width: 320, height: 92),
-                frameCount: 30, frameInterval: 1.0 / 12.0,
+                frameCount: 72, frameInterval: 1.0 / 12.0,
                 section: "애니 · 이펙트", title: "깃발-차트-\(Int(peak))%",
-                note: "44pt sparkline. 깃발이 보이는지 + 차트 위아래 텍스트를 침범하지 않는지.")
+                note: "44pt sparkline. 깃발이 펫을 따라 오르내리는지 + 천이 발밑으로 안 내려오는지. "
+                    + "펫 머리가 그렇듯 라인 꼭대기에선 윗줄 텍스트를 조금 덮는 게 정상.")
         }
     }
 
@@ -305,7 +308,8 @@ private struct FlagShopCellStage: View {
 }
 
 /// 차트 재현 — `MainView.chartPet`이 하는 배선(chartOverlay → plotFrame → WalkingCat)을 같은
-/// 높이(44pt)로 옮겼다. 위아래 텍스트는 깃발이 차트 밖 이웃을 침범하는지 보기 위한 것.
+/// 높이(44pt)로 옮겼다. 위아래 텍스트는 깃발이 차트 밖 이웃을 얼마나 침범하는지 보기 위한 것 —
+/// 라인 꼭대기에서 펫 머리 + 깃대만큼 윗줄을 덮는 건 의도된 것이고, 그 이상이면 headroom이 잘못됐다.
 @MainActor
 private struct FlagChartStage: View {
     /// 차트 한 점. 튜플 배열 + `id: \.0`으로 두면 타입 체크가 폭발해 CI에서 컴파일이 죽는다.
