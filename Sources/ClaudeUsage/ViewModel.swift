@@ -77,6 +77,8 @@ final class ViewModel: ObservableObject {
     /// 마지막 sync 시각 — 연속 호출 방지용. 메인 사이클은 resetAt 임박 시 sleep을 60초 미만으로
     /// 줄이는데(`nextPollDelay`의 resetGuard), 그때 sync까지 매번 따라가면 호출이 튄다.
     private var lastSyncAt: Date?
+    /// 길드 로고 캐시 보강을 이미 시도했는지 — 실행당 1회로 묶는다 (`syncGuildLogoIfNeeded`).
+    private var didAttemptGuildLogoSync = false
     /// sync 최소 간격. 위 resetGuard로 사이클이 촘촘해져도 이 간격은 지킨다.
     static let syncMinIntervalSec: TimeInterval = 120
     /// 비활성(패널·메뉴바 모두 숨김) 상태의 claim 체크 시각 — 자체 스로틀용.
@@ -956,12 +958,30 @@ final class ViewModel: ObservableObject {
     ///
     /// 실패는 조용히 넘긴다 — 다음 cycle에 재시도되고, UI는 직전 값을 유지한다. 메인 backoff
     /// (Claude/Cursor/Codex 전용)에는 연동하지 않는다.
+    /// 길드 로고 캐시(`Settings.guildLogo`) 자가 치유 — 깃발 이펙트가 이 값만 보고 그린다.
+    ///
+    /// 캐시는 원래 길드 화면을 열어야 채워졌는데, 그 화면을 한 번도 안 연 길드원은 깃발에
+    /// 로고가 안 붙는다(v0.17.33 실제 증상). 서버 호출은 **캐시가 빈 길드원만, 실행당 1회**다 —
+    /// 성공하면 값이 영구 저장되므로 다시 오지 않고, 로고가 없는 길드만 다음 실행에서 한 번 더
+    /// 시도한다. Egress 관점에서 무시할 수 있는 양이고, 대신 길드 화면 방문에 의존하지 않는다.
+    private func syncGuildLogoIfNeeded(hmacKey: String) async {
+        let s = Settings.shared
+        guard !didAttemptGuildLogoSync, !s.guildID.isEmpty, s.guildLogo.isEmpty else { return }
+        didAttemptGuildLogoSync = true
+        guard let info = try? await RankingAPI.shared.fetchGuildInfo(
+            deviceId: s.rankingDeviceID, hmacKeyBase64: hmacKey) else { return }
+        guard let logo = info.guild.logo, !logo.isEmpty else { return }
+        s.guildLogo = logo
+        DebugLog.log("Guild: 로고 캐시 보강 (\(logo.prefix(2)))")
+    }
+
     private func runSync() async {
         let s = Settings.shared
         guard hasRankingPrerequisites, let hmacKey = Keychain.loadRankingHmacKey() else {
             if boardUnreadCount != 0 { boardUnreadCount = 0 }
             return
         }
+        await syncGuildLogoIfNeeded(hmacKey: hmacKey)
         if let last = lastSyncAt, Date().timeIntervalSince(last) < Self.syncMinIntervalSec { return }
 
         // 첫 호출 — boardLastSeenAt 시드. 과거 글이 전부 미확인으로 잡히지 않게 한다.

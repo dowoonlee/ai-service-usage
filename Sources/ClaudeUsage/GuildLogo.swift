@@ -78,12 +78,15 @@ enum GuildLogo {
         return img
     }
 
-    /// 깃발 이펙트용 로고. `image(for:guildID:)`와 달리 **길드를 모르면 nil**을 준다 —
-    /// 그쪽은 값이 없으면 id 해시로 샘플을 지어내는데, 깃발에서는 그게 "남의 펫에 엉뚱한 길드기를
-    /// 다는" 오정보가 된다. nil이면 `PetEffectOverlay`가 기본 깃발을 그린다.
+    /// 깃발 이펙트용 로고. `image(for:guildID:)`와 달리 **모르면 nil**을 준다.
+    ///
+    /// 그쪽은 값이 없으면 id 해시로 샘플을 지어낸다 — 리스트의 20pt 배너에서는 "뭐라도 그린다"가
+    /// 맞지만, 깃발에서는 내 길드기 자리에 남의 로고가 걸리는 오정보가 된다. 실제로 v0.17.33이
+    /// 그렇게 나갔다: 로고 캐시가 비어 있는 사용자(길드 탭을 연 적 없는 경우)의 펫이 자기 길드
+    /// 로고 대신 해시로 뽑힌 샘플을 들고 다녔다. 모를 때는 기본 깃발이 맞다.
     @MainActor
     static func flagImage(for raw: String?, guildID: String) -> NSImage? {
-        guard !guildID.isEmpty else { return nil }
+        guard !guildID.isEmpty, let raw, !raw.isEmpty else { return nil }
         return image(for: raw, guildID: guildID)
     }
 
@@ -256,16 +259,31 @@ enum GuildLogo {
         return image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
     }
 
+    /// BGRA 픽셀 배열 → NSImage.
+    ///
+    /// 비트맵 메모리는 **CoreGraphics가 소유**하게 하고(`data: nil`) 거기에 픽셀을 복사해 넣는다.
+    /// 배열 버퍼를 `withUnsafeMutableBytes`로 넘겨 컨텍스트를 만들면 포인터가 클로저 밖으로
+    /// 탈출해, 이후 `makeImage()`가 수명이 끝났을 수도 있는 메모리를 읽는다(UB). 지금까지는
+    /// 우연히 동작했지만 최적화·인라이닝이 바뀌면 조용히 빈 이미지가 나올 수 있는 자리다.
+    ///
+    /// 행 복사에 `ctx.bytesPerRow`를 쓰는 건 CG가 정렬을 위해 행을 패딩할 수 있기 때문이다 —
+    /// `width * 4`로 가정하면 패딩된 컨텍스트에서 이미지가 비스듬히 밀린다.
     private static func image(fromBGRA px: [UInt32], width: Int, height: Int) -> NSImage? {
-        var buf = px
         let cs = CGColorSpaceCreateDeviceRGB()
         let info = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        guard let ctx = buf.withUnsafeMutableBytes({ raw -> CGContext? in
-            CGContext(data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8,
-                      bytesPerRow: width * 4, space: cs, bitmapInfo: info)
-        }), let cg = ctx.makeImage() else { return nil }
-        let img = NSImage(cgImage: cg, size: NSSize(width: width, height: height))
-        return img
+        guard width > 0, height > 0, px.count >= width * height,
+              let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                  bytesPerRow: width * 4, space: cs, bitmapInfo: info),
+              let dst = ctx.data else { return nil }
+        let rowBytes = width * 4
+        px.withUnsafeBytes { src in
+            guard let base = src.baseAddress else { return }
+            for y in 0..<height {
+                (dst + y * ctx.bytesPerRow).copyMemory(from: base + y * rowBytes, byteCount: rowBytes)
+            }
+        }
+        guard let cg = ctx.makeImage() else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: width, height: height))
     }
 
     private static func darken(_ c: UInt32) -> UInt32 {
