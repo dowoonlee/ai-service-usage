@@ -483,6 +483,11 @@ struct RankingView: View {
                 // 길드 랭킹은 실패해도 개인 보드를 가리지 않게 조용히 무시.
                 if let board = try? await RankingAPI.shared.fetchGuildLeaderboard(deviceId: deviceId) {
                     guildBoard = board
+                    // 깃발 이펙트가 쓰는 로고 캐시 보강 — 길드 탭을 안 거쳐도 여기서 채워진다.
+                    if let mine = board.myGuild, let logo = mine.logo, !logo.isEmpty {
+                        settings.guildID = mine.guildId
+                        settings.guildLogo = logo
+                    }
                 }
             }
         }
@@ -561,6 +566,8 @@ private struct LeaderboardRowView: View {
                 badges: profile.badgeRowsForRender(),
                 collections: profile.collectionRowsForRender(),
                 showWatermark: false,
+                // 내 행만 길드기를 채운다 — 남의 행은 그 사람 길드 로고를 알 수 없다(기본 깃발).
+                guildFlag: isMe ? GuildLogo.myFlagImage : nil,
                 width: 460,
                 medals: entry.medals,
                 animatedAvatar: true,
