@@ -308,35 +308,58 @@ private struct FlagShopCellStage: View {
 /// 높이(44pt)로 옮겼다. 위아래 텍스트는 깃발이 차트 밖 이웃을 침범하는지 보기 위한 것.
 @MainActor
 private struct FlagChartStage: View {
-    let peak: Double
+    /// 차트 한 점. 튜플 배열 + `id: \.0`으로 두면 타입 체크가 폭발해 CI에서 컴파일이 죽는다.
+    private struct Sample: Identifiable {
+        let id: Int
+        let date: Date
+        let value: Double
+    }
 
-    private var data: [(Date, Double)] {
-        let now = Date()
-        return (0..<12).map { i in
-            (now.addingTimeInterval(Double(i - 12) * 600), peak * (0.75 + 0.25 * sin(Double(i))))
+    let peak: Double
+    private let samples: [Sample]
+    private let points: [(Date, Double)]
+
+    init(peak: Double) {
+        self.peak = peak
+        // 기준 시각을 고정한다 — 접근할 때마다 `Date()`를 새로 잡으면 차트와 펫이 서로 다른
+        // 점 배열을 보게 되고, 그러면 펫이 라인을 벗어난다(WalkingCat 주석 참조).
+        let base = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        var rows: [Sample] = []
+        for i in 0..<12 {
+            let date: Date = base.addingTimeInterval(Double(i - 12) * 600)
+            let wave: Double = 0.75 + 0.25 * sin(Double(i))
+            rows.append(Sample(id: i, date: date, value: peak * wave))
         }
+        self.samples = rows
+        self.points = rows.map { ($0.date, $0.value) }
+    }
+
+    private var chart: some View {
+        Chart(samples) { s in
+            AreaMark(x: .value("t", s.date), y: .value("v", s.value))
+                .foregroundStyle(.blue.opacity(0.2))
+            LineMark(x: .value("t", s.date), y: .value("v", s.value))
+                .foregroundStyle(.blue)
+        }
+        .chartYScale(domain: 0...100)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                WalkingCat(points: points, proxy: proxy, plotFrame: geo[proxy.plotAreaFrame],
+                           kind: .fox, effects: [.flag])
+            }
+        }
+        .frame(height: 44)
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text).font(.system(size: 10)).foregroundStyle(.secondary)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("윗줄 — 침범 확인용").font(.system(size: 10)).foregroundStyle(.secondary)
-            Chart {
-                ForEach(data, id: \.0) { item in
-                    AreaMark(x: .value("t", item.0), y: .value("v", item.1))
-                        .foregroundStyle(.blue.opacity(0.2))
-                    LineMark(x: .value("t", item.0), y: .value("v", item.1))
-                        .foregroundStyle(.blue)
-                }
-            }
-            .chartYScale(domain: 0...100)
-            .chartOverlay { proxy in
-                GeometryReader { geo in
-                    WalkingCat(points: data, proxy: proxy, plotFrame: geo[proxy.plotAreaFrame],
-                               kind: .fox, effects: [.flag])
-                }
-            }
-            .frame(height: 44)
-            Text("아랫줄 — 침범 확인용").font(.system(size: 10)).foregroundStyle(.secondary)
+            label("윗줄 — 침범 확인용")
+            chart
+            label("아랫줄 — 침범 확인용")
         }
         .padding(8)
     }
