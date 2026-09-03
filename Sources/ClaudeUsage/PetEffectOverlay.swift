@@ -34,9 +34,9 @@ struct PetEffectOverlay: View {
     /// 넘긴다 — 모르면 nil로 두고 기본 깃발을 그린다. 남의 펫에 엉뚱한 길드기가 걸리는 쪽이
     /// 깃발이 안 걸리는 것보다 나쁘다. cf. `GuildLogo.flagImage(for:guildID:)`
     var guildFlag: NSImage? = nil
-    /// 깃발 크기 배율. 깃발은 이펙트 중 유일하게 펫 밖으로 크게 뻗어서, 폭이 고정된 좁은 셀
-    /// (트레이너 카드의 110pt 아바타 칸)에서는 천이 셀 경계에 잘려 로고가 반만 보인다.
-    /// 그런 호출부만 1 미만을 넘긴다. 차트·사무실처럼 여백이 있는 곳은 기본값 그대로.
+    /// 깃발 크기 배율 — 좁은 셀에서 일부러 더 작게 그리고 싶을 때만 1 미만을 넘긴다
+    /// (트레이너 카드는 셀 안 배치를 손으로 맞춰 0.78). 잘림 방지는 이 값이 아니라
+    /// `flagGeometry`가 캔버스 크기를 보고 알아서 한다.
     var flagScale: CGFloat = 1.0
 
     var body: some View {
@@ -203,59 +203,53 @@ struct PetEffectOverlay: View {
     /// 창을 열어둔 채 다른 앱을 쓰는 중)에서까지 돌릴 이유가 없다. 멈춰도 마지막 프레임은 남으므로
     /// 깃발이 사라지지는 않는다. 초당 프레임도 30 → 15로 낮췄다(계단 파동이라 차이가 안 보인다).
     private var flag: some View {
-        let facingLeftSide = facingRight            // 진행 방향 반대편(등 뒤)에 깃대를 세운다
-        let h = petHeight * flagScale               // 깃발 기하의 기준 크기
-        // 깃대는 몸통 밖으로 살짝만 뺀다 — 더 멀리 두면 좁은 셀에서 천이 잘린다.
-        let poleX = center.x + (facingLeftSide ? -1 : 1) * h * 0.38
-        let poleTop = footY - petHeight * 1.50 * flagScale
-        let clothW = h * 0.86
-        // 높이는 로고 원본 비율(66:44 = 3:2)에서 파생한다. 임의 높이를 주면 로고가 세로로
-        // 눌리고, 축소 배율이 축마다 달라져 사선 밴드가 격자 무늬로 앨리어싱된다.
-        let clothH = clothW * CGFloat(GuildLogo.pixelHeight) / CGFloat(GuildLogo.pixelWidth)
-        let block = max(2.0, h * 0.10)              // 픽셀 블록 = 계단 한 칸
-        let cols = max(1, Int((clothW / block).rounded(.up)))
-        let poleW = max(2.0, h * 0.055)
-
-        return TimelineView(.animation(minimumInterval: 1.0 / 15.0,
-                                       paused: !(windowIsVisible && windowIsActive))) { ctx in
+        TimelineView(.animation(minimumInterval: 1.0 / 15.0,
+                                paused: !(windowIsVisible && windowIsActive))) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
-            Canvas { gc, _ in
+            Canvas { gc, size in
+                // 기하는 캔버스 크기를 보고 정한다 — Canvas는 자기 bounds 밖을 잘라내므로
+                // (다른 이펙트와 달리) 깃발은 "그리고 보니 밖이었다"가 곧 소실이다.
+                let g = Self.flagGeometry(center: center, footY: footY, petHeight: petHeight,
+                                          facingRight: facingRight, scale: flagScale,
+                                          in: CGRect(origin: .zero, size: size))
                 // 깃대 — 도트 톤에 맞춰 단색 막대 + 꼭지 구슬.
-                gc.fill(Path(CGRect(x: poleX - poleW / 2, y: poleTop,
-                                    width: poleW, height: max(0, footY - poleTop))),
+                gc.fill(Path(CGRect(x: g.poleX - g.poleW / 2, y: g.poleTop,
+                                    width: g.poleW, height: max(0, footY - g.poleTop))),
                         with: .color(Self.poleColor))
-                gc.fill(Path(ellipseIn: CGRect(x: poleX - poleW, y: poleTop - poleW,
-                                               width: poleW * 2, height: poleW * 2)),
+                gc.fill(Path(ellipseIn: CGRect(x: g.poleX - g.poleW, y: g.poleTop - g.poleW,
+                                               width: g.poleW * 2, height: g.poleW * 2)),
                         with: .color(Self.finialColor))
 
                 let resolved = guildFlag.map { gc.resolve(Image(nsImage: $0).interpolation(.none)) }
-                let clothX = facingLeftSide ? poleX - clothW : poleX
+                let clothX = g.onLeft ? g.poleX - g.clothW : g.poleX
 
-                for c in 0..<cols {
+                for c in 0..<g.cols {
                     // 0 = 깃대(고정단) … 1 = 자유단. 제곱이라 끝쪽만 크게 흔들린다.
-                    let u = Double(c) / Double(max(1, cols - 1))
-                    let amp = block * CGFloat(0.15 + 1.35 * u * u)
+                    let u = Double(c) / Double(max(1, g.cols - 1))
+                    let amp = g.block * CGFloat(0.15 + 1.35 * u * u)
                     let phase = t * 6.0 - Double(c) * 0.55        // 깃대 → 끝으로 진행하는 파동
                     let stepped = (sin(phase) * 1.5).rounded() / 1.5
                     let yOff = amp * CGFloat(stepped)
-                    let x = (facingLeftSide ? poleX - CGFloat(c + 1) * block
-                                            : poleX + CGFloat(c) * block).rounded()
-                    let top = poleTop + poleW + yOff
+                    let x = (g.onLeft ? g.poleX - CGFloat(c + 1) * g.block
+                                      : g.poleX + CGFloat(c) * g.block).rounded()
+                    let top = g.clothTop + yOff
 
                     var slice = gc
                     // 컬럼 밖으로 새지 않게 세로로 길게 클립. +0.5는 블록 사이 미세 틈 메움(rainbow와 동일).
-                    slice.clip(to: Path(CGRect(x: x, y: poleTop - h,
-                                               width: block + 0.5, height: h * 3)))
+                    // 세로 여유는 천 높이 + 파동 진폭 — 작은 펫에서는 진폭이 천보다 커질 수 있다.
+                    let pad = g.clothH + g.sway
+                    slice.clip(to: Path(CGRect(x: x, y: g.clothTop - pad,
+                                               width: g.block + 0.5, height: g.clothH + pad * 2)))
                     if let resolved {
                         slice.draw(resolved, in: CGRect(x: clothX, y: top,
-                                                        width: clothW, height: clothH))
+                                                        width: g.clothW, height: g.clothH))
                     } else {
                         // 기본 깃발 — 남색 필드 + 아래 금색 밴드.
-                        slice.fill(Path(CGRect(x: x, y: top, width: block + 0.5,
-                                               height: clothH * 0.68)),
+                        slice.fill(Path(CGRect(x: x, y: top, width: g.block + 0.5,
+                                               height: g.clothH * 0.68)),
                                    with: .color(Self.plainFieldColor))
-                        slice.fill(Path(CGRect(x: x, y: top + clothH * 0.68, width: block + 0.5,
-                                               height: clothH * 0.32)),
+                        slice.fill(Path(CGRect(x: x, y: top + g.clothH * 0.68, width: g.block + 0.5,
+                                               height: g.clothH * 0.32)),
                                    with: .color(Self.plainBandColor))
                     }
                     // 접힘 음영 — 파동의 기울기(cos)로 어둡게/밝게. 폭은 정확히 block(겹치면 이음매가
@@ -263,12 +257,116 @@ struct PetEffectOverlay: View {
                     let slope = cos(phase)
                     let shade = slope < 0 ? Color.black.opacity(min(0.30, -slope * 0.30))
                                           : Color.white.opacity(min(0.12, slope * 0.12))
-                    slice.fill(Path(CGRect(x: x, y: top, width: block, height: clothH)),
+                    slice.fill(Path(CGRect(x: x, y: top, width: g.block, height: g.clothH)),
                                with: .color(shade))
                 }
             }
         }
     }
+
+    /// 깃발이 그려질 좌표 일체. `flagGeometry`가 캔버스 안에 들어가도록 맞춘 결과다.
+    struct FlagGeometry: Equatable {
+        var poleX: CGFloat
+        var poleTop: CGFloat
+        var poleW: CGFloat
+        /// 천이 깃대의 왼쪽에 걸리는지. 기본은 진행 방향 반대편(등 뒤)이지만 그쪽이 좁으면 뒤집힌다.
+        var onLeft: Bool
+        var clothTop: CGFloat      // 파동 offset 0일 때 천의 윗변
+        var clothW: CGFloat
+        var clothH: CGFloat
+        var block: CGFloat
+        var cols: Int
+        /// 파동이 천을 위아래로 밀 수 있는 최대 폭. 클립·bbox 계산이 공유한다.
+        var sway: CGFloat
+        /// 실제 픽셀이 닿는 최대 범위(깃대·꼭지·천·파동 진폭 포함). 캔버스 안에 들어가는지
+        /// 테스트가 이걸로 단언한다.
+        var drawnRect: CGRect
+    }
+
+    /// 캔버스가 좁으면 줄이거나 반대편으로 넘겨서라도 깃발 전체가 보이게 하는 기하 계산.
+    ///
+    /// 왜 필요한가 — 깃발은 이펙트 중 유일하게 펫 밖으로 크게 뻗는다(발끝 기준 위로 1.5×펫높이,
+    /// 옆으로 1.24×펫높이). 그런데 그리는 곳은 `Canvas`라 **자기 bounds 밖은 잘려 나간다.** 광원·
+    /// 파티클처럼 펫 주변에 머무는 이펙트는 이 차이가 안 드러나지만, 깃발은 호출부가 좁으면
+    /// 조용히 반쪽이 되거나 통째로 사라졌다:
+    ///   - 차트(44pt) — 펫이 라인 위쪽(사용량 40% 이상)에 있으면 깃대가 통째로 캔버스 위로 나가
+    ///     아무것도 안 보였다.
+    ///   - 상점 미리보기 셀(110×110) — 천의 절반 이상이 셀 밖이라 로고가 반만 걸렸다.
+    ///
+    /// 규칙은 두 축이 다르다. **가로는 줄이고, 세로는 깃대를 짧게 한다.**
+    /// 가로를 클램프로 밀어 넣으면 깃대가 펫 몸통 반대편까지 건너가 천이 펫을 덮고, 세로를 축소로
+    /// 맞추면 좁은 차트에서 천이 몇 pt로 뭉개져 로고가 안 읽힌다. 천 크기는 최대한 지키고
+    /// 깃대 길이만 양보하는 쪽이 "펫이 깃발을 들고 있다"로 계속 읽힌다.
+    static func flagGeometry(center: CGPoint, footY: CGFloat, petHeight: CGFloat,
+                             facingRight: Bool, scale: CGFloat,
+                             in bounds: CGRect) -> FlagGeometry {
+        // 레이아웃 첫 패스 등으로 캔버스 크기를 못 믿을 때는 자연 크기 그대로 — 어차피 안 그려진다.
+        let bounded = bounds.width > 1 && bounds.height > 1
+        var s = max(0.01, scale)
+        var onLeft = facingRight                    // 진행 방향 반대편(등 뒤)에 깃대를 세운다
+        // 깃대는 몸통 밖으로 살짝만 뺀다 — 더 멀리 두면 좁은 셀에서 천이 잘린다.
+        func widthNeeded(at k: CGFloat) -> CGFloat {
+            let h = petHeight * k
+            return h * 0.38 + h * 0.86 + max(2.0, h * 0.10)   // 깃대 offset + 천 + 컬럼 반올림 여유
+        }
+
+        if bounded {
+            let roomLeft = center.x - bounds.minX
+            let roomRight = bounds.maxX - center.x
+            let preferred = onLeft ? roomLeft : roomRight
+            let other = onLeft ? roomRight : roomLeft
+            if preferred < widthNeeded(at: s) {
+                if other >= widthNeeded(at: s) {
+                    onLeft.toggle()                 // 반대편이 넉넉하면 통째로 넘긴다
+                } else {
+                    if other > preferred { onLeft.toggle() }
+                    let room = max(preferred, other)
+                    s *= max(flagMinFitScale, min(1, room / widthNeeded(at: s)))
+                }
+            }
+        }
+
+        let h = petHeight * s
+        let clothW = h * 0.86
+        // 높이는 로고 원본 비율(66:44 = 3:2)에서 파생한다. 임의 높이를 주면 로고가 세로로
+        // 눌리고, 축소 배율이 축마다 달라져 사선 밴드가 격자 무늬로 앨리어싱된다.
+        let clothH = clothW * CGFloat(GuildLogo.pixelHeight) / CGFloat(GuildLogo.pixelWidth)
+        let block = max(2.0, h * 0.10)              // 픽셀 블록 = 계단 한 칸
+        let cols = max(1, Int((clothW / block).rounded(.up)))
+        let poleW = max(2.0, h * 0.055)
+        // 파동 진폭 상한 — (sin×1.5).rounded()/1.5 는 ±4/3, 진폭 계수는 최대 1.5.
+        let sway = block * 1.5 * (4.0 / 3.0)
+        let span = CGFloat(cols) * block + 0.5      // 컬럼이 실제로 덮는 가로 폭
+
+        var poleX = center.x + (onLeft ? -1 : 1) * h * 0.38
+        var poleTop = footY - petHeight * 1.50 * s
+
+        if bounded {
+            // 세로 — 위로 넘치면 깃대를 짧게 해서 캔버스 안으로 끌어내린다(천 크기는 유지).
+            let minTop = bounds.minY + poleW
+            let maxTop = bounds.maxY - (poleW + clothH + sway)
+            poleTop = min(max(poleTop, minTop), max(minTop, maxTop))
+            // 가로 — 위에서 폭을 맞췄지만 반올림·꼭지 구슬까지 확실히 안쪽에 둔다.
+            let lo = bounds.minX + poleW + (onLeft ? span : 0)
+            let hi = bounds.maxX - poleW - (onLeft ? 0 : span)
+            if lo <= hi { poleX = min(max(poleX, lo), hi) }
+        }
+
+        let clothTop = poleTop + poleW
+        let left = onLeft ? min(poleX - span, poleX - poleW) : poleX - poleW
+        let right = onLeft ? poleX + poleW : max(poleX + span, poleX + poleW)
+        let top = poleTop - poleW
+        let bottom = max(footY, clothTop + clothH + sway)
+        return FlagGeometry(poleX: poleX, poleTop: poleTop, poleW: poleW, onLeft: onLeft,
+                            clothTop: clothTop, clothW: clothW, clothH: clothH,
+                            block: block, cols: cols, sway: sway,
+                            drawnRect: CGRect(x: left, y: top,
+                                              width: right - left, height: bottom - top))
+    }
+
+    /// 폭이 모자랄 때 깃발을 줄일 수 있는 하한. 이보다 더 줄이면 로고가 도트 몇 개로 뭉개져
+    /// 안 그리느니만 못하다 — 그 아래는 차라리 조금 잘리는 쪽을 택한다.
+    static let flagMinFitScale: CGFloat = 0.45
 
     private static let poleColor = Color(red: 0.42, green: 0.30, blue: 0.18)
     private static let finialColor = Color(red: 0.95, green: 0.78, blue: 0.25)

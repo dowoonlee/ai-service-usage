@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import Charts
 @testable import ClaudeUsage
 
 /// 움직이는 것들의 검수 — GIF로 굽는다.
@@ -199,6 +200,35 @@ final class AnimationPreviews: SandboxedTestCase {
         }
     }
 
+    /// 깃발 — **좁은 호출부** 재현. 위 무대(220×130)는 여유가 많아 잘림이 드러나지 않는다.
+    ///
+    /// 이 이펙트가 실제로 깨진 곳이 정확히 여기였다. 그리는 주체가 `Canvas`라 자기 bounds 밖은
+    /// 잘려 나가는데, 깃발만 펫 밖으로 크게 뻗어서(발끝 위로 1.5×펫높이) 44pt 차트에서는 펫이
+    /// 라인 위쪽에 있을 때 통째로 사라졌고 110pt 상점 셀에서는 천이 반토막 났다.
+    /// 검수 포인트는 하나 — **점선 안(=실제 셀)에서 깃발이 온전한가.**
+    func testRenderFlagEffectTightCanvas() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+
+        for facingRight in [true, false] {
+            try PreviewRenderer.renderAnimated(
+                FlagShopCellStage(facingRight: facingRight),
+                size: CGSize(width: 130, height: 130),
+                frameCount: 30, frameInterval: 1.0 / 15.0,
+                section: "애니 · 이펙트", title: "깃발-상점셀-\(facingRight ? "우향" : "좌향")",
+                note: "상점 미리보기 셀(110×110, 점선). 천이 셀 밖으로 나가 잘리지 않는지.")
+        }
+
+        // 사용량이 높을수록 펫이 라인 위쪽 = 깃발이 쓸 세로 여유가 없다. 셋 다 깃발이 보여야 한다.
+        for peak in [95.0, 55.0, 15.0] {
+            try PreviewRenderer.renderAnimated(
+                FlagChartStage(peak: peak),
+                size: CGSize(width: 320, height: 92),
+                frameCount: 30, frameInterval: 1.0 / 12.0,
+                section: "애니 · 이펙트", title: "깃발-차트-\(Int(peak))%",
+                note: "44pt sparkline. 깃발이 보이는지 + 차트 위아래 텍스트를 침범하지 않는지.")
+        }
+    }
+
     private func lcm(_ a: Int, _ b: Int) -> Int {
         guard a > 0, b > 0 else { return max(a, b, 1) }
         return a / gcd(a, b) * b
@@ -239,5 +269,98 @@ private struct FlagEffectPreviewStage: View {
                 }
             }
         }
+    }
+}
+
+
+/// 상점 미리보기 셀 재현 — `GachaView.PetPreviewView`의 좌표를 그대로 옮겼다(110×110 셀,
+/// center(55,55), footY 95, petHeight 70). 점선이 실제 셀 경계라 잘림이 눈에 보인다.
+@MainActor
+private struct FlagShopCellStage: View {
+    let facingRight: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let frames = PetSprite.frames(for: .fox, action: .walk)
+            ZStack {
+                PetEffectOverlay(effects: [.flag], placement: .backdrop,
+                                 center: CGPoint(x: 55, y: 55), footY: 95,
+                                 petHeight: 70, facingRight: facingRight, isMoving: true,
+                                 guildFlag: GuildLogo.myFlagImage)
+                if !frames.isEmpty,
+                   let img = PetSprite.image(for: .fox, action: .walk,
+                                             frameIndex: Int(t * 8) % frames.count) {
+                    Image(nsImage: img).interpolation(.none).resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 84)
+                        .scaleEffect(x: facingRight ? -1 : 1, y: 1)
+                        .position(x: 55, y: 55)
+                }
+            }
+            .frame(width: 110, height: 110)
+            .border(Color.secondary.opacity(0.6), width: 1)
+        }
+    }
+}
+
+/// 차트 재현 — `MainView.chartPet`이 하는 배선(chartOverlay → plotFrame → WalkingCat)을 같은
+/// 높이(44pt)로 옮겼다. 위아래 텍스트는 깃발이 차트 밖 이웃을 침범하는지 보기 위한 것.
+@MainActor
+private struct FlagChartStage: View {
+    /// 차트 한 점. 튜플 배열 + `id: \.0`으로 두면 타입 체크가 폭발해 CI에서 컴파일이 죽는다.
+    private struct Sample: Identifiable {
+        let id: Int
+        let date: Date
+        let value: Double
+    }
+
+    let peak: Double
+    private let samples: [Sample]
+    private let points: [(Date, Double)]
+
+    init(peak: Double) {
+        self.peak = peak
+        // 기준 시각을 고정한다 — 접근할 때마다 `Date()`를 새로 잡으면 차트와 펫이 서로 다른
+        // 점 배열을 보게 되고, 그러면 펫이 라인을 벗어난다(WalkingCat 주석 참조).
+        let base = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        var rows: [Sample] = []
+        for i in 0..<12 {
+            let date: Date = base.addingTimeInterval(Double(i - 12) * 600)
+            let wave: Double = 0.75 + 0.25 * sin(Double(i))
+            rows.append(Sample(id: i, date: date, value: peak * wave))
+        }
+        self.samples = rows
+        self.points = rows.map { ($0.date, $0.value) }
+    }
+
+    private var chart: some View {
+        Chart(samples) { s in
+            AreaMark(x: .value("t", s.date), y: .value("v", s.value))
+                .foregroundStyle(.blue.opacity(0.2))
+            LineMark(x: .value("t", s.date), y: .value("v", s.value))
+                .foregroundStyle(.blue)
+        }
+        .chartYScale(domain: 0...100)
+        .chartOverlay { proxy in
+            GeometryReader { geo in
+                WalkingCat(points: points, proxy: proxy, plotFrame: geo[proxy.plotAreaFrame],
+                           kind: .fox, effects: [.flag])
+            }
+        }
+        .frame(height: 44)
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text).font(.system(size: 10)).foregroundStyle(.secondary)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            label("윗줄 — 침범 확인용")
+            chart
+            label("아랫줄 — 침범 확인용")
+        }
+        .padding(8)
     }
 }
