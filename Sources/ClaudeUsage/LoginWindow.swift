@@ -7,44 +7,28 @@ import WebKit
 enum LoginNavigationDecision: Equatable {
     case allow
     case cancel
-    /// 로그인과 무관한 곳으로 사용자를 데려가려는 최상위 이동 — 시스템 브라우저로 넘긴다.
-    case openExternally
 }
 
 enum LoginNavigationPolicy {
-    /// 로그인 흐름에서 WebView 안에 머물러도 되는 호스트.
+    /// https는 **호스트를 가리지 않고 창 안에서** 처리한다. 프레임 종류도 보지 않는다.
     ///
-    /// ⚠️ 이 목록은 **최상위 프레임에만** 적용한다. 서브프레임(iframe)까지 여기에 걸면
-    /// 로그인 페이지가 싣는 서드파티 리소스가 조용히 죽는다 — 실제로 claude.ai 로그인 페이지의
-    /// hCaptcha(`newassets.hcaptcha.com`)가 목록에 없어서 캡차가 뜨지 않고, 그 iframe URL이
-    /// 엉뚱하게 사용자의 외부 브라우저로 열리고 있었다. 페이지가 서드파티를 하나 추가할 때마다
-    /// 조용히 깨지는 구조라, 목록을 늘리는 대신 프레임 단위로 규칙을 나눈다.
-    static let allowedHostSuffixes = [
-        "claude.ai",
-        "anthropic.com",
-        "google.com",
-        "gstatic.com",
-        "googleusercontent.com",
-        "apple.com",
-        "icloud.com",
-        "github.com",
-        "workos.com",
-        "auth0.com",
-    ]
-
-    static func isAllowedHost(_ host: String) -> Bool {
-        let h = host.lowercased()
-        return allowedHostSuffixes.contains { h == $0 || h.hasSuffix(".\($0)") }
-    }
-
-    /// - Parameter isMainFrame: 최상위 프레임 이동이면 true. iframe·팝업이면 false.
-    ///   팝업(`targetFrame == nil`)은 여기서 통과시키고 `createWebViewWith`가 다시 판정한다.
+    /// 예전에는 로그인에 쓰이는 호스트 허용목록을 두고 그 밖은 `NSWorkspace.open`으로 시스템
+    /// 브라우저에 넘겼는데, 그게 로그인을 깨는 원인이었다. OAuth는 state·nonce·쿠키가 **이 창의
+    /// 세션**에 묶여 있어서, 중간 한 단계라도 다른 브라우저로 넘어가면 그쪽에는 맞는 세션이 없다.
+    /// 실제 제보: Google 로그인 도중 기본 브라우저(웨일)가 열렸고 Google이 403으로 거부했다.
+    /// 브라우저 종류의 문제가 아니다 — 넘긴 순간 어느 브라우저에서든 깨진다.
+    ///
+    /// 허용목록을 늘려서는 못 고친다. 로그인 플로우는 회사 SSO IdP, 캡차, 본인확인 같은 임의
+    /// 호스트를 정상적으로 경유하고, 그 목록은 계정·조직마다 다르다. 목록을 한 줄씩 늘리는 방식은
+    /// 다음 사용자에서 또 조용히 깨진다.
+    ///
+    /// 대신 남은 통제는 **스킴**이다. 비-https(`mailto:`, `ftp:`, 커스텀 스킴 등)는 취소한다 —
+    /// 그걸 시스템에 넘기면 이 창이 임의 스킴을 여는 통로가 된다.
     static func decide(for url: URL, isMainFrame: Bool) -> LoginNavigationDecision {
+        // WebKit이 프레임을 만들 때 about:blank를 먼저 태운다. 막으면 페이지가 조립되지 않는다.
         if url.scheme == "about" { return .allow }
         guard url.scheme == "https", let host = url.host, !host.isEmpty else { return .cancel }
-        // 서브프레임·팝업은 사용자를 데려가는 이동이 아니다. 외부 브라우저로 내보내면 안 된다.
-        guard isMainFrame else { return .allow }
-        return isAllowedHost(host) ? .allow : .openExternally
+        return .allow
     }
 }
 
@@ -96,6 +80,7 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate, WKU
             wv.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor),
         ])
         self.webView = wv
+        Self.log("창 열기 — claude.ai/login 로드")
         wv.load(URLRequest(url: URL(string: "https://claude.ai/login")!))
 
         // 로그인 완료 시점을 놓치지 않도록 주기적으로도 쿠키를 스캔
@@ -114,6 +99,19 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate, WKU
         checkForSessionKey()
     }
 
+    /// 로드 실패 — 사내망 TLS 가로채기나 차단된 호스트를 여기서 구분한다. URL은 남기지 않고
+    /// 에러 도메인·코드만 남긴다.
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        let ns = error as NSError
+        Self.log("로드 실패 \(ns.domain) code=\(ns.code)")
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                 withError error: Error) {
+        let ns = error as NSError
+        Self.log("로드 실패(provisional) \(ns.domain) code=\(ns.code)")
+    }
+
     func webView(
         _ webView: WKWebView,
         decidePolicyFor navigationAction: WKNavigationAction,
@@ -128,13 +126,22 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate, WKU
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? false
         switch LoginNavigationPolicy.decide(for: url, isMainFrame: isMainFrame) {
         case .allow:
+            // 최상위 이동만 남긴다 — 서브프레임까지 찍으면 광고·계측 프레임에 로그가 묻힌다.
+            if isMainFrame { Self.log("이동 host=\(url.host ?? "?")") }
             decisionHandler(.allow)
         case .cancel:
-            decisionHandler(.cancel)
-        case .openExternally:
-            NSWorkspace.shared.open(url)
+            Self.log("차단 scheme=\(url.scheme ?? "?") main=\(isMainFrame)")
             decisionHandler(.cancel)
         }
+    }
+
+    /// 로그인 흐름 로그. **호스트·스킴·단계만** 남긴다 — path/query에는 OAuth code·state가,
+    /// 쿠키에는 sessionKey가 실려 있고 이 로그는 버그리포트로 GitHub 이슈에 첨부된다.
+    ///
+    /// 로깅이 없던 동안 "로그인이 안 된다" 제보는 전부 추측으로만 다뤄야 했다 — 팝업이 떴는지,
+    /// 어느 호스트에서 멈췄는지, 쿠키를 잡았는지 로그에 아무 흔적이 없었다.
+    private static func log(_ message: String) {
+        DebugLog.log("Login: \(message)")
     }
 
     // MARK: - OAuth 팝업 (WKUIDelegate)
@@ -150,11 +157,13 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate, WKU
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
         guard let url = navigationAction.request.url else { return nil }
-        // 팝업도 사용자를 데려가는 이동이라 최상위와 같은 기준으로 판정한다.
+        // 팝업도 사용자를 데려가는 이동이라 최상위와 같은 기준으로 판정한다. 여기서 창 밖으로
+        // 내보내면 OAuth 세션이 끊긴다(위 `decide` 주석 참조) — 못 열 URL이면 그냥 무시한다.
         guard LoginNavigationPolicy.decide(for: url, isMainFrame: true) == .allow else {
-            NSWorkspace.shared.open(url)
+            Self.log("팝업 차단 scheme=\(url.scheme ?? "?")")
             return nil
         }
+        Self.log("팝업 host=\(url.host ?? "?")")
         // 이미 팝업이 떠 있으면 그 창을 재사용한다(중복 클릭 방어).
         if let existing = popupWebView {
             existing.load(navigationAction.request)
@@ -201,6 +210,7 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate, WKU
     /// 팝업이 window.close()를 호출했을 때(=OAuth 완료). 창을 닫아준다.
     func webViewDidClose(_ webView: WKWebView) {
         guard webView === popupWebView else { return }
+        Self.log("팝업 닫힘 (window.close) — 쿠키 즉시 확인")
         closePopup()
         // 팝업이 닫히는 시점엔 이미 claude.ai 쿠키가 스토어에 들어와 있다. 2초 폴링을
         // 기다리지 않고 즉시 확인해 로그인 완료를 앞당긴다.
@@ -237,6 +247,7 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate, WKU
     private func capture(_ key: String) {
         if captured { return }
         captured = true
+        Self.log("sessionKey 캡처 — 로그인 완료")
         Keychain.save(key)
         DispatchQueue.main.async { [weak self] in
             self?.pollTimer?.invalidate()
@@ -257,6 +268,7 @@ final class LoginWindowController: NSWindowController, WKNavigationDelegate, WKU
             popupWebView = nil
             return
         }
+        Self.log(captured ? "창 닫힘 (성공)" : "창 닫힘 (캡처 없이 종료)")
         pollTimer?.invalidate()
         pollTimer = nil
         closePopup()
