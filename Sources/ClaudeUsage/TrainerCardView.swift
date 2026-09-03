@@ -24,6 +24,9 @@ struct TrainerCardView: View {
     let collections: [(collection: PetCollection, complete: Bool)]
     /// 캡처용 워터마크. preview에선 보이는 게 자연스럽고 export 시도 그대로 박힘.
     var showWatermark: Bool = true
+    /// 깃발 이펙트에 걸 길드 로고. **이 카드 주인의 길드를 아는 화면만** 넘긴다
+    /// (내 레포트 = 내 길드 / 길드·사무실 멤버 카드 = 그 길드). 모르면 nil → 기본 깃발.
+    var guildFlag: NSImage? = nil
 
     struct BadgeRow {
         let category: BadgeCategory
@@ -260,7 +263,10 @@ struct TrainerCardView: View {
                 footY: 84,
                 petHeight: 54,
                 facingRight: !card.avatar.kind.defaultFacingLeft,
-                isMoving: moving
+                isMoving: moving,
+                guildFlag: guildFlag,
+                // 셀 반폭(55) 안에 깃대+천이 들어가는 최대치. 이 이상이면 천이 셀에 잘린다.
+                flagScale: 0.78
             )
             .frame(width: 110, height: 110)
         }

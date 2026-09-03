@@ -123,7 +123,8 @@ struct GuildLeaderboardView: View {
     }
 
     /// 직전 달 길드 시상대 — 2-1-3 단상 (개인 시상대의 길드판). 단 위에는 정산 시점
-    /// 길드장 대표 펫, 단 안에는 메달·등수·길드명·최종 점수·멤버 수. 내 길드 단은 테두리로 강조.
+    /// 길드장 대표 펫이 배회하고(1위는 왕관), 단 안에는 메달·등수·길드명·최종 점수·멤버 수.
+    /// 내 길드 단은 테두리로 강조.
     private func guildPodiumSection(_ prev: RankingAPI.GuildPreviousMonth) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
@@ -153,42 +154,36 @@ struct GuildLeaderboardView: View {
         [2, 1, 3].compactMap { rank in entries.first { $0.rank == rank } }
     }
 
-    /// 등수별 계단 높이 — 콘텐츠 아래에 채우는 여분(1위가 가장 높다).
-    /// Spacer는 greedy라 조상 maxHeight를 만나면 늘어나므로 고정 filler를 쓴다.
-    private static func podiumExtraHeight(_ rank: Int) -> CGFloat {
-        switch rank { case 1: return 26; case 2: return 13; default: return 0 }
-    }
-
     /// 시상대 한 단. 개인 시상대와 같은 메탈릭 단(`PodiumPedestal`) + 금/은/동을 써서
     /// 두 보드의 시각 언어를 맞춘다 (기존 회색 사각형은 등수 위계가 드러나지 않았다).
     private func guildPodiumBlock(_ entry: RankingAPI.GuildPreviousMonthEntry,
                                   isMine: Bool) -> some View {
         let rank = entry.rank
         return VStack(spacing: 2) {
-            podiumLeaderAvatar(entry)
-            VStack(spacing: 3) {
-                HStack(spacing: 3) {
-                    Text(podiumMedal(rank)).font(.system(size: 15))
+            podiumLeaderAvatar(entry, isMine: isMine)
+            VStack(spacing: 5) {
+                HStack(spacing: 4) {
+                    Text(podiumMedal(rank)).font(.system(size: 18))
                     Text("\(rank)")
-                        .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        .font(.system(size: 24, weight: .heavy, design: .rounded))
                         .foregroundStyle(podiumColor(rank))
                 }
                 Text(entry.name)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 // 단 배경이 금/은/동이라 리스트의 보라 VP를 그대로 쓰면 1위 금색 위에서
                 // 대비가 무너진다 — 단 안에서만 기본색으로 둔다.
                 Text("\(entry.score) VP")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 HStack(spacing: 3) {
-                    Image(systemName: "person.2.fill").font(.system(size: 7))
-                    Text("\(entry.memberCount)명").font(.system(size: 9))
+                    Image(systemName: "person.2.fill").font(.system(size: 8))
+                    Text("\(entry.memberCount)명").font(.system(size: 10))
                 }
                 .foregroundStyle(.secondary)
-                Color.clear.frame(height: Self.podiumExtraHeight(rank))
+                Color.clear.frame(height: podiumExtraHeight(rank))
             }
-            .padding(.top, 8)
+            .padding(.top, 10)
             .padding(.bottom, 6)
             .padding(.horizontal, 4)
             .frame(maxWidth: .infinity)
@@ -199,26 +194,21 @@ struct GuildLeaderboardView: View {
         .help(isMine ? "내 길드" : "")
     }
 
-    /// 정산 시점 길드장 대표 펫 — 스냅샷 프로필에서 렌더 (없으면 발자국 아이콘).
-    @ViewBuilder
-    private func podiumLeaderAvatar(_ entry: RankingAPI.GuildPreviousMonthEntry) -> some View {
-        if let selection = entry.leaderProfileJson?.card.avatar,
-           let nsImage = PetSprite.image(for: selection.kind, action: .walk, frameIndex: 0) {
-            Image(nsImage: nsImage)
-                .interpolation(.none)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .hueRotation(.degrees(selection.variant == PetOwnership.prestigeVariant
-                    ? 0 : WalkingCat.hueDegrees(for: selection.variant)))
-                .scaleEffect(x: selection.kind.defaultFacingLeft ? -1 : 1, y: 1)
-                .frame(height: 28)
-                .help(entry.leaderNickname.map { "길드장 \($0)" } ?? "")
-        } else {
-            Image(systemName: "pawprint.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-                .frame(height: 28)
-        }
+    /// 정산 시점 길드장 대표 펫 — 개인 시상대와 같은 공용 렌더(`PodiumPetAvatar`)를 쓴다.
+    /// 단 위를 배회하고 1위는 왕관·금색 glow가 붙으며, 스냅샷에 남은 장착 이펙트도 그대로 입는다.
+    /// 프로필이 없는 옛 스냅샷은 발자국으로 대체.
+    private func podiumLeaderAvatar(_ entry: RankingAPI.GuildPreviousMonthEntry,
+                                    isMine: Bool) -> some View {
+        let avatar = entry.leaderProfileJson?.card.avatar
+        let effects = Set((entry.leaderProfileJson?.equippedEffects ?? [])
+            .compactMap { EffectKind(rawValue: $0) })
+        // 시상대 응답에는 길드 로고가 없다. 내 길드 단만 로컬 캐시로 깃발을 채우고, 남의 길드는
+        // 기본 깃발로 둔다 — 남의 로고를 payload에 실으면 리더보드 egress가 다시 커진다(#238).
+        return PodiumPetAvatar(kind: avatar?.kind, variant: avatar?.variant ?? 0,
+                               rank: entry.rank, effects: effects,
+                               placeholderSymbol: "pawprint.fill",
+                               guildFlag: isMine ? GuildLogo.myFlagImage : nil)
+            .help(entry.leaderNickname.map { "길드장 \($0)" } ?? "")
     }
 
     /// "리셋까지 18일" / "오늘 리셋" — RankingView와 동일 포맷 (월 경계 직관화).

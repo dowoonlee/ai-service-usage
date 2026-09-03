@@ -78,6 +78,21 @@ enum GuildLogo {
         return img
     }
 
+    /// 깃발 이펙트용 로고. `image(for:guildID:)`와 달리 **길드를 모르면 nil**을 준다 —
+    /// 그쪽은 값이 없으면 id 해시로 샘플을 지어내는데, 깃발에서는 그게 "남의 펫에 엉뚱한 길드기를
+    /// 다는" 오정보가 된다. nil이면 `PetEffectOverlay`가 기본 깃발을 그린다.
+    @MainActor
+    static func flagImage(for raw: String?, guildID: String) -> NSImage? {
+        guard !guildID.isEmpty else { return nil }
+        return image(for: raw, guildID: guildID)
+    }
+
+    /// 내 길드 깃발 — 표시 캐시(`Settings.guildLogo`) 기준. 무소속이면 nil.
+    @MainActor
+    static var myFlagImage: NSImage? {
+        flagImage(for: Settings.shared.guildLogo, guildID: Settings.shared.guildID)
+    }
+
     // MARK: - 샘플 로고 (절차적)
 
     /// 10종 팔레트. (배경, 배경 밴드, 문양, 문양 그림자) — 모두 0xAARRGGBB.

@@ -1525,7 +1525,8 @@ private struct PetPreviewView: View {
                     ZStack {
                         PetEffectOverlay(effects: fx, placement: .backdrop,
                                          center: CGPoint(x: 55, y: 55), footY: 95,
-                                         petHeight: 70, facingRight: movingRight, isMoving: true)
+                                         petHeight: 70, facingRight: movingRight, isMoving: true,
+                                         guildFlag: GuildLogo.myFlagImage)
                         Image(nsImage: frames[frameIdx])
                             .resizable()
                             .interpolation(.none)

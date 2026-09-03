@@ -12,6 +12,8 @@ struct PetEffectOverlay: View {
     enum Placement { case backdrop, particles }
     /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
     @Environment(\.windowIsVisible) private var windowIsVisible
+    /// 창이 포커스를 잃으면 **깃발만** 추가로 멈춘다 — 아래 `flag` 주석 참조.
+    @Environment(\.windowIsActive) private var windowIsActive
 
     let effects: Set<EffectKind>
     let placement: Placement
@@ -28,6 +30,14 @@ struct PetEffectOverlay: View {
     var mythicRoll: Double = 0
     /// mythic 펫별 오라 스타일(색). WalkingCat이 `Mythic.spec(for:)?.aura`를 주입.
     var mythicAuraStyle: MythicAura = .crimsonGold
+    /// 깃발 이펙트에 걸 길드 로고(`GuildLogo` 66×44 도트). **그 펫이 속한 길드를 아는 화면만**
+    /// 넘긴다 — 모르면 nil로 두고 기본 깃발을 그린다. 남의 펫에 엉뚱한 길드기가 걸리는 쪽이
+    /// 깃발이 안 걸리는 것보다 나쁘다. cf. `GuildLogo.flagImage(for:guildID:)`
+    var guildFlag: NSImage? = nil
+    /// 깃발 크기 배율. 깃발은 이펙트 중 유일하게 펫 밖으로 크게 뻗어서, 폭이 고정된 좁은 셀
+    /// (트레이너 카드의 110pt 아바타 칸)에서는 천이 셀 경계에 잘려 로고가 반만 보인다.
+    /// 그런 호출부만 1 미만을 넘긴다. 차트·사무실처럼 여백이 있는 곳은 기본값 그대로.
+    var flagScale: CGFloat = 1.0
 
     var body: some View {
         ZStack {
@@ -35,6 +45,8 @@ struct PetEffectOverlay: View {
             case .backdrop:
                 // Mythic 기본 오라 — 구매 효과보다 뒤(맨 아래)에 깔린다.
                 if mythicBase { mythicAura }
+                // 깃발은 맨 뒤 — 광원이 깃발 위로 번져야 펫이 앞에 선 것으로 읽힌다.
+                if effects.contains(.flag) { flag }
                 // 무지개/별가루 트레일은 펫 뒤로 흐르므로 backdrop. 광원(glow/aura)과 공존 가능.
                 if effects.contains(.rainbow) { rainbow }
                 if effects.contains(.stardust) { stardust }
@@ -176,6 +188,92 @@ struct PetEffectOverlay: View {
                       y: center.y)
         }
     }
+
+    /// 길드 깃발 — 펫 등 뒤에 깃대를 세우고 천을 펄럭인다.
+    ///
+    /// 파동은 `rainbow`와 같은 방식이다(컬럼별 사인을 블록 단위로 양자화 → 도트 계단). 다른 건
+    /// **진폭이 깃대에서 멀수록 커진다**는 점 하나다. 무지개는 전 구간 같은 진폭이라 리본으로
+    /// 읽히지만, 천은 고정단이 안 움직여야 "매달린 것"으로 읽힌다.
+    ///
+    /// 로고가 있으면 66×44 도트를 컬럼 단위로 잘라 같은 y offset을 먹여 그린다 — 이미지가 통째로
+    /// 물결을 타는 효과. 없으면(무소속·남의 펫) 기본 2색 깃발.
+    ///
+    /// **프레임 루프는 창이 보이고 + 활성일 때만 돈다.** 다른 이펙트는 `windowIsVisible`만 보지만
+    /// 깃발은 컬럼마다 클립·드로우가 들어가 이 파일에서 가장 비싸다. 보이기만 하는 뒤쪽 창(예: 랭킹
+    /// 창을 열어둔 채 다른 앱을 쓰는 중)에서까지 돌릴 이유가 없다. 멈춰도 마지막 프레임은 남으므로
+    /// 깃발이 사라지지는 않는다. 초당 프레임도 30 → 15로 낮췄다(계단 파동이라 차이가 안 보인다).
+    private var flag: some View {
+        let facingLeftSide = facingRight            // 진행 방향 반대편(등 뒤)에 깃대를 세운다
+        let h = petHeight * flagScale               // 깃발 기하의 기준 크기
+        // 깃대는 몸통 밖으로 살짝만 뺀다 — 더 멀리 두면 좁은 셀에서 천이 잘린다.
+        let poleX = center.x + (facingLeftSide ? -1 : 1) * h * 0.38
+        let poleTop = footY - petHeight * 1.50 * flagScale
+        let clothW = h * 0.86
+        // 높이는 로고 원본 비율(66:44 = 3:2)에서 파생한다. 임의 높이를 주면 로고가 세로로
+        // 눌리고, 축소 배율이 축마다 달라져 사선 밴드가 격자 무늬로 앨리어싱된다.
+        let clothH = clothW * CGFloat(GuildLogo.pixelHeight) / CGFloat(GuildLogo.pixelWidth)
+        let block = max(2.0, h * 0.10)              // 픽셀 블록 = 계단 한 칸
+        let cols = max(1, Int((clothW / block).rounded(.up)))
+        let poleW = max(2.0, h * 0.055)
+
+        return TimelineView(.animation(minimumInterval: 1.0 / 15.0,
+                                       paused: !(windowIsVisible && windowIsActive))) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            Canvas { gc, _ in
+                // 깃대 — 도트 톤에 맞춰 단색 막대 + 꼭지 구슬.
+                gc.fill(Path(CGRect(x: poleX - poleW / 2, y: poleTop,
+                                    width: poleW, height: max(0, footY - poleTop))),
+                        with: .color(Self.poleColor))
+                gc.fill(Path(ellipseIn: CGRect(x: poleX - poleW, y: poleTop - poleW,
+                                               width: poleW * 2, height: poleW * 2)),
+                        with: .color(Self.finialColor))
+
+                let resolved = guildFlag.map { gc.resolve(Image(nsImage: $0).interpolation(.none)) }
+                let clothX = facingLeftSide ? poleX - clothW : poleX
+
+                for c in 0..<cols {
+                    // 0 = 깃대(고정단) … 1 = 자유단. 제곱이라 끝쪽만 크게 흔들린다.
+                    let u = Double(c) / Double(max(1, cols - 1))
+                    let amp = block * CGFloat(0.15 + 1.35 * u * u)
+                    let phase = t * 6.0 - Double(c) * 0.55        // 깃대 → 끝으로 진행하는 파동
+                    let stepped = (sin(phase) * 1.5).rounded() / 1.5
+                    let yOff = amp * CGFloat(stepped)
+                    let x = (facingLeftSide ? poleX - CGFloat(c + 1) * block
+                                            : poleX + CGFloat(c) * block).rounded()
+                    let top = poleTop + poleW + yOff
+
+                    var slice = gc
+                    // 컬럼 밖으로 새지 않게 세로로 길게 클립. +0.5는 블록 사이 미세 틈 메움(rainbow와 동일).
+                    slice.clip(to: Path(CGRect(x: x, y: poleTop - h,
+                                               width: block + 0.5, height: h * 3)))
+                    if let resolved {
+                        slice.draw(resolved, in: CGRect(x: clothX, y: top,
+                                                        width: clothW, height: clothH))
+                    } else {
+                        // 기본 깃발 — 남색 필드 + 아래 금색 밴드.
+                        slice.fill(Path(CGRect(x: x, y: top, width: block + 0.5,
+                                               height: clothH * 0.68)),
+                                   with: .color(Self.plainFieldColor))
+                        slice.fill(Path(CGRect(x: x, y: top + clothH * 0.68, width: block + 0.5,
+                                               height: clothH * 0.32)),
+                                   with: .color(Self.plainBandColor))
+                    }
+                    // 접힘 음영 — 파동의 기울기(cos)로 어둡게/밝게. 폭은 정확히 block(겹치면 이음매가
+                    // 세로줄로 보인다 — 반투명이 두 번 칠해지기 때문).
+                    let slope = cos(phase)
+                    let shade = slope < 0 ? Color.black.opacity(min(0.30, -slope * 0.30))
+                                          : Color.white.opacity(min(0.12, slope * 0.12))
+                    slice.fill(Path(CGRect(x: x, y: top, width: block, height: clothH)),
+                               with: .color(shade))
+                }
+            }
+        }
+    }
+
+    private static let poleColor = Color(red: 0.42, green: 0.30, blue: 0.18)
+    private static let finialColor = Color(red: 0.95, green: 0.78, blue: 0.25)
+    private static let plainFieldColor = Color(red: 0.16, green: 0.20, blue: 0.34)
+    private static let plainBandColor = Color(red: 0.95, green: 0.78, blue: 0.25)
 
     // MARK: - particles
 

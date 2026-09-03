@@ -175,10 +175,69 @@ final class AnimationPreviews: SandboxedTestCase {
             note: "펫이 가구를 통과하지 않는지, 벽에 끼지 않는지, 걷는 방향과 그림 방향이 맞는지.")
     }
 
+    // MARK: - RP 이펙트
+
+    /// 깃발 이펙트 — 길드 로고가 있을 때와 없을 때.
+    ///
+    /// 정지 컷으로는 판별이 안 되는 게 정확히 이 이펙트다. 천의 파동은 깃대 쪽 진폭이 0에 가깝고
+    /// 자유단만 크게 흔들려야 "매달린 천"으로 읽히는데, 한 프레임만 보면 그냥 물결친 사각형이다.
+    /// 로고판은 66×44 도트를 컬럼 단위로 잘라 그리므로 이음매(세로 줄무늬)도 여기서 확인한다.
+    func testRenderFlagEffect() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        let cases: [(String, NSImage?, String)] = [
+            ("이펙트-깃발-길드로고", GuildLogo.image(for: "s:2", guildID: "preview"),
+             "길드 소속 펫 — 로고가 물결을 타는지, 컬럼 이음매가 세로줄로 보이지 않는지."),
+            ("이펙트-깃발-기본", nil,
+             "무소속(또는 길드를 모르는 남의 펫) — 기본 2색 깃발로 폴백하는지."),
+        ]
+        for (title, logo, note) in cases {
+            try PreviewRenderer.renderAnimated(
+                FlagEffectPreviewStage(guildFlag: logo),
+                size: CGSize(width: 220, height: 130),
+                frameCount: 40, frameInterval: 1.0 / 15.0,
+                section: "애니 · 이펙트", title: title, note: note)
+        }
+    }
+
     private func lcm(_ a: Int, _ b: Int) -> Int {
         guard a > 0, b > 0 else { return max(a, b, 1) }
         return a / gcd(a, b) * b
     }
 
     private func gcd(_ a: Int, _ b: Int) -> Int { b == 0 ? a : gcd(b, a % b) }
+}
+
+
+/// 깃발 이펙트 검수용 무대 — `WalkingCat`이 하는 합성(backdrop 이펙트 → 펫 → particles 이펙트)을
+/// 같은 좌표 규약(center/footY/petHeight)으로 최소 재현한다. 실제 렌더는 `PetEffectOverlay`가 한다.
+@MainActor
+private struct FlagEffectPreviewStage: View {
+    let guildFlag: NSImage?
+
+    private let petHeight: CGFloat = 54
+    private var center: CGPoint { CGPoint(x: 130, y: 76) }
+    private var footY: CGFloat { 103 }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 15.0)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            let frames = PetSprite.frames(for: .fox, action: .walk)
+            ZStack {
+                PetEffectOverlay(
+                    effects: [.flag], placement: .backdrop,
+                    center: center, footY: footY, petHeight: petHeight,
+                    facingRight: true, isMoving: true, guildFlag: guildFlag)
+                if !frames.isEmpty,
+                   let img = PetSprite.image(for: .fox, action: .walk,
+                                             frameIndex: Int(t * 8) % frames.count) {
+                    Image(nsImage: img)
+                        .interpolation(.none)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: petHeight, height: petHeight)
+                        .position(center)
+                }
+            }
+        }
+    }
 }
