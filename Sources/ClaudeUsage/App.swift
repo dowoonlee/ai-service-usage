@@ -87,6 +87,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 기여 보상 인상 소급 — coin 지급 재개(2,000 × N) + RP 차액(500 × N). 위 마이그레이션과
         // 플래그가 별개라 순서는 무관하지만, 둘 다 coin을 건드리므로 나란히 둔다.
         Settings.shared.applyContributorRewardV2IfNeeded()
+        // Codex 7d 스케일 교정 소급 — 이번 달 과소 적립분을 대기열에 적재(지급은 폴 사이클이 분납).
+        // 로컬 스냅샷을 다시 훑는 파일 IO라 Settings.init이 아니라 여기서 부른다.
+        Settings.shared.applyCodexBackfillIfNeeded()
         // (실험) 펫 메타데이터 서버 override — flag on일 때만 디스크 캐시 즉시 로드 + 서버 갱신.
         // flag off면 전부 코드 하드코딩 fallback이라 호출조차 안 함.
         if Settings.shared.experimentalRemotePetMeta {

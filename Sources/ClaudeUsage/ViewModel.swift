@@ -403,6 +403,7 @@ final class ViewModel: ObservableObject {
                     await self.refreshWeather()
                     await self.refreshLatestVersion()
                     self.accumulatePetUsage()
+                    self.drainCodexBackfill()
                     await ContributorBonus.shared.sync()
                     self.updateBackoffAfterCycle()
                     BadgeRegistry.evaluate()
@@ -546,6 +547,12 @@ final class ViewModel: ObservableObject {
     /// 폴링 tick마다 호출 — 현재 차트에 배치된 펫(`petClaudeKind`/`petCursorKind`)에 실시간 누적.
     /// 양쪽 차트가 같은 종이면 더블카운트 (한 tick에 2배 누적). pet enable 토글이 꺼진 차트는 누적 제외.
     /// 임계 초과 시 `PetOwnership.registerUsage`가 variant unlock을 트리거하고 그 결과를 로그.
+    /// Codex 7d 스케일 교정 소급분을 조금씩 지급. 대기열이 비어 있으면 즉시 반환한다.
+    /// 제출(`submitRankingIfNeeded`)보다 **앞**에서 돌아야 이번 사이클 제출에 소급분이 실린다.
+    private func drainCodexBackfill() {
+        CodexBackfill.drain()
+    }
+
     private func accumulatePetUsage() {
         let now = Date()
         defer { lastPetUsageTickAt = now }
