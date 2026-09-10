@@ -9,3 +9,5 @@ sparkle_private.key
 scripts/ranking.env
 supabase/.temp/
 docs/SERVICE_OVERVIEW.md
+# 서브에이전트 리뷰 산출물 — 그때그때의 스냅샷이라 이력으로 남기지 않는다.
+reports/
