@@ -24,4 +24,14 @@ final class VPLedger: UsageConsumer {
             DebugLog.log("VPLedger: +\(whole) VP (source=\(event.source.rawValue), total=\(s.rankingScoreEarnedVP))")
         }
     }
+
+    /// 환산식 오류로 과소 적립됐던 몫의 소급 지급. `consume`과 달리 이벤트가 아니라 이미 계산된
+    /// 정수를 받는다 — 소급은 지난 사용량의 재계산이라 되살릴 원본 이벤트가 없다.
+    /// VP는 사용량 비례 값이므로 보너스(coin 전용 `creditBonus`)로 우회하지 않고 여기로 들어온다.
+    func creditBackfill(_ amount: Int, reason: String) {
+        guard amount > 0 else { return }
+        let s = Settings.shared
+        s.rankingScoreEarnedVP += amount
+        DebugLog.log("VPLedger: backfill +\(amount) VP (\(reason), total=\(s.rankingScoreEarnedVP))")
+    }
 }

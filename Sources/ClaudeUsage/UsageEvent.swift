@@ -153,6 +153,9 @@ enum UsageEventProducer {
     /// 모델로 적립. 세 창은 plan별로 상호배타라(Plus/Pro는 5h/7d만, free는 monthly만 옴 — CodexAPI
     /// 파싱 참조) 같은 폴에서 둘 이상 적립되는 일은 없다 → 이중적립 위험 없음.
     /// coinFactor = codexPlanMultiplier(Plus 1.0 / Pro 2.5 / free 0.5), vpFactor = codexPlanPriceVP / maxPureCoin.
+    ///
+    /// 7d 창의 만점 pure는 **그 응답에 5h가 함께 왔는지**로 갈린다(`codexSevenDayScale`). OpenAI가
+    /// 5h 창을 뺀 뒤로 7d 하나가 한 달치를 대표하기 때문 — 자세한 배경은 `codexSevenDayOnlyMaxCoin`.
     static func ingestCodex(_ snapshot: CodexSnapshot) {
         let context = UsageContext(
             planName: snapshot.planName,
@@ -166,7 +169,7 @@ enum UsageEventProducer {
         }
         if let resetAt = snapshot.sevenDayResetAt, let pct = snapshot.sevenDayPct {
             ingestWindow(pct: pct, resetAt: resetAt, source: .codexSevenDay,
-                         maxCoin: CoinLedger.codexSevenDayMaxCoin, context: context,
+                         maxCoin: codexSevenDayScale(snapshot), context: context,
                          lastResetKey: \.lastCodexSevenDayReset, lastPctKey: \.lastCodexSevenDayPctSeen)
         }
         // free 전용 monthly 단일 창 — Claude/Cursor Free와 형평을 맞추려고 적립 대상에 포함.
@@ -176,6 +179,17 @@ enum UsageEventProducer {
                          maxCoin: CoinLedger.codexMonthlyMaxCoin, context: context,
                          lastResetKey: \.lastCodexMonthlyReset, lastPctKey: \.lastCodexMonthlyPctSeen)
         }
+    }
+
+    /// 7d 창의 만점 pure. 응답에 5h가 함께 오면 Claude와 같은 30/60 분할(합 4578)이 성립하므로
+    /// 60을 그대로 쓰고, 7d 단독이면 그 하나가 월 전체를 대표하므로 1068.2로 올린다.
+    ///
+    /// plan이 아니라 **실제로 온 창 집합**으로 판정하는 게 핵심이다. 5h 유무는 OpenAI가 예고 없이
+    /// 바꿔온 값이고(2026-07 제거), 다시 주기 시작하면 이 분기가 저절로 옛 스케일로 돌아온다.
+    /// plan 이름에 고정하면 그때 정확히 17.8배 과다 적립된다.
+    nonisolated static func codexSevenDayScale(_ snapshot: CodexSnapshot) -> Double {
+        snapshot.fiveHourPct == nil ? CoinLedger.codexSevenDayOnlyMaxCoin
+                                    : CoinLedger.codexSevenDayMaxCoin
     }
 
     /// 5h/7d pct-delta 윈도우 공통 처리 — Claude/Codex가 동일 로직을 공유한다.

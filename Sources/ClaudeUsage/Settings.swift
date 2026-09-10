@@ -716,6 +716,16 @@ final class Settings: ObservableObject {
     @Published var rankingScoreFractionVP: Double {
         didSet { AppEnv.defaults.set(rankingScoreFractionVP, forKey: Keys.rankingScoreFractionVP) }
     }
+    /// Codex 7d 스케일 교정(`codexSevenDayOnlyMaxCoin`) 소급분 중 **아직 안 준** 잔액.
+    /// `applyCodexBackfillIfNeeded`가 이번 달치를 계산해 채우고, 폴 사이클마다 조금씩 빠진다
+    /// (`CodexBackfill.drainPerCycle`). 한 번에 주지 않는 이유는 `CodexBackfill` 주석 참조.
+    @Published var pendingCodexBackfillVP: Int {
+        didSet { AppEnv.defaults.set(pendingCodexBackfillVP, forKey: Keys.pendingCodexBackfillVP) }
+    }
+    /// 위와 같은 소급의 coin 잔액. VP와 별도로 소진된다(둘의 환산 배율이 달라 잔액도 다르다).
+    @Published var pendingCodexBackfillCoins: Int {
+        didSet { AppEnv.defaults.set(pendingCodexBackfillCoins, forKey: Keys.pendingCodexBackfillCoins) }
+    }
     /// 이미 수령한 명예의 전당 보상 dedup. 형식: "YYYY-MM.rank" (예: "2026-05.1").
     /// 한 번 들어가면 영구 — 서버측 idempotency와 함께 이중 지급 방지.
     @Published var claimedPodiumPeriods: Set<String> {
@@ -928,6 +938,8 @@ final class Settings: ObservableObject {
         self.isGuildLeader             = (d.object(forKey: Keys.isGuildLeader) as? Bool) ?? false
         self.rankingScoreEarnedVP      = (d.object(forKey: Keys.rankingScoreEarnedVP) as? Int) ?? 0
         self.rankingScoreFractionVP    = (d.object(forKey: Keys.rankingScoreFractionVP) as? Double) ?? 0
+        self.pendingCodexBackfillVP    = (d.object(forKey: Keys.pendingCodexBackfillVP) as? Int) ?? 0
+        self.pendingCodexBackfillCoins = (d.object(forKey: Keys.pendingCodexBackfillCoins) as? Int) ?? 0
         let claimedData = d.data(forKey: Keys.claimedPodiumPeriods)
         self.claimedPodiumPeriods = (claimedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         let claimedRpData = d.data(forKey: Keys.claimedRpRewards)
@@ -1327,6 +1339,23 @@ final class Settings: ObservableObject {
         guard !d.bool(forKey: Keys.hasMigratedGymBadges) else { return }
         BadgeRegistry.evaluate(silent: true)
         d.set(true, forKey: Keys.hasMigratedGymBadges)
+    }
+
+    /// Codex 7d 스케일 교정의 소급분(2026-09-01~)을 계산해 대기열에 적재. 1회성.
+    ///
+    /// 지급 자체는 여기서 하지 않는다 — 잔액만 세워두고 폴 사이클이 나눠 지급한다
+    /// (`ViewModel.drainCodexBackfill`). 계산은 로컬 스냅샷을 다시 훑는 것이라 파일 IO가 들어가므로
+    /// `Settings.init`이 아니라 App 시작 훅에서 호출한다.
+    func applyCodexBackfillIfNeeded() {
+        let d = AppEnv.defaults
+        guard !d.bool(forKey: Keys.hasComputedCodexSevenDayBackfill) else { return }
+        d.set(true, forKey: Keys.hasComputedCodexSevenDayBackfill)
+
+        let owed = CodexBackfill.computeOwed()
+        guard owed.vp > 0 || owed.coins > 0 else { return }
+        pendingCodexBackfillVP += owed.vp
+        pendingCodexBackfillCoins += owed.coins
+        DebugLog.log("CodexBackfill: 이번 달 소급 대기열 적재 — VP \(owed.vp), coin \(owed.coins)")
     }
 
     /// Contributor PR 보너스 단가 50 → 1,000 상향(v0.6.10) 소급 적용. 이미 적립된
@@ -1815,6 +1844,8 @@ final class Settings: ObservableObject {
         static let rankingPrivacyAccepted      = "settings.rankingPrivacyAccepted"
         static let rankingScoreEarnedVP        = "settings.rankingScoreEarnedVP"
         static let rankingScoreFractionVP      = "settings.rankingScoreFractionVP"
+        static let pendingCodexBackfillVP      = "settings.pendingCodexBackfillVP"
+        static let pendingCodexBackfillCoins   = "settings.pendingCodexBackfillCoins"
         static let claimedPodiumPeriods        = "settings.claimedPodiumPeriods"
         static let claimedRpRewards            = "settings.claimedRpRewards"
         static let claimedGrants               = "settings.claimedGrants"
@@ -1877,6 +1908,7 @@ final class Settings: ObservableObject {
         static let gachaInventoryCollapsed     = "settings.gachaInventoryCollapsed"
         static let showGitHubLoginInCard       = "settings.showGitHubLoginInCard"
         static let hasMigratedContributorBonusUpgrade = "settings.hasMigratedContributorBonusUpgrade"
+        static let hasComputedCodexSevenDayBackfill   = "settings.hasComputedCodexSevenDayBackfill"
         static let hasMigratedContributorRewardV2 = "settings.hasMigratedContributorRewardV2"
     }
 }

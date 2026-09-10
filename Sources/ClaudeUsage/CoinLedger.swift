@@ -77,6 +77,20 @@ final class CoinLedger: UsageConsumer {
     /// Codex 5h/7d 윈도우 만점 coin — Claude와 동일 스케일(30/60).
     static let codexFiveHourMaxCoin: Double     = 30
     static let codexSevenDayMaxCoin: Double     = 60
+    /// Codex 7d 창이 **단독으로** 올 때의 만점 pure. 5h가 같이 오면 위의 30/60을 쓴다.
+    ///
+    /// OpenAI가 2026-07 중 Plus/Pro 응답에서 5h 창을 없앴다(수집 샘플: 06-23·06-25는
+    /// primary=18000+secondary=604800, 07-16부터 primary=604800·secondary=null). 그런데 VP/coin
+    /// 환산의 분모는 `claudeMaxPureCoinPerMonth`(4578) — Claude의 5h 144창(4,320, 전체의 94%)
+    /// + 7d 4.3창(257) 구조를 전제한 값이다. 그래서 7d 하나만 오는 계정은 분모의 5.6%까지만
+    /// 채울 수 있었다: Codex Pro가 월 최대 1,123 VP(목표 20,000의 5.6%) / 643 coin.
+    /// free(monthly 창)가 500 VP·2,289 coin이라 **유료가 무료보다 덜 받는 역전**까지 났다.
+    ///
+    /// 분모를 갈아끼우는 대신 7d 창 만점을 올려 pure 스케일 자체를 Claude와 맞춘다 —
+    /// 그래야 vpFactor·coinFactor를 건드리지 않고 VP와 coin이 **한 번에** 정합된다.
+    /// = 월 이론 최대 pure(4578) ÷ 월 7d 창 수(30/7) ≈ 1068.2. 이 값이면 7d 창을 매번 100%
+    /// 채우는 Pro가 월 20,000 VP / 11,445 coin(= Claude Max 20x 동급)에 정확히 닿는다.
+    static let codexSevenDayOnlyMaxCoin: Double = claudeMaxPureCoinPerMonth * 7.0 / 30.0
     /// Codex free monthly 창 만점 coin. `claudeMaxPureCoinPerMonth`(4578)와 동일 값으로 잡아
     /// 월 풀 사용 시 pureValue 합이 4578 → VP = 4578 × (codexPlanPriceVP("free")=500 / 4578) = 500,
     /// Claude/Cursor Free(~500 VP)와 형평. 5h/7d(30/60)와 스케일이 다른 건 의도 — monthly는 한 달에
@@ -232,6 +246,15 @@ final class CoinLedger: UsageConsumer {
         guard amount > 0 else { return }
         credit(amount)
         DebugLog.log("CoinLedger: Contributor upgrade +\(amount) coin (\(prCount) PR × +\(perPRDelta)) (total=\(Settings.shared.coins))")
+    }
+
+    /// Codex 7d 스케일 교정 소급. **`source: .codex`로 넣는 게 핵심** — 원래대로 적립됐다면
+    /// ②(codexCoinsEarned)에 쌓였을 몫이라, 보너스처럼 ①만 올리면 도장 Codex 카테고리 진척이
+    /// 실제 사용량과 어긋난 채로 남는다.
+    func creditCodexBackfill(_ amount: Int) {
+        guard amount > 0 else { return }
+        credit(amount, source: .codex)
+        DebugLog.log("CoinLedger: Codex backfill +\(amount) coin (total=\(Settings.shared.coins))")
     }
 
     /// 펫 컬렉션 컴플리트 보너스. rarity 합 × 1.5.
