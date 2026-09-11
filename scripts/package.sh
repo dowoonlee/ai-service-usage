@@ -43,6 +43,9 @@ mkdir -p "${APP_DIR}/Contents/Resources"
 echo "==> assembling bundle at ${APP_DIR}"
 cp ".build/release/${SPM_PRODUCT}" "${APP_DIR}/Contents/MacOS/${EXECUTABLE}"
 
+# Finder / application dialogs use the icon in the outer app bundle.
+bash scripts/build-app-icon.sh "${APP_DIR}/Contents/Resources/AppIcon.icns"
+
 # SwiftPM CLI 빌드는 @executable_path/../Frameworks rpath를 자동 추가하지 않음 →
 # Sparkle.framework 같은 임베드 프레임워크를 dyld가 못 찾아서 실행 시 Library not loaded.
 install_name_tool -add_rpath "@executable_path/../Frameworks" "${APP_DIR}/Contents/MacOS/${EXECUTABLE}" 2>/dev/null || true
@@ -93,6 +96,7 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>${APP_NAME}</string>
     <key>CFBundleDisplayName</key><string>${DISPLAY_NAME}</string>
+    <key>CFBundleIconFile</key><string>AppIcon.icns</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION}</string>
     <key>CFBundleVersion</key><string>${VERSION}</string>
