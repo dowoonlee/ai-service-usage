@@ -15,7 +15,14 @@ import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { resolveTenant } from "../_shared/tenant.ts";
-import { TOP_CONTRIBUTORS } from "../_shared/guild_policy.ts";
+import {
+  GUESTBOOK_DELETE_WINDOW_SEC,
+  GUESTBOOK_MAX_LEN,
+  GUESTBOOK_VISIT_LIMIT,
+  TOP_CONTRIBUTORS,
+} from "../_shared/guild_policy.ts";
+import { BOARD_REQUIRES_GITHUB, boardInteractionBlocked } from "../_shared/board_policy.ts";
+import { fetchGuestbook, guestbookCooldownRemainingSec } from "../_shared/guild_guestbook.ts";
 
 interface VisitPayload {
   deviceId: string;
@@ -81,7 +88,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, github_login, last_guestbook_at")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -151,6 +158,13 @@ Deno.serve(async (req: Request) => {
     .select("slot_id, item_kind, users(nickname)")
     .eq("guild_id", guild.id);
 
+  // 방명록 (M2) — 최근 N개 + 작성 정책. 자기 길드에는 못 쓴다(열람·삭제만).
+  const guestbook = await fetchGuestbook(db, guild.id, GUESTBOOK_VISIT_LIMIT, deviceId);
+  const cooldownRemainingSec = isMine
+    ? 0
+    : await guestbookCooldownRemainingSec(db, deviceId, guild.id, user.last_guestbook_at);
+  const canInteract = !boardInteractionBlocked(user);
+
   return jsonResponse({
     guild: {
       id: guild.id,
@@ -173,5 +187,16 @@ Deno.serve(async (req: Request) => {
       itemKind: f.item_kind,
       donorNickname: (f.users as unknown as { nickname: string } | null)?.nickname ?? null,
     })),
+    guestbook,
+    guestbookPolicy: {
+      canWrite: !isMine && canInteract,
+      maxLen: GUESTBOOK_MAX_LEN,
+      cooldownRemainingSec,
+      deleteWindowSec: GUESTBOOK_DELETE_WINDOW_SEC,
+      requiresGitHub: BOARD_REQUIRES_GITHUB,
+      canInteract,
+      // 길드장은 자기 길드 방명록을 언제나 지울 수 있다 — 클라 삭제 버튼 노출 기준.
+      isLeader: String(guild.leader_device_id ?? "").toLowerCase() === deviceId,
+    },
   });
 });

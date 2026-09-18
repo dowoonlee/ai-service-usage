@@ -12,7 +12,8 @@ import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { stripBackup } from "../_shared/profile.ts";
-import { TOP_CONTRIBUTORS } from "../_shared/guild_policy.ts";
+import { GUESTBOOK_DELETE_WINDOW_SEC, GUESTBOOK_INFO_LIMIT, TOP_CONTRIBUTORS } from "../_shared/guild_policy.ts";
+import { fetchGuestbook } from "../_shared/guild_guestbook.ts";
 
 interface InfoPayload {
   deviceId: string;
@@ -211,6 +212,9 @@ Deno.serve(async (req: Request) => {
       });
   }
 
+  // 받은 방명록 (M2) — 최근 N개만. 전체는 방문 화면(guild-visit)이 보여준다.
+  const guestbook = await fetchGuestbook(db, guild.id, GUESTBOOK_INFO_LIMIT, deviceId);
+
   return jsonResponse({
     guild: {
       id: guild.id,
@@ -237,5 +241,7 @@ Deno.serve(async (req: Request) => {
     })),
     sentInvites,   // 길드장만 채워짐 (그 외 빈 배열)
     joinRequests,  // 길드장만 채워짐 — 받은 대기중 가입신청 (그 외 빈 배열)
+    guestbook,
+    guestbookDeleteWindowSec: GUESTBOOK_DELETE_WINDOW_SEC,
   });
 });

@@ -97,7 +97,9 @@ struct GachaView: View {
         VStack(spacing: 0) {
             Picker("", selection: $selectedTab) {
                 ForEach(Tab.allCases) { t in
-                    Text(t.displayName).tag(t)
+                    // 길드 탭 — 내 길드에 안 본 방명록이 있으면 점. 세그먼트에는 뷰 배지를 못 얹어 글자로.
+                    Text(t == .guild && settings.hasUnseenGuestbook ? "\(t.displayName) •" : t.displayName)
+                        .tag(t)
                 }
             }
             .pickerStyle(.segmented)

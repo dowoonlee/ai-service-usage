@@ -23,6 +23,17 @@ struct GuildVisitView: View {
     @State private var error: String?
     @State private var loading = false
 
+    // 방명록 (M2) — 응답에서 떼어 로컬 상태로 둔다: 작성/삭제 후 서버 재조회 없이 즉시 반영.
+    @State private var guestbook: [RankingAPI.GuildGuestbookEntry] = []
+    @State private var policy: RankingAPI.GuildGuestbookPolicy?
+    @State private var draft: String = ""
+    @State private var posting = false
+    @State private var guestbookError: String?
+    /// 서버가 알려준 남은 쿨다운(초) — 1초 tick으로 줄이고 0이 되면 작성창이 열린다.
+    @State private var cooldownSec: Int = 0
+    @State private var cooldownTask: Task<Void, Never>?
+    @State private var deletingIds: Set<Int> = []
+
     /// 방문객 = 내 대표 펫. 랭킹 미등록이면 닉네임이 비어 "나"로 표시.
     private var guest: OfficeSimulation.Guest {
         let avatar = settings.trainerCard.avatar
@@ -41,6 +52,8 @@ struct GuildVisitView: View {
                         header(response.guild)
                         officeSection(response)
                         membersSection(response)
+                        Divider()
+                        guestbookSection(response)
                     } else if let error {
                         Text(error).font(.system(size: 11)).foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -56,8 +69,183 @@ struct GuildVisitView: View {
             }
         }
         .frame(width: 540)
-        .frame(minHeight: 460, maxHeight: 640)
+        .frame(minHeight: 460, maxHeight: 700)
         .onAppear(perform: load)
+        .onDisappear { cooldownTask?.cancel() }
+    }
+
+    // MARK: - 방명록
+
+    /// 방명록 목록 + 작성창. 작성 가능 여부는 서버 정책(`guestbookPolicy`)이 결정한다 —
+    /// 자기 길드(열람·삭제만) / GitHub 미연동(읽기 전용) / 쿨다운 중 / 구버전 서버(작성창 없음).
+    private func guestbookSection(_ response: RankingAPI.GuildVisitResponse) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Label("방명록", systemImage: "book.closed")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("\(guestbook.count)")
+                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                Spacer()
+            }
+            guestbookComposer(response)
+            if guestbook.isEmpty {
+                Text(response.guild.isMine
+                     ? "아직 놀러온 사람이 없어요. 다른 길드에 먼저 다녀와 보세요."
+                     : "첫 방명록을 남겨보세요 ✍️")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .padding(.vertical, 6)
+            } else {
+                ForEach(guestbook) { entry in
+                    GuildGuestbookRow(
+                        entry: entry,
+                        canDelete: canDelete(entry),
+                        deleting: deletingIds.contains(entry.id),
+                        onDelete: { deleteEntry(entry) })
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func guestbookComposer(_ response: RankingAPI.GuildVisitResponse) -> some View {
+        if let policy {
+            if response.guild.isMine {
+                Text(policy.isLeader
+                     ? "내 길드 방명록이에요. 길드장은 언제든 지울 수 있어요."
+                     : "내 길드 방명록이에요. 다른 길드에 놀러가서 남겨보세요.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            } else if !policy.canInteract {
+                HStack(spacing: 8) {
+                    Image(systemName: "lock.shield").foregroundStyle(.secondary)
+                    Text("방명록 작성은 GitHub 인증 후 가능해요. 읽기는 그대로예요.")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: AppRadius.sm).fill(Color.gray.opacity(0.08)))
+            } else if policy.canWrite {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .top, spacing: 8) {
+                        TextField("\(policy.maxLen)자 이내로 한마디…", text: $draft, axis: .vertical)
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(1...3)
+                            .disabled(posting || cooldownSec > 0)
+                            .onChange(of: draft) { new in
+                                if new.count > policy.maxLen { draft = String(new.prefix(policy.maxLen)) }
+                            }
+                        Button {
+                            submitGuestbook(response)
+                        } label: {
+                            if posting {
+                                ProgressView().controlSize(.small).frame(width: 44)
+                            } else {
+                                Text("남기기").frame(width: 44)
+                            }
+                        }
+                        .keyboardShortcut(.return, modifiers: [.command])
+                        .disabled(!canSubmit(policy))
+                    }
+                    HStack {
+                        Text("\(draft.trimmingCharacters(in: .whitespacesAndNewlines).count) / \(policy.maxLen)")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(draft.count >= policy.maxLen ? .red : .secondary)
+                        Spacer()
+                        if cooldownSec > 0 {
+                            Text("다음 방명록까지 \(GuildGuestbookFormat.formatCooldown(cooldownSec))")
+                                .font(.system(size: 9)).foregroundStyle(.secondary)
+                        } else {
+                            Text("같은 길드에는 하루 한 번 · ⌘↩")
+                                .font(.system(size: 9)).foregroundStyle(.tertiary)
+                        }
+                    }
+                    if let guestbookError {
+                        Text(guestbookError).font(.system(size: 10)).foregroundStyle(.red)
+                    }
+                }
+            }
+        }
+    }
+
+    private func canSubmit(_ policy: RankingAPI.GuildGuestbookPolicy) -> Bool {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !posting && cooldownSec == 0 && !trimmed.isEmpty && trimmed.count <= policy.maxLen
+    }
+
+    private func canDelete(_ entry: RankingAPI.GuildGuestbookEntry) -> Bool {
+        guard let policy else { return false }
+        return policy.isLeader
+            || GuildGuestbookFormat.isDeletableByAuthor(entry, windowSec: policy.deleteWindowSec)
+    }
+
+    private func submitGuestbook(_ response: RankingAPI.GuildVisitResponse) {
+        guard let policy, canSubmit(policy) else { return }
+        let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        posting = true
+        guestbookError = nil
+        Task { @MainActor in
+            defer { posting = false }
+            let key = Keychain.loadRankingHmacKey() ?? ""
+            do {
+                let resp = try await RankingAPI.shared.writeGuestbook(
+                    deviceId: settings.rankingDeviceID, guildId: response.guild.id,
+                    content: content, hmacKeyBase64: key)
+                guestbook.insert(resp.entry, at: 0)
+                draft = ""
+                // 같은 길드 24h — 서버 재조회 없이 클라 카운트다운을 하루로 시드.
+                startCooldown(24 * 3_600)
+            } catch RankingAPI.RankingError.rateLimited(let retryAfterSec) {
+                startCooldown(retryAfterSec)
+                guestbookError = RankingAPI.RankingError.rateLimited(retryAfterSec: retryAfterSec).localizedDescription
+            } catch RankingAPI.RankingError.guildConflict(let code) where code == "guestbook_cooldown" {
+                startCooldown(24 * 3_600)
+                guestbookError = RankingAPI.RankingError.guildConflict(code).localizedDescription
+            } catch is CancellationError {
+                return
+            } catch {
+                guestbookError = error.friendlyDescription
+            }
+        }
+    }
+
+    private func deleteEntry(_ entry: RankingAPI.GuildGuestbookEntry) {
+        guard let response, !deletingIds.contains(entry.id) else { return }
+        deletingIds.insert(entry.id)
+        guestbookError = nil
+        Task { @MainActor in
+            defer { deletingIds.remove(entry.id) }
+            let key = Keychain.loadRankingHmacKey() ?? ""
+            do {
+                try await RankingAPI.shared.deleteGuestbook(
+                    deviceId: settings.rankingDeviceID, guildId: response.guild.id,
+                    entryId: entry.id, hmacKeyBase64: key)
+                guestbook.removeAll { $0.id == entry.id }
+            } catch RankingAPI.RankingError.guildConflict(let code) where code == "entry_not_found" {
+                guestbook.removeAll { $0.id == entry.id }
+            } catch is CancellationError {
+                return
+            } catch {
+                guestbookError = error.friendlyDescription
+            }
+        }
+    }
+
+    private func startCooldown(_ sec: Int) {
+        cooldownTask?.cancel()
+        cooldownSec = max(0, sec)
+        guard cooldownSec > 0 else { return }
+        cooldownTask = Task { @MainActor in
+            while cooldownSec > 0, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+                cooldownSec = max(0, cooldownSec - 1)
+            }
+        }
+    }
+
+    private func applyGuestbook(_ resp: RankingAPI.GuildVisitResponse) {
+        guestbook = resp.guestbook ?? []
+        policy = resp.guestbookPolicy
+        startCooldown(resp.guestbookPolicy?.cooldownRemainingSec ?? 0)
     }
 
     private var titleBar: some View {
@@ -187,6 +375,7 @@ struct GuildVisitView: View {
     private func load() {
         if let preloaded {
             response = preloaded
+            applyGuestbook(preloaded)
             return
         }
         guard response == nil, !loading else { return }
@@ -199,8 +388,10 @@ struct GuildVisitView: View {
             defer { loading = false }
             let key = Keychain.loadRankingHmacKey() ?? ""
             do {
-                response = try await RankingAPI.shared.visitGuild(
+                let resp = try await RankingAPI.shared.visitGuild(
                     deviceId: settings.rankingDeviceID, guildId: guildId, hmacKeyBase64: key)
+                response = resp
+                applyGuestbook(resp)
             } catch is CancellationError {
                 return
             } catch {

@@ -57,6 +57,8 @@ struct GuildView: View {
     @State private var browseLoading: Bool = false
     /// 길드 방문 시트 — 둘러보기 행의 "구경".
     @State private var visitingGuild: RankingAPI.GuildLeaderboardEntry?
+    /// 받은 방명록 삭제 진행 중 id (길드장 / 작성자 윈도우 내).
+    @State private var deletingGuestbookIds: Set<Int> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -596,6 +598,8 @@ struct GuildView: View {
                 Divider()
                 membersSection(info)
                 Divider()
+                guestbookSection(info)
+                Divider()
                 inviteCodeSection(info.guild)
                 if info.guild.isLeader {
                     requestsSection(info)
@@ -710,6 +714,48 @@ struct GuildView: View {
         }
     }
 
+    /// 받은 방명록 — 놀러온 사람들이 남긴 최근 N개 (guild-info가 10개만 싣는다). 길드장은 언제나,
+    /// 작성자는 윈도우 내에서 삭제. 전체 목록은 랭킹 탭에서 내 길드를 "놀러가기"로 열면 보인다.
+    @ViewBuilder
+    private func guestbookSection(_ info: RankingAPI.GuildInfoResponse) -> some View {
+        let entries = info.guestbook ?? []
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Label("받은 방명록", systemImage: "book.closed")
+                    .font(.system(size: 12, weight: .semibold))
+                if !entries.isEmpty {
+                    Text("최근 \(entries.count)개")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            if entries.isEmpty {
+                Text("아직 놀러온 사람이 없어요. 랭킹 탭에서 다른 길드에 먼저 다녀와 보세요.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                ForEach(entries) { entry in
+                    GuildGuestbookRow(
+                        entry: entry,
+                        canDelete: info.guild.isLeader
+                            || GuildGuestbookFormat.isDeletableByAuthor(
+                                entry, windowSec: info.guestbookDeleteWindowSec ?? 300),
+                        deleting: deletingGuestbookIds.contains(entry.id),
+                        onDelete: { performDeleteGuestbook(entry.id, guildId: info.guild.id) })
+                }
+            }
+        }
+    }
+
+    private func performDeleteGuestbook(_ entryId: Int, guildId: String) {
+        deletingGuestbookIds.insert(entryId)
+        runAction({
+            defer { deletingGuestbookIds.remove(entryId) }
+            try await RankingAPI.shared.deleteGuestbook(
+                deviceId: settings.rankingDeviceID, guildId: guildId, entryId: entryId,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+        })
+    }
+
     /// 기여 VP 내림차순 → 가입 오래된 순. 서버 rn과 동일한 감각의 표시 순서.
     private func sortedMembers(_ members: [RankingAPI.GuildMember]) -> [RankingAPI.GuildMember] {
         members.sorted {
@@ -783,6 +829,8 @@ struct GuildView: View {
                 // 깃발 이펙트가 내 펫에 두를 로고 — 길드 화면 밖(차트·트레이너 카드)에서도 필요하다.
                 settings.guildLogo = resp.guild.logo ?? ""
                 settings.isGuildLeader = resp.guild.isLeader
+                // 받은 방명록을 본 것으로 — 가챠 창 길드 탭의 새 글 점이 꺼진다.
+                settings.guildGuestbookSeenAt = Date()
             } catch RankingAPI.RankingError.guildConflict(let code) where code == "not_in_guild" {
                 info = nil
                 notInGuild = true

@@ -143,12 +143,16 @@ final class ScenePreviews: SandboxedTestCase {
                 logo: info.guild.logo, logoX: info.guild.logoX, logoY: info.guild.logoY,
                 createdAt: info.guild.createdAt, score: info.guild.score, rank: info.guild.rank,
                 memberCount: info.guild.memberCount, isMine: false),
-            members: members, furniture: info.furniture)
+            members: members, furniture: info.furniture,
+            guestbook: PreviewDemoState.guestbook(),
+            guestbookPolicy: RankingAPI.GuildGuestbookPolicy(
+                canWrite: true, maxLen: 60, cooldownRemainingSec: 0, deleteWindowSec: 300,
+                requiresGitHub: true, canInteract: true, isLeader: false))
         try PreviewRenderer.renderInWindow(
             GuildVisitView(guildId: info.guild.id, guildName: info.guild.name, preloaded: visit),
-            size: CGSize(width: 540, height: 640),
+            size: CGSize(width: 540, height: 700),
             section: "길드", title: "방문-시트",
-            note: "남의 사무실 읽기 전용 + 방문객 펫(입구 쪽) + 멤버 칩. 헤더·사무실·멤버가 모두 보이는지")
+            note: "남의 사무실 읽기 전용 + 방문객 펫(입구 쪽) + 멤버 칩 + 방명록(작성창·줄). 아래가 잘리지 않는지")
     }
 
     // MARK: - 배틀 재생

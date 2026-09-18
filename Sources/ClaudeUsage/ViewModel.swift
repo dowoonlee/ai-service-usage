@@ -1014,6 +1014,10 @@ final class ViewModel: ObservableObject {
             if !PollGate.boardViewIsOpen {
                 boardUnreadCount = resp.badges.boardUnread
             }
+            // 내 길드 방명록 새 글 신호 — 값 비교만 하므로 nil(무소속·구버전 서버)도 그대로 반영.
+            if s.guildGuestbookLatestAt != resp.badges.guestbookLatestAt {
+                s.guildGuestbookLatestAt = resp.badges.guestbookLatestAt
+            }
             DMViewModel.shared.applySync(resp)
             if let board = resp.board { NotificationCenter.default.post(name: .boardSynced, object: board) }
             if let lb = resp.leaderboard {

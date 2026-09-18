@@ -1,6 +1,6 @@
 # 길드 방문 · 방명록 — 기획
 
-> 다른 길드 사무실에 놀러가서 구경하고 방명록을 남기는 기능. **M1(방문)은 본 문서와 함께 구현, M2(방명록)는 후속.**
+> 다른 길드 사무실에 놀러가서 구경하고 방명록을 남기는 기능. **M1(방문)·M2(방명록) 구현 완료, M3은 선택.**
 > 작성 시점: v0.17.39 기준 (2026-09-18).
 
 ## 0. 결론 요약
@@ -52,7 +52,7 @@ furniture: [{ slotId, itemKind, donorNickname }]
 - 진입: `GuildLeaderboardView(onVisit:)`, `GuildView.browseRow`의 버튼. `.sheet(item:)`.
 - 프리뷰: `ScenePreviews.testRenderGuildVisit` (`PREVIEW_OUT_DIR`).
 
-## 3. M2 — 방명록 (후속)
+## 3. M2 — 방명록 (구현)
 
 ### 규칙
 
@@ -75,15 +75,22 @@ furniture: [{ slotId, itemKind, donorNickname }]
 ### 서버
 
 - `guild-guestbook` POST HMAC `{ action: write|delete, deviceId, guildId, content?, entryId?, ts }`. 옵션 키는 present-only 규약(`guild-request` 참조).
-- 쿨다운은 `INSERT ... ON CONFLICT DO UPDATE ... WHERE last_at < now() - 24h` 한 문장 — 병렬 요청 우회 차단.
-- `guild-visit` 응답에 `guestbook[30]` + `guestbookPolicy { canWrite, cooldownRemainingSec, canInteract }` 추가.
-- `guild-info`에 최근 10개 포함 (60자×10 < 1KB). `sync`에 `guestbookUnread` 스칼라(클라 `guestbookSeenAt` 기준 카운트, `boardUnread`와 같은 모양).
+- 쓰기는 `guild_guestbook_write` RPC 한 트랜잭션: 전역 쿨다운(조건부 `UPDATE users`) → 길드별 쿨다운(`INSERT ... ON CONFLICT DO UPDATE ... WHERE`) → insert → `guilds.last_guestbook_at`. 거절은 `RAISE EXCEPTION '<code>:<retryAfterSec>'`로 전체 롤백(실패한 시도가 전역 쿨다운을 소모하지 않도록). Edge가 파싱해 `rate_limited`(429) / `guestbook_cooldown`(403)으로 매핑.
+- `guild-visit` 응답에 `guestbook[30]` + `guestbookPolicy { canWrite, maxLen, cooldownRemainingSec, deleteWindowSec, requiresGitHub, canInteract, isLeader }`.
+- `guild-info`에 `guestbook[10]` + `guestbookDeleteWindowSec` (60자×10 < 1KB).
+- `sync` 배지에 `guestbookLatestAt` **스칼라**(내 길드 `guilds.last_guestbook_at`). 카운트 대신 최신 시각을 준 이유: 클라 `seenAt`을 payload에 넣으면 서명 대상이 바뀌어 구버전 클라/서버 조합이 깨진다. 클라가 자기 `guildGuestbookSeenAt`과 비교해 점만 찍는다.
 
 ### 클라이언트
 
-- 방문 시트 하단에 방명록 목록 + 작성창. `BoardView`의 서버 주도 정책 패턴(글자 수 잘라내기, 쿨다운 틱, GitHub 안내 카드) 복사.
-- 내 길드 화면 하단 "받은 방명록" 섹션 + 길드 탭 배지.
-- 새 에러 코드 `own_guild`, `guestbook_cooldown`을 `domainErrorCodes`와 한국어 메시지에 등록.
+- `GuildGuestbookRow`(공용 줄: 대표 펫 + 닉네임 + 소속 길드 + 상대 시각 + 삭제) — 방문 시트와 내 길드 화면이 공유.
+- 방문 시트 하단: 목록 + 작성창. `BoardView`의 서버 주도 정책 패턴(글자 수 잘라내기, 쿨다운 틱, GitHub 안내 카드). 작성 성공 시 로컬 prepend + 24h 카운트다운 시드(재조회 없음).
+- 내 길드 화면 "받은 방명록" 섹션(길드장 삭제). `guild-info` 성공 시 `guildGuestbookSeenAt = now`.
+- 가챠 창 길드 탭: `Settings.hasUnseenGuestbook`이면 "길드 •".
+- 에러 코드 `own_guild`, `guestbook_cooldown`, `entry_not_found`, `not_entry_owner`, `delete_window_expired`, `content_too_long`, `empty_content`를 `domainErrorCodes`와 한국어 메시지에 등록.
+
+### 배포 순서
+
+마이그레이션(`20260918000000_guild_guestbook.sql`) → 함수(`guild-visit`, `guild-guestbook`, `guild-info`, `sync`) → 클라 릴리스. 서버가 먼저 나가도 구버전 클라는 새 필드를 무시하므로 안전하다.
 
 ## 4. M3 — 선택
 

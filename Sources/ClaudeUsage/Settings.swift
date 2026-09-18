@@ -760,6 +760,20 @@ final class Settings: ObservableObject {
     @Published var boardLastSeenAt: Date? {
         didSet { AppEnv.defaults.set(boardLastSeenAt, forKey: Keys.boardLastSeenAt) }
     }
+    /// 내 길드 방명록의 최신 작성 시각 — sync 배지(`guestbookLatestAt`)로 갱신. 무소속이면 nil.
+    @Published var guildGuestbookLatestAt: Date? {
+        didSet { AppEnv.defaults.set(guildGuestbookLatestAt, forKey: Keys.guildGuestbookLatestAt) }
+    }
+    /// 내 길드 화면의 "받은 방명록"을 마지막으로 본 시점. 가챠 창 길드 탭의 새 글 점 기준.
+    @Published var guildGuestbookSeenAt: Date? {
+        didSet { AppEnv.defaults.set(guildGuestbookSeenAt, forKey: Keys.guildGuestbookSeenAt) }
+    }
+    /// 내 길드에 아직 안 본 방명록이 있는지 — 두 시각의 단순 비교.
+    var hasUnseenGuestbook: Bool {
+        guard let latest = guildGuestbookLatestAt else { return false }
+        guard let seen = guildGuestbookSeenAt else { return true }
+        return latest > seen
+    }
     /// 본인 누적 메달 캐시 — 진실은 서버 `monthly_winners`. leaderboard 응답의 `myMedals`로
     /// 갱신해 리포트 카드가 서버 round-trip 없이 즉시 그릴 수 있게 한다. 백업 대상 아님(재집계 가능).
     @Published var myMedalGold: Int {
@@ -951,6 +965,8 @@ final class Settings: ObservableObject {
         self.cursorLastRequestsSeen    = d.object(forKey: Keys.cursorLastRequestsSeen) as? Int
         self.cursorLastStartOfMonth    = d.object(forKey: Keys.cursorLastStartOfMonth) as? Date
         self.boardLastSeenAt           = d.object(forKey: Keys.boardLastSeenAt) as? Date
+        self.guildGuestbookLatestAt    = d.object(forKey: Keys.guildGuestbookLatestAt) as? Date
+        self.guildGuestbookSeenAt      = d.object(forKey: Keys.guildGuestbookSeenAt) as? Date
         self.myMedalGold               = (d.object(forKey: Keys.myMedalGold) as? Int) ?? 0
         self.myMedalSilver             = (d.object(forKey: Keys.myMedalSilver) as? Int) ?? 0
         self.myMedalBronze             = (d.object(forKey: Keys.myMedalBronze) as? Int) ?? 0
@@ -1853,6 +1869,8 @@ final class Settings: ObservableObject {
         static let cursorLastRequestsSeen      = "settings.cursorLastRequestsSeen"
         static let cursorLastStartOfMonth      = "settings.cursorLastStartOfMonth"
         static let boardLastSeenAt             = "settings.boardLastSeenAt"
+        static let guildGuestbookLatestAt      = "settings.guildGuestbookLatestAt"
+        static let guildGuestbookSeenAt        = "settings.guildGuestbookSeenAt"
         static let myMedalGold                 = "settings.myMedalGold"
         static let myMedalSilver               = "settings.myMedalSilver"
         static let myMedalBronze               = "settings.myMedalBronze"

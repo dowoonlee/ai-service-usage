@@ -684,6 +684,57 @@ actor RankingAPI {
         let sentInvites: [GuildSentInvite]?
         /// 길드장이 받은 대기중 가입신청. 구버전 서버는 키가 없어 nil → 빈 배열로 취급.
         let joinRequests: [GuildIncomingRequest]?
+        /// 받은 방명록 최근 N개 (M2). 구버전 서버는 nil.
+        let guestbook: [GuildGuestbookEntry]?
+        /// 작성자 본인 삭제 윈도우(초) — 구버전 서버는 nil.
+        let guestbookDeleteWindowSec: Int?
+    }
+
+    /// 방명록 한 줄 (guild-visit / guild-info / guild-guestbook 공용). 작성 시점 스냅샷이라
+    /// 작성자가 닉변·탈퇴·이적해도 그대로 남는다.
+    struct GuildGuestbookEntry: Decodable, Identifiable, Sendable, Equatable {
+        let id: Int
+        let nickname: String
+        /// 작성 시점 소속 길드명. 무소속이면 nil.
+        let guildName: String?
+        let petKind: String?
+        let petVariant: Int?
+        let content: String
+        let createdAt: Date
+        let isMine: Bool
+
+        var kind: PetKind? { petKind.flatMap(PetKind.init(rawValue:)) }
+        var variant: Int { petVariant ?? 0 }
+    }
+    /// 방문 화면의 방명록 작성 정책 — 서버 SSOT(`_shared/guild_policy.ts`).
+    struct GuildGuestbookPolicy: Decodable, Sendable {
+        /// 타 길드 + GitHub 연동일 때만 true. 자기 길드는 열람·삭제만.
+        let canWrite: Bool
+        let maxLen: Int
+        let cooldownRemainingSec: Int
+        let deleteWindowSec: Int
+        let requiresGitHub: Bool
+        let canInteract: Bool
+        /// 이 길드의 길드장 — 방명록을 언제나 지울 수 있다.
+        let isLeader: Bool
+    }
+    struct GuildGuestbookPayload: Encodable {
+        let action: String
+        let deviceId: String
+        let guildId: String
+        /// write 전용 — nil이면 키 제외(서버 present-only).
+        let content: String?
+        /// delete 전용.
+        let entryId: Int?
+        let ts: Int64
+    }
+    struct GuildGuestbookRequest: Encodable {
+        let payload: GuildGuestbookPayload
+        let signature: String
+    }
+    struct GuildGuestbookWriteResponse: Decodable, Sendable {
+        let ok: Bool
+        let entry: GuildGuestbookEntry
     }
 
     // 길드 방문 (guild-visit) — docs/plans/guild-visit.md M1
@@ -719,6 +770,9 @@ actor RankingAPI {
         /// profileJson 없이 `petKind`/`petVariant`/`equippedEffects`만 채워진 멤버.
         let members: [GuildMember]
         let furniture: [GuildFurnitureItem]
+        /// 방명록 최근 N개 (M2). 구버전 서버는 nil.
+        let guestbook: [GuildGuestbookEntry]?
+        let guestbookPolicy: GuildGuestbookPolicy?
 
         /// 사무실 뷰(`GuildOfficeView`)는 `GuildInfoResponse`를 받으므로 그 모양으로 조립한다.
         /// 방문자에게 리더 권한은 없다 — `isLeader: false`, 초대 코드는 빈 문자열.
@@ -729,7 +783,8 @@ actor RankingAPI {
                                  officeFurniture: guild.officeFurniture, logo: guild.logo,
                                  logoX: guild.logoX, logoY: guild.logoY, createdAt: guild.createdAt,
                                  score: guild.score, rank: guild.rank, memberCount: guild.memberCount),
-                members: members, furniture: furniture, sentInvites: nil, joinRequests: nil)
+                members: members, furniture: furniture, sentInvites: nil, joinRequests: nil,
+                guestbook: nil, guestbookDeleteWindowSec: nil)
         }
     }
 
@@ -857,6 +912,13 @@ actor RankingAPI {
                 case "redecline_cooldown":  return "최근 거절된 길드입니다. 24시간 후 다시 신청할 수 있어요."
                 case "request_not_found":   return "이미 처리되었거나 만료된 신청입니다."
                 case "request_expired":     return "만료된 신청입니다."
+                case "own_guild":           return "내 길드 방명록에는 쓸 수 없어요. 다른 길드에 놀러가서 남겨보세요."
+                case "guestbook_cooldown":  return "이 길드에는 하루에 한 번만 남길 수 있어요."
+                case "entry_not_found":     return "이미 지워진 방명록이에요."
+                case "not_entry_owner":     return "본인이 쓴 방명록만 지울 수 있어요."
+                case "delete_window_expired": return "삭제 가능 시간이 지났어요."
+                case "content_too_long":    return "방명록이 너무 길어요."
+                case "empty_content":       return "내용을 입력하세요."
                 default:                    return "길드 요청이 거부되었습니다 (\(code))."
                 }
             case .guildCooldown(let until):
@@ -1462,6 +1524,28 @@ actor RankingAPI {
                               body: GuildVisitRequest(payload: payload, signature: sig))
     }
 
+    /// 방명록 작성 — 타 길드에만. 쿨다운은 429 `rateLimited`(전체 10분) / `guildConflict("guestbook_cooldown")`(같은 길드 24h).
+    func writeGuestbook(deviceId: String, guildId: String, content: String,
+                        hmacKeyBase64: String) async throws -> GuildGuestbookWriteResponse {
+        let payload = GuildGuestbookPayload(action: "write", deviceId: deviceId, guildId: guildId,
+                                            content: content, entryId: nil,
+                                            ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-guestbook",
+                              body: GuildGuestbookRequest(payload: payload, signature: sig))
+    }
+
+    /// 방명록 삭제 — 작성자(윈도우 내) 또는 해당 길드 길드장.
+    func deleteGuestbook(deviceId: String, guildId: String, entryId: Int,
+                         hmacKeyBase64: String) async throws {
+        let payload = GuildGuestbookPayload(action: "delete", deviceId: deviceId, guildId: guildId,
+                                            content: nil, entryId: entryId,
+                                            ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let _: GuildOfficeResponse = try await post(path: "guild-guestbook",
+                                                    body: GuildGuestbookRequest(payload: payload, signature: sig))
+    }
+
     /// 길드 월간 랭킹 — 미등록/미가입도 조회 가능 (온보딩 "구경" 리스트).
     func fetchGuildLeaderboard(deviceId: String?) async throws -> GuildLeaderboardResponse {
         var items: [URLQueryItem] = []
@@ -1544,6 +1628,9 @@ actor RankingAPI {
     struct SyncBadges: Decodable, Sendable {
         let dmUnread: Int
         let boardUnread: Int
+        /// 내 길드 방명록의 최신 작성 시각 — 클라 `guildGuestbookSeenAt`과 비교해 새 글 점을 찍는다.
+        /// 무소속·방명록 없음·구버전 서버는 nil.
+        let guestbookLatestAt: Date?
     }
     struct SyncInboxSection: Decodable, Sendable { let threads: [DMThread] }
 
@@ -2159,6 +2246,9 @@ actor RankingAPI {
         "invite_not_found", "invite_expired", "redecline_cooldown", "too_many_pending",
         // 가입신청
         "already_requested", "request_not_found", "request_expired", "too_many_requests",
+        // 방명록
+        "own_guild", "guestbook_cooldown", "entry_not_found", "not_entry_owner",
+        "delete_window_expired", "content_too_long", "empty_content",
         // 쪽지
         "no_key", "cannot_send", "cannot_send_self", "cannot_block",
     ]
