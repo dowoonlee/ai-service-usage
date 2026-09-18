@@ -30,6 +30,7 @@ import { fetchInbox } from "../_shared/dm_inbox_query.ts";
 import { fetchBoard } from "../_shared/board_query.ts";
 import { fetchLeaderboard } from "../_shared/leaderboard_query.ts";
 import { listPendingInvites } from "../_shared/guild_invites.ts";
+import { GUESTBOOK_REPLY_BADGE_WINDOW_SEC } from "../_shared/guild_policy.ts";
 
 interface SyncPayload {
   deviceId: string;
@@ -156,7 +157,32 @@ Deno.serve(async (req: Request) => {
     console.error("sync guestbook badge failed", error);
   }
 
-  out.badges = { dmUnread, boardUnread, guestbookLatestAt };
+  // --- 내가 남긴 방명록에 달린 답글 (M3) ---
+  // 길드별 최신 답글 시각 목록. 클라가 길드별 seenAt과 비교해 랭킹 탭·해당 길드 놀러가기 버튼에
+  // 점을 찍는다. 같은 길드엔 하루 한 번만 쓸 수 있어 목록은 작고, 기간을 잘라 무한히 자라지 않는다.
+  // 본인이 자기 원글에 단 답글은 제외.
+  let guestbookReplies: Array<{ guildId: string; latestAt: string }> = [];
+  try {
+    const since = new Date(Date.now() - GUESTBOOK_REPLY_BADGE_WINDOW_SEC * 1000).toISOString();
+    const { data: rows } = await db
+      .from("guild_guestbook_replies")
+      .select("guild_id, created_at")
+      .eq("entry_author_device_id", deviceId)
+      .neq("author_device_id", deviceId)
+      .gt("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    const latest = new Map<string, string>();
+    for (const r of rows ?? []) {
+      const g = String(r.guild_id);
+      if (!latest.has(g)) latest.set(g, r.created_at);   // desc 정렬이라 첫 행이 최신
+    }
+    guestbookReplies = [...latest].map(([guildId, latestAt]) => ({ guildId, latestAt }));
+  } catch (error) {
+    console.error("sync guestbook replies badge failed", error);
+  }
+
+  out.badges = { dmUnread, boardUnread, guestbookLatestAt, guestbookReplies };
   out.invites = invites;
 
   // --- 게시판 본문 (창이 열렸을 때만) ---

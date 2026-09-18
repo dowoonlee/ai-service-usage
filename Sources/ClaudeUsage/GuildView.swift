@@ -59,6 +59,11 @@ struct GuildView: View {
     @State private var visitingGuild: RankingAPI.GuildLeaderboardEntry?
     /// 받은 방명록 삭제 진행 중 id (길드장 / 작성자 윈도우 내).
     @State private var deletingGuestbookIds: Set<Int> = []
+    /// 받은 방명록 답글 (M3) — 진행 중 표시와 "더 보기"로 받은 전체 답글(응답은 최근 3개만).
+    @State private var replyBusyEntryIds: Set<Int> = []
+    @State private var deletingReplyIds: Set<Int> = []
+    @State private var loadingReplyIds: Set<Int> = []
+    @State private var expandedReplies: [Int: [RankingAPI.GuildGuestbookReply]] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -261,13 +266,19 @@ struct GuildView: View {
             Text("\(g.memberCount)명").font(.system(size: 9)).foregroundStyle(.secondary)
             Spacer()
             Text("\(g.score) VP").font(.system(size: 10, design: .monospaced)).foregroundStyle(.purple)
+            let hasReply = settings.guildsWithUnseenReplies.contains(g.guildId.lowercased())
             Button {
                 visitingGuild = g
             } label: {
                 Image(systemName: "figure.walk").font(.system(size: 10))
             }
             .controlSize(.small)
-            .help("\(g.name) 사무실 구경하기")
+            .overlay(alignment: .topTrailing) {
+                if hasReply {
+                    Circle().fill(Color.red).frame(width: 7, height: 7).offset(x: 3, y: -3)
+                }
+            }
+            .help(hasReply ? "내 방명록에 답글이 달렸어요" : "\(g.name) 사무실 구경하기")
             if alreadyRequested {
                 Text("신청됨").font(.system(size: 10)).foregroundStyle(.secondary)
                     .padding(.horizontal, 6).padding(.vertical, 2)
@@ -733,15 +744,79 @@ struct GuildView: View {
                 Text("아직 놀러온 사람이 없어요. 랭킹 탭에서 다른 길드에 먼저 다녀와 보세요.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             } else {
+                let windowSec = info.guestbookDeleteWindowSec ?? 300
                 ForEach(entries) { entry in
                     GuildGuestbookRow(
                         entry: entry,
                         canDelete: info.guild.isLeader
-                            || GuildGuestbookFormat.isDeletableByAuthor(
-                                entry, windowSec: info.guestbookDeleteWindowSec ?? 300),
+                            || GuildGuestbookFormat.isDeletableByAuthor(entry, windowSec: windowSec),
                         deleting: deletingGuestbookIds.contains(entry.id),
-                        onDelete: { performDeleteGuestbook(entry.id, guildId: info.guild.id) })
+                        onDelete: { performDeleteGuestbook(entry.id, guildId: info.guild.id) },
+                        replies: expandedReplies[entry.id] ?? entry.replies ?? [],
+                        replyCount: max(entry.replyCount ?? 0, expandedReplies[entry.id]?.count ?? 0),
+                        // 집주인은 전원 답글 가능 (GitHub 게이트만). 서버가 최종 판정.
+                        canReply: info.guestbookCanInteract ?? true,
+                        replyBusy: replyBusyEntryIds.contains(entry.id),
+                        loadingReplies: loadingReplyIds.contains(entry.id),
+                        canDeleteReply: { reply in
+                            info.guild.isLeader
+                                || GuildGuestbookFormat.isDeletableByAuthor(reply, windowSec: windowSec)
+                        },
+                        deletingReplyIds: deletingReplyIds,
+                        onReply: { text, done in
+                            performReplyGuestbook(entry.id, guildId: info.guild.id, text: text, done: done)
+                        },
+                        onDeleteReply: { reply in
+                            performDeleteGuestbookReply(reply.id, guildId: info.guild.id)
+                        },
+                        onLoadAllReplies: { performLoadReplies(entry.id, guildId: info.guild.id) })
                 }
+            }
+        }
+    }
+
+    /// 답글 — 성공하면 refresh로 재정합(runAction). 작성창은 done(true)로 닫힌다.
+    private func performReplyGuestbook(_ entryId: Int, guildId: String, text: String,
+                                       done: @escaping (Bool) -> Void) {
+        replyBusyEntryIds.insert(entryId)
+        var ok = false
+        runAction({
+            defer { replyBusyEntryIds.remove(entryId); done(ok) }
+            _ = try await RankingAPI.shared.replyGuestbook(
+                deviceId: settings.rankingDeviceID, guildId: guildId, entryId: entryId,
+                content: text, hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            ok = true
+            expandedReplies[entryId] = nil   // refresh 응답(최근 3개)으로 돌아간다
+        })
+    }
+
+    private func performDeleteGuestbookReply(_ replyId: Int, guildId: String) {
+        deletingReplyIds.insert(replyId)
+        runAction({
+            defer { deletingReplyIds.remove(replyId) }
+            try await RankingAPI.shared.deleteGuestbookReply(
+                deviceId: settings.rankingDeviceID, guildId: guildId, replyId: replyId,
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            for (entryId, list) in expandedReplies where list.contains(where: { $0.id == replyId }) {
+                expandedReplies[entryId] = list.filter { $0.id != replyId }
+            }
+        })
+    }
+
+    /// "더 보기" — refresh 없이 로컬 상태만 채운다 (읽기라 재정합 불필요).
+    private func performLoadReplies(_ entryId: Int, guildId: String) {
+        guard !loadingReplyIds.contains(entryId) else { return }
+        loadingReplyIds.insert(entryId)
+        Task { @MainActor in
+            defer { loadingReplyIds.remove(entryId) }
+            do {
+                expandedReplies[entryId] = try await RankingAPI.shared.listGuestbookReplies(
+                    deviceId: settings.rankingDeviceID, guildId: guildId, entryId: entryId,
+                    hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            } catch is CancellationError {
+                return
+            } catch {
+                self.error = error.localizedDescription
             }
         }
     }

@@ -688,6 +688,22 @@ actor RankingAPI {
         let guestbook: [GuildGuestbookEntry]?
         /// 작성자 본인 삭제 윈도우(초) — 구버전 서버는 nil.
         let guestbookDeleteWindowSec: Int?
+        /// 집주인 답글 작성 가능(GitHub 게이트). 구버전 서버는 nil → true로 취급.
+        let guestbookCanInteract: Bool?
+    }
+
+    /// 방명록 답글 한 줄 (M3) — 1단, 작성 시점 스냅샷.
+    struct GuildGuestbookReply: Decodable, Identifiable, Sendable, Equatable {
+        let id: Int
+        let nickname: String
+        let petKind: String?
+        let petVariant: Int?
+        let content: String
+        let createdAt: Date
+        let isMine: Bool
+
+        var kind: PetKind? { petKind.flatMap(PetKind.init(rawValue:)) }
+        var variant: Int { petVariant ?? 0 }
     }
 
     /// 방명록 한 줄 (guild-visit / guild-info / guild-guestbook 공용). 작성 시점 스냅샷이라
@@ -702,6 +718,10 @@ actor RankingAPI {
         let content: String
         let createdAt: Date
         let isMine: Bool
+        /// 최근 3개(시간순). 전체는 `listGuestbookReplies`. 구버전 서버는 nil.
+        /// 답글 작성/삭제 후 로컬 갱신을 위해 var.
+        var replies: [GuildGuestbookReply]?
+        var replyCount: Int?
 
         var kind: PetKind? { petKind.flatMap(PetKind.init(rawValue:)) }
         var variant: Int { petVariant ?? 0 }
@@ -724,9 +744,19 @@ actor RankingAPI {
         let guildId: String
         /// write 전용 — nil이면 키 제외(서버 present-only).
         let content: String?
-        /// delete 전용.
+        /// delete / reply / list_replies 전용.
         let entryId: Int?
+        /// delete_reply 전용.
+        let replyId: Int?
         let ts: Int64
+    }
+    struct GuildGuestbookReplyResponse: Decodable, Sendable {
+        let ok: Bool
+        let reply: GuildGuestbookReply
+    }
+    struct GuildGuestbookRepliesResponse: Decodable, Sendable {
+        let ok: Bool
+        let replies: [GuildGuestbookReply]
     }
     struct GuildGuestbookRequest: Encodable {
         let payload: GuildGuestbookPayload
@@ -784,7 +814,7 @@ actor RankingAPI {
                                  logoX: guild.logoX, logoY: guild.logoY, createdAt: guild.createdAt,
                                  score: guild.score, rank: guild.rank, memberCount: guild.memberCount),
                 members: members, furniture: furniture, sentInvites: nil, joinRequests: nil,
-                guestbook: nil, guestbookDeleteWindowSec: nil)
+                guestbook: nil, guestbookDeleteWindowSec: nil, guestbookCanInteract: nil)
         }
     }
 
@@ -915,6 +945,8 @@ actor RankingAPI {
                 case "own_guild":           return "내 길드 방명록에는 쓸 수 없어요. 다른 길드에 놀러가서 남겨보세요."
                 case "guestbook_cooldown":  return "이 길드에는 하루에 한 번만 남길 수 있어요."
                 case "entry_not_found":     return "이미 지워진 방명록이에요."
+                case "reply_not_found":     return "이미 지워진 답글이에요."
+                case "cannot_reply":        return "답글은 그 길드 멤버와 원글 작성자만 달 수 있어요."
                 case "not_entry_owner":     return "본인이 쓴 방명록만 지울 수 있어요."
                 case "delete_window_expired": return "삭제 가능 시간이 지났어요."
                 case "content_too_long":    return "방명록이 너무 길어요."
@@ -1528,7 +1560,7 @@ actor RankingAPI {
     func writeGuestbook(deviceId: String, guildId: String, content: String,
                         hmacKeyBase64: String) async throws -> GuildGuestbookWriteResponse {
         let payload = GuildGuestbookPayload(action: "write", deviceId: deviceId, guildId: guildId,
-                                            content: content, entryId: nil,
+                                            content: content, entryId: nil, replyId: nil,
                                             ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         return try await post(path: "guild-guestbook",
@@ -1539,11 +1571,44 @@ actor RankingAPI {
     func deleteGuestbook(deviceId: String, guildId: String, entryId: Int,
                          hmacKeyBase64: String) async throws {
         let payload = GuildGuestbookPayload(action: "delete", deviceId: deviceId, guildId: guildId,
-                                            content: nil, entryId: entryId,
+                                            content: nil, entryId: entryId, replyId: nil,
                                             ts: Int64(Date().timeIntervalSince1970))
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         let _: GuildOfficeResponse = try await post(path: "guild-guestbook",
                                                     body: GuildGuestbookRequest(payload: payload, signature: sig))
+    }
+
+    /// 방명록 답글 — 그 길드 멤버 또는 원글 작성자. 30초 쿨다운은 429 `rateLimited`.
+    func replyGuestbook(deviceId: String, guildId: String, entryId: Int, content: String,
+                        hmacKeyBase64: String) async throws -> GuildGuestbookReplyResponse {
+        let payload = GuildGuestbookPayload(action: "reply", deviceId: deviceId, guildId: guildId,
+                                            content: content, entryId: entryId, replyId: nil,
+                                            ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-guestbook",
+                              body: GuildGuestbookRequest(payload: payload, signature: sig))
+    }
+
+    func deleteGuestbookReply(deviceId: String, guildId: String, replyId: Int,
+                              hmacKeyBase64: String) async throws {
+        let payload = GuildGuestbookPayload(action: "delete_reply", deviceId: deviceId, guildId: guildId,
+                                            content: nil, entryId: nil, replyId: replyId,
+                                            ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let _: GuildOfficeResponse = try await post(path: "guild-guestbook",
+                                                    body: GuildGuestbookRequest(payload: payload, signature: sig))
+    }
+
+    /// 원글 하나의 답글 전체 — 응답에는 최근 3개만 실리므로 "더 보기"가 부른다.
+    func listGuestbookReplies(deviceId: String, guildId: String, entryId: Int,
+                              hmacKeyBase64: String) async throws -> [GuildGuestbookReply] {
+        let payload = GuildGuestbookPayload(action: "list_replies", deviceId: deviceId, guildId: guildId,
+                                            content: nil, entryId: entryId, replyId: nil,
+                                            ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        let resp: GuildGuestbookRepliesResponse = try await post(
+            path: "guild-guestbook", body: GuildGuestbookRequest(payload: payload, signature: sig))
+        return resp.replies
     }
 
     /// 길드 월간 랭킹 — 미등록/미가입도 조회 가능 (온보딩 "구경" 리스트).
@@ -1631,6 +1696,12 @@ actor RankingAPI {
         /// 내 길드 방명록의 최신 작성 시각 — 클라 `guildGuestbookSeenAt`과 비교해 새 글 점을 찍는다.
         /// 무소속·방명록 없음·구버전 서버는 nil.
         let guestbookLatestAt: Date?
+        /// 내가 남긴 방명록에 답글이 달린 길드별 최신 시각 (M3). 구버전 서버는 nil.
+        let guestbookReplies: [GuestbookReplyBadge]?
+    }
+    struct GuestbookReplyBadge: Decodable, Sendable {
+        let guildId: String
+        let latestAt: Date
     }
     struct SyncInboxSection: Decodable, Sendable { let threads: [DMThread] }
 
@@ -2249,6 +2320,7 @@ actor RankingAPI {
         // 방명록
         "own_guild", "guestbook_cooldown", "entry_not_found", "not_entry_owner",
         "delete_window_expired", "content_too_long", "empty_content",
+        "cannot_reply", "reply_not_found",
         // 쪽지
         "no_key", "cannot_send", "cannot_send_self", "cannot_block",
     ]

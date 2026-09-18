@@ -13,6 +13,7 @@ import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { stripBackup } from "../_shared/profile.ts";
 import { GUESTBOOK_DELETE_WINDOW_SEC, GUESTBOOK_INFO_LIMIT, TOP_CONTRIBUTORS } from "../_shared/guild_policy.ts";
+import { boardInteractionBlocked } from "../_shared/board_policy.ts";
 import { fetchGuestbook } from "../_shared/guild_guestbook.ts";
 
 interface InfoPayload {
@@ -55,7 +56,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user } = await db
     .from("users")
-    .select("device_id, hmac_key_b64, status")
+    .select("device_id, hmac_key_b64, status, github_login")
     .eq("device_id", deviceId)
     .maybeSingle();
   if (!user) return errorResponse(404, "device_not_registered");
@@ -243,5 +244,7 @@ Deno.serve(async (req: Request) => {
     joinRequests,  // 길드장만 채워짐 — 받은 대기중 가입신청 (그 외 빈 배열)
     guestbook,
     guestbookDeleteWindowSec: GUESTBOOK_DELETE_WINDOW_SEC,
+    // 집주인 답글 작성 가능 여부 (GitHub 게이트) — 실제 차단은 guild-guestbook의 403.
+    guestbookCanInteract: !boardInteractionBlocked(user),
   });
 });

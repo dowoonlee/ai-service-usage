@@ -1253,7 +1253,8 @@ enum GuildOfficeDemo {
             return RankingAPI.GuildInfoResponse(guild: guild, members: members,
                                                 furniture: decorItems, sentInvites: nil,
                                                 joinRequests: nil, guestbook: nil,
-                                                guestbookDeleteWindowSec: nil)
+                                                guestbookDeleteWindowSec: nil,
+                                                guestbookCanInteract: nil)
         }
 
         var body: some View {

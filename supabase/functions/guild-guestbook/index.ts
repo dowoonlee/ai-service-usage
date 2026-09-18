@@ -1,5 +1,6 @@
 // POST /guild-guestbook
-// 다른 길드 사무실 방명록 — 작성(write) / 삭제(delete). docs/plans/guild-visit.md M2.
+// 다른 길드 사무실 방명록 — 작성(write) / 삭제(delete) + 답글(reply / delete_reply / list_replies).
+// docs/plans/guild-visit.md M2·M3.
 //
 // 규칙:
 //   write  — 타 길드에만(자기 길드는 403 own_guild). GitHub 미연동은 게시판과 같은 게이트
@@ -8,7 +9,12 @@
 //   delete — 작성자는 GUESTBOOK_DELETE_WINDOW_SEC 안에서, 해당 길드의 길드장은 언제나.
 //            쿨다운은 삭제와 무관하게 유지된다(writes 테이블이 별도라서).
 //
-// payload(서명 대상, flat, present-only): { action, deviceId, guildId, [content], [entryId], ts }
+//   reply  — 1단 답글. 권한 = 그 길드 멤버(집주인) 또는 원글 작성자. 30초 쿨다운(마지막 답글 기준).
+//            답글이 달리면 guilds.last_guestbook_at도 갱신 — 집주인 "새 활동" 배지가 그대로 확장된다.
+//   delete_reply — 답글 작성자(윈도우 내) 또는 길드장.
+//   list_replies — 원글 하나의 답글 전체(응답엔 최근 N개만 실리므로 "더 보기"용).
+//
+// payload(서명 대상, flat, present-only): { action, deviceId, guildId, [content], [entryId], [replyId], ts }
 
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
@@ -21,15 +27,26 @@ import {
   GUESTBOOK_GLOBAL_COOLDOWN_SEC,
   GUESTBOOK_GUILD_COOLDOWN_SEC,
   GUESTBOOK_MAX_LEN,
+  GUESTBOOK_REPLY_COOLDOWN_SEC,
+  GUESTBOOK_REPLY_MAX_LEN,
 } from "../_shared/guild_policy.ts";
+import { fetchReplies, mapReplyRow } from "../_shared/guild_guestbook.ts";
+
+type Action = "write" | "delete" | "reply" | "delete_reply" | "list_replies";
+const ACTIONS: ReadonlySet<string> = new Set(["write", "delete", "reply", "delete_reply", "list_replies"]);
 
 interface GuestbookPayload {
-  action: "write" | "delete";
+  action: Action;
   deviceId: string;
   guildId: string;
   content?: string;
   entryId?: number;
+  replyId?: number;
   ts: number;
+}
+
+function isPositiveInt(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v > 0;
 }
 interface GuestbookRequest {
   payload: GuestbookPayload;
@@ -51,7 +68,7 @@ Deno.serve(async (req: Request) => {
   }
   const p = body.payload;
   if (!p || typeof p !== "object") return errorResponse(400, "missing_payload");
-  if (p.action !== "write" && p.action !== "delete") return errorResponse(400, "invalid_action");
+  if (!ACTIONS.has(p.action)) return errorResponse(400, "invalid_action");
   if (!isValidUUID(p.deviceId)) return errorResponse(400, "invalid_device_id");
   if (!isValidUUID(p.guildId)) return errorResponse(400, "invalid_guild_id");
   if (typeof body.signature !== "string" || body.signature.length !== 64) {
@@ -61,12 +78,15 @@ Deno.serve(async (req: Request) => {
   const nowSec = Math.floor(Date.now() / 1000);
   if (Math.abs(nowSec - p.ts) > MAX_CLOCK_SKEW_SEC) return errorResponse(400, "clock_skew");
 
-  if (p.action === "write" && typeof p.content !== "string") {
+  if ((p.action === "write" || p.action === "reply") && typeof p.content !== "string") {
     return errorResponse(400, "invalid_content");
   }
-  if (p.action === "delete" &&
-      (typeof p.entryId !== "number" || !Number.isInteger(p.entryId) || p.entryId <= 0)) {
+  if ((p.action === "delete" || p.action === "reply" || p.action === "list_replies") &&
+      !isPositiveInt(p.entryId)) {
     return errorResponse(400, "invalid_entry_id");
+  }
+  if (p.action === "delete_reply" && !isPositiveInt(p.replyId)) {
+    return errorResponse(400, "invalid_reply_id");
   }
 
   const deviceId = p.deviceId.toLowerCase();
@@ -90,6 +110,7 @@ Deno.serve(async (req: Request) => {
   };
   if (typeof p.content === "string") verifyObj.content = p.content;
   if (typeof p.entryId === "number") verifyObj.entryId = p.entryId;
+  if (typeof p.replyId === "number") verifyObj.replyId = p.replyId;
   const ok = await verifyHmac(verifyObj, body.signature, user.hmac_key_b64);
   if (!ok) return errorResponse(401, "bad_signature");
 
@@ -174,6 +195,122 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  const isLeader = String(guild.leader_device_id ?? "").toLowerCase() === deviceId;
+  const isHost = myGuildId === guild.id.toLowerCase();
+
+  // ---------------------------------------------------------------- list_replies
+  if (p.action === "list_replies") {
+    const { data: entry } = await db
+      .from("guild_guestbook")
+      .select("id, guild_id")
+      .eq("id", p.entryId as number)
+      .maybeSingle();
+    if (!entry || String(entry.guild_id).toLowerCase() !== guild.id.toLowerCase()) {
+      return errorResponse(404, "entry_not_found");
+    }
+    return jsonResponse({ ok: true, replies: await fetchReplies(db, entry.id, deviceId) });
+  }
+
+  // ---------------------------------------------------------------- reply
+  if (p.action === "reply") {
+    const { data: entry } = await db
+      .from("guild_guestbook")
+      .select("id, guild_id, author_device_id")
+      .eq("id", p.entryId as number)
+      .maybeSingle();
+    if (!entry || String(entry.guild_id).toLowerCase() !== guild.id.toLowerCase()) {
+      return errorResponse(404, "entry_not_found");
+    }
+    const isEntryAuthor = entry.author_device_id != null &&
+      String(entry.author_device_id).toLowerCase() === deviceId;
+    if (!isHost && !isEntryAuthor) return errorResponse(403, "cannot_reply");
+    if (boardInteractionBlocked(user)) return errorResponse(403, "github_required");
+
+    const content = (p.content as string).trim();
+    if (content.length === 0) return errorResponse(400, "empty_content");
+    if (content.length > GUESTBOOK_REPLY_MAX_LEN) return errorResponse(400, "content_too_long");
+
+    // 30초 쿨다운 — 내가 쓴 마지막 답글 기준 (댓글과 같은 방식; 삭제로 우회돼도 30초라 무의미).
+    const { data: lastReply } = await db
+      .from("guild_guestbook_replies")
+      .select("created_at")
+      .eq("author_device_id", deviceId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastReply?.created_at) {
+      const remaining = Math.ceil(
+        (new Date(lastReply.created_at).getTime() + GUESTBOOK_REPLY_COOLDOWN_SEC * 1000 - Date.now()) / 1000,
+      );
+      if (remaining > 0) {
+        return jsonResponse({ error: "rate_limited", retryAfterSec: remaining }, { status: 429 });
+      }
+    }
+
+    const avatar = (user.profile_json as { card?: { avatar?: { kind?: unknown; variant?: unknown } } } | null)
+      ?.card?.avatar;
+    const petKind = typeof avatar?.kind === "string" ? avatar.kind : null;
+    const petVariant = typeof avatar?.variant === "number" ? avatar.variant : 0;
+
+    if (user.status === "shadow_banned") {
+      return jsonResponse({
+        ok: true,
+        reply: { id: 0, nickname: user.nickname, petKind, petVariant, content,
+                 createdAt: new Date().toISOString(), isMine: true },
+      });
+    }
+
+    const { data: inserted, error: insErr } = await db
+      .from("guild_guestbook_replies")
+      .insert({
+        entry_id: entry.id,
+        guild_id: guild.id,
+        entry_author_device_id: entry.author_device_id,
+        author_device_id: deviceId,
+        author_nickname_snapshot: user.nickname,
+        author_pet_kind: petKind,
+        author_pet_variant: petVariant,
+        content,
+        tenant_id: tenant,
+      })
+      .select("id, author_device_id, author_nickname_snapshot, author_pet_kind, author_pet_variant, content, created_at")
+      .single();
+    if (insErr || !inserted) {
+      console.error("guestbook reply insert failed", insErr);
+      return errorResponse(500, "insert_failed");
+    }
+    // 집주인 "새 활동" 신호 — 원글과 같은 컬럼을 갱신해 길드 탭 점이 그대로 확장된다.
+    // 방문자 본인이 자기 원글에 답할 때는 집주인에게 알릴 활동이므로 이것도 갱신.
+    await db.from("guilds").update({ last_guestbook_at: inserted.created_at }).eq("id", guild.id);
+
+    return jsonResponse({ ok: true, reply: mapReplyRow(inserted, deviceId) });
+  }
+
+  // ---------------------------------------------------------------- delete_reply
+  if (p.action === "delete_reply") {
+    const { data: reply } = await db
+      .from("guild_guestbook_replies")
+      .select("id, guild_id, author_device_id, created_at")
+      .eq("id", p.replyId as number)
+      .maybeSingle();
+    if (!reply || String(reply.guild_id).toLowerCase() !== guild.id.toLowerCase()) {
+      return errorResponse(404, "reply_not_found");
+    }
+    const isAuthor = reply.author_device_id != null &&
+      String(reply.author_device_id).toLowerCase() === deviceId;
+    if (!isAuthor && !isLeader) return errorResponse(403, "not_entry_owner");
+    if (isAuthor && !isLeader) {
+      const ageSec = (Date.now() - new Date(reply.created_at).getTime()) / 1000;
+      if (ageSec > GUESTBOOK_DELETE_WINDOW_SEC) return errorResponse(403, "delete_window_expired");
+    }
+    const { error: delErr } = await db.from("guild_guestbook_replies").delete().eq("id", reply.id);
+    if (delErr) {
+      console.error("guestbook reply delete failed", delErr);
+      return errorResponse(500, "delete_failed");
+    }
+    return jsonResponse({ ok: true });
+  }
+
   // ---------------------------------------------------------------- delete
   const { data: entry } = await db
     .from("guild_guestbook")
@@ -185,7 +322,6 @@ Deno.serve(async (req: Request) => {
   }
   const isAuthor = entry.author_device_id != null &&
     String(entry.author_device_id).toLowerCase() === deviceId;
-  const isLeader = String(guild.leader_device_id ?? "").toLowerCase() === deviceId;
   if (!isAuthor && !isLeader) return errorResponse(403, "not_entry_owner");
   if (isAuthor && !isLeader) {
     const ageSec = (Date.now() - new Date(entry.created_at).getTime()) / 1000;

@@ -34,6 +34,10 @@ struct GuildVisitView: View {
     @State private var cooldownSec: Int = 0
     @State private var cooldownTask: Task<Void, Never>?
     @State private var deletingIds: Set<Int> = []
+    // 답글 (M3)
+    @State private var replyBusyIds: Set<Int> = []
+    @State private var loadingReplyIds: Set<Int> = []
+    @State private var deletingReplyIds: Set<Int> = []
 
     /// 방문객 = 내 대표 펫. 랭킹 미등록이면 닉네임이 비어 "나"로 표시.
     private var guest: OfficeSimulation.Guest {
@@ -101,7 +105,18 @@ struct GuildVisitView: View {
                         entry: entry,
                         canDelete: canDelete(entry),
                         deleting: deletingIds.contains(entry.id),
-                        onDelete: { deleteEntry(entry) })
+                        onDelete: { deleteEntry(entry) },
+                        replies: entry.replies ?? [],
+                        replyCount: entry.replyCount ?? 0,
+                        canReply: canReply(entry, in: response),
+                        replyMaxLen: policy?.maxLen ?? 60,
+                        replyBusy: replyBusyIds.contains(entry.id),
+                        loadingReplies: loadingReplyIds.contains(entry.id),
+                        canDeleteReply: { canDeleteReply($0) },
+                        deletingReplyIds: deletingReplyIds,
+                        onReply: { text, done in submitReply(entry, text: text, done: done) },
+                        onDeleteReply: { deleteReply(entry, reply: $0) },
+                        onLoadAllReplies: { loadAllReplies(entry) })
                 }
             }
         }
@@ -178,6 +193,100 @@ struct GuildVisitView: View {
             || GuildGuestbookFormat.isDeletableByAuthor(entry, windowSec: policy.deleteWindowSec)
     }
 
+    // MARK: - 답글 (M3) — 권한은 그 길드 멤버(집주인) 또는 원글 작성자. 서버가 최종 판정.
+
+    private func canReply(_ entry: RankingAPI.GuildGuestbookEntry,
+                          in response: RankingAPI.GuildVisitResponse) -> Bool {
+        guard let policy, policy.canInteract else { return false }
+        return response.guild.isMine || entry.isMine
+    }
+
+    private func canDeleteReply(_ reply: RankingAPI.GuildGuestbookReply) -> Bool {
+        guard let policy else { return false }
+        return policy.isLeader
+            || GuildGuestbookFormat.isDeletableByAuthor(reply, windowSec: policy.deleteWindowSec)
+    }
+
+    private func mutateEntry(_ id: Int, _ body: (inout RankingAPI.GuildGuestbookEntry) -> Void) {
+        guard let idx = guestbook.firstIndex(where: { $0.id == id }) else { return }
+        body(&guestbook[idx])
+    }
+
+    private func submitReply(_ entry: RankingAPI.GuildGuestbookEntry, text: String,
+                             done: @escaping (Bool) -> Void) {
+        guard let response, !replyBusyIds.contains(entry.id) else { return done(false) }
+        replyBusyIds.insert(entry.id)
+        guestbookError = nil
+        Task { @MainActor in
+            defer { replyBusyIds.remove(entry.id) }
+            let key = Keychain.loadRankingHmacKey() ?? ""
+            do {
+                let resp = try await RankingAPI.shared.replyGuestbook(
+                    deviceId: settings.rankingDeviceID, guildId: response.guild.id,
+                    entryId: entry.id, content: text, hmacKeyBase64: key)
+                mutateEntry(entry.id) {
+                    $0.replies = ($0.replies ?? []) + [resp.reply]
+                    $0.replyCount = ($0.replyCount ?? 0) + 1
+                }
+                done(true)
+            } catch is CancellationError {
+                done(false)
+            } catch {
+                guestbookError = error.friendlyDescription
+                done(false)
+            }
+        }
+    }
+
+    private func deleteReply(_ entry: RankingAPI.GuildGuestbookEntry,
+                             reply: RankingAPI.GuildGuestbookReply) {
+        guard let response, !deletingReplyIds.contains(reply.id) else { return }
+        deletingReplyIds.insert(reply.id)
+        guestbookError = nil
+        Task { @MainActor in
+            defer { deletingReplyIds.remove(reply.id) }
+            let key = Keychain.loadRankingHmacKey() ?? ""
+            do {
+                try await RankingAPI.shared.deleteGuestbookReply(
+                    deviceId: settings.rankingDeviceID, guildId: response.guild.id,
+                    replyId: reply.id, hmacKeyBase64: key)
+            } catch RankingAPI.RankingError.guildConflict(let code) where code == "reply_not_found" {
+                // 이미 없음 — 아래에서 로컬만 정리.
+            } catch is CancellationError {
+                return
+            } catch {
+                guestbookError = error.friendlyDescription
+                return
+            }
+            mutateEntry(entry.id) {
+                $0.replies = ($0.replies ?? []).filter { $0.id != reply.id }
+                $0.replyCount = max(0, ($0.replyCount ?? 1) - 1)
+            }
+        }
+    }
+
+    private func loadAllReplies(_ entry: RankingAPI.GuildGuestbookEntry) {
+        guard let response, !loadingReplyIds.contains(entry.id) else { return }
+        loadingReplyIds.insert(entry.id)
+        Task { @MainActor in
+            defer { loadingReplyIds.remove(entry.id) }
+            let key = Keychain.loadRankingHmacKey() ?? ""
+            do {
+                let all = try await RankingAPI.shared.listGuestbookReplies(
+                    deviceId: settings.rankingDeviceID, guildId: response.guild.id,
+                    entryId: entry.id, hmacKeyBase64: key)
+                mutateEntry(entry.id) {
+                    $0.replies = all
+                    $0.replyCount = all.count
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guestbookError = error.friendlyDescription
+            }
+        }
+    }
+
     private func submitGuestbook(_ response: RankingAPI.GuildVisitResponse) {
         guard let policy, canSubmit(policy) else { return }
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -247,6 +356,8 @@ struct GuildVisitView: View {
         guestbook = resp.guestbook ?? []
         policy = resp.guestbookPolicy
         startCooldown(resp.guestbookPolicy?.cooldownRemainingSec ?? 0)
+        // 이 길드의 답글을 본 것으로 — 랭킹 탭·길드 스코프·놀러가기 버튼의 점이 꺼진다.
+        settings.guestbookReplySeen[resp.guild.id.lowercased()] = Date()
     }
 
     private var titleBar: some View {
@@ -437,15 +548,27 @@ enum GuildVisitDemo {
             member("newbie", kind: .pawn, vp: 120, top: false),
         ]
         let now = Date()
-        func entry(_ id: Int, _ nick: String, _ guild: String?, _ kind: PetKind, _ text: String,
-                   minutesAgo: Double, mine: Bool = false) -> RankingAPI.GuildGuestbookEntry {
-            RankingAPI.GuildGuestbookEntry(
-                id: id, nickname: nick, guildName: guild, petKind: kind.rawValue, petVariant: 0,
+        func reply(_ id: Int, _ nick: String, _ kind: PetKind, _ text: String,
+                   minutesAgo: Double, mine: Bool = false) -> RankingAPI.GuildGuestbookReply {
+            RankingAPI.GuildGuestbookReply(
+                id: id, nickname: nick, petKind: kind.rawValue, petVariant: 0,
                 content: text, createdAt: now.addingTimeInterval(-minutesAgo * 60), isMine: mine)
         }
+        func entry(_ id: Int, _ nick: String, _ guild: String?, _ kind: PetKind, _ text: String,
+                   minutesAgo: Double, mine: Bool = false,
+                   replies: [RankingAPI.GuildGuestbookReply] = [], replyCount: Int? = nil)
+            -> RankingAPI.GuildGuestbookEntry {
+            RankingAPI.GuildGuestbookEntry(
+                id: id, nickname: nick, guildName: guild, petKind: kind.rawValue, petVariant: 0,
+                content: text, createdAt: now.addingTimeInterval(-minutesAgo * 60), isMine: mine,
+                replies: replies, replyCount: replyCount ?? replies.count)
+        }
         let guestbook = [
-            entry(5, "pipelinepete", "It's Always DNS", .whale, "사무실 좋네요, 커피머신 부럽다 ☕", minutesAgo: 2, mine: true),
-            entry(4, "nullpointer", "Works on My Machine", .slime, "놀러왔다 감. 다음 달 1위는 우리 거", minutesAgo: 40),
+            entry(5, "pipelinepete", "It's Always DNS", .whale, "사무실 좋네요, 커피머신 부럽다 ☕", minutesAgo: 2, mine: true,
+                  replies: [reply(11, "kimcoder", .warrior, "커피는 셀프입니다 ☕", minutesAgo: 1),
+                            reply(12, "pipelinepete", .whale, "ㅋㅋ 다음에 원두 들고 올게요", minutesAgo: 0.5, mine: true)]),
+            entry(4, "nullpointer", "Works on My Machine", .slime, "놀러왔다 감. 다음 달 1위는 우리 거", minutesAgo: 40,
+                  replies: [reply(13, "vibewolf", .wolf, "어림도 없지", minutesAgo: 30)], replyCount: 5),
             entry(3, "yamlwrangler", nil, .fox, "무소속인데 구경 잘 했습니다 👋", minutesAgo: 180),
             entry(2, "cronjobkim", "--no-verify", .wolf, "액자 문구 웃기네요 ㅋㅋ", minutesAgo: 900),
             entry(1, "gitblame", "It's Always DNS", .ninjaFrog, "화분에 물 좀 주세요", minutesAgo: 3000),

@@ -1,6 +1,6 @@
 # 길드 방문 · 방명록 — 기획
 
-> 다른 길드 사무실에 놀러가서 구경하고 방명록을 남기는 기능. **M1(방문)·M2(방명록) 구현 완료, M3은 선택.**
+> 다른 길드 사무실에 놀러가서 구경하고 방명록을 남기는 기능. **M1(방문)·M2(방명록)·M3(답글) 구현 완료, M4는 선택.**
 > 작성 시점: v0.17.39 기준 (2026-09-18).
 
 ## 0. 결론 요약
@@ -92,11 +92,11 @@ furniture: [{ slotId, itemKind, donorNickname }]
 
 마이그레이션(`20260918000000_guild_guestbook.sql`) → 함수(`guild-visit`, `guild-guestbook`, `guild-info`, `sync`) → 클라 릴리스. 서버가 먼저 나가도 구버전 클라는 새 필드를 무시하므로 안전하다.
 
-## 4. M3 — 방명록 대댓글 (후속 1순위, 미착수)
+## 4. M3 — 방명록 답글 (구현)
 
 방명록 한 줄에 답글을 다는 기능. 방문자가 남기고 끝나는 일방향을 "집주인이 답하는" 양방향으로.
 
-### 초안 결정 (착수 시 확정)
+### 결정
 
 | 항목 | 안 | 근거 |
 |---|---|---|
@@ -108,16 +108,27 @@ furniture: [{ slotId, itemKind, donorNickname }]
 | GitHub 게이트 | 적용 | |
 | 표시 | 원글당 최근 3개 + "N개 더" (전체는 펼침) | 방문 응답 Egress — 30원글×답글 무제한은 안 됨 |
 
-### 열린 질문 (착수 전 결정 필요)
+### 방문자가 답글을 읽는 경로 — 점을 따라 재방문
 
-1. **방문자가 답글을 어디서 읽나.** 다시 그 길드에 놀러가야만 보이면 답글이 닿지 않는다. 후보: (a) 내 길드 탭에 "내가 남긴 방명록" 섹션(원글 + 답글), (b) 쪽지함(DM 인박스)에 답글 알림 행, (c) 재방문 시에만. (a)가 자연스럽지만 무소속 방문자는 길드 탭이 온보딩 화면이라 자리를 따로 내야 한다.
-2. **새 답글 신호.** 원글과 같은 방식이면 `users.last_guestbook_reply_at`(내가 쓴 원글에 답글이 달린 최신 시각)을 `sync` 배지 스칼라로. 어디에 점을 찍을지는 1번에 달려 있다.
+새 화면을 만들지 않는다. **가챠 창 "랭킹 •" → 스코프 "길드 •" → 그 길드 행의 놀러가기 버튼 점 → 방문 시트에서 답글.** 무소속 방문자도 랭킹 탭은 보이므로 자리 문제가 없다(온보딩 둘러보기 행의 버튼에도 같은 점).
 
-### 서버 스케치
+- 신호: `sync` 배지 `guestbookReplies: [{guildId, latestAt}]` — 내가 쓴 원글에 달린 답글(본인 답글 제외)의 길드별 최신 시각, 최근 30일. 같은 길드엔 하루 한 번만 쓸 수 있어 목록이 작다.
+- 읽음: 클라 `Settings.guestbookReplySeen[guildId]` — 그 길드 방문 시트를 열면 갱신. 서명 payload는 바뀌지 않는다.
+- 집주인 쪽은 새 신호 없이 `guilds.last_guestbook_at`을 답글에도 갱신 → 기존 "길드 •"가 "내 길드 방명록에 새 활동"으로 확장.
+- 한계: 리더보드는 상위 50개만 보여 주므로 순위 밖 길드의 답글은 버튼이 없어 닿지 않는다. 길드 수가 넘치면 "답글 온 길드" 행을 따로 띄우는 것으로 보완.
 
-- `guild_guestbook_replies(id, entry_id → guild_guestbook ON DELETE CASCADE, author_device_id, author_nickname_snapshot, author_pet_kind, author_pet_variant, content CHECK 1..60, tenant_id, created_at)`, 인덱스 `(entry_id, created_at)`.
-- `guild-guestbook`에 `action: reply | delete_reply` 추가 (present-only 키 `entryId`/`replyId`/`content`). 권한 = 그 길드 멤버 or 원글 작성자.
-- `guild-visit`·`guild-info`의 `guestbook[]` 각 항목에 `replies[≤3]` + `replyCount`.
+### 서버
+
+- `guild_guestbook_replies(id, entry_id → guild_guestbook CASCADE, guild_id → guilds CASCADE, entry_author_device_id, author_*, content CHECK 1..60, tenant_id, created_at)`. `guild_id`·`entry_author_device_id`는 비정규화 — 배지 조회를 조인 없이 하기 위해(sync는 전 사용자가 600s마다 친다).
+- `guild-guestbook`에 `reply` / `delete_reply` / `list_replies` 추가 (present-only 키 `entryId`/`replyId`/`content`). 쿨다운 30초는 마지막 답글 기준(댓글과 같은 방식).
+- `guild-visit`·`guild-info`의 `guestbook[]`에 `replies[≤3]`(시간순) + `replyCount`. 전체는 `list_replies`.
+- `guild-info`에 `guestbookCanInteract`(집주인 답글 작성창 게이트).
+
+### 클라이언트
+
+- `GuildGuestbookRow`가 답글 목록·"N개 더 보기"·답글 작성창까지 그린다. 방문 시트는 로컬 상태를 직접 갱신하고, 내 길드 화면은 `runAction` → refresh로 재정합(더 보기는 로컬 `expandedReplies`).
+- `Settings.guestbookReplyLatest/Seen` + `guildsWithUnseenReplies`. 점 3곳: 가챠 탭 "랭킹 •", 스코프 "길드 •", 놀러가기 버튼 오버레이.
+- 프리뷰 `ScenePreviews.testRenderGuildGuestbookRows`.
 
 ## 5. M4 — 선택
 

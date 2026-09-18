@@ -155,6 +155,30 @@ final class ScenePreviews: SandboxedTestCase {
             note: "남의 사무실 읽기 전용 + 방문객 펫(입구 쪽) + 멤버 칩 + 방명록(작성창·줄). 아래가 잘리지 않는지")
     }
 
+    /// 방명록 줄만 — 답글(1단 들여쓰기)·"더 보기"·답글 버튼·삭제 아이콘이 한 화면에. 시트에서는
+    /// 스크롤 아래라 전체 프리뷰로는 보이지 않는다.
+    func testRenderGuildGuestbookRows() throws {
+        let entries = PreviewDemoState.guestbook()
+        let view = VStack(alignment: .leading, spacing: 6) {
+            ForEach(entries) { entry in
+                GuildGuestbookRow(
+                    entry: entry, canDelete: entry.isMine, deleting: false, onDelete: {},
+                    replies: entry.replies ?? [], replyCount: entry.replyCount ?? 0,
+                    canReply: true,
+                    canDeleteReply: { $0.isMine },
+                    onReply: { _, done in done(true) },
+                    onDeleteReply: { _ in },
+                    onLoadAllReplies: {})
+            }
+        }
+        .padding(14)
+        .frame(width: 540)
+        try PreviewRenderer.renderInWindow(
+            view, size: CGSize(width: 540, height: 520),
+            section: "길드", title: "방명록-답글",
+            note: "원글 5개 중 2개에 답글. 두 번째는 5개 중 1개만 실려 '답글 4개 더 보기'가 떠야 한다")
+    }
+
     // MARK: - 배틀 재생
 
     /// 관장전/아레나가 공유하는 재생 뷰. 팀 크기(3v3 / 5v5)와 결과 상태에 따라 높이가 달라지고,

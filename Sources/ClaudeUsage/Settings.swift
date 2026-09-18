@@ -774,6 +774,22 @@ final class Settings: ObservableObject {
         guard let seen = guildGuestbookSeenAt else { return true }
         return latest > seen
     }
+    /// 내가 남긴 방명록에 답글이 달린 길드별 최신 시각 — sync 배지(`guestbookReplies`)로 갱신.
+    @Published var guestbookReplyLatest: [String: Date] {
+        didSet { persist(guestbookReplyLatest, forKey: Keys.guestbookReplyLatest) }
+    }
+    /// 그 길드 방문 시트를 마지막으로 연 시각(길드별) — 답글 점의 읽음 기준.
+    @Published var guestbookReplySeen: [String: Date] {
+        didSet { persist(guestbookReplySeen, forKey: Keys.guestbookReplySeen) }
+    }
+    /// 안 본 답글이 있는 길드 id — 랭킹 탭·길드 스코프·해당 길드 놀러가기 버튼에 점.
+    var guildsWithUnseenReplies: Set<String> {
+        Set(guestbookReplyLatest.compactMap { guildId, latest in
+            guard let seen = guestbookReplySeen[guildId] else { return guildId }
+            return latest > seen ? guildId : nil
+        })
+    }
+    var hasUnseenGuestbookReplies: Bool { !guildsWithUnseenReplies.isEmpty }
     /// 본인 누적 메달 캐시 — 진실은 서버 `monthly_winners`. leaderboard 응답의 `myMedals`로
     /// 갱신해 리포트 카드가 서버 round-trip 없이 즉시 그릴 수 있게 한다. 백업 대상 아님(재집계 가능).
     @Published var myMedalGold: Int {
@@ -967,6 +983,8 @@ final class Settings: ObservableObject {
         self.boardLastSeenAt           = d.object(forKey: Keys.boardLastSeenAt) as? Date
         self.guildGuestbookLatestAt    = d.object(forKey: Keys.guildGuestbookLatestAt) as? Date
         self.guildGuestbookSeenAt      = d.object(forKey: Keys.guildGuestbookSeenAt) as? Date
+        self.guestbookReplyLatest      = (d.data(forKey: Keys.guestbookReplyLatest).flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) }) ?? [:]
+        self.guestbookReplySeen        = (d.data(forKey: Keys.guestbookReplySeen).flatMap { try? JSONDecoder().decode([String: Date].self, from: $0) }) ?? [:]
         self.myMedalGold               = (d.object(forKey: Keys.myMedalGold) as? Int) ?? 0
         self.myMedalSilver             = (d.object(forKey: Keys.myMedalSilver) as? Int) ?? 0
         self.myMedalBronze             = (d.object(forKey: Keys.myMedalBronze) as? Int) ?? 0
@@ -1871,6 +1889,8 @@ final class Settings: ObservableObject {
         static let boardLastSeenAt             = "settings.boardLastSeenAt"
         static let guildGuestbookLatestAt      = "settings.guildGuestbookLatestAt"
         static let guildGuestbookSeenAt        = "settings.guildGuestbookSeenAt"
+        static let guestbookReplyLatest        = "settings.guestbookReplyLatest"
+        static let guestbookReplySeen          = "settings.guestbookReplySeen"
         static let myMedalGold                 = "settings.myMedalGold"
         static let myMedalSilver               = "settings.myMedalSilver"
         static let myMedalBronze               = "settings.myMedalBronze"
