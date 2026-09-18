@@ -123,6 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if ProcessInfo.processInfo.environment["AIUSAGE_OFFICE_DEMO"] != nil {
             GuildOfficeDemo.present()
         }
+        // 길드 방문 시트 미리보기 — `AIUSAGE_VISIT_DEMO=1 swift run`. 서버 없이 mock 길드·방명록.
+        if ProcessInfo.processInfo.environment["AIUSAGE_VISIT_DEMO"] != nil {
+            GuildVisitDemo.present()
+        }
 #endif
     }
 

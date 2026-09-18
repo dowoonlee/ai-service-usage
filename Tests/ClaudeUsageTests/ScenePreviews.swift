@@ -122,6 +122,39 @@ final class ScenePreviews: SandboxedTestCase {
             note: "배치 모드 + 테마 프리뷰(바닥3/벽1). 슬롯 가이드가 보이는지")
     }
 
+    /// 남의 길드 방문 시트 — 읽기 전용 사무실에 방문객 펫(내 대표 펫)이 들어와 있고, 그 아래
+    /// 멤버 칩이 줄바꿈되는지. 시트라 `minHeight`가 있어야 아래가 잘리지 않는다.
+    func testRenderGuildVisit() throws {
+        let info = PreviewDemoState.guildInfo()
+        let members = info.members.map { m in
+            // 방문 응답은 profileJson 없이 축약 필드만 온다 — 그 경로로 그려지는지 확인.
+            let avatar = m.officeAvatar
+            return RankingAPI.GuildMember(
+                nickname: m.nickname, monthlyVP: m.monthlyVP, isTopContributor: m.isTopContributor,
+                officeSlot: nil, isLeader: m.isLeader, isMe: false, joinedAt: m.joinedAt,
+                githubLogin: nil, profileJson: nil, deviceId: nil,
+                petKind: avatar.kind.rawValue, petVariant: avatar.variant,
+                equippedEffects: avatar.effects.map(\.rawValue))
+        }
+        let visit = RankingAPI.GuildVisitResponse(
+            guild: RankingAPI.GuildVisitGuild(
+                id: info.guild.id, name: info.guild.name, floorTheme: info.guild.floorTheme,
+                wallTheme: info.guild.wallTheme, officeFurniture: info.guild.officeFurniture,
+                logo: info.guild.logo, logoX: info.guild.logoX, logoY: info.guild.logoY,
+                createdAt: info.guild.createdAt, score: info.guild.score, rank: info.guild.rank,
+                memberCount: info.guild.memberCount, isMine: false),
+            members: members, furniture: info.furniture,
+            guestbook: PreviewDemoState.guestbook(),
+            guestbookPolicy: RankingAPI.GuildGuestbookPolicy(
+                canWrite: true, maxLen: 60, cooldownRemainingSec: 0, deleteWindowSec: 300,
+                requiresGitHub: true, canInteract: true, isLeader: false))
+        try PreviewRenderer.renderInWindow(
+            GuildVisitView(guildId: info.guild.id, guildName: info.guild.name, preloaded: visit),
+            size: CGSize(width: 540, height: 700),
+            section: "길드", title: "방문-시트",
+            note: "남의 사무실 읽기 전용 + 방문객 펫(입구 쪽) + 멤버 칩 + 방명록(작성창·줄). 아래가 잘리지 않는지")
+    }
+
     // MARK: - 배틀 재생
 
     /// 관장전/아레나가 공유하는 재생 뷰. 팀 크기(3v3 / 5v5)와 결과 상태에 따라 높이가 달라지고,

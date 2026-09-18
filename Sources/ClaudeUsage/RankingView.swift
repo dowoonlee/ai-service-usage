@@ -29,6 +29,8 @@ struct RankingView: View {
     @State private var tenantAnnouncements: [RankingAPI.TenantAnnouncementRow] = []
     /// RP 적립 이력 시트 트리거.
     @State private var showingRpHistory = false
+    /// 길드 방문 시트 — 리더보드 행의 "놀러가기".
+    @State private var visitingGuild: RankingAPI.GuildLeaderboardEntry?
 
     enum Scope: String, CaseIterable, Identifiable {
         case personal, guild
@@ -192,9 +194,13 @@ struct RankingView: View {
                 ScrollView {
                     GuildLeaderboardView(
                         board: board,
-                        highlightGuildId: settings.guildID.isEmpty ? nil : settings.guildID
+                        highlightGuildId: settings.guildID.isEmpty ? nil : settings.guildID,
+                        onVisit: { visitingGuild = $0 }
                     )
                     .padding(12)
+                }
+                .sheet(item: $visitingGuild) { entry in
+                    GuildVisitView(guildId: entry.guildId, guildName: entry.name)
                 }
                 footer
             }

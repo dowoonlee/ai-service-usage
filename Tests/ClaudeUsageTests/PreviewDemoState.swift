@@ -153,7 +153,8 @@ enum PreviewDemoState {
             return RankingAPI.GuildMember(
                 nickname: nick, monthlyVP: vp, isTopContributor: top, officeSlot: slot,
                 isLeader: me, isMe: me, joinedAt: Date(timeIntervalSince1970: 1_780_000_000),
-                githubLogin: nil, profileJson: profile, deviceId: nil)
+                githubLogin: nil, profileJson: profile, deviceId: nil,
+                petKind: nil, petVariant: nil, equippedEffects: nil)
         }
         let members = [
             // 깃발 장착 멤버 — 사무실은 그 길드의 로고를 알고 있으므로 남의 펫에도 길드기가 걸린다.
@@ -177,6 +178,25 @@ enum PreviewDemoState {
             createdAt: Date(timeIntervalSince1970: 1_770_000_000),
             score: 8_540, rank: 3, memberCount: members.count)
         return RankingAPI.GuildInfoResponse(guild: guild, members: members, furniture: furniture,
-                                            sentInvites: nil, joinRequests: nil)
+                                            sentInvites: nil, joinRequests: nil,
+                                            guestbook: guestbook(), guestbookDeleteWindowSec: 300)
+    }
+
+    /// 방명록 샘플 — 방문 시트·내 길드 화면이 같은 데이터로 렌더된다.
+    static func guestbook() -> [RankingAPI.GuildGuestbookEntry] {
+        let now = Date()   // 상대 시각 라벨이 실제처럼 보이도록 렌더 시점 기준
+        func entry(_ id: Int, _ nick: String, _ guild: String?, _ kind: PetKind, _ text: String,
+                   minutesAgo: Double, mine: Bool = false) -> RankingAPI.GuildGuestbookEntry {
+            RankingAPI.GuildGuestbookEntry(
+                id: id, nickname: nick, guildName: guild, petKind: kind.rawValue, petVariant: 0,
+                content: text, createdAt: now.addingTimeInterval(-minutesAgo * 60), isMine: mine)
+        }
+        return [
+            entry(5, "pipelinepete", "It's Always DNS", .whale, "사무실 좋네요, 커피머신 부럽다 ☕", minutesAgo: 2, mine: true),
+            entry(4, "nullpointer", "Works on My Machine", .slime, "놀러왔다 감. 다음 달 1위는 우리 거", minutesAgo: 40),
+            entry(3, "yamlwrangler", nil, .fox, "무소속인데 구경 잘 했습니다 👋", minutesAgo: 180),
+            entry(2, "cronjobkim", "--no-verify", .wolf, "액자 문구 웃기네요 ㅋㅋ", minutesAgo: 900),
+            entry(1, "gitblame", "It's Always DNS", .ninjaFrog, "화분에 물 좀 주세요", minutesAgo: 3000),
+        ]
     }
 }

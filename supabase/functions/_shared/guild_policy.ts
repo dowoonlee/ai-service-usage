@@ -138,3 +138,12 @@ export async function checkJoinCooldown(
   }
   return null;
 }
+
+// 방명록 (guild_guestbook) — docs/plans/guild-visit.md M2. 클라 GuildVisitView가 응답의
+// guestbookPolicy로 라벨·카운트다운을 그리므로 여기만 바꾸면 양쪽이 따라간다.
+export const GUESTBOOK_MAX_LEN = 60;                       // DB CHECK(1..60)와 쌍 — 바꾸면 마이그레이션 동반
+export const GUESTBOOK_GUILD_COOLDOWN_SEC = 24 * 3600;     // 같은 길드에 하루 한 번
+export const GUESTBOOK_GLOBAL_COOLDOWN_SEC = 600;          // 전체 10분 — 게시판 글 쿨다운과 같은 감각
+export const GUESTBOOK_DELETE_WINDOW_SEC = 300;            // 작성자 삭제 가능 윈도우 (길드장은 언제나)
+export const GUESTBOOK_VISIT_LIMIT = 30;                   // 방문 화면 최근 N개
+export const GUESTBOOK_INFO_LIMIT = 10;                    // 내 길드 화면 최근 N개 (guild-info 응답 비대화 방지)

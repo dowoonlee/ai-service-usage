@@ -140,7 +140,23 @@ Deno.serve(async (req: Request) => {
     console.error("sync board unread failed", error);
   }
 
-  out.badges = { dmUnread, boardUnread };
+  // --- 내 길드 방명록 최신 시각 ---
+  // 카운트가 아니라 스칼라 하나 — 클라가 자기 guestbookSeenAt과 비교해 점을 찍는다. payload에
+  // seenAt을 추가하면 서명 대상이 바뀌어 구버전 클라/서버 조합이 깨지므로 응답 쪽에만 얹는다.
+  let guestbookLatestAt: string | null = null;
+  try {
+    const { data: m } = await db
+      .from("guild_members")
+      .select("guilds(last_guestbook_at)")
+      .eq("device_id", deviceId)
+      .maybeSingle();
+    guestbookLatestAt =
+      (m?.guilds as unknown as { last_guestbook_at: string | null } | null)?.last_guestbook_at ?? null;
+  } catch (error) {
+    console.error("sync guestbook badge failed", error);
+  }
+
+  out.badges = { dmUnread, boardUnread, guestbookLatestAt };
   out.invites = invites;
 
   // --- 게시판 본문 (창이 열렸을 때만) ---

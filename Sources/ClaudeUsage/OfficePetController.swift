@@ -47,6 +47,13 @@ final class OfficeSimulation: ObservableObject {
         let mode: Mode
         let monthlyVP: Int
         let isMe: Bool
+        /// 방문객(남의 사무실에 놀러온 내 펫) — 멤버가 아니라 자리가 없고 대사 풀이 다르다.
+        var isGuest: Bool = false
+
+        /// 화면 표시 이름 — 방문객은 id에 접두가 붙어 있어 벗겨낸다.
+        var displayName: String {
+            isGuest ? String(id.dropFirst(OfficeSimulation.guestIDPrefix.count)) : id
+        }
 
         var x: CGFloat
         /// 현재 발(baseline) y — 2D 이동이라 상시 변한다.
@@ -77,6 +84,16 @@ final class OfficeSimulation: ObservableObject {
             }
         }
     }
+
+    /// 방문객 — `GuildVisitView`가 내 대표 펫을 남의 사무실에 들여보낼 때 (guild-visit.md M1).
+    struct Guest: Equatable {
+        let name: String
+        let kind: PetKind
+        let variant: Int
+        let effects: Set<EffectKind>
+    }
+    /// 방문객 펫 id 접두 — 멤버 닉네임과 충돌하지 않게 (닉네임에는 공백·제어문자가 없고 3자 이상).
+    nonisolated static let guestIDPrefix = "__guest:"
 
     @Published private(set) var pets: [PetState] = []
 
@@ -119,6 +136,13 @@ final class OfficeSimulation: ObservableObject {
         "이번 달은 내가 캐리한다", "테스트 다 초록불 보고 잘 거야",
     ]
     private static let drinkQuotes = ["☕", "커피가 코드를 만든다", "한 모금만…"]
+    /// 방문객 전용 — 남의 사무실을 구경하는 자의 감상.
+    private static let guestQuotes = [
+        "사무실 좋네요 👀", "커피 한 잔만 얻어 마셔도…", "구경 왔어요 👋", "여긴 분위기가 다르네",
+        "우리 길드보다 넓다…", "방명록 어디 있죠?", "PC가 다 켜져 있네", "화분에 물은 주시나요",
+        "이 소파 탐나는데", "혹시 자리 하나 남나요?",
+    ]
+    private static let guestArrivalLine = "놀러왔어요 👋"
     private static let greetLines = ["👋", "커피?", "머지 축하", "오늘도 화이팅"]
 
     deinit {
@@ -131,27 +155,28 @@ final class OfficeSimulation: ObservableObject {
     func configure(members: [RankingAPI.GuildMember],
                    assignments: [String: Int],
                    placements: [OfficeLayout.FurniturePlacement],
-                   decor: [(slotId: Int, kind: String)] = []) {
+                   decor: [(slotId: Int, kind: String)] = [],
+                   guest: Guest? = nil) {
         let key = members.map {
             "\($0.nickname):\(assignments[$0.nickname] ?? -1):\($0.isTopContributor):\($0.monthlyVP > 0)"
         }.sorted().joined(separator: ",")
             + "|furniture:" + OfficeLayout.serializePlacements(placements)
             + "|decor:" + decor.map { "\($0.slotId):\($0.kind)" }.sorted().joined(separator: ",")
+            + "|guest:" + (guest.map { "\($0.name):\($0.kind.rawValue):\($0.variant)" } ?? "")
         guard key != configuredKey else { return }
         configuredKey = key
 
         pets = members.compactMap { member in
             guard let spot = OfficeLayout.spot(id: assignments[member.nickname]) else { return nil }
-            let avatar = member.profileJson?.card.avatar
+            let avatar = member.officeAvatar
             let mode: PetState.Mode = member.monthlyVP <= 0 ? .sleeping
                 : (member.isTopContributor ? .working : .normal)
             let home = CGPoint(x: spot.anchorX, y: OfficeLayout.lanes[spot.lane])
             return PetState(
                 id: member.nickname,
-                kind: avatar?.kind ?? .fox,
-                variant: avatar?.variant ?? 0,
-                equippedEffects: Set((member.profileJson?.equippedEffects ?? [])
-                    .compactMap { EffectKind(rawValue: $0) }),
+                kind: avatar.kind,
+                variant: avatar.variant,
+                equippedEffects: avatar.effects,
                 spot: spot,
                 home: home,
                 mode: mode,
@@ -164,6 +189,7 @@ final class OfficeSimulation: ObservableObject {
         // 통행 특성별 충돌 밴드 → A* 보행 그리드 (기획 §2/§5-2).
         grid = OfficePathGrid(
             blockedRects: OfficeLayout.collisionRects(placements: placements, decor: decor))
+        if let guest { pets.append(makeGuest(guest)) }
         // 커피머신 방문 지점 — 커피머신이 놓인 레인 바닥, 기계 오른쪽 옆 (정면을 비워둔다).
         // 책상 위에 올려진 커피머신도 방문 지점은 그 레인의 바닥이다.
         coffeePoint = placements
@@ -180,6 +206,36 @@ final class OfficeSimulation: ObservableObject {
     func stop() {
         timer?.invalidate()
         timer = nil
+    }
+
+    /// 방문객 펫 — 씬 왼쪽 밖에서 앞레인(입구 쪽) 자유 지점으로 걸어 들어온다. 자리는 없으므로
+    /// normal 모드로 바닥 전체를 배회하며, 커피머신 방문·스침 인사는 멤버와 똑같이 겪는다.
+    private func makeGuest(_ guest: Guest) -> PetState {
+        let entrance = CGPoint(x: OfficeLayout.edgeMargin + 14, y: OfficeLayout.lanes[2])
+        let home = grid?.randomFreePoint(near: entrance, radius: 24, awayFrom: entrance, minDist: 0)
+            ?? entrance
+        let start = CGPoint(x: -12, y: OfficeLayout.lanes[2])
+        let path = grid?.path(from: start, to: home) ?? [home]
+        let now = Date().timeIntervalSinceReferenceDate
+        var pet = PetState(
+            id: Self.guestIDPrefix + guest.name,
+            kind: guest.kind,
+            variant: guest.variant,
+            equippedEffects: guest.effects,
+            spot: OfficeLayout.Spot(id: -1, name: "방문객", lane: 2, anchorX: home.x),
+            home: home,
+            mode: .normal,
+            monthlyVP: 0,
+            isMe: true,
+            isGuest: true,
+            x: start.x,
+            y: start.y
+        )
+        pet.facingRight = true
+        pet.phase = .walking(path: path, step: 0)
+        pet.bubble = Self.guestArrivalLine
+        pet.bubbleUntil = now + 4
+        return pet
     }
 
     private func startTimerIfNeeded() {
@@ -330,8 +386,9 @@ final class OfficeSimulation: ObservableObject {
         } else {
             pet.phase = .idle(until: now + Double.random(in: 2...8))
             // idle 시작 시 낮은 확률로 상황극 한마디 — working은 전용 대사 위주로 섞는다.
-            if pet.bubble == nil && Double.random(in: 0..<1) < 0.08 {
-                let pool = pet.mode == .working
+            if pet.bubble == nil && Double.random(in: 0..<1) < (pet.isGuest ? 0.2 : 0.08) {
+                let pool = pet.isGuest ? Self.guestQuotes
+                    : pet.mode == .working
                     ? (Bool.random() ? Self.workingQuotes : Self.officeQuotes)
                     : Self.officeQuotes
                 pet.bubble = pool.randomElement()
