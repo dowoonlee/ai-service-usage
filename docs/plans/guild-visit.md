@@ -92,12 +92,39 @@ furniture: [{ slotId, itemKind, donorNickname }]
 
 마이그레이션(`20260918000000_guild_guestbook.sql`) → 함수(`guild-visit`, `guild-guestbook`, `guild-info`, `sync`) → 클라 릴리스. 서버가 먼저 나가도 구버전 클라는 새 필드를 무시하므로 안전하다.
 
-## 4. M3 — 선택
+## 4. M3 — 방명록 대댓글 (후속 1순위, 미착수)
+
+방명록 한 줄에 답글을 다는 기능. 방문자가 남기고 끝나는 일방향을 "집주인이 답하는" 양방향으로.
+
+### 초안 결정 (착수 시 확정)
+
+| 항목 | 안 | 근거 |
+|---|---|---|
+| 깊이 | **1단** — 방명록 아래 답글만, 답글의 답글 없음 | 60자 한 줄 문화에 스레드는 과함 |
+| 답글 권한 | 그 길드 멤버(집주인) + 원글 작성자 | 방문자끼리 남의 집에서 대화하는 건 방명록 취지 밖 |
+| 길이 | 60자 (원글과 동일) | |
+| 쿨다운 | 전체 30초 (댓글 `COMMENT_COOLDOWN_SEC`와 동일), 길드별 24h 제한 없음 | 대화 흐름 허용, 스팸만 차단 |
+| 삭제 | 작성자 5분 내, 길드장 언제나. 원글 삭제 시 CASCADE | 원글 규칙과 동일 |
+| GitHub 게이트 | 적용 | |
+| 표시 | 원글당 최근 3개 + "N개 더" (전체는 펼침) | 방문 응답 Egress — 30원글×답글 무제한은 안 됨 |
+
+### 열린 질문 (착수 전 결정 필요)
+
+1. **방문자가 답글을 어디서 읽나.** 다시 그 길드에 놀러가야만 보이면 답글이 닿지 않는다. 후보: (a) 내 길드 탭에 "내가 남긴 방명록" 섹션(원글 + 답글), (b) 쪽지함(DM 인박스)에 답글 알림 행, (c) 재방문 시에만. (a)가 자연스럽지만 무소속 방문자는 길드 탭이 온보딩 화면이라 자리를 따로 내야 한다.
+2. **새 답글 신호.** 원글과 같은 방식이면 `users.last_guestbook_reply_at`(내가 쓴 원글에 답글이 달린 최신 시각)을 `sync` 배지 스칼라로. 어디에 점을 찍을지는 1번에 달려 있다.
+
+### 서버 스케치
+
+- `guild_guestbook_replies(id, entry_id → guild_guestbook ON DELETE CASCADE, author_device_id, author_nickname_snapshot, author_pet_kind, author_pet_variant, content CHECK 1..60, tenant_id, created_at)`, 인덱스 `(entry_id, created_at)`.
+- `guild-guestbook`에 `action: reply | delete_reply` 추가 (present-only 키 `entryId`/`replyId`/`content`). 권한 = 그 길드 멤버 or 원글 작성자.
+- `guild-visit`·`guild-info`의 `guestbook[]` 각 항목에 `replies[≤3]` + `replyCount`.
+
+## 5. M4 — 선택
 
 - 하루 첫 방명록 소액 코인 (로컬 `creditBonus`, dedup 키 `guestbook.daily`).
 - "이번 주 방문 많은 길드" 같은 지표.
 
-## 5. Egress 메모
+## 6. Egress 메모
 
 - 방문 응답은 `profileJson` 없이 ~10KB. 리더보드 응답에 사무실 데이터를 섞지 않는다 (과거 `profile_json`을 실었다가 수백 KB가 된 기록, #238).
 - 방문 화면에 폴링 없음. 방명록 새 글 신호는 `sync` 스칼라 배지로만.
