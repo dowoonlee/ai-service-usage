@@ -9,6 +9,8 @@ struct GuildLeaderboardView: View {
     let board: RankingAPI.GuildLeaderboardResponse
     /// 내 길드 id — 리스트·시상대에서 하이라이트. 무소속이면 nil.
     let highlightGuildId: String?
+    /// "놀러가기" — 남의 길드 사무실 방문 시트를 여는 콜백 (guild-visit.md M1). nil이면 버튼 없음.
+    var onVisit: ((RankingAPI.GuildLeaderboardEntry) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -59,6 +61,16 @@ struct GuildLeaderboardView: View {
                     Text("\(entry.score) VP")
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.purple)
+                    if let onVisit, !isMine {
+                        Button {
+                            onVisit(entry)
+                        } label: {
+                            Label("놀러가기", systemImage: "figure.walk")
+                                .font(.system(size: 10))
+                        }
+                        .controlSize(.small)
+                        .help("\(entry.name) 사무실 구경하기")
+                    }
                 }
                 HStack(spacing: 4) {
                     Image(systemName: "person.2.fill").font(.system(size: 8))

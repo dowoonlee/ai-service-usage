@@ -55,6 +55,8 @@ struct GuildView: View {
     @State private var browseGuilds: [RankingAPI.GuildLeaderboardEntry] = []
     @State private var myRequests: [RankingAPI.GuildOutgoingRequest] = []
     @State private var browseLoading: Bool = false
+    /// 길드 방문 시트 — 둘러보기 행의 "구경".
+    @State private var visitingGuild: RankingAPI.GuildLeaderboardEntry?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -242,6 +244,9 @@ struct GuildView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.teal.opacity(0.06)))
+        .sheet(item: $visitingGuild) { entry in
+            GuildVisitView(guildId: entry.guildId, guildName: entry.name)
+        }
     }
 
     private func browseRow(_ g: RankingAPI.GuildLeaderboardEntry, alreadyRequested: Bool) -> some View {
@@ -254,6 +259,13 @@ struct GuildView: View {
             Text("\(g.memberCount)명").font(.system(size: 9)).foregroundStyle(.secondary)
             Spacer()
             Text("\(g.score) VP").font(.system(size: 10, design: .monospaced)).foregroundStyle(.purple)
+            Button {
+                visitingGuild = g
+            } label: {
+                Image(systemName: "figure.walk").font(.system(size: 10))
+            }
+            .controlSize(.small)
+            .help("\(g.name) 사무실 구경하기")
             if alreadyRequested {
                 Text("신청됨").font(.system(size: 10)).foregroundStyle(.secondary)
                     .padding(.horizontal, 6).padding(.vertical, 2)

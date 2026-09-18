@@ -594,7 +594,23 @@ actor RankingAPI {
         let profileJson: ProfileState?
         /// 길드장 요청 응답에만 포함 — kick 타겟팅용. 일반 멤버에게는 서버가 내려주지 않는다.
         let deviceId: String?
+        /// 방문(guild-visit) 응답 전용 — profileJson 없이 사무실 렌더에 필요한 대표 펫만.
+        /// guild-info는 보내지 않으므로 nil. 렌더는 `profileJson?.card.avatar`를 우선하고 이 값으로 폴백.
+        let petKind: String?
+        let petVariant: Int?
+        let equippedEffects: [String]?
         var id: String { nickname }
+
+        /// 사무실 씬이 그릴 대표 펫 — 정식 프로필이 있으면 그것, 없으면(방문 응답) 축약 필드.
+        var officeAvatar: (kind: PetKind, variant: Int, effects: Set<EffectKind>) {
+            if let avatar = profileJson?.card.avatar {
+                return (avatar.kind, avatar.variant,
+                        Set((profileJson?.equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) }))
+            }
+            return (petKind.flatMap(PetKind.init(rawValue:)) ?? .fox,
+                    petVariant ?? 0,
+                    Set((equippedEffects ?? []).compactMap { EffectKind(rawValue: $0) }))
+        }
     }
     struct GuildInfo: Decodable, Sendable {
         let id: String
@@ -668,6 +684,53 @@ actor RankingAPI {
         let sentInvites: [GuildSentInvite]?
         /// 길드장이 받은 대기중 가입신청. 구버전 서버는 키가 없어 nil → 빈 배열로 취급.
         let joinRequests: [GuildIncomingRequest]?
+    }
+
+    // 길드 방문 (guild-visit) — docs/plans/guild-visit.md M1
+
+    struct GuildVisitPayload: Encodable {
+        let deviceId: String
+        let guildId: String
+        let ts: Int64
+    }
+    struct GuildVisitRequest: Encodable {
+        let payload: GuildVisitPayload
+        let signature: String
+    }
+    /// 남의 길드 공개 프로젝션 — 초대 코드·리더 여부 등 멤버 전용 필드가 없다.
+    struct GuildVisitGuild: Decodable, Sendable {
+        let id: String
+        let name: String
+        let floorTheme: Int
+        let wallTheme: Int
+        let officeFurniture: String?
+        let logo: String?
+        let logoX: Int?
+        let logoY: Int?
+        let createdAt: Date
+        let score: Int
+        let rank: Int?
+        let memberCount: Int
+        /// 요청자가 이 길드 멤버 — 랭킹 탭에서 내 길드를 눌렀을 때.
+        let isMine: Bool
+    }
+    struct GuildVisitResponse: Decodable, Sendable {
+        let guild: GuildVisitGuild
+        /// profileJson 없이 `petKind`/`petVariant`/`equippedEffects`만 채워진 멤버.
+        let members: [GuildMember]
+        let furniture: [GuildFurnitureItem]
+
+        /// 사무실 뷰(`GuildOfficeView`)는 `GuildInfoResponse`를 받으므로 그 모양으로 조립한다.
+        /// 방문자에게 리더 권한은 없다 — `isLeader: false`, 초대 코드는 빈 문자열.
+        var asInfoResponse: GuildInfoResponse {
+            GuildInfoResponse(
+                guild: GuildInfo(id: guild.id, name: guild.name, inviteCode: "", isLeader: false,
+                                 floorTheme: guild.floorTheme, wallTheme: guild.wallTheme,
+                                 officeFurniture: guild.officeFurniture, logo: guild.logo,
+                                 logoX: guild.logoX, logoY: guild.logoY, createdAt: guild.createdAt,
+                                 score: guild.score, rank: guild.rank, memberCount: guild.memberCount),
+                members: members, furniture: furniture, sentInvites: nil, joinRequests: nil)
+        }
     }
 
     /// 길드 점수에 반영되는 상위 기여자 1명 (guild-leaderboard `topMembers`).
@@ -1387,6 +1450,16 @@ actor RankingAPI {
         let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
         return try await post(path: "guild-info",
                               body: GuildInfoRequest(payload: payload, signature: sig))
+    }
+
+    /// 다른 길드 사무실 방문 — 같은 테넌트의 임의 길드 공개 프로젝션. 멤버십 불필요.
+    /// 없는 길드는 `.guildConflict("guild_not_found")`, 다른 테넌트는 `.tenantError("cross_tenant")`.
+    func visitGuild(deviceId: String, guildId: String, hmacKeyBase64: String) async throws -> GuildVisitResponse {
+        let payload = GuildVisitPayload(deviceId: deviceId, guildId: guildId,
+                                        ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        return try await post(path: "guild-visit",
+                              body: GuildVisitRequest(payload: payload, signature: sig))
     }
 
     /// 길드 월간 랭킹 — 미등록/미가입도 조회 가능 (온보딩 "구경" 리스트).

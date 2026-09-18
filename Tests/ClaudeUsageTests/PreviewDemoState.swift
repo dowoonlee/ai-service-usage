@@ -153,7 +153,8 @@ enum PreviewDemoState {
             return RankingAPI.GuildMember(
                 nickname: nick, monthlyVP: vp, isTopContributor: top, officeSlot: slot,
                 isLeader: me, isMe: me, joinedAt: Date(timeIntervalSince1970: 1_780_000_000),
-                githubLogin: nil, profileJson: profile, deviceId: nil)
+                githubLogin: nil, profileJson: profile, deviceId: nil,
+                petKind: nil, petVariant: nil, equippedEffects: nil)
         }
         let members = [
             // 깃발 장착 멤버 — 사무실은 그 길드의 로고를 알고 있으므로 남의 펫에도 길드기가 걸린다.

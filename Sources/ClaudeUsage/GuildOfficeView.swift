@@ -31,6 +31,8 @@ struct GuildOfficeView: View {
     let onRemoveDecor: (Int) -> Void
     /// 테마 미리보기 구매 확정 — 호출 측이 코인 검증·서버 반영 + 미리보기 해제.
     let onApplyTheme: () -> Void
+    /// 방문객 — 남의 사무실에 놀러온 내 대표 펫 (`GuildVisitView`). nil이면 멤버만 그린다.
+    var guest: OfficeSimulation.Guest? = nil
 
     @StateObject private var sim = OfficeSimulation()
     @State private var popoverPetID: String?
@@ -183,7 +185,8 @@ struct GuildOfficeView: View {
 
     private func reconfigureSim() {
         sim.configure(members: info.members, assignments: assignments, placements: placements,
-                      decor: placedDecor.map { (slotId: $0.slotId, kind: $0.itemKind) })
+                      decor: placedDecor.map { (slotId: $0.slotId, kind: $0.itemKind) },
+                      guest: guest)
     }
 
     // MARK: - 가구 구매 (미리보기 → 확정)
@@ -255,6 +258,7 @@ struct GuildOfficeView: View {
             .sorted().joined(separator: ",")
             + "|furniture:" + OfficeLayout.serializePlacements(placements)
             + "|decor:" + placedDecor.map { "\($0.slotId):\($0.itemKind)" }.sorted().joined(separator: ",")
+            + "|guest:" + (guest.map { "\($0.name):\($0.kind.rawValue):\($0.variant)" } ?? "")
     }
 
     // MARK: - 길드 로고 간판
@@ -655,7 +659,8 @@ private struct OfficePetView: View {
                 Color.clear
                     .frame(width: max(20, height), height: height)
                     .contentShape(Rectangle())
-                    .help("\(pet.id) · 이번 달 \(pet.monthlyVP) VP · \(pet.spot.name)")
+                    .help(pet.isGuest ? "\(pet.displayName) · 방문객 (나)"
+                          : "\(pet.id) · 이번 달 \(pet.monthlyVP) VP · \(pet.spot.name)")
                     .onTapGesture { onTap() }
                     .popover(isPresented: $showPopover, arrowEdge: .top) { popoverContent }
                     .position(x: centerX, y: centerY)
@@ -711,8 +716,9 @@ private struct OfficePetView: View {
             .padding(8)
         } else {
             VStack(spacing: 4) {
-                Text(pet.id).font(.system(size: 13, weight: .semibold))
-                Text("\(pet.monthlyVP) VP").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(pet.displayName).font(.system(size: 13, weight: .semibold))
+                Text(pet.isGuest ? "방문객 (나)" : "\(pet.monthlyVP) VP")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             .padding(12)
         }
@@ -1167,7 +1173,8 @@ enum GuildOfficeDemo {
             return RankingAPI.GuildMember(
                 nickname: nick, monthlyVP: vp, isTopContributor: top, officeSlot: nil,
                 isLeader: me, isMe: me, joinedAt: Date(), githubLogin: nil,
-                profileJson: profile, deviceId: nil)
+                profileJson: profile, deviceId: nil,
+                petKind: nil, petVariant: nil, equippedEffects: nil)
         }
         let members = [
             member("dowoon", kind: .fox, variant: 1, vp: 3120, top: true, me: true),
