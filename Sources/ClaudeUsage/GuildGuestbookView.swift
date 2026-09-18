@@ -6,6 +6,7 @@ import SwiftUI
 ///
 /// 게시판과 달리 비익명: 작성자 닉네임 + 소속 길드명 + 대표 펫. "○○ 길드의 △△가 다녀감"이
 /// 놀러가기의 재미라서 익명화하지 않는다 (길드 표면의 관례).
+@MainActor
 struct GuildGuestbookRow: View {
     let entry: RankingAPI.GuildGuestbookEntry
     /// 삭제 버튼 노출 — 호출 측이 "작성자 + 윈도우 내" 또는 "길드장"을 판정해 넘긴다.

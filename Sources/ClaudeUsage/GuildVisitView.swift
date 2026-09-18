@@ -10,6 +10,7 @@ import SwiftUI
 ///
 /// 시트는 폭만 정하면 높이를 받은 만큼만 쓰므로 `minHeight`가 필수(CLAUDE.md "Sheets need an
 /// explicit minHeight"). 최상위 `ScrollView` + `maxHeight`로 작은 화면에서도 안에 들어간다.
+@MainActor
 struct GuildVisitView: View {
     let guildId: String
     /// 응답이 오기 전 헤더에 보여줄 이름 (리더보드 행이 알고 있던 값).
