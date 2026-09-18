@@ -169,7 +169,9 @@ struct RankingView: View {
     private var scopePicker: some View {
         Picker("", selection: $scope) {
             ForEach(Scope.allCases) { s in
-                Text(s.pickerLabel).tag(s)
+                // 길드 스코프 — 내가 남긴 방명록에 안 본 답글이 있으면 점 (가챠 탭 점과 같은 신호).
+                Text(s == .guild && settings.hasUnseenGuestbookReplies ? "\(s.pickerLabel) •" : s.pickerLabel)
+                    .tag(s)
             }
         }
         .pickerStyle(.segmented)
@@ -195,7 +197,8 @@ struct RankingView: View {
                     GuildLeaderboardView(
                         board: board,
                         highlightGuildId: settings.guildID.isEmpty ? nil : settings.guildID,
-                        onVisit: { visitingGuild = $0 }
+                        onVisit: { visitingGuild = $0 },
+                        unseenReplyGuildIds: settings.guildsWithUnseenReplies
                     )
                     .padding(12)
                 }

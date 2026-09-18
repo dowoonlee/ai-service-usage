@@ -97,8 +97,10 @@ struct GachaView: View {
         VStack(spacing: 0) {
             Picker("", selection: $selectedTab) {
                 ForEach(Tab.allCases) { t in
-                    // 길드 탭 — 내 길드에 안 본 방명록이 있으면 점. 세그먼트에는 뷰 배지를 못 얹어 글자로.
-                    Text(t == .guild && settings.hasUnseenGuestbook ? "\(t.displayName) •" : t.displayName)
+                    // 길드 탭 — 내 길드에 안 본 방명록이 있으면 점. 랭킹 탭 — 내가 남긴 방명록에 안 본
+                    // 답글이 있으면 점(길드 스코프 → 그 길드 놀러가기 버튼으로 이어진다).
+                    // 세그먼트에는 뷰 배지를 못 얹어 글자로.
+                    Text(tabHasDot(t) ? "\(t.displayName) •" : t.displayName)
                         .tag(t)
                 }
             }
@@ -132,6 +134,14 @@ struct GachaView: View {
                minHeight: 640, maxHeight: .infinity, alignment: .top)
         .onReceive(NotificationCenter.default.publisher(for: .gachaSwitchTab)) { notif in
             if let tab = notif.object as? Tab { selectedTab = tab }
+        }
+    }
+
+    private func tabHasDot(_ tab: Tab) -> Bool {
+        switch tab {
+        case .guild:   return settings.hasUnseenGuestbook
+        case .ranking: return settings.hasUnseenGuestbookReplies
+        default:       return false
         }
     }
 

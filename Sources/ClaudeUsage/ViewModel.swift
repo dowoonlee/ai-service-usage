@@ -1018,6 +1018,13 @@ final class ViewModel: ObservableObject {
             if s.guildGuestbookLatestAt != resp.badges.guestbookLatestAt {
                 s.guildGuestbookLatestAt = resp.badges.guestbookLatestAt
             }
+            // 내가 남긴 방명록의 답글 — 길드별 최신 시각. 서버 목록이 곧 진실(기간 밖으로 밀린 길드는
+            // 사라진다). 구버전 서버(nil)는 건드리지 않는다.
+            if let badges = resp.badges.guestbookReplies {
+                let latest = Dictionary(badges.map { ($0.guildId.lowercased(), $0.latestAt) },
+                                        uniquingKeysWith: { max($0, $1) })
+                if latest != s.guestbookReplyLatest { s.guestbookReplyLatest = latest }
+            }
             DMViewModel.shared.applySync(resp)
             if let board = resp.board { NotificationCenter.default.post(name: .boardSynced, object: board) }
             if let lb = resp.leaderboard {

@@ -11,6 +11,8 @@ struct GuildLeaderboardView: View {
     let highlightGuildId: String?
     /// "놀러가기" — 남의 길드 사무실 방문 시트를 여는 콜백 (guild-visit.md M1). nil이면 버튼 없음.
     var onVisit: ((RankingAPI.GuildLeaderboardEntry) -> Void)? = nil
+    /// 내가 남긴 방명록에 안 본 답글이 있는 길드 — 그 행의 놀러가기 버튼에 점 (M3).
+    var unseenReplyGuildIds: Set<String> = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -62,6 +64,7 @@ struct GuildLeaderboardView: View {
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.purple)
                     if let onVisit, !isMine {
+                        let hasReply = unseenReplyGuildIds.contains(entry.guildId.lowercased())
                         Button {
                             onVisit(entry)
                         } label: {
@@ -69,7 +72,13 @@ struct GuildLeaderboardView: View {
                                 .font(.system(size: 10))
                         }
                         .controlSize(.small)
-                        .help("\(entry.name) 사무실 구경하기")
+                        .overlay(alignment: .topTrailing) {
+                            if hasReply {
+                                Circle().fill(Color.red).frame(width: 7, height: 7)
+                                    .offset(x: 3, y: -3)
+                            }
+                        }
+                        .help(hasReply ? "내 방명록에 답글이 달렸어요" : "\(entry.name) 사무실 구경하기")
                     }
                 }
                 HStack(spacing: 4) {
