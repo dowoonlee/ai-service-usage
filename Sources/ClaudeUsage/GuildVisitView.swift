@@ -407,3 +407,76 @@ struct GuildVisitView: View {
         return f.string(from: date)
     }
 }
+
+// MARK: - DEBUG 데모 (`AIUSAGE_VISIT_DEMO=1 swift run`)
+
+#if DEBUG
+/// 서버 없이 mock 길드·방명록으로 방문 시트를 띄운다. 방문객 펫 입장 연출·방명록 작성창·삭제
+/// 버튼·쿨다운 문구를 눈으로 확인하는 용도. 작성/삭제는 서버를 치므로 데모에선 실패 문구가 뜬다.
+/// 릴리스 빌드 미포함.
+@MainActor
+enum GuildVisitDemo {
+    private static var window: NSWindow?
+
+    static func present() {
+        func member(_ nick: String, kind: PetKind, variant: Int = 0, vp: Int, top: Bool,
+                    leader: Bool = false, effects: [String] = []) -> RankingAPI.GuildMember {
+            RankingAPI.GuildMember(
+                nickname: nick, monthlyVP: vp, isTopContributor: top, officeSlot: nil,
+                isLeader: leader, isMe: false, joinedAt: Date(), githubLogin: nil,
+                profileJson: nil, deviceId: nil,
+                petKind: kind.rawValue, petVariant: variant, equippedEffects: effects)
+        }
+        let members = [
+            member("kimcoder", kind: .warrior, vp: 2400, top: true, leader: true, effects: ["flag"]),
+            member("vibewolf", kind: .wolf, variant: 4, vp: 1800, top: true),
+            member("nightowl", kind: .whale, vp: 700, top: true, effects: ["glow"]),
+            member("lurker42", kind: .ninjaFrog, vp: 400, top: true),
+            member("ghostdev", kind: .slime, vp: 0, top: false),
+            member("newbie", kind: .pawn, vp: 120, top: false),
+        ]
+        let now = Date()
+        func entry(_ id: Int, _ nick: String, _ guild: String?, _ kind: PetKind, _ text: String,
+                   minutesAgo: Double, mine: Bool = false) -> RankingAPI.GuildGuestbookEntry {
+            RankingAPI.GuildGuestbookEntry(
+                id: id, nickname: nick, guildName: guild, petKind: kind.rawValue, petVariant: 0,
+                content: text, createdAt: now.addingTimeInterval(-minutesAgo * 60), isMine: mine)
+        }
+        let guestbook = [
+            entry(5, "pipelinepete", "It's Always DNS", .whale, "사무실 좋네요, 커피머신 부럽다 ☕", minutesAgo: 2, mine: true),
+            entry(4, "nullpointer", "Works on My Machine", .slime, "놀러왔다 감. 다음 달 1위는 우리 거", minutesAgo: 40),
+            entry(3, "yamlwrangler", nil, .fox, "무소속인데 구경 잘 했습니다 👋", minutesAgo: 180),
+            entry(2, "cronjobkim", "--no-verify", .wolf, "액자 문구 웃기네요 ㅋㅋ", minutesAgo: 900),
+            entry(1, "gitblame", "It's Always DNS", .ninjaFrog, "화분에 물 좀 주세요", minutesAgo: 3000),
+        ]
+        let furniture = [
+            RankingAPI.GuildFurnitureItem(slotId: 0, itemKind: "SMALL_PAINTING", donorNickname: "kimcoder"),
+            RankingAPI.GuildFurnitureItem(slotId: 6, itemKind: "CACTUS", donorNickname: "vibewolf"),
+        ]
+        let visit = RankingAPI.GuildVisitResponse(
+            guild: RankingAPI.GuildVisitGuild(
+                id: "demo-guild", name: "데드락클럽", floorTheme: 2, wallTheme: 1,
+                officeFurniture: nil, logo: GuildLogo.encode(sample: 4), logoX: nil, logoY: nil,
+                createdAt: now.addingTimeInterval(-86_400 * 200), score: 8_420, rank: 3,
+                memberCount: members.count, isMine: false),
+            members: members, furniture: furniture,
+            guestbook: guestbook,
+            guestbookPolicy: RankingAPI.GuildGuestbookPolicy(
+                canWrite: true, maxLen: 60, cooldownRemainingSec: 0, deleteWindowSec: 300,
+                requiresGitHub: true, canInteract: true, isLeader: false))
+
+        let root = GuildVisitView(guildId: visit.guild.id, guildName: visit.guild.name, preloaded: visit)
+        let w = NSWindow(contentViewController: NSHostingController(rootView: root))
+        // 시트의 maxHeight(700)까지 펼쳐 방명록이 스크롤 없이 보이게 — 실사용 시트와 같은 폭.
+        w.setContentSize(NSSize(width: 540, height: 700))
+        w.title = "길드 방문 데모"
+        w.setFrameTopLeftPoint(NSPoint(x: 80, y: (NSScreen.main?.frame.height ?? 900) - 60))
+        window = w
+        NSApp.activate(ignoringOtherApps: true)
+        w.makeKeyAndOrderFront(nil)
+        // 캡처 자동화용 — `screencapture -l<이 번호>` (GuildOfficeDemo와 동일).
+        print("VISIT_DEMO_WINDOW=\(w.windowNumber)")
+        fflush(stdout)
+    }
+}
+#endif
