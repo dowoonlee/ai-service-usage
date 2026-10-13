@@ -14,7 +14,7 @@
 import { jsonResponse, errorResponse, handleOptions, corsHeaders } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
-import { furnitureWriteError, isValidFurnitureLayout } from "../_shared/guild_furniture.ts";
+import { furnitureWriteError, parseOfficeStudio, studioFromLegacy, studioLayout, studioTransitionError, isValidOfficeStudio } from "../_shared/guild_furniture.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import {
   generateInviteCode,
@@ -44,6 +44,10 @@ interface ManagePayload {
   layout?: string;
   layoutVersion?: number;
   expectedLayout?: string;
+  studio?: string;
+  expectedRevision?: number;
+  furnitureOperation?: string;
+  purchaseKind?: number;
   // invite 전용 — 초대할 상대의 닉네임 (서버가 device로 해석).
   targetNickname?: string;
   // cancel_invite 전용 — 취소할 초대 id (UUID).
@@ -122,7 +126,9 @@ Deno.serve(async (req: Request) => {
       });
     }
     if (writeError) return errorResponse(400, writeError);
-    if (!isValidFurnitureLayout(p.layout)) return errorResponse(400, "invalid_layout");
+    if (!parseOfficeStudio(p.studio) || !Number.isSafeInteger(p.expectedRevision) || p.expectedRevision! < 0) {
+      return errorResponse(400, "invalid_layout");
+    }
   }
   if (typeof body.signature !== "string" || body.signature.length !== 64) {
     return errorResponse(400, "invalid_signature");
@@ -157,6 +163,10 @@ Deno.serve(async (req: Request) => {
   if (typeof p.targetNickname === "string") verifyObj.targetNickname = p.targetNickname;
   if (typeof p.layoutVersion === "number") verifyObj.layoutVersion = p.layoutVersion;
   if (typeof p.expectedLayout === "string") verifyObj.expectedLayout = p.expectedLayout;
+  if (typeof p.studio === "string") verifyObj.studio = p.studio;
+  if (typeof p.expectedRevision === "number") verifyObj.expectedRevision = p.expectedRevision;
+  if (typeof p.furnitureOperation === "string") verifyObj.furnitureOperation = p.furnitureOperation;
+  if (typeof p.purchaseKind === "number") verifyObj.purchaseKind = p.purchaseKind;
   if (typeof p.inviteId === "string") verifyObj.inviteId = p.inviteId;
   if (typeof p.requestId === "string") verifyObj.requestId = p.requestId;
   if (typeof p.newName === "string") verifyObj.newName = p.newName;
@@ -176,7 +186,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: guild } = await db
     .from("guilds")
-    .select("id, leader_device_id, tenant_id")
+    .select("id, leader_device_id, tenant_id, office_furniture, office_studio, office_revision")
     .eq("id", membership.guild_id)
     .maybeSingle();
   if (!guild) return errorResponse(404, "guild_not_found");
@@ -423,13 +433,23 @@ Deno.serve(async (req: Request) => {
     }
 
     case "set_furniture": {
-      // 가구 자유 배치 — 멤버 자리(office_slot 포지션)는 고정, 가구 좌표만 교체.
-      // Compare-and-set: 같은 길드장의 다른 기기/오래된 화면이 최신 배치를 덮어쓰지 못한다.
+      if (guild.office_revision !== p.expectedRevision || guild.office_furniture !== p.expectedLayout) {
+        return errorResponse(409, "furniture_conflict");
+      }
+      const state = parseOfficeStudio(p.studio)!;
+      const previous = guild.office_studio ?? studioFromLegacy(guild.office_furniture);
+      if (!isValidOfficeStudio(previous)) return errorResponse(409, "furniture_inventory_conflict");
+      const transitionError = studioTransitionError(previous, state, p.furnitureOperation, p.purchaseKind);
+      if (transitionError) return errorResponse(409, transitionError);
+      const layout = studioLayout(state);
+      const revision = p.expectedRevision! + 1;
+      // 배치·소유권·프리셋을 같은 문장에서 갱신하고, 동시 수정/길드장 교체를 검사한다.
       const { data: updated, error: updErr } = await db
         .from("guilds")
-        .update({ office_furniture: p.layout })
+        .update({ office_furniture: layout, office_studio: state, office_revision: revision })
         .eq("id", guild.id)
         .eq("leader_device_id", deviceId)
+        .eq("office_revision", p.expectedRevision!)
         .eq("office_furniture", p.expectedLayout!)
         .select("id")
         .maybeSingle();
@@ -438,7 +458,7 @@ Deno.serve(async (req: Request) => {
         return errorResponse(500, "layout_failed");
       }
       if (!updated) return errorResponse(409, "furniture_conflict");
-      return jsonResponse({ ok: true, officeFurniture: p.layout });
+      return jsonResponse({ ok: true, officeFurniture: layout, officeStudio: state, officeRevision: revision });
     }
 
     case "rename": {

@@ -651,14 +651,9 @@ struct GuildView: View {
                 rearrangeMode: $rearrangeMode,
                 previewFloorTheme: $previewFloorTheme,
                 previewWallTheme: $previewWallTheme,
-                onSetFurniture: { serialized, expected in
-                    try await performSaveFurniture(serialized, expected: expected)
-                },
+                onSaveStudio: { request in try await performSaveStudio(request) },
                 onSetLogoPos: { x, y in
                     performSetLogoPos(x: x, y: y)
-                },
-                onBuyFurniture: { kind, serialized, expected in
-                    try await performSaveFurniture(serialized, expected: expected, purchase: kind)
                 },
                 onPlaceDecor: { slot, item in
                     performPlaceDecor(slot: slot, item: item)
@@ -673,7 +668,7 @@ struct GuildView: View {
             )
             HStack(spacing: 8) {
                 if info.guild.isLeader {
-                    Button(rearrangeMode ? "재배치 종료" : "가구 재배치") {
+                    Button(rearrangeMode ? "꾸미기 완료" : "사무실 꾸미기") {
                         clearThemePreview()
                         rearrangeMode.toggle()
                     }
@@ -693,7 +688,7 @@ struct GuildView: View {
                 .font(.system(size: 11))
                 .disabled(actionBusy)
                 if rearrangeMode {
-                    Text("드래그로 이동 · 액자는 클릭해 문구 입력")
+                    Text("가구를 드래그하거나 아래 작업대를 사용하세요")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -1096,12 +1091,13 @@ struct GuildView: View {
 
     /// 가구 편집/구매 공통 저장. 성공한 배치를 즉시 반영해 후속 저장의 기준도 갱신한다.
     @MainActor
-    private func performSaveFurniture(_ serialized: String, expected: String,
-                                      purchase: OfficeLayout.FurnitureKind? = nil) async throws {
+    private func performSaveStudio(_ request: OfficeStudioSave) async throws {
         guard !actionBusy else { throw RankingAPI.RankingError.guildConflict("furniture_busy") }
         guard let guild = info?.guild, guild.isLeader else {
             throw RankingAPI.RankingError.guildConflict("not_leader")
         }
+        let purchase = request.operation == .purchase
+            ? request.purchaseKind.flatMap { OfficeLayout.furnitureKind(id: $0) } : nil
         if let purchase, settings.coins < purchase.price {
             throw RankingAPI.RankingError.guildConflict("insufficient_coins")
         }
@@ -1110,16 +1106,19 @@ struct GuildView: View {
         do {
             let response = try await RankingAPI.shared.manageGuild(
                 deviceId: settings.rankingDeviceID, action: .setFurniture,
-                furniture: serialized, expectedFurniture: expected,
+                expectedFurniture: request.expectedLayout, studio: request.state,
+                expectedRevision: request.expectedRevision, furnitureOperation: request.operation,
+                purchaseKind: request.purchaseKind,
                 hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
             if let purchase {
                 CoinLedger.shared.spendGuildDecor(purchase.price, item: "가구(\(purchase.name))")
             }
             if info?.guild.id == guild.id {
-                info?.guild.officeFurniture = response.officeFurniture ?? serialized
+                info?.guild.officeFurniture = response.officeFurniture
+                info?.guild.officeStudio = response.officeStudio
+                info?.guild.officeRevision = response.officeRevision
             }
         } catch {
-            // 충돌/응답 유실일 수 있어 서버 배치를 재조회하되, 원래 오류는 호출부에 전달한다.
             refresh()
             throw error
         }

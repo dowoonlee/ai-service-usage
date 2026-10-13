@@ -163,7 +163,7 @@ final class AnimationPreviews: SandboxedTestCase {
             rearrangeMode: .constant(false),
             previewFloorTheme: .constant(nil),
             previewWallTheme: .constant(nil),
-            onSetFurniture: { _, _ in }, onSetLogoPos: { _, _ in }, onBuyFurniture: { _, _, _ in },
+            onSaveStudio: { _ in }, onSetLogoPos: { _, _ in },
             onPlaceDecor: { _, _ in }, onRemoveDecor: { _ in }, onApplyTheme: {},
             purchaseSheetOpen: .constant(false))
 

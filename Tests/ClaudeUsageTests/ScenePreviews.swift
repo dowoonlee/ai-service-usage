@@ -93,9 +93,9 @@ final class ScenePreviews: SandboxedTestCase {
             rearrangeMode: .constant(rearrange),
             previewFloorTheme: .constant(floor),
             previewWallTheme: .constant(wall),
-            onSetFurniture: { _, _ in },
+            onSaveStudio: { _ in },
             onSetLogoPos: { _, _ in },
-            onBuyFurniture: { _, _, _ in },
+
             onPlaceDecor: { _, _ in },
             onRemoveDecor: { _ in },
             onApplyTheme: {},

@@ -49,23 +49,23 @@ Deno.test("명시적 빈 사무실 허용, 초기 상태 문자열과 불완전 
 });
 
 Deno.test("구버전 요청과 기준 배치가 없는 요청을 차단한다", () => {
-  for (const version of [undefined, null, 1, "2", 3]) {
+  for (const version of [undefined, null, 1, 2, "3", 4]) {
     assert(
       furnitureWriteError(version, "") === "furniture_update_required",
       "구버전 덮어쓰기 방지",
     );
   }
   assert(
-    furnitureWriteError(2, undefined) === "invalid_layout",
+    furnitureWriteError(3, undefined) === "invalid_layout",
     "기준 배치 필수",
   );
   assert(
-    furnitureWriteError(2, "x".repeat(9001)) === "invalid_layout",
+    furnitureWriteError(3, "x".repeat(9001)) === "invalid_layout",
     "기준 배치 길이 방어",
   );
   for (const expected of ["", "0:35:0", EMPTY_FURNITURE_LAYOUT]) {
     assert(
-      furnitureWriteError(2, expected) === null,
+      furnitureWriteError(3, expected) === null,
       "신형 요청은 초기/빈/기존 배치 모두 허용",
     );
   }

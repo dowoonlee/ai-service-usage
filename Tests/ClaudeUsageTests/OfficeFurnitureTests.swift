@@ -42,15 +42,22 @@ final class OfficeFurnitureTests: XCTestCase {
         XCTAssertEqual(OfficeLayout.sanitizedPlacements(OfficeLayout.serializePlacements(room)).map(\.kind), [0, 9, 8])
     }
     func testFurnitureSavePayloadIncludesVersionAndExpectedLayout() throws {
+        let state = OfficeStudioState(legacyLayout: "empty:v2")
         let payload = RankingAPI.GuildManagePayload(
             action: "set_furniture", deviceId: "dev-1", targetDeviceId: "",
-            layout: OfficeLayout.emptyFurnitureLayout, layoutVersion: 2,
-            expectedLayout: "0:35.0:0", targetNickname: nil, inviteId: nil,
-            requestId: nil, newName: nil, logo: nil, logoX: nil, logoY: nil, ts: 42)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        XCTAssertEqual(String(data: try encoder.encode(payload), encoding: .utf8),
-            #"{"action":"set_furniture","deviceId":"dev-1","expectedLayout":"0:35.0:0","layout":"empty:v2","layoutVersion":2,"targetDeviceId":"","ts":42}"#)
+            layout: nil, layoutVersion: 3, expectedLayout: "0:35.0:0",
+            studio: try state.encoded(), expectedRevision: 4, furnitureOperation: "arrange",
+            targetNickname: nil, inviteId: nil, requestId: nil, newName: nil,
+            logo: nil, logoX: nil, logoY: nil, ts: 42)
+        let data = try JSONEncoder().encode(payload)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["layoutVersion"] as? Int, 3)
+        XCTAssertEqual(json["expectedRevision"] as? Int, 4)
+        XCTAssertEqual(json["expectedLayout"] as? String, "0:35.0:0")
+        XCTAssertEqual(json["studio"] as? String, try state.encoded())
+        XCTAssertEqual(json["furnitureOperation"] as? String, "arrange")
+        XCTAssertNil(json["purchaseKind"])
+        XCTAssertNil(json["layout"])
     }
 
     func testSixtyFurnitureCollisionGridPerformance() {

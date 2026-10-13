@@ -294,6 +294,31 @@ enum OfficeLayout {
         }.joined(separator: ";")
     }
 
+    /// 벽은 x·y를 함께 탐색한다. 기본 높이에 자리가 없어도 위아래 빈 공간을 활용한다.
+    static func freePlacement(kind id: Int, uid: Int,
+                              others: [FurniturePlacement]) -> FurniturePlacement? {
+        guard let kind = furnitureKind(id: id) else { return nil }
+        let xs = stride(from: edgeMargin + kind.size.width / 2,
+                        through: sceneSize.width - edgeMargin - kind.size.width / 2, by: 2)
+        let lanesToTry = kind.mount == .wall ? [wallLane] : [2, 1, 0]
+        let ys: [CGFloat?] = kind.mount == .wall
+            ? [clampWallY(wallFurnitureBaselineY, for: kind)]
+                + stride(from: wallBottom, through: kind.collisionSize.height, by: -2).map { Optional($0) }
+            : [nil]
+        for lane in lanesToTry {
+            for y in ys {
+                for x in xs {
+                    if !placementCollides(uid: uid, kind: id, x: x, lane: lane,
+                                          wallY: y, others: others) {
+                        return FurniturePlacement(uid: uid, kind: id, x: x, lane: lane,
+                                                  text: nil, wallY: y)
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
     /// 벽 baseline y 클램프 — 가시 아트가 벽 밴드(0..wallBottom) 안에 온전히 들어오게.
     /// baseline = 가시 아트 하단이므로 상단(baseline-가시높이)≥0, 하단(baseline)≤wallBottom.
     /// (셀 size가 아닌 collisionSize 기준이라 여백 큰 시계도 벽 위쪽까지 올릴 수 있다.)
