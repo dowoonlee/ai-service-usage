@@ -208,7 +208,9 @@ enum OfficeLayout {
     /// 액자 문구 최대 길이 (서버 FURNITURE_TEXT_MAX와 쌍).
     static let furnitureTextMax = 10
     /// 보유 인스턴스 상한 (서버 FURNITURE_MAX_INSTANCES와 쌍).
-    static let furnitureMaxInstances = 30
+    static let furnitureMaxInstances = 60
+    /// 빈 문자열은 기존 길드의 기본 배치. 명시적으로 비운 사무실은 별도로 저장한다.
+    static let emptyFurnitureLayout = "empty:v2"
 
     // MARK: - 가구 인스턴스 (보유분 — 드래그 자유 배치 + 구매로 추가)
 
@@ -238,6 +240,7 @@ enum OfficeLayout {
     /// (레거시 4필드 "kind:x:3:text"는 y가 숫자가 아니면 text로 폴백 해석.)
     static func sanitizedPlacements(_ raw: String?) -> [FurniturePlacement] {
         guard let raw, !raw.isEmpty else { return defaultPlacements }
+        if raw == emptyFurnitureLayout { return [] }
         var out: [FurniturePlacement] = []
         for entry in raw.split(separator: ";").prefix(furnitureMaxInstances) {
             let parts = entry.split(separator: ":", omittingEmptySubsequences: false)
@@ -274,7 +277,8 @@ enum OfficeLayout {
     /// 서버 전송용 직렬화 — "kind:x:lane[:y[:text]]". 벽 가구는 y 필드(소수 1자리)를 항상
     /// 포함하고, 액자 문구는 그 뒤 percent-encoding (':'/';' 충돌 방지). 바닥은 3필드.
     static func serializePlacements(_ placements: [FurniturePlacement]) -> String {
-        placements.map { p in
+        guard !placements.isEmpty else { return emptyFurnitureLayout }
+        return placements.map { p in
             var s = String(format: "%d:%.1f:%d", p.kind, p.x, p.lane)
             let isWall = p.lane == wallLane
             if isWall {
@@ -288,6 +292,31 @@ enum OfficeLayout {
             }
             return s
         }.joined(separator: ";")
+    }
+
+    /// 벽은 x·y를 함께 탐색한다. 기본 높이에 자리가 없어도 위아래 빈 공간을 활용한다.
+    static func freePlacement(kind id: Int, uid: Int,
+                              others: [FurniturePlacement]) -> FurniturePlacement? {
+        guard let kind = furnitureKind(id: id) else { return nil }
+        let xs = stride(from: edgeMargin + kind.size.width / 2,
+                        through: sceneSize.width - edgeMargin - kind.size.width / 2, by: 2)
+        let lanesToTry = kind.mount == .wall ? [wallLane] : [2, 1, 0]
+        let ys: [CGFloat?] = kind.mount == .wall
+            ? [clampWallY(wallFurnitureBaselineY, for: kind)]
+                + stride(from: wallBottom, through: kind.collisionSize.height, by: -2).map { Optional($0) }
+            : [nil]
+        for lane in lanesToTry {
+            for y in ys {
+                for x in xs {
+                    if !placementCollides(uid: uid, kind: id, x: x, lane: lane,
+                                          wallY: y, others: others) {
+                        return FurniturePlacement(uid: uid, kind: id, x: x, lane: lane,
+                                                  text: nil, wallY: y)
+                    }
+                }
+            }
+        }
+        return nil
     }
 
     /// 벽 baseline y 클램프 — 가시 아트가 벽 밴드(0..wallBottom) 안에 온전히 들어오게.

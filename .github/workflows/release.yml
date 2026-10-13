@@ -102,16 +102,18 @@ jobs:
 
       - name: Bump Homebrew Cask
         env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
           SHA256: ${{ steps.sha.outputs.sha256 }}
         run: |
           set -euo pipefail
-          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+          if [ -z "${GH_TOKEN:-}" ]; then
             echo "::notice::HOMEBREW_TAP_TOKEN not set; skipping cask bump."
             exit 0
           fi
-          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/dowoonlee/homebrew-tap.git" tap
+          # 토큰을 remote URL/.git/config에 저장하지 않고 gh credential helper로 전달한다.
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
+            clone https://github.com/dowoonlee/homebrew-tap.git tap
           cd tap
           mkdir -p Casks
           cp ../homebrew/aiusage.rb Casks/aiusage.rb
@@ -124,5 +126,5 @@ jobs:
             echo "No cask changes."
           else
             git commit -m "aiusage: ${VERSION}"
-            git push origin HEAD
+            git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin HEAD
           fi

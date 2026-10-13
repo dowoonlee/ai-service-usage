@@ -93,9 +93,9 @@ final class ScenePreviews: SandboxedTestCase {
             rearrangeMode: .constant(rearrange),
             previewFloorTheme: .constant(floor),
             previewWallTheme: .constant(wall),
-            onSetFurniture: { _ in },
+            onSaveStudio: { _ in },
             onSetLogoPos: { _, _ in },
-            onBuyFurniture: { _, _ in },
+
             onPlaceDecor: { _, _ in },
             onRemoveDecor: { _ in },
             onApplyTheme: {},
@@ -104,6 +104,31 @@ final class ScenePreviews: SandboxedTestCase {
 
     /// 가구 배치·펫 배회·로고 배너가 한 화면에 겹치는 곳이라, 좌표 로직을 고칠 때마다
     /// 실제 그림을 봐야 한다. `GuildOfficeDemo`는 창을 띄우지만 여기선 뷰만 굽는다.
+    func testRenderGuildOfficeCapacityAndEmptyRoom() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        var info = PreviewDemoState.guildInfo()
+        var placements: [OfficeLayout.FurniturePlacement] = []
+        for index in 0..<60 {
+            let isWall = index < 30
+            let kind: Int = isWall ? 8 : 5
+            let x = CGFloat(18 + (index % 15) * 17)
+            let lane: Int = isWall ? 3 : (index / 15) % 3
+            let wallY: CGFloat? = isWall ? CGFloat(20 + (index / 15) * 22) : nil
+            let placement = OfficeLayout.FurniturePlacement(uid: index, kind: kind,
+                x: x, lane: lane, text: nil, wallY: wallY)
+            placements.append(placement)
+        }
+        for (title, layout) in [("사무실-60개", OfficeLayout.serializePlacements(placements)),
+                                 ("사무실-가구0개", OfficeLayout.emptyFurnitureLayout)] {
+            info.guild.officeFurniture = layout
+            try PreviewRenderer.renderInWindow(
+                officeView(info: info, rearrange: true, floor: nil, wall: nil),
+                size: CGSize(width: windowWidth, height: windowHeight),
+                section: "길드", title: title,
+                note: "가구 상한 60개 및 마지막 가구 삭제 후 빈 사무실")
+        }
+    }
+
     func testRenderGuildOffice() throws {
         let info = PreviewDemoState.guildInfo()
         let view = officeView(info: info, rearrange: false, floor: nil, wall: nil)

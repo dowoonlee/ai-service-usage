@@ -420,9 +420,9 @@ struct GuildVisitView: View {
                 rearrangeMode: .constant(false),
                 previewFloorTheme: .constant(nil),
                 previewWallTheme: .constant(nil),
-                onSetFurniture: { _ in },
+                onSaveStudio: { _ in },
                 onSetLogoPos: { _, _ in },
-                onBuyFurniture: { _, _ in },
+
                 onPlaceDecor: { _, _ in },
                 onRemoveDecor: { _ in },
                 onApplyTheme: {},

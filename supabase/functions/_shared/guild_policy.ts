@@ -28,7 +28,7 @@ export const FURNITURE_KIND_COUNT = 11;                   // kind 0..10
 export const FURNITURE_WALL_KINDS = new Set([8, 9, 10]);  // 벽 전용(시계/액자/화이트보드) — lane 3 강제
 export const FURNITURE_TEXT_KINDS = new Set([9]);         // 문구 지원 (액자)
 export const FURNITURE_WALL_LANE = 3;
-export const FURNITURE_MAX_INSTANCES = 30;                // 클라 furnitureMaxInstances와 쌍
+export const FURNITURE_MAX_INSTANCES = 60;                // 클라 furnitureMaxInstances와 쌍
 export const FURNITURE_TEXT_MAX = 10;                     // 클라 furnitureTextMax와 쌍
 
 // 사무실 꾸미기 — 클라 OfficeLayout 카탈로그와 쌍. DECOR_SLOT_COUNT는 DB CHECK

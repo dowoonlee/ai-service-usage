@@ -518,6 +518,13 @@ actor RankingAPI {
         let deviceId: String
         let targetDeviceId: String
         let layout: String?
+        /// set_furniture 전용 — 60개·빈 사무실 지원 버전과 비교 후 갱신할 기존 원문.
+        let layoutVersion: Int?
+        let expectedLayout: String?
+        var studio: String? = nil
+        var expectedRevision: Int? = nil
+        var furnitureOperation: String? = nil
+        var purchaseKind: Int? = nil
         /// invite 전용 — 초대할 닉네임. nil이면 키 자체가 직렬화에서 빠진다(서버 present-only).
         let targetNickname: String?
         /// cancel_invite 전용 — 취소할 초대 id.
@@ -543,6 +550,8 @@ actor RankingAPI {
         let inviteCode: String?
         /// set_furniture 응답에만 — 반영된 가구 배치 직렬화.
         let officeFurniture: String?
+        let officeStudio: OfficeStudioState?
+        let officeRevision: Int?
         /// rename 응답에만 — 반영된 새 길드명.
         let name: String?
         /// set_logo 응답에만 — 반영된 로고 저장 문자열.
@@ -622,7 +631,9 @@ actor RankingAPI {
         let wallTheme: Int
         /// 가구 자유 배치 직렬화("setId:x:lane;…"). 빈 문자열/nil → 기본 배치.
         /// 렌더 전 `OfficeLayout.sanitizedPlacements`로 검증.
-        let officeFurniture: String?
+        var officeFurniture: String?
+        var officeStudio: OfficeStudioState? = nil
+        var officeRevision: Int? = nil
         /// 길드 로고 (`GuildLogo` 저장 형식). 구버전 서버는 nil → id 해시로 샘플 폴백.
         let logo: String?
         /// 사무실 벽에서의 로고 중심(씬 논리 좌표). nil이면 클라 기본 위치.
@@ -677,7 +688,7 @@ actor RankingAPI {
         var id: String { requestId }
     }
     struct GuildInfoResponse: Decodable, Sendable {
-        let guild: GuildInfo
+        var guild: GuildInfo
         let members: [GuildMember]
         let furniture: [GuildFurnitureItem]
         /// 길드장이 보낸 대기중 초대. 구버전 서버는 키가 없어 nil → 빈 배열로 취급.
@@ -929,6 +940,11 @@ actor RankingAPI {
                 case "already_in_guild":    return "이미 길드에 소속되어 있습니다."
                 case "name_taken":          return "이미 사용 중인 길드 이름입니다."
                 case "invalid_guild_name":  return "길드 이름 형식이 올바르지 않습니다 (2~24자)."
+                case "furniture_busy": return "가구 저장 중입니다. 잠시 후 다시 시도해 주세요."
+                case "insufficient_coins": return "코인이 부족합니다."
+                case "invalid_layout": return "가구 배치 또는 문구를 저장할 수 없습니다. 문구 길이와 특수 문자를 확인해 주세요."
+                case "furniture_inventory_conflict": return "보유 가구가 변경되었습니다. 최신 사무실을 확인한 뒤 다시 시도해 주세요."
+                case "furniture_conflict": return "다른 기기에서 가구 배치가 변경되었습니다. 최신 배치를 확인한 뒤 다시 시도해 주세요."
                 case "slot_taken":          return "방금 다른 멤버가 그 자리에 앉았습니다."
                 case "not_in_guild":        return "길드에 소속되어 있지 않습니다."
                 case "invalid_code":        return "초대 코드가 올바르지 않습니다."
@@ -1367,13 +1383,22 @@ actor RankingAPI {
     /// inviteId는 cancelInvite에서만, newName은 rename에서만, logo는 setLogo에서만
     /// (나머지는 nil → canonical에서 키 제외, 서버 present-only와 일치).
     func manageGuild(deviceId: String, action: GuildManageAction, targetDeviceId: String? = nil,
-                     furniture: String? = nil, targetNickname: String? = nil, inviteId: String? = nil,
+                     furniture: String? = nil, expectedFurniture: String? = nil,
+                     studio: OfficeStudioState? = nil, expectedRevision: Int? = nil,
+                     furnitureOperation: OfficeStudioState.Operation? = nil, purchaseKind: Int? = nil,
+                     targetNickname: String? = nil, inviteId: String? = nil,
                      requestId: String? = nil, newName: String? = nil, logo: String? = nil,
                      logoX: Int? = nil, logoY: Int? = nil,
                      hmacKeyBase64: String) async throws -> GuildManageResponse {
         let payload = GuildManagePayload(action: action.rawValue, deviceId: deviceId,
                                          targetDeviceId: targetDeviceId ?? "",
                                          layout: furniture,
+                                         layoutVersion: action == .setFurniture ? 3 : nil,
+                                         expectedLayout: action == .setFurniture ? expectedFurniture : nil,
+                                         studio: try studio?.encoded(),
+                                         expectedRevision: expectedRevision,
+                                         furnitureOperation: furnitureOperation?.rawValue,
+                                         purchaseKind: purchaseKind,
                                          targetNickname: targetNickname,
                                          inviteId: inviteId,
                                          requestId: requestId,
@@ -2311,7 +2336,7 @@ actor RankingAPI {
         // 길드
         "already_in_guild", "name_taken", "invalid_guild_name", "slot_taken",
         "not_in_guild", "invalid_code", "not_leader", "target_not_in_guild",
-        "cannot_kick_self", "guild_not_found",
+        "cannot_kick_self", "guild_not_found", "furniture_conflict", "furniture_inventory_conflict", "invalid_layout",
         // 초대
         "cannot_invite", "cannot_invite_self", "already_invited",
         "invite_not_found", "invite_expired", "redecline_cooldown", "too_many_pending",

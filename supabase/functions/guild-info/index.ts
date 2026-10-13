@@ -78,7 +78,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: guild } = await db
     .from("guilds")
-    .select("id, name, invite_code, leader_device_id, floor_theme, wall_theme, office_furniture, logo, logo_x, logo_y, created_at")
+    .select("id, name, invite_code, leader_device_id, floor_theme, wall_theme, office_furniture, office_studio, office_revision, logo, logo_x, logo_y, created_at")
     .eq("id", membership.guild_id)
     .maybeSingle();
   if (!guild) return errorResponse(404, "guild_not_found");
@@ -224,6 +224,8 @@ Deno.serve(async (req: Request) => {
       isLeader,
       floorTheme: guild.floor_theme,
       wallTheme: guild.wall_theme,
+      officeStudio: guild.office_studio,
+      officeRevision: guild.office_revision,
       officeFurniture: guild.office_furniture,   // 가구 자유 배치 직렬화 — 클라 렌더 입력
       logo: guild.logo ?? null,                  // "s:<n>" 샘플 또는 "p:<base64>" 픽셀 PNG
       logoX: guild.logo_x ?? null,               // 벽에서의 로고 중심 (null이면 클라 기본 위치)
