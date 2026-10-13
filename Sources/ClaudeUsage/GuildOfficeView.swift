@@ -20,12 +20,12 @@ struct GuildOfficeView: View {
     /// 테마 미리보기 (상점 테마 탭이 구동, 구매 확인 전) — nil이면 서버 값.
     @Binding var previewFloorTheme: Int?
     @Binding var previewWallTheme: Int?
-    /// 가구 드래그 종료 시 — 직렬화된 전체 배치("setId:x:lane;…"). 호출 측이 서버 반영.
-    let onSetFurniture: (String) -> Void
+    /// 가구 편집 저장 — 새 전체 배치와 편집 시작 시점의 서버 원문. 실패 시 throw로 원복.
+    let onSetFurniture: (String, String) async throws -> Void
     /// 로고 드래그 종료 시 — 씬 논리 좌표의 로고 중심. 호출 측이 서버 반영(무료 조작).
     let onSetLogoPos: (Int, Int) -> Void
-    /// 가구 구매 확정 (카탈로그 아이템, 새 인스턴스가 포함된 직렬화) — 호출 측이 코인 검증·서버 반영.
-    let onBuyFurniture: (OfficeLayout.FurnitureKind, String) -> Void
+    /// 가구 구매 확정 (아이템, 새 배치, 기존 원문) — 호출 측이 코인 검증·서버 반영.
+    let onBuyFurniture: (OfficeLayout.FurnitureKind, String, String) async throws -> Void
     /// 데코 구매 (slot, item) — 호출 측이 코인 검증·서버 반영.
     let onPlaceDecor: (Int, OfficeLayout.DecorItem) -> Void
     let onRemoveDecor: (Int) -> Void
@@ -38,6 +38,8 @@ struct GuildOfficeView: View {
     @State private var popoverPetID: String?
     /// 드래그 중 작업 사본 — nil이면 서버 값 사용. 드롭 후 서버 값이 따라오면 자동 해제.
     @State private var draftPlacements: [OfficeLayout.FurniturePlacement]?
+    /// 편집 도중 새로고침돼도 저장 기준은 편집을 시작했을 때의 원문으로 유지한다.
+    @State private var draftExpectedLayout: String?
     /// 현재 드래그 중인 가구 인스턴스 uid (하이라이트용).
     @State private var draggingUid: Int?
     /// 로고 드래그 작업 사본 — nil이면 서버 값. 드롭 후 서버 값이 따라오면 해제된다.
@@ -52,6 +54,19 @@ struct GuildOfficeView: View {
     @State private var pendingPurchase: OfficeLayout.FurniturePlacement?
     /// 액자 문구 편집 popover가 열린 인스턴스 uid (재배치 모드에서 액자 클릭).
     @State private var editingTextUid: Int?
+    private enum FurnitureAlert {
+        case delete(OfficeLayout.FurniturePlacement)
+        case failure(String)
+        var title: String {
+            switch self {
+            case .delete: return "가구를 삭제하시겠습니까?"
+            case .failure: return "가구 저장 실패"
+            }
+        }
+    }
+    @State private var furnitureAlert: FurnitureAlert?
+    @State private var savingFurniture = false
+    @State private var purchaseUnavailableReason: String?
 
     private var scene: CGSize { OfficeLayout.sceneSize }
     /// 서버 가구 배치 (검증 실패/빈 값은 기본 배치 폴백).
@@ -138,6 +153,9 @@ struct GuildOfficeView: View {
                 OfficeShopSheet(
                     isLeader: info.guild.isLeader,
                     placedDecor: placedDecor,
+                    furnitureCount: placements.count,
+                    furnitureUnavailableReason: purchaseUnavailableReason,
+                    canBuyFurniture: pendingPurchase != nil && !savingFurniture,
                     currentFloorTheme: info.guild.floorTheme,
                     currentWallTheme: info.guild.wallTheme,
                     previewFloorTheme: $previewFloorTheme,
@@ -158,11 +176,45 @@ struct GuildOfficeView: View {
             }
             .padding(6)
         }
+        .disabled(savingFurniture)
+        .overlay(alignment: .bottomLeading) {
+            if savingFurniture {
+                Text("가구 저장 중…")
+                    .font(.system(size: 10)).padding(6)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4))
+            }
+        }
+        .alert(furnitureAlert?.title ?? "", isPresented: Binding(
+            get: { furnitureAlert != nil },
+            set: { if !$0 { furnitureAlert = nil } }
+        ), presenting: furnitureAlert) { alert in
+            switch alert {
+            case .delete(let placement):
+                Button("삭제", role: .destructive) {
+                    furnitureAlert = nil
+                    guard info.guild.isLeader, !savingFurniture,
+                          placements.contains(placement) else { return }
+                    editingTextUid = nil
+                    saveFurniture(placements.filter { $0.uid != placement.uid })
+                }
+                Button("취소", role: .cancel) { furnitureAlert = nil }
+            case .failure:
+                Button("확인") { furnitureAlert = nil }
+            }
+        } message: { alert in
+            switch alert {
+            case .delete(let placement):
+                Text("\(OfficeLayout.furnitureKind(id: placement.kind)?.name ?? "가구") 1개를 영구 삭제합니다. 코인은 환불되지 않습니다.")
+            case .failure(let message):
+                Text(message)
+            }
+        }
         .onAppear { reconfigureSim() }
         .onDisappear { sim.stop() }
         .onChange(of: membersKey) { _ in reconfigureSim() }
         .onChange(of: rearrangeMode) { on in
             draftPlacements = nil
+            draftExpectedLayout = nil
             draggingUid = nil
             pendingPurchase = nil
             editingTextUid = nil
@@ -171,7 +223,15 @@ struct GuildOfficeView: View {
         }
         // 서버 값이 드래그 결과를 따라잡으면 작업 사본 해제 (refresh 후 재정합).
         .onChange(of: info.guild.officeFurniture ?? "") { _ in
-            if draggingUid == nil { draftPlacements = nil }
+            if case .delete = furnitureAlert { furnitureAlert = nil }
+            editingTextUid = nil
+            if draggingUid == nil && !savingFurniture {
+                draftPlacements = nil
+                draftExpectedLayout = nil
+                if let pending = pendingPurchase {
+                    setPendingPurchase(OfficeLayout.furnitureKind(id: pending.kind))
+                }
+            }
         }
     }
 
@@ -193,13 +253,15 @@ struct GuildOfficeView: View {
 
     /// 카탈로그 선택 → 빈 지점에 미리보기 인스턴스 생성 (nil = 미리보기 해제).
     private func setPendingPurchase(_ kind: OfficeLayout.FurnitureKind?) {
-        guard let kind else {
-            pendingPurchase = nil
+        pendingPurchase = nil
+        purchaseUnavailableReason = nil
+        guard let kind else { return }
+        guard placements.count < OfficeLayout.furnitureMaxInstances else {
+            purchaseUnavailableReason = "가구는 최대 \(OfficeLayout.furnitureMaxInstances)개까지 배치할 수 있습니다. 기존 가구를 삭제해 주세요."
             return
         }
-        guard placements.count < OfficeLayout.furnitureMaxInstances,
-              let pos = freePlacementPosition(for: kind) else {
-            pendingPurchase = nil
+        guard let pos = freePlacementPosition(for: kind) else {
+            purchaseUnavailableReason = "배치할 공간이 없습니다. 기존 가구를 이동하거나 삭제해 주세요."
             return
         }
         let uid = (placements.map(\.uid).max() ?? -1) + 1
@@ -211,12 +273,11 @@ struct GuildOfficeView: View {
     /// 구매 확정 — 미리보기 인스턴스를 배치에 합류시켜 즉시 렌더하고, 결제·서버 반영은
     /// 호출 측(onBuyFurniture)에 위임. 구매 후 드래그로 원하는 위치로 옮기면 된다.
     private func commitPurchase(_ kind: OfficeLayout.FurnitureKind) {
-        guard let pending = pendingPurchase else { return }
+        guard let pending = pendingPurchase, pending.kind == kind.id else { return }
         let updated = placements + [pending]
-        draftPlacements = updated
         pendingPurchase = nil
         purchaseSheetOpen = false
-        onBuyFurniture(kind, OfficeLayout.serializePlacements(updated))
+        saveFurniture(updated, purchase: kind)
     }
 
     /// 미리보기 초기 위치 — 벽 가구는 벽 밴드, 바닥 가구는 앞레인부터 겹치지 않는 x 스캔.
@@ -245,8 +306,30 @@ struct GuildOfficeView: View {
         let trimmed = String(text.trimmingCharacters(in: .whitespacesAndNewlines)
             .prefix(OfficeLayout.furnitureTextMax))
         working[idx].text = trimmed.isEmpty ? nil : trimmed
-        draftPlacements = working
-        onSetFurniture(OfficeLayout.serializePlacements(working))
+        saveFurniture(working)
+    }
+
+    /// 성공 응답까지 다음 편집을 막고, 실패하면 서버 배치로 즉시 원복한다.
+    private func saveFurniture(_ updated: [OfficeLayout.FurniturePlacement],
+                               purchase: OfficeLayout.FurnitureKind? = nil) {
+        guard info.guild.isLeader, !savingFurniture else { return }
+        let expected = draftExpectedLayout ?? info.guild.officeFurniture ?? ""
+        savingFurniture = true
+        draftPlacements = updated
+        let serialized = OfficeLayout.serializePlacements(updated)
+        Task { @MainActor in
+            defer {
+                draftPlacements = nil
+                draftExpectedLayout = nil
+                savingFurniture = false
+            }
+            do {
+                if let purchase { try await onBuyFurniture(purchase, serialized, expected) }
+                else { try await onSetFurniture(serialized, expected) }
+            } catch {
+                furnitureAlert = .failure(error.localizedDescription)
+            }
+        }
     }
 
     /// 멤버·자동 배치·가구 배치·데코 변경 감지 키 — 순서 무관.
@@ -446,7 +529,7 @@ struct GuildOfficeView: View {
             .frame(width: kind.size.width * scale, height: kind.size.height * scale)
             .opacity(isPending ? 0.75 : 1)   // 구매 확인 전 미리보기
             .overlay {
-                if rearrangeMode && !isPending {
+                if rearrangeMode && info.guild.isLeader && !isPending {
                     RoundedRectangle(cornerRadius: 3)
                         .strokeBorder(style: StrokeStyle(lineWidth: isDragging ? 2 : 1, dash: [3]))
                         .foregroundStyle(isDragging ? Color.orange : Color.accentColor)
@@ -456,7 +539,7 @@ struct GuildOfficeView: View {
             let positionX = placement.x * scale
             // artBottomInset — 아트 하단 투명 여백만큼 내려 가시 하단을 baseline에 정렬 ("떠 보임" 방지).
             let positionY = (baseline - kind.size.height / 2 + kind.artBottomInset) * scale
-            if rearrangeMode && !isPending {
+            if rearrangeMode && info.guild.isLeader && !isPending {
                 // 탭(문구 편집)은 액자에만 — 다른 가구에 TapGesture가 붙어 드래그 인식을
                 // 방해하지 않도록 조건부로 분기한다.
                 if kind.supportsText {
@@ -473,11 +556,17 @@ struct GuildOfficeView: View {
                             }
                         }
                         .gesture(furnitureDrag(placement, scale: scale))
+                        .contextMenu {
+                            Button("가구 삭제…", role: .destructive) { furnitureAlert = .delete(placement) }
+                        }
                         .position(x: positionX, y: positionY)
                 } else {
                     body
                         .contentShape(Rectangle())
                         .gesture(furnitureDrag(placement, scale: scale))
+                        .contextMenu {
+                            Button("가구 삭제…", role: .destructive) { furnitureAlert = .delete(placement) }
+                        }
                         .position(x: positionX, y: positionY)
                 }
             } else {
@@ -493,6 +582,8 @@ struct GuildOfficeView: View {
                                scale: CGFloat) -> some Gesture {
         DragGesture(coordinateSpace: .named("officeScene"))
             .onChanged { value in
+                guard !savingFurniture else { return }
+                if draftExpectedLayout == nil { draftExpectedLayout = info.guild.officeFurniture ?? "" }
                 draggingUid = placement.uid
                 var working = draftPlacements ?? serverPlacements
                 guard let idx = working.firstIndex(where: { $0.uid == placement.uid }) else { return }
@@ -511,7 +602,9 @@ struct GuildOfficeView: View {
             .onEnded { _ in
                 draggingUid = nil
                 if let working = draftPlacements {
-                    onSetFurniture(OfficeLayout.serializePlacements(working))
+                    saveFurniture(working)
+                } else {
+                    draftExpectedLayout = nil
                 }
             }
     }
@@ -736,6 +829,9 @@ private struct OfficeShopSheet: View {
 
     let isLeader: Bool
     let placedDecor: [RankingAPI.GuildFurnitureItem]
+    let furnitureCount: Int
+    let furnitureUnavailableReason: String?
+    let canBuyFurniture: Bool
     let currentFloorTheme: Int
     let currentWallTheme: Int
     @Binding var previewFloorTheme: Int?
@@ -753,6 +849,7 @@ private struct OfficeShopSheet: View {
     @State private var pendingDecor: (slot: Int, item: OfficeLayout.DecorItem)?
 
     init(isLeader: Bool, placedDecor: [RankingAPI.GuildFurnitureItem],
+         furnitureCount: Int, furnitureUnavailableReason: String?, canBuyFurniture: Bool,
          currentFloorTheme: Int, currentWallTheme: Int,
          previewFloorTheme: Binding<Int?>, previewWallTheme: Binding<Int?>,
          onPreviewFurniture: @escaping (OfficeLayout.FurnitureKind?) -> Void,
@@ -763,6 +860,9 @@ private struct OfficeShopSheet: View {
          onApplyTheme: @escaping () -> Void) {
         self.isLeader = isLeader
         self.placedDecor = placedDecor
+        self.furnitureCount = furnitureCount
+        self.furnitureUnavailableReason = furnitureUnavailableReason
+        self.canBuyFurniture = canBuyFurniture
         self.currentFloorTheme = currentFloorTheme
         self.currentWallTheme = currentWallTheme
         _previewFloorTheme = previewFloorTheme
@@ -829,6 +929,12 @@ private struct OfficeShopSheet: View {
 
     @ViewBuilder
     private func furnitureRows(mount: OfficeLayout.FurnitureMount) -> some View {
+        Text("배치된 가구 \(furnitureCount)/\(OfficeLayout.furnitureMaxInstances)개 · 기본 가구 포함")
+            .font(.system(size: 10)).foregroundStyle(.secondary)
+        if let reason = furnitureUnavailableReason {
+            Text(reason).font(.system(size: 10)).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         ForEach(OfficeLayout.furnitureCatalog.filter { $0.mount == mount }) { kind in
             let affordable = settings.coins >= kind.price
             let selected = pendingFurniture?.id == kind.id
@@ -846,7 +952,7 @@ private struct OfficeShopSheet: View {
             }
         }
         if let pending = pendingFurniture {
-            confirmBar(price: pending.price) {
+            confirmBar(price: pending.price, available: canBuyFurniture) {
                 pendingFurniture = nil
                 onPreviewFurniture(nil)
             } buy: {
@@ -1002,7 +1108,7 @@ private struct OfficeShopSheet: View {
         .opacity(dimmed ? 0.6 : 1)
     }
 
-    private func confirmBar(price: Int, cancel: @escaping () -> Void,
+    private func confirmBar(price: Int, available: Bool = true, cancel: @escaping () -> Void,
                             buy: @escaping () -> Void) -> some View {
         VStack(spacing: 6) {
             Divider()
@@ -1019,7 +1125,7 @@ private struct OfficeShopSheet: View {
                 }
                 .font(.system(size: 11)).controlSize(.small)
                 .buttonStyle(.borderedProminent)
-                .disabled(settings.coins < price)
+                .disabled(settings.coins < price || !available)
             }
         }
     }
@@ -1042,7 +1148,7 @@ private struct OfficeShopSheet: View {
     private var footer: some View {
         Text(tab == .decor
              ? "구매한 장식은 길드에 기부됩니다 (제거는 기부자/길드장)"
-             : "구매한 가구는 길드 소유 — 재배치 모드에서 드래그로 이동 (벽 설치는 벽 안에서만)")
+             : "가구는 길드 소유 · 재배치 모드에서 드래그로 이동, 우클릭으로 삭제 (환불 없음)")
             .font(.system(size: 9)).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -1264,7 +1370,7 @@ enum GuildOfficeDemo {
                     rearrangeMode: $rearrange,
                     previewFloorTheme: $previewFloor,
                     previewWallTheme: $previewWall,
-                    onSetFurniture: { serialized in
+                    onSetFurniture: { serialized, _ in
                         furnitureLayout = serialized
                         print("OFFICE_DEMO_FURNITURE=\(serialized)")
                         fflush(stdout)
@@ -1274,7 +1380,7 @@ enum GuildOfficeDemo {
                         print("OFFICE_DEMO_LOGO_POS=\(x),\(y)")
                         fflush(stdout)
                     },
-                    onBuyFurniture: { kind, serialized in
+                    onBuyFurniture: { kind, serialized, _ in
                         furnitureLayout = serialized
                         print("OFFICE_DEMO_BUY kind=\(kind.id) \(kind.name)")
                         fflush(stdout)

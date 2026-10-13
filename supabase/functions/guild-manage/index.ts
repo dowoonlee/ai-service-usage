@@ -11,9 +11,10 @@
 // rename의 RP 300 소모는 클라이언트 로컬 경제(생성권·데코와 동일)라 서버가 검증하지 않는다 —
 // 서버는 이름 규칙(isValidGuildName)·유일성·길드장 권한만 강제한다.
 
-import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
+import { jsonResponse, errorResponse, handleOptions, corsHeaders } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
+import { furnitureWriteError, isValidFurnitureLayout } from "../_shared/guild_furniture.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import {
   generateInviteCode,
@@ -21,12 +22,6 @@ import {
   INVITE_EXPIRE_SEC,
   INVITE_REDECLINE_COOLDOWN_SEC,
   INVITE_MAX_PENDING_PER_GUILD,
-  FURNITURE_KIND_COUNT,
-  FURNITURE_WALL_KINDS,
-  FURNITURE_TEXT_KINDS,
-  FURNITURE_WALL_LANE,
-  FURNITURE_MAX_INSTANCES,
-  FURNITURE_TEXT_MAX,
   isValidGuildName,
   isValidGuildLogo,
   isValidGuildLogoPos,
@@ -47,6 +42,8 @@ interface ManagePayload {
   targetDeviceId: string; // kick 외에는 ""
   // set_furniture 전용 — "kind:x:lane[:text];…" (보유 가구 인스턴스 직렬화, text는 percent-encoding).
   layout?: string;
+  layoutVersion?: number;
+  expectedLayout?: string;
   // invite 전용 — 초대할 상대의 닉네임 (서버가 device로 해석).
   targetNickname?: string;
   // cancel_invite 전용 — 취소할 초대 id (UUID).
@@ -114,65 +111,18 @@ Deno.serve(async (req: Request) => {
   if (p.action === "set_logo_pos" && !isValidGuildLogoPos(p.logoX, p.logoY)) {
     return errorResponse(400, "invalid_logo_pos");
   }
-  // set_furniture: "kind:x:lane[:y[:text]];…" 검증 — 카탈로그 kind 범위, 벽/바닥 lane 정합,
-  // 벽 가구 자유 y(4번째 필드), 액자 문구(5번째, percent-encoding). kind 중복 허용.
-  // 좌표는 클라 논리 좌표(씬 280×150, 바닥 레인 0..2, 벽 3). 서버는 형식·범위만 권위 검증.
-  // 추가 필드(y·text)는 위치 대신 "숫자면 좌표, 아니면 문구"로 관대하게 판정 (레거시 4필드
-  // text와 신형 4필드 y를 모두 수용). 문구는 TEXT_KIND 한정 + 길이/제어문자 방어.
   if (p.action === "set_furniture") {
-    if (typeof p.layout !== "string" || p.layout.length > 1500) {
-      return errorResponse(400, "invalid_layout");
+    const writeError = furnitureWriteError(p.layoutVersion, p.expectedLayout);
+    // 구버전은 알 수 없는 409를 닉네임 중복으로 표시한다. 기존 최소 버전 게이트처럼
+    // 평문 426을 사용해야 실제 업데이트 안내가 사용자에게 전달된다.
+    if (writeError === "furniture_update_required") {
+      return new Response("가구를 변경하려면 앱을 최신 버전으로 업데이트해 주세요. 상단 버전 칩에서 업데이트할 수 있습니다.", {
+        status: 426,
+        headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" },
+      });
     }
-    const entries = p.layout.length === 0 ? [] : p.layout.split(";");
-    if (entries.length > FURNITURE_MAX_INSTANCES) {
-      return errorResponse(400, "invalid_layout");
-    }
-    for (const e of entries) {
-      const parts = e.split(":");
-      if (parts.length < 3 || parts.length > 5) {
-        return errorResponse(400, "invalid_layout");
-      }
-      const kind = Number(parts[0]);
-      const x = Number(parts[1]);
-      const lane = Number(parts[2]);
-      if (
-        !Number.isInteger(kind) || kind < 0 || kind >= FURNITURE_KIND_COUNT ||
-        !Number.isFinite(x) || x < 0 || x > 280 ||
-        !Number.isInteger(lane) ||
-        (FURNITURE_WALL_KINDS.has(kind)
-          ? lane !== FURNITURE_WALL_LANE
-          : lane < 0 || lane > 2)
-      ) {
-        return errorResponse(400, "invalid_layout");
-      }
-      // 추가 필드 4·5: 숫자면 좌표(y), 비숫자면 문구.
-      for (const field of parts.slice(3)) {
-        if (field.length === 0) continue;
-        const asNum = Number(field);
-        if (Number.isFinite(asNum)) {
-          if (asNum < 0 || asNum > 150) return errorResponse(400, "invalid_layout"); // 씬 y 범위
-          continue;
-        }
-        // 문구 — 액자 등 TEXT_KIND 한정.
-        if (!FURNITURE_TEXT_KINDS.has(kind) || field.length > 120) {
-          return errorResponse(400, "invalid_layout");
-        }
-        let text: string;
-        try {
-          text = decodeURIComponent(field);
-        } catch {
-          return errorResponse(400, "invalid_layout");
-        }
-        // 클라는 grapheme 10자 캡 — 이모지 ZWJ 시퀀스는 code point가 더 많으므로
-        // 서버는 ×2 여유로 검증 (형식 방어가 목적, 정확한 글자 수는 클라 UX 책임).
-        if (
-          text.length === 0 || [...text].length > FURNITURE_TEXT_MAX * 2 ||
-          /[\x00-\x1f\x7f;:]/.test(text)
-        ) {
-          return errorResponse(400, "invalid_layout");
-        }
-      }
-    }
+    if (writeError) return errorResponse(400, writeError);
+    if (!isValidFurnitureLayout(p.layout)) return errorResponse(400, "invalid_layout");
   }
   if (typeof body.signature !== "string" || body.signature.length !== 64) {
     return errorResponse(400, "invalid_signature");
@@ -205,6 +155,8 @@ Deno.serve(async (req: Request) => {
   if (typeof p.layout === "string") verifyObj.layout = p.layout;
   // 클라이언트가 액션별로만 키를 직렬화 → canonical 재현도 동일 조건(present-only).
   if (typeof p.targetNickname === "string") verifyObj.targetNickname = p.targetNickname;
+  if (typeof p.layoutVersion === "number") verifyObj.layoutVersion = p.layoutVersion;
+  if (typeof p.expectedLayout === "string") verifyObj.expectedLayout = p.expectedLayout;
   if (typeof p.inviteId === "string") verifyObj.inviteId = p.inviteId;
   if (typeof p.requestId === "string") verifyObj.requestId = p.requestId;
   if (typeof p.newName === "string") verifyObj.newName = p.newName;
@@ -472,14 +424,20 @@ Deno.serve(async (req: Request) => {
 
     case "set_furniture": {
       // 가구 자유 배치 — 멤버 자리(office_slot 포지션)는 고정, 가구 좌표만 교체.
-      const { error: updErr } = await db
+      // Compare-and-set: 같은 길드장의 다른 기기/오래된 화면이 최신 배치를 덮어쓰지 못한다.
+      const { data: updated, error: updErr } = await db
         .from("guilds")
         .update({ office_furniture: p.layout })
-        .eq("id", guild.id);
+        .eq("id", guild.id)
+        .eq("leader_device_id", deviceId)
+        .eq("office_furniture", p.expectedLayout!)
+        .select("id")
+        .maybeSingle();
       if (updErr) {
         console.error("guild set_furniture failed", updErr);
         return errorResponse(500, "layout_failed");
       }
+      if (!updated) return errorResponse(409, "furniture_conflict");
       return jsonResponse({ ok: true, officeFurniture: p.layout });
     }
 

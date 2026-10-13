@@ -651,14 +651,14 @@ struct GuildView: View {
                 rearrangeMode: $rearrangeMode,
                 previewFloorTheme: $previewFloorTheme,
                 previewWallTheme: $previewWallTheme,
-                onSetFurniture: { serialized in
-                    performSetFurniture(serialized)
+                onSetFurniture: { serialized, expected in
+                    try await performSaveFurniture(serialized, expected: expected)
                 },
                 onSetLogoPos: { x, y in
                     performSetLogoPos(x: x, y: y)
                 },
-                onBuyFurniture: { kind, serialized in
-                    performBuyFurniture(kind, serialized: serialized)
+                onBuyFurniture: { kind, serialized, expected in
+                    try await performSaveFurniture(serialized, expected: expected, purchase: kind)
                 },
                 onPlaceDecor: { slot, item in
                     performPlaceDecor(slot: slot, item: item)
@@ -1094,13 +1094,34 @@ struct GuildView: View {
         }
     }
 
-    /// 가구 재배치 (길드장) — 드래그 결과 좌표 직렬화를 서버에 반영. refresh가 최신 배치로 재정합.
-    private func performSetFurniture(_ serialized: String) {
-        runAction {
-            _ = try await RankingAPI.shared.manageGuild(
-                deviceId: settings.rankingDeviceID, action: .setFurniture, furniture: serialized,
+    /// 가구 편집/구매 공통 저장. 성공한 배치를 즉시 반영해 후속 저장의 기준도 갱신한다.
+    @MainActor
+    private func performSaveFurniture(_ serialized: String, expected: String,
+                                      purchase: OfficeLayout.FurnitureKind? = nil) async throws {
+        guard !actionBusy else { throw RankingAPI.RankingError.guildConflict("furniture_busy") }
+        guard let guild = info?.guild, guild.isLeader else {
+            throw RankingAPI.RankingError.guildConflict("not_leader")
+        }
+        if let purchase, settings.coins < purchase.price {
+            throw RankingAPI.RankingError.guildConflict("insufficient_coins")
+        }
+        actionBusy = true
+        defer { actionBusy = false }
+        do {
+            let response = try await RankingAPI.shared.manageGuild(
+                deviceId: settings.rankingDeviceID, action: .setFurniture,
+                furniture: serialized, expectedFurniture: expected,
                 hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
-            DebugLog.log("Guild: 가구 배치 저장 → \(serialized)")
+            if let purchase {
+                CoinLedger.shared.spendGuildDecor(purchase.price, item: "가구(\(purchase.name))")
+            }
+            if info?.guild.id == guild.id {
+                info?.guild.officeFurniture = response.officeFurniture ?? serialized
+            }
+        } catch {
+            // 충돌/응답 유실일 수 있어 서버 배치를 재조회하되, 원래 오류는 호출부에 전달한다.
+            refresh()
+            throw error
         }
     }
 
@@ -1148,22 +1169,6 @@ struct GuildView: View {
                 CoinLedger.shared.spendGuildDecor(
                     OfficeLayout.themePrice, item: "테마(\(purchase.kind) \(purchase.index))")
             }
-        }
-    }
-
-    /// 가구 구매 확정 — 코인 검증 후 새 인스턴스 포함 배치를 서버 반영 + 코인 차감.
-    private func performBuyFurniture(_ kind: OfficeLayout.FurnitureKind, serialized: String) {
-        guard settings.coins >= kind.price else {
-            error = "코인이 부족합니다 (\(kind.price) 필요)."
-            return
-        }
-        runAction {
-            _ = try await RankingAPI.shared.manageGuild(
-                deviceId: settings.rankingDeviceID, action: .setFurniture,
-                furniture: serialized,
-                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
-            CoinLedger.shared.spendGuildDecor(kind.price, item: "가구(\(kind.name))")
-            DebugLog.log("Guild: 가구 구매 \(kind.name) (\(kind.price)코인)")
         }
     }
 
