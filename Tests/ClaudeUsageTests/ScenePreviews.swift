@@ -107,10 +107,16 @@ final class ScenePreviews: SandboxedTestCase {
     func testRenderGuildOfficeCapacityAndEmptyRoom() throws {
         _ = try PreviewRenderer.requireOutputDir()
         var info = PreviewDemoState.guildInfo()
-        let placements = (0..<60).map { index in
-            OfficeLayout.FurniturePlacement(uid: index, kind: index < 30 ? 8 : 5,
-                x: CGFloat(18 + index % 15 * 17), lane: index < 30 ? 3 : (index / 15) % 3,
-                text: nil, wallY: index < 30 ? CGFloat(20 + index / 15 * 22) : nil)
+        var placements: [OfficeLayout.FurniturePlacement] = []
+        for index in 0..<60 {
+            let isWall = index < 30
+            let kind: Int = isWall ? 8 : 5
+            let x = CGFloat(18 + (index % 15) * 17)
+            let lane: Int = isWall ? 3 : (index / 15) % 3
+            let wallY: CGFloat? = isWall ? CGFloat(20 + (index / 15) * 22) : nil
+            let placement = OfficeLayout.FurniturePlacement(uid: index, kind: kind,
+                x: x, lane: lane, text: nil, wallY: wallY)
+            placements.append(placement)
         }
         for (title, layout) in [("사무실-60개", OfficeLayout.serializePlacements(placements)),
                                  ("사무실-가구0개", OfficeLayout.emptyFurnitureLayout)] {
