@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// 픽셀 사무실 아래의 작업대. 배치/보관/프리셋을 한 위치에서 관리한다.
+@MainActor
 struct OfficeStudioPanel: View {
     enum Tab: String, CaseIterable { case placed = "배치된 가구", storage = "보관함", presets = "프리셋" }
     enum Action {
