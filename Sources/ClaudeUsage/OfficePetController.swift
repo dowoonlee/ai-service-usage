@@ -15,6 +15,10 @@ import SwiftUI
 ///   sleeping — 월 VP 0: 완전 고정 + 💤. 스침 인사에도 무반응.
 ///   greeting — 두 펫이 근접 교차하는 순간 ~10% 확률로 1.5s 멈춤 + 인사 말풍선.
 ///   special  — Mythic 전용: idle 중 낮은 확률로 특수 모션(Attack/Heal 등) + 전용 대사.
+///   controlled — **내 펫(isMe) WASD 조작**: 키가 눌린 동안 FSM에서 빠져 직접 이동(가구 충돌은 축별
+///              미끄러짐), 손을 뗀 뒤 `controlIdleResume`초가 지나면 idle로 복귀해 다시 자율 행동.
+///   emote    — **F 키**: 종 전용 대사 한마디 + 액션. Mythic은 전용 특수 모션, 그 외는 제자리 두 번
+///              점프(`hopOffset`을 틱마다 갱신, 뷰가 스프라이트를 그만큼 띄운다). 끝나면 controlled 여운으로.
 ///
 /// 경로탐색: `OfficeLayout.collisionRects`(통행 특성별 충돌 밴드)를 4px 셀 그리드로 이산화한
 /// `OfficePathGrid`에서 A*(8방향, 대각선은 모서리 끼임 방지 조건부)로 최단경로를 뽑고,
@@ -35,6 +39,11 @@ final class OfficeSimulation: ObservableObject {
             case drinking(until: TimeInterval)
             /// Mythic 특수 모션 재생 중.
             case special(until: TimeInterval)
+            /// WASD 조작 중 — moving은 이번 틱에 실제로 움직였는지(걷기/앉기 프레임 선택),
+            /// lastInput은 마지막 키 입력 시각(복귀 타이머 기준).
+            case controlled(moving: Bool, lastInput: TimeInterval)
+            /// F 키 액션 재생 중 — from~until 구간. Mythic은 specialAction 프레임, 그 외는 점프.
+            case emote(from: TimeInterval, until: TimeInterval)
         }
 
         let id: String                 // nickname (길드 내 유니크)
@@ -68,15 +77,32 @@ final class OfficeSimulation: ObservableObject {
         var isWalking: Bool {
             switch phase {
             case .walking, .visiting: return true
+            case .controlled(let moving, _): return moving
             default: return false
             }
         }
+
+        var isControlled: Bool {
+            if case .controlled = phase { return true }
+            return false
+        }
+
+        var isEmoting: Bool {
+            if case .emote = phase { return true }
+            return false
+        }
+
+        /// F 액션의 제자리 점프 높이(논리 px, ≥0) — 뷰가 스프라이트를 이만큼 위로 띄운다.
+        /// 시뮬레이션 틱(30Hz)에서 갱신하므로 8fps 프레임 루프와 무관하게 부드럽다.
+        var hopOffset: CGFloat = 0
 
         /// 뷰가 재생할 스프라이트 액션 — phase·mode에서 유도.
         var displayAction: PetController.Action {
             switch phase {
             case .walking, .visiting: return .walk
+            case .controlled(let moving, _): return moving ? .walk : .sit
             case .special: return specialAction
+            case .emote: return Mythic.spec(for: kind)?.specials[specialAction] != nil ? specialAction : .sit
             case .drinking, .greeting: return .sit
             case .idle:
                 // working은 자리에서 "작업 중" 모션(.scan) — PC ON과 함께 캐리 중임이 읽히게.
@@ -96,6 +122,47 @@ final class OfficeSimulation: ObservableObject {
     nonisolated static let guestIDPrefix = "__guest:"
 
     @Published private(set) var pets: [PetState] = []
+
+    /// 시뮬레이션 시계 — idle/인사/액션의 만료 판정에 쓴다. 테스트가 틱과 함께 결정적으로 밀 수
+    /// 있도록 주입 가능 (기본은 벽시계).
+    var clock: () -> TimeInterval = { Date().timeIntervalSinceReferenceDate }
+
+    /// WASD 조작 키 — 뷰(`OfficeKeyCapture`)가 keyDown/keyUp을 전달한다.
+    enum ControlKey: Hashable { case up, down, left, right }
+    private var heldKeys: Set<ControlKey> = []
+
+    /// 조작 대상 — 놀러가기 화면이면 방문객(내 펫), 내 길드면 isMe 멤버. 없으면 nil (WASD 무시).
+    private var controlledIndex: Int? {
+        pets.firstIndex { $0.isGuest && $0.isMe } ?? pets.firstIndex(where: \.isMe)
+    }
+    var hasControllablePet: Bool { controlledIndex != nil }
+
+    func setControlKey(_ key: ControlKey, pressed: Bool) {
+        if pressed { heldKeys.insert(key) } else { heldKeys.remove(key) }
+    }
+
+    /// 창이 key를 잃거나 뷰가 사라질 때 — keyUp이 안 올 수 있어 눌림 상태를 전부 해제한다.
+    func releaseAllControlKeys() {
+        heldKeys.removeAll()
+    }
+
+    /// F 키 — 내 펫이 종 전용 대사 한마디와 함께 액션을 한다. Mythic은 전용 특수 모션(+전용 대사),
+    /// 그 외는 제자리 점프. 재생 중 다시 누르면 무시(연타 스팸 방지), 끝난 뒤엔 바로 다시 가능.
+    func triggerEmote() {
+        guard let i = controlledIndex, !pets[i].isEmoting else { return }
+        let now = clock()
+        var pet = pets[i]
+        if visitingPetID == pet.id { visitingPetID = nil }
+        var line = Quotes.random(for: pet.kind)
+        if let spec = Mythic.spec(for: pet.kind), let action = spec.specials.keys.randomElement() {
+            pet.specialAction = action
+            if let quote = spec.moveQuotes[action]?.randomElement() { line = quote }
+        }
+        pet.phase = .emote(from: now, until: now + Self.emoteDuration)
+        pet.bubble = line
+        pet.bubbleUntil = now + Self.emoteDuration + 2.5
+        pets[i] = pet
+    }
 
     private var timer: Timer?
     /// 통행 특성별 충돌 밴드를 이산화한 보행 그리드 — 가구 재배치(layout)마다 재구축.
@@ -121,6 +188,13 @@ final class OfficeSimulation: ObservableObject {
     private static let greetCooldownSec: TimeInterval = 30
     private static let drinkDuration: TimeInterval = 3.0
     private static let specialDuration: TimeInterval = 1.6
+    /// WASD 조작 속도 — 산책(14)보다 빠릿하게, 그래도 씬(280px)을 가로지르는 데 ~10초.
+    private static let controlSpeed: CGFloat = 28
+    /// 마지막 키 입력 후 이 시간이 지나면 자율 행동으로 복귀.
+    private static let controlIdleResume: TimeInterval = 6
+    /// F 액션 길이 — Mythic 특수 모션(specialDuration)과 맞춘다. 점프는 이 안에 두 번.
+    private static let emoteDuration: TimeInterval = 1.6
+    private static let emoteHopHeight: CGFloat = 6
 
     // MARK: - 대사 (P2a 확충 — WalkingCat의 Quotes와 별개인 사무실 상황극)
 
@@ -216,7 +290,7 @@ final class OfficeSimulation: ObservableObject {
             ?? entrance
         let start = CGPoint(x: -12, y: OfficeLayout.lanes[2])
         let path = grid?.path(from: start, to: home) ?? [home]
-        let now = Date().timeIntervalSinceReferenceDate
+        let now = clock()
         var pet = PetState(
             id: Self.guestIDPrefix + guest.name,
             kind: guest.kind,
@@ -257,17 +331,27 @@ final class OfficeSimulation: ObservableObject {
 #endif
     }
 
-    private func tick() {
+    /// 한 프레임(1/30s) 진행. 타이머가 부르지만 테스트가 결정적으로 돌리기 위해 internal로 둔다.
+    func tick() {
         guard !pets.isEmpty else { return }
-        let now = Date().timeIntervalSinceReferenceDate
+        let now = clock()
         let dt: CGFloat = 1.0 / 30
         var updated = pets
+        let controlled = controlledIndex
 
         for i in updated.indices {
             var pet = updated[i]
 
             // 말풍선 만료.
             if pet.bubble != nil && now > pet.bubbleUntil { pet.bubble = nil }
+
+            // WASD 조작 — 키가 눌려 있거나 조작 여운(복귀 대기) 중이면 FSM 대신 직접 이동.
+            // mode(sleeping 포함)보다 우선: 월 VP 0이어도 내 펫은 움직일 수 있어야 한다.
+            if i == controlled, !heldKeys.isEmpty || pet.isControlled || pet.isEmoting {
+                tickControlled(&pet, now: now, dt: dt)
+                updated[i] = pet
+                continue
+            }
 
             switch pet.mode {
             case .sleeping:
@@ -317,17 +401,30 @@ final class OfficeSimulation: ObservableObject {
                     if now >= until {
                         pet.phase = .idle(until: now + Double.random(in: 2...8))
                     }
+                case .controlled:
+                    // 조작 대상이 바뀐 경우(재구성 등) — 즉시 자율 행동으로.
+                    pet.phase = .idle(until: now)
+                case .emote(_, let until):
+                    pet.hopOffset = 0
+                    if now >= until { pet.phase = .idle(until: now + Double.random(in: 1...3)) }
                 }
             }
             updated[i] = pet
         }
 
-        // 스침 인사 — 둘 다 산책(walking) 중 근접 교차 (2D 거리 기준).
+        // 스침 인사 — 둘 다 산책(walking, 또는 WASD로 이동) 중 근접 교차 (2D 거리 기준).
         // 펫끼리는 비충돌(통과)이므로 하드 블록 없이 연출만 (기획 §5-2 충돌 모델).
+        func strolling(_ pet: PetState) -> Bool {
+            switch pet.phase {
+            case .walking: return pet.mode != .sleeping
+            case .controlled(let moving, _): return moving
+            default: return false
+            }
+        }
         for i in updated.indices {
-            guard case .walking = updated[i].phase, updated[i].mode != .sleeping else { continue }
+            guard strolling(updated[i]) else { continue }
             for j in updated.indices where j > i {
-                guard case .walking = updated[j].phase, updated[j].mode != .sleeping,
+                guard strolling(updated[j]),
                       hypot(updated[i].x - updated[j].x, updated[i].y - updated[j].y) < 7 else { continue }
                 let pairKey = [updated[i].id, updated[j].id].sorted().joined(separator: "|")
                 if let until = greetCooldown[pairKey], now < until { continue }
@@ -335,7 +432,10 @@ final class OfficeSimulation: ObservableObject {
                 guard Double.random(in: 0..<1) < Self.greetChance else { continue }
                 let line = Self.greetLines.randomElement() ?? "👋"
                 for k in [i, j] {
-                    updated[k].phase = .greeting(until: now + Self.greetDuration)
+                    // 조작 중인 펫은 멈추지 않고 말풍선만 — 키 입력을 가로채면 조작감이 끊긴다.
+                    if !updated[k].isControlled {
+                        updated[k].phase = .greeting(until: now + Self.greetDuration)
+                    }
                     updated[k].bubble = line
                     updated[k].bubbleUntil = now + Self.greetDuration + 0.5
                 }
@@ -346,6 +446,62 @@ final class OfficeSimulation: ObservableObject {
         }
 
         pets = updated
+    }
+
+    /// WASD 한 틱 — 눌린 키의 합 방향으로 등속 이동. 가구 충돌 밴드(그리드)와 `petWalkArea` 밖은
+    /// 막되, 대각선이 막히면 가능한 축으로만 미끄러져 벽을 따라 걷는 감각을 준다.
+    /// 키가 없으면 제자리(앉기)에서 복귀 타이머를 재고, 만료 시 idle로 돌려 FSM에 넘긴다.
+    private func tickControlled(_ pet: inout PetState, now: TimeInterval, dt: CGFloat) {
+        var dx: CGFloat = 0, dy: CGFloat = 0
+        if heldKeys.contains(.left) { dx -= 1 }
+        if heldKeys.contains(.right) { dx += 1 }
+        if heldKeys.contains(.up) { dy -= 1 }
+        if heldKeys.contains(.down) { dy += 1 }
+
+        guard dx != 0 || dy != 0 else {
+            switch pet.phase {
+            case .controlled(_, let last):
+                pet.phase = now - last >= Self.controlIdleResume
+                    ? .idle(until: now + Double.random(in: 1...3))
+                    : .controlled(moving: false, lastInput: last)
+            case .emote(let from, let until):
+                if now >= until {
+                    // 액션이 끝나면 조작 여운으로 — 6초 뒤 자율 행동 복귀는 WASD와 같은 규칙.
+                    pet.hopOffset = 0
+                    pet.phase = .controlled(moving: false, lastInput: now)
+                } else if Mythic.spec(for: pet.kind)?.specials[pet.specialAction] == nil {
+                    // 일반 펫 — 두 번 점프 (|sin|이 한 주기에 두 봉우리).
+                    let t = (now - from) / (until - from)
+                    pet.hopOffset = abs(sin(t * .pi * 2)) * Self.emoteHopHeight
+                }
+            default: break
+            }
+            return
+        }
+        // 이동 입력은 액션을 끊는다 — 조작감 우선.
+        pet.hopOffset = 0
+        // 조작 시작 — 커피머신 방문 중이었다면 점유를 풀어 다른 펫이 갈 수 있게.
+        if visitingPetID == pet.id { visitingPetID = nil }
+
+        let len = hypot(dx, dy)
+        let step = Self.controlSpeed * dt
+        let current = CGPoint(x: pet.x, y: pet.y)
+        var next = CGPoint(x: pet.x + dx / len * step, y: pet.y + dy / len * step)
+        if !isWalkable(next) {
+            let xOnly = CGPoint(x: next.x, y: pet.y)
+            let yOnly = CGPoint(x: pet.x, y: next.y)
+            if dx != 0 && isWalkable(xOnly) { next = xOnly }
+            else if dy != 0 && isWalkable(yOnly) { next = yOnly }
+            else { next = current }
+        }
+        pet.x = next.x
+        pet.y = next.y
+        if dx != 0 { pet.facingRight = dx > 0 }
+        pet.phase = .controlled(moving: next != current, lastInput: now)
+    }
+
+    private func isWalkable(_ p: CGPoint) -> Bool {
+        OfficeLayout.petWalkArea.contains(p) && (grid?.isWalkable(p) ?? true)
     }
 
     /// idle 만료 시 다음 행동 결정 — 모드별 성향 (P2a 고도화의 중심 분기).
@@ -470,6 +626,13 @@ struct OfficePathGrid {
 
     private func isFree(_ c: Int, _ r: Int) -> Bool {
         c >= 0 && r >= 0 && c < cols && r < rows && !blockedCells[r * cols + c]
+    }
+
+    /// 지점이 자유 셀 위인지 — WASD 직접 이동의 충돌 판정 (경로탐색 없이 한 걸음씩 묻는다).
+    /// `cell(of:)`가 범위를 클램프하므로 영역 밖 판정은 호출 측(`petWalkArea`)이 맡는다.
+    func isWalkable(_ p: CGPoint) -> Bool {
+        let (c, r) = cell(of: p)
+        return isFree(c, r)
     }
 
     /// 막힌 지점 보정 — 주변 링을 넓혀가며 가장 가까운 자유 셀 (가구 위에 낀 시작점 탈출).
