@@ -944,7 +944,7 @@ actor RankingAPI {
                 case "insufficient_coins": return "코인이 부족합니다."
                 case "invalid_layout": return "가구 배치 또는 문구를 저장할 수 없습니다. 문구 길이와 특수 문자를 확인해 주세요."
                 case "furniture_inventory_conflict": return "보유 가구가 변경되었습니다. 최신 사무실을 확인한 뒤 다시 시도해 주세요."
-                case "furniture_conflict": return "다른 기기에서 가구 배치가 변경되었습니다. 최신 배치를 확인한 뒤 다시 시도해 주세요."
+                case "furniture_conflict": return "다른 멤버나 기기에서 가구 배치가 변경되었습니다. 최신 배치를 확인한 뒤 다시 시도해 주세요."
                 case "slot_taken":          return "방금 다른 멤버가 그 자리에 앉았습니다."
                 case "not_in_guild":        return "길드에 소속되어 있지 않습니다."
                 case "invalid_code":        return "초대 코드가 올바르지 않습니다."
@@ -1548,7 +1548,7 @@ actor RankingAPI {
                                slot: slot, hmacKeyBase64: hmacKeyBase64)
     }
 
-    /// 데코 제거 (기부자 본인 또는 길드장 — 아니면 `.guildConflict("not_leader")`).
+    /// 데코 제거 (멤버 누구나 — 꾸미기 권한을 멤버 전체로 열면서 기부자/길드장 제한을 해제).
     func removeDecor(deviceId: String, slot: Int,
                      hmacKeyBase64: String) async throws -> GuildOfficeResponse {
         try await officeAction(deviceId: deviceId, action: "remove_decor", item: "", slot: slot,

@@ -1,6 +1,7 @@
 // POST /guild-manage
-// 길드장 전용 액션 묶음: kick(추방) / rotate_code(초대 코드 재발급) / disband(해체)
+// 길드 관리 액션 묶음: kick(추방) / rotate_code(초대 코드 재발급) / disband(해체)
 // / set_furniture(가구 자유 배치) / rename(길드명 변경). 1함수 1액션 관례의 의도적 예외 — 함수 수 억제 (docs/plans/guild.md §3).
+// 권한: 사무실 꾸미기(set_furniture / set_logo_pos)는 **멤버 누구나**, 나머지는 길드장 전용 (MEMBER_ACTIONS).
 //
 // payload(서명 대상, flat): { action, deviceId, [layout,] [newName,] targetDeviceId, ts }
 //   - targetDeviceId는 kick에서만 의미. 나머지는 빈 문자열("").
@@ -35,6 +36,8 @@ const MANAGE_ACTIONS: ReadonlySet<string> = new Set([
   "kick", "rotate_code", "disband", "set_furniture", "invite", "cancel_invite", "rename",
   "set_logo", "set_logo_pos", "approve_request", "reject_request",
 ]);
+/// 길드장이 아니어도 되는 액션 — 사무실 꾸미기 (가구 배치·로고 위치). 멤버십은 여전히 필수.
+const MEMBER_ACTIONS: ReadonlySet<string> = new Set(["set_furniture", "set_logo_pos"]);
 
 interface ManagePayload {
   action: ManageAction;
@@ -190,7 +193,11 @@ Deno.serve(async (req: Request) => {
     .eq("id", membership.guild_id)
     .maybeSingle();
   if (!guild) return errorResponse(404, "guild_not_found");
-  if (guild.leader_device_id !== deviceId) return errorResponse(403, "not_leader");
+  // 사무실 꾸미기(가구 배치·로고 위치)는 멤버 누구나 — 나머지(추방/코드/해체/초대/승인/이름/로고 디자인)는
+  // 길드장 전용. 동시 편집 충돌은 set_furniture의 office_revision 검사가 막는다.
+  if (!MEMBER_ACTIONS.has(p.action) && guild.leader_device_id !== deviceId) {
+    return errorResponse(403, "not_leader");
+  }
 
   switch (p.action) {
     case "kick": {
@@ -443,12 +450,11 @@ Deno.serve(async (req: Request) => {
       if (transitionError) return errorResponse(409, transitionError);
       const layout = studioLayout(state);
       const revision = p.expectedRevision! + 1;
-      // 배치·소유권·프리셋을 같은 문장에서 갱신하고, 동시 수정/길드장 교체를 검사한다.
+      // 배치·소유권·프리셋을 같은 문장에서 갱신하고, 동시 수정(다른 멤버 포함)을 revision으로 검사한다.
       const { data: updated, error: updErr } = await db
         .from("guilds")
         .update({ office_furniture: layout, office_studio: state, office_revision: revision })
         .eq("id", guild.id)
-        .eq("leader_device_id", deviceId)
         .eq("office_revision", p.expectedRevision!)
         .eq("office_furniture", p.expectedLayout!)
         .select("id")

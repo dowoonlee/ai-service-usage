@@ -43,7 +43,7 @@ struct GuildView: View {
     @State private var confirmingDisbandFinal: Bool = false
     @State private var kickTarget: RankingAPI.GuildMember?
     @State private var copiedCode: Bool = false
-    /// 가구 재배치 모드 (길드장) — 가구를 드래그로 자유 이동.
+    /// 가구 재배치 모드 (멤버 누구나) — 가구를 드래그로 자유 이동.
     @State private var rearrangeMode: Bool = false
     /// 테마 미리보기 (구매 확인 전) — 스와치 클릭 시 씬에만 적용, "구매"를 눌러야 결제.
     @State private var previewFloorTheme: Int?
@@ -667,17 +667,16 @@ struct GuildView: View {
                 purchaseSheetOpen: $purchaseSheetOpen
             )
             HStack(spacing: 8) {
-                if info.guild.isLeader {
-                    Button(rearrangeMode ? "꾸미기 완료" : "사무실 꾸미기") {
-                        clearThemePreview()
-                        rearrangeMode.toggle()
-                    }
-                    .font(.system(size: 11))
-                    .disabled(actionBusy)
+                // 꾸미기는 멤버 누구나 (길드장 전용이던 것을 열었다 — 서버도 멤버십만 검사).
+                Button(rearrangeMode ? "꾸미기 완료" : "사무실 꾸미기") {
+                    clearThemePreview()
+                    rearrangeMode.toggle()
                 }
+                .font(.system(size: 11))
+                .disabled(actionBusy)
                 Button {
-                    // 길드장은 재배치 모드와 함께 열어 구매 직후 바로 드래그 배치 가능.
-                    if info.guild.isLeader { rearrangeMode = true }
+                    // 재배치 모드와 함께 열어 구매 직후 바로 드래그 배치 가능.
+                    rearrangeMode = true
                     purchaseSheetOpen = true
                 } label: {
                     HStack(spacing: 4) {
@@ -1093,8 +1092,8 @@ struct GuildView: View {
     @MainActor
     private func performSaveStudio(_ request: OfficeStudioSave) async throws {
         guard !actionBusy else { throw RankingAPI.RankingError.guildConflict("furniture_busy") }
-        guard let guild = info?.guild, guild.isLeader else {
-            throw RankingAPI.RankingError.guildConflict("not_leader")
+        guard let guild = info?.guild else {
+            throw RankingAPI.RankingError.guildConflict("not_in_guild")
         }
         let purchase = request.operation == .purchase
             ? request.purchaseKind.flatMap { OfficeLayout.furnitureKind(id: $0) } : nil
@@ -1147,7 +1146,7 @@ struct GuildView: View {
         }
     }
 
-    /// 미리보기 중인 테마 구매·적용 (길드장, 항목당 2,000코인 — 바닥+벽 동시 미리보기면 2건 결제).
+    /// 미리보기 중인 테마 구매·적용 (멤버 누구나, 항목당 2,000코인 — 바닥+벽 동시 미리보기면 2건 결제).
     private func performApplyThemePreview() {
         let purchases: [(kind: String, index: Int)] =
             [previewFloorTheme.map { ("floor", $0) }, previewWallTheme.map { ("wall", $0) }]

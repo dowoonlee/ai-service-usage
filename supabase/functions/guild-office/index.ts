@@ -3,8 +3,8 @@
 //   set_spot     — 내 스팟 선택(0..11)/비우기(-1). 선착순 UNIQUE 위반 시 409 slot_taken.
 //   place_decor  — 데코 슬롯(0..9)에 아이템 배치/교체 구매 (멤버 누구나 — 기부 모델).
 //                  코인은 클라 로컬 경제라 서버는 기록만 (생성권과 동일 원칙, 기획 §2).
-//   remove_decor — 데코 제거 (기부자 본인 또는 길드장).
-//   set_theme    — 인테리어 테마 (길드장 전용). item="floor"|"wall", slot=테마 index.
+//   remove_decor — 데코 제거 (멤버 누구나 — 꾸미기 권한을 멤버 전체로 열면서 기부자/길드장 제한 해제).
+//   set_theme    — 인테리어 테마 (멤버 누구나). item="floor"|"wall", slot=테마 index.
 //
 // payload(서명 대상, flat — 액션 무관 고정 형태): { action, deviceId, item, slot, ts }
 //   item은 place_decor(아이템 kind)/set_theme("floor"|"wall") 외에는 "".
@@ -154,22 +154,12 @@ Deno.serve(async (req: Request) => {
     case "remove_decor": {
       const { data: row } = await db
         .from("guild_furniture")
-        .select("slot_id, purchased_by")
+        .select("slot_id")
         .eq("guild_id", guildId)
         .eq("slot_id", p.slot)
         .maybeSingle();
       if (!row) return errorResponse(404, "decor_not_found");
-      // 제거 권한 — 기부자 본인 또는 길드장.
-      if (row.purchased_by !== deviceId) {
-        const { data: guild } = await db
-          .from("guilds")
-          .select("leader_device_id")
-          .eq("id", guildId)
-          .maybeSingle();
-        if (!guild || guild.leader_device_id !== deviceId) {
-          return errorResponse(403, "not_leader");
-        }
-      }
+      // 제거 권한 — 멤버 누구나 (사무실 꾸미기는 길드장과 동일 권한).
       const { error: delErr } = await db
         .from("guild_furniture")
         .delete()
@@ -183,14 +173,7 @@ Deno.serve(async (req: Request) => {
     }
 
     case "set_theme": {
-      const { data: guild } = await db
-        .from("guilds")
-        .select("leader_device_id")
-        .eq("id", guildId)
-        .maybeSingle();
-      if (!guild || guild.leader_device_id !== deviceId) {
-        return errorResponse(403, "not_leader");
-      }
+      // 멤버 누구나 — 코인은 클라 로컬 경제라 서버는 기록만 (place_decor와 동일 원칙).
       const patch = p.item === "floor" ? { floor_theme: p.slot } : { wall_theme: p.slot };
       const { error: updErr } = await db.from("guilds").update(patch).eq("id", guildId);
       if (updErr) {

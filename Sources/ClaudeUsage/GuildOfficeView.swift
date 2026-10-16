@@ -11,8 +11,10 @@ import UniformTypeIdentifiers
 ///
 /// 멤버 배치: 자동 랜덤 — `OfficeLayout.autoAssignments` 결정적 해시로 클라이언트에서 배정
 /// (수동 자리 선택은 사용자 피드백으로 폐기. 서버 office_slot은 더 이상 읽지 않는다).
-/// 재배치 모드(길드장): 가구를 **마우스 드래그**로 자유 이동 — 놓으면 가장 가까운 레인에 스냅
+/// 재배치 모드(멤버 누구나 — 길드장 전용이던 것을 열었다. 동시 편집은 서버 revision 충돌로 막는다):
+/// 가구를 **마우스 드래그**로 자유 이동 — 놓으면 가장 가까운 레인에 스냅
 /// 후 서버 저장 (레포트 탭 악세서리 드래그와 동일한 감각. 스왑 클릭 방식은 사용자 피드백으로 폐기).
+/// 내 펫은 **WASD**로 직접 움직이고 **F**로 대사+액션을 한다 (`OfficeKeyCapture` → `OfficeSimulation`).
 /// 상점(OfficeShopSheet): 가구(바닥/벽)·장식·테마를 카테고리 탭으로 통합 구매 —
 /// 꾸미기 모드는 사용자 피드백으로 폐기, 장식은 빈 슬롯 자동 선택 + 미리보기로 단순화.
 struct GuildOfficeView: View {
@@ -86,7 +88,7 @@ struct GuildOfficeView: View {
     }
     private var studio: OfficeStudioState { draftStudio ?? serverStudio }
     private var serverPlacements: [OfficeLayout.FurniturePlacement] { studio.placements }
-    private var canEdit: Bool { rearrangeMode && info.guild.isLeader && !photoMode }
+    private var canEdit: Bool { rearrangeMode && !photoMode }
     /// 시뮬레이션·직렬화에 쓰는 유효 배치 — 드래그 중이면 작업 사본.
     private var placements: [OfficeLayout.FurniturePlacement] {
         draftPlacements ?? serverPlacements
@@ -120,6 +122,11 @@ struct GuildOfficeView: View {
                 Label(photoMode ? "사무실 사진" : "길드 사무실", systemImage: photoMode ? "camera" : "building.2")
                     .font(.system(size: 12, weight: .semibold, design: .rounded))
                 Spacer()
+                if sim.hasControllablePet && !photoMode {
+                    Label("WASD 이동 · F 액션", systemImage: "keyboard")
+                        .foregroundStyle(.secondary)
+                        .help("W/A/S/D 키로 내 펫을 직접 움직이고, F 키로 대사와 액션을 합니다. 창이 활성화된 상태에서 동작하고, 손을 떼면 잠시 후 알아서 돌아다닙니다.")
+                }
                 if photoMode {
                     Toggle("말풍선", isOn: $photoBubbles).toggleStyle(.checkbox)
                     Button("PNG 저장", action: savePhoto)
@@ -151,6 +158,11 @@ struct GuildOfficeView: View {
             .coordinateSpace(name: "officeScene")   // 가구 드래그 좌표 기준
         }
         .aspectRatio(scene.width / scene.height, contentMode: .fit)
+        // WASD — 이 뷰가 붙은 창이 key일 때만 가로챈다 (텍스트 입력 중에는 통과).
+        .background(OfficeKeyCapture(
+            onKey: { key, pressed in sim.setControlKey(key, pressed: pressed) },
+            onEmote: { sim.triggerEmote() },
+            onReleaseAll: { sim.releaseAllControlKeys() }))
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.md))
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.md)
@@ -183,7 +195,6 @@ struct GuildOfficeView: View {
                 }
             ), arrowEdge: .bottom) {
                 OfficeShopSheet(
-                    isLeader: info.guild.isLeader,
                     placedDecor: placedDecor,
                     furnitureCount: placements.count,
                     inventoryCount: studio.items.count,
@@ -406,7 +417,7 @@ struct GuildOfficeView: View {
     private enum HistoryAction { case record, undo, redo, none, clear }
     private func saveStudio(_ updated: OfficeStudioState, operation: OfficeStudioState.Operation,
                             purchase: Int? = nil, historyAction: HistoryAction = .record) {
-        guard info.guild.isLeader, !savingFurniture else { return }
+        guard !savingFurniture else { return }
         let before = (draftBaseStudio ?? serverStudio).items
         let revision = draftExpectedRevision ?? info.guild.officeRevision ?? 0
         let request = OfficeStudioSave(state: updated, expectedRevision: revision,
@@ -509,7 +520,7 @@ struct GuildOfficeView: View {
 
     // MARK: - 길드 로고 간판
 
-    /// 벽에 걸린 길드 로고. 재배치 모드(길드장)에서는 **가구와 똑같이 드래그로 이동**한다.
+    /// 벽에 걸린 길드 로고. 재배치 모드에서는 **가구와 똑같이 드래그로 이동**한다.
     /// 고정 위치였을 땐 창문·액자와 겹쳐 배치가 어색했다.
     ///
     /// 좌표는 씬 논리 좌표(280×150)의 **중심** 기준이고 벽 밴드 안으로 클램프한다.
@@ -692,7 +703,7 @@ struct GuildOfficeView: View {
             .frame(width: kind.size.width * scale, height: kind.size.height * scale)
             .opacity(isPending ? 0.75 : 1)   // 구매 확인 전 미리보기
             .overlay {
-                if editing && info.guild.isLeader && !isPending {
+                if editing && !isPending {
                     RoundedRectangle(cornerRadius: 3)
                         .strokeBorder(style: StrokeStyle(lineWidth: isDragging ? 2 : 1, dash: [3]))
                         .foregroundStyle(isDragging ? Color.orange : Color.accentColor)
@@ -703,7 +714,7 @@ struct GuildOfficeView: View {
             let positionX = placement.x * scale
             // artBottomInset — 아트 하단 투명 여백만큼 내려 가시 하단을 baseline에 정렬 ("떠 보임" 방지).
             let positionY = (baseline - kind.size.height / 2 + kind.artBottomInset) * scale
-            if editing && info.guild.isLeader && !isPending {
+            if editing && !isPending {
                 // 탭(문구 편집)은 액자에만 — 다른 가구에 TapGesture가 붙어 드래그 인식을
                 // 방해하지 않도록 조건부로 분기한다.
                 if kind.supportsText {
@@ -904,8 +915,9 @@ private struct OfficePetView: View {
                     guildFlag: guildFlag
                 )
                 if !frames.isEmpty {
+                    // hopOffset — F 액션의 제자리 점프 (시뮬레이션이 틱마다 갱신, 평소 0).
                     petSprite(frames[frameIdx], height: height)
-                        .position(x: centerX, y: centerY)
+                        .position(x: centerX, y: centerY - pet.hopOffset * scale)
                 }
                 PetEffectOverlay(
                     effects: pet.equippedEffects,
@@ -1001,7 +1013,6 @@ private struct OfficePetView: View {
 private struct OfficeShopSheet: View {
     enum Tab: Hashable { case floorFurniture, wallFurniture, decor, theme }
 
-    let isLeader: Bool
     let placedDecor: [RankingAPI.GuildFurnitureItem]
     let furnitureCount: Int
     let inventoryCount: Int
@@ -1024,7 +1035,7 @@ private struct OfficeShopSheet: View {
     @State private var pendingFurniture: OfficeLayout.FurnitureKind?
     @State private var pendingDecor: (slot: Int, item: OfficeLayout.DecorItem)?
 
-    init(isLeader: Bool, placedDecor: [RankingAPI.GuildFurnitureItem],
+    init(placedDecor: [RankingAPI.GuildFurnitureItem],
          furnitureCount: Int, inventoryCount: Int, furnitureUnavailableReason: String?, canBuyFurniture: Bool,
          currentFloorTheme: Int, currentWallTheme: Int,
          previewFloorTheme: Binding<Int?>, previewWallTheme: Binding<Int?>,
@@ -1035,7 +1046,6 @@ private struct OfficeShopSheet: View {
          onBuyDecor: @escaping (Int, OfficeLayout.DecorItem) -> Void,
          onRemoveDecor: @escaping (Int) -> Void,
          onApplyTheme: @escaping () -> Void) {
-        self.isLeader = isLeader
         self.placedDecor = placedDecor
         self.furnitureCount = furnitureCount
         self.inventoryCount = inventoryCount
@@ -1052,8 +1062,8 @@ private struct OfficeShopSheet: View {
         self.onBuyDecor = onBuyDecor
         self.onRemoveDecor = onRemoveDecor
         self.onApplyTheme = onApplyTheme
-        // 가구/테마는 길드장 전용 — 멤버는 장식 탭에서 시작.
-        _tab = State(initialValue: isLeader ? .floorFurniture : .decor)
+        // 가구·장식·테마 모두 멤버 누구나 구매 가능 (길드장 전용이던 가구/테마를 열었다).
+        _tab = State(initialValue: .floorFurniture)
     }
 
     var body: some View {
@@ -1067,14 +1077,10 @@ private struct OfficeShopSheet: View {
                     .foregroundStyle(AppColors.gold)
             }
             Picker("", selection: $tab) {
-                if isLeader {
-                    Text("바닥 가구").tag(Tab.floorFurniture)
-                    Text("벽 설치").tag(Tab.wallFurniture)
-                }
+                Text("바닥 가구").tag(Tab.floorFurniture)
+                Text("벽 설치").tag(Tab.wallFurniture)
                 Text("장식").tag(Tab.decor)
-                if isLeader {
-                    Text("테마").tag(Tab.theme)
-                }
+                Text("테마").tag(Tab.theme)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -1198,10 +1204,9 @@ private struct OfficeShopSheet: View {
                             Text("· \(donor) 기부").font(.system(size: 9)).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if isLeader || placed.donorNickname == Settings.shared.rankingNickname {
-                            Button("제거", role: .destructive) { onRemoveDecor(placed.slotId) }
-                                .font(.system(size: 9)).controlSize(.mini)
-                        }
+                        // 제거도 멤버 누구나 — 서버(guild-office remove_decor)와 동일 기준.
+                        Button("제거", role: .destructive) { onRemoveDecor(placed.slotId) }
+                            .font(.system(size: 9)).controlSize(.mini)
                     }
                 }
             }
