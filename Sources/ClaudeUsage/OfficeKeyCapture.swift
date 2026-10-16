@@ -14,6 +14,13 @@ import SwiftUI
 ///
 /// 키를 누른 채 창이 key를 잃으면 keyUp이 오지 않아 펫이 계속 걷는다 — `didResignKeyNotification`과
 /// 뷰 제거 시점에 `onReleaseAll`로 눌림 상태를 전부 푼다.
+///
+/// **자동 포커스 가로채기** — SwiftUI는 창이 처음 표시될 때, 닫았다 다시 열 때, hide→unhide 때,
+/// 시트가 열릴 때 창의 **첫 key view**(기하 순서)를 first responder로 만든다. 길드 탭에서는
+/// "멤버 초대" 닉네임 입력란, 놀러가기 시트에서는 방명록 입력란이 그 첫 key view라 WASD가
+/// 전부 거기로 타이핑됐다. `CaptureView`가 `acceptsFirstResponder`를 켜고 사무실 씬(입력란보다
+/// 위)에 깔려 있으면 그 자동 포커스를 대신 받는다 — 입력란은 사용자가 클릭하거나 Tab으로
+/// 넘어갈 때만 포커스된다. 투명(hitTest nil)이라 클릭으로는 포커스되지 않고, 포커스 링도 없다.
 struct OfficeKeyCapture: NSViewRepresentable {
     let onKey: (OfficeSimulation.ControlKey, Bool) -> Void
     let onEmote: () -> Void
@@ -44,6 +51,18 @@ struct OfficeKeyCapture: NSViewRepresentable {
         private static let emoteKeyCode: UInt16 = 3   // F
         private var monitor: Any?
         private var resignObserver: NSObjectProtocol?
+
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            focusRingType = .none
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+        /// first responder 후보 — 창의 첫 key view가 되어 SwiftUI의 자동 포커스(첫 TextField)를
+        /// 대신 받는다. 키 처리 자체는 로컬 모니터가 하므로 이 뷰가 first responder인지 여부는
+        /// WASD 동작과 무관하고, 입력란이 엉뚱하게 포커스되는 것만 막는다.
+        override var acceptsFirstResponder: Bool { true }
 
         /// 투명 배경 — 마우스 히트테스트에서 빠져 가구 드래그·펫 탭을 가리지 않는다.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
