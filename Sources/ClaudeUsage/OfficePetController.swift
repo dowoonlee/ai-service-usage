@@ -487,7 +487,16 @@ final class OfficeSimulation: ObservableObject {
         let step = Self.controlSpeed * dt
         let current = CGPoint(x: pet.x, y: pet.y)
         var next = CGPoint(x: pet.x + dx / len * step, y: pet.y + dy / len * step)
-        if !isWalkable(next) {
+        if !isWalkable(current) {
+            // 아직 바닥 위가 아닐 때 — 방문객 입장 연출 중(씬 왼쪽 밖에서 걸어 들어오는 동안)
+            // 키를 누르면 여기로 온다. 평소 규칙("다음 지점이 자유 셀이어야 이동")을 그대로 적용하면
+            // 한 걸음(≈1px)으로는 영역 안에 못 들어가 어느 방향이든 제자리 — 방향만 바뀌고 펫은
+            // 영원히 밖에 갇힌다. 바닥에 가까워지는 이동(또는 자유 셀로 올라서는 이동)은 허용해
+            // 걸어 들어올 수 있게 한다. 가구 위에 끼었을 때(영역 안·막힌 셀)도 같은 규칙으로 탈출.
+            if !isWalkable(next) && Self.distanceToWalkArea(next) > Self.distanceToWalkArea(current) {
+                next = current
+            }
+        } else if !isWalkable(next) {
             let xOnly = CGPoint(x: next.x, y: pet.y)
             let yOnly = CGPoint(x: pet.x, y: next.y)
             if dx != 0 && isWalkable(xOnly) { next = xOnly }
@@ -502,6 +511,14 @@ final class OfficeSimulation: ObservableObject {
 
     private func isWalkable(_ p: CGPoint) -> Bool {
         OfficeLayout.petWalkArea.contains(p) && (grid?.isWalkable(p) ?? true)
+    }
+
+    /// 보행 영역 밖 지점에서 영역까지의 거리 (안이면 0) — 밖에 있는 펫의 "들어오는 이동" 판정.
+    private static func distanceToWalkArea(_ p: CGPoint) -> CGFloat {
+        let a = OfficeLayout.petWalkArea
+        let dx = max(a.minX - p.x, 0, p.x - a.maxX)
+        let dy = max(a.minY - p.y, 0, p.y - a.maxY)
+        return hypot(dx, dy)
     }
 
     /// idle 만료 시 다음 행동 결정 — 모드별 성향 (P2a 고도화의 중심 분기).
