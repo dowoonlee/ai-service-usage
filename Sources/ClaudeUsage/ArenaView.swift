@@ -15,6 +15,10 @@ import SwiftUI
 @MainActor
 struct ArenaView: View {
     @ObservedObject private var settings = Settings.shared
+    @StateObject private var manualSession = ManualBattleSession()
+    @State private var showManualBattle = false
+    @State private var manualTeam: [BattlePetSnapshot] = []
+    @State private var manualOpponent: [BattlePetSnapshot] = []
     @State private var mode: Mode = .practice
     @State private var showTypeHelp = false        // 6타입 상성 도움말 시트
     @State private var showChallengeConfirm = false // 랭크전 도전 확인 alert(일일 판수 소모)
@@ -105,6 +109,8 @@ struct ArenaView: View {
                 header
                 if owned.isEmpty {
                     emptyGate
+                    Button("대여 팀으로 수동 전투 배우기") { openManualBattle() }
+                        .buttonStyle(.borderedProminent)
                 } else {
                     Picker("", selection: $mode) {
                         ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
@@ -135,6 +141,9 @@ struct ArenaView: View {
         }
         .onChange(of: teamKinds) { _, new in settings.battleTeam = new }  // 편성 변경 즉시 영속
         .sheet(isPresented: $showTypeHelp) { typeHelpSheet }
+        .sheet(isPresented: $showManualBattle) {
+            ManualBattleView(session: manualSession, team: manualTeam, opponent: manualOpponent)
+        }
         .task { await loadEnhanceState() }   // 서버에서 강화 레벨·가용 VP 로드(등록 사용자)
         .task(id: mode) { if mode == .ranked { await loadRankedState() } }   // 랭크전 진입 시 랭킹·전적
         .onDisappear { enhanceTask?.cancel(); rankedTask?.cancel() }
@@ -151,7 +160,7 @@ struct ArenaView: View {
                     Label("타입 상성", systemImage: "hexagon").font(.system(size: 10))
                 }.buttonStyle(.plain).foregroundStyle(.tint)
             }
-            Text("강화·레이팅·시즌 보상 모두 서버 반영 — 승패는 조작 방지를 위해 서버가 확정합니다. 도트 임팩트는 에셋 확보 후.")
+            Text("내 팀을 직접 지휘하거나 자동 전투를 관전하세요. 랭크전과 강화소도 이곳에서 이용할 수 있습니다.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
@@ -289,8 +298,16 @@ struct ArenaView: View {
     private var practiceSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             teamEditor
+            Button { openManualBattle() } label: {
+                Label(manualSession.state != nil ? "수동 연습전 이어보기" : "직접 조작 · 수동 연습전", systemImage: "gamecontroller.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(maxWidth: .infinity).padding(.vertical, 9)
+            }.buttonStyle(.borderedProminent)
+            Text("기술·교체·방어를 직접 선택하세요. 레인보우는 궁극기 두 갈래를 선택할 수 있습니다.")
+                .font(.caption2).foregroundStyle(.secondary)
+            OwnedManualAchievementShelf(preview: manualSession.archive.achievementPreview)
             Button { fight() } label: {
-                Text("⚔️ 연습전 시작").font(.system(size: 13, weight: .semibold))
+                Text("⚔️ 자동 관전 연습전").font(.system(size: 13, weight: .semibold))
                     .frame(maxWidth: .infinity).padding(.vertical, 9)
                     .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.accentColor))
                     .foregroundStyle(.white)
@@ -506,6 +523,7 @@ struct ArenaView: View {
             VStack(spacing: 3) {
                 thumb(kind, h: 30)
                 Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 8)).lineLimit(1)
+                OwnedManualMasteryBadge(kind: kind)
                 typeBadge(kind.battleType)
                 HStack(spacing: 3) {
                     Text("Σ\(s.total)").font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
@@ -729,6 +747,12 @@ struct ArenaView: View {
         }
     }
 
+    private func openManualBattle() {
+        manualTeam = teamKinds.map { BattlePetSnapshot(kind: $0, variant: battleVariant($0), enhanceLevel: serverLevels[$0] ?? 0) }
+        manualOpponent = manualTeam.isEmpty ? [] : matchmakeOpponent(against: manualTeam, matchGrowth: true)
+        showManualBattle = true
+    }
+
     private func fight() {
         // 내 팀 — 강화소 로컬 레벨 + 보유 이로치 반영.
         let aS = teamKinds.map { BattlePetSnapshot(kind: $0, variant: battleVariant($0), enhanceLevel: serverLevels[$0] ?? 0) }
@@ -745,13 +769,18 @@ struct ArenaView: View {
         return snaps.reduce(0) { $0 + BattleEngine.finalStats(for: $1, in: team).total }
     }
     /// 내 팀 전투력에 가장 근접한 상대 팀을 무작위 후보 중에서 고른다(일방적 매치 방지).
-    private func matchmakeOpponent(against aS: [BattlePetSnapshot]) -> [BattlePetSnapshot] {
+    private func matchmakeOpponent(against aS: [BattlePetSnapshot], matchGrowth: Bool = false) -> [BattlePetSnapshot] {
         let size = max(1, min(5, aS.count))
         let target = teamPower(aS)
         var best: [BattlePetSnapshot] = []
         var bestDiff = Int.max
         for _ in 0..<48 {
-            let snaps = Array(PetKind.allCases.shuffled().prefix(size)).map { BattlePetSnapshot(kind: $0) }
+            let snaps = Array(PetKind.allCases.shuffled().prefix(size)).enumerated().map { index, kind in
+                guard matchGrowth, aS.indices.contains(index) else { return BattlePetSnapshot(kind: kind) }
+                let growth = aS[index]
+                return BattlePetSnapshot(kind: kind, variant: growth.variant, enhanceLevel: growth.enhanceLevel,
+                    progressUnits: growth.progressUnits)
+            }
             let diff = abs(teamPower(snaps) - target)
             if diff < bestDiff { bestDiff = diff; best = snaps }
         }

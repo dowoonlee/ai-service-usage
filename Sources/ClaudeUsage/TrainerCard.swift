@@ -221,6 +221,8 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     case arenaRookie               // 아레나 첫 승리
     case arenaChallenger           // 레이팅 1200 도달
     case arenaChampion             // 아레나 랭킹 1위 도달
+    case manualCommander, manualTypeExpert, manualSwitcher, manualPlanner
+    case manualReserve, manualDual, manualComeback, manualSupport
 
     // ── 자동 unlock — Vibe / OSS ──
     case vibeCoder                 // Claude+Cursor 5,000
@@ -277,6 +279,14 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .arenaRookie:           return "아레나 루키"
         case .arenaChallenger:       return "아레나 도전자"
         case .arenaChampion:         return "아레나 챔피언"
+        case .manualCommander:       return ManualAchievement.firstCommand.rewardName
+        case .manualTypeExpert:      return ManualAchievement.typeExpert.rewardName
+        case .manualSwitcher:        return ManualAchievement.switchCounter.rewardName
+        case .manualPlanner:         return ManualAchievement.speedPlanner.rewardName
+        case .manualReserve:         return ManualAchievement.ultimateReserve.rewardName
+        case .manualDual:            return ManualAchievement.dualUltimate.rewardName
+        case .manualComeback:        return ManualAchievement.lastStand.rewardName
+        case .manualSupport:         return ManualAchievement.teamRecovery.rewardName
         case .vibeCoder:             return "Vibe Coder"
         case .vibeMaster:            return "Vibe Master"
         case .openSourceContributor: return "Open Source"
@@ -332,6 +342,9 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .arenaRookie:           return "아레나 첫 승리"
         case .arenaChallenger:       return "아레나 레이팅 1200 도달"
         case .arenaChampion:         return "아레나 랭킹 1위 도달"
+        case .manualCommander, .manualTypeExpert, .manualSwitcher, .manualPlanner,
+             .manualReserve, .manualDual, .manualComeback, .manualSupport:
+            return "공식 전투 업적 · \(ManualAchievement.forTitle(self)?.condition ?? "")"
         case .vibeCoder:             return "Claude+Cursor 누적 코인 5,000"
         case .vibeMaster:            return "Claude+Cursor 누적 코인 25,000"
         case .openSourceContributor: return "GitHub 머지 PR 1개 이상"
@@ -432,6 +445,10 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         if s.pvpWinsCache >= 1     { set.insert(.arenaRookie) }
         if s.pvpBestRating >= 1200 { set.insert(.arenaChallenger) }
         if s.pvpBestRank == 1      { set.insert(.arenaChampion) }
+        let manual = ManualAchievementStore.shared.progress(owner: s.rankingDeviceID)
+        for achievement in ManualAchievement.allCases where manual.contains(achievement) {
+            set.insert(achievement.rewardTitle)
+        }
 
         // ── Vibe / OSS ──
         let vibe = s.claudeCoinsEarned + s.cursorCoinsEarned

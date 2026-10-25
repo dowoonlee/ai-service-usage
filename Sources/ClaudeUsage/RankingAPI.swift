@@ -2318,6 +2318,41 @@ actor RankingAPI {
         return try await post(path: "pvp-history", body: PvPChallengeRequest(payload: payload, signature: sig))
     }
 
+    struct ManualArenaResponse: Codable {
+        let state: ManualBattleState
+        let eligibleKinds: [String]
+        let expiresAt: String
+    }
+    struct ManualArenaStatus: Decodable {
+        let enabled: Bool
+        let records: [String: ManualMasteryRecord]
+        let active: ManualArenaResponse?
+        var achievements: ManualAchievementProgress? = nil
+    }
+    private struct ManualArenaPayload: Encodable {
+        let action: String; let deviceId: String; let ts: Int64; let requestId: String
+        let battleId: String; let revision: Int; let commandJson: String; let branchesJson: String
+    }
+    private struct ManualArenaRequest: Encodable { let payload: ManualArenaPayload; let signature: String }
+
+    private func manualArenaCall<Response: Decodable>(deviceId: String, hmac: String, action: String,
+        requestID: UUID = UUID(), battleID: UUID? = nil, revision: Int = 0,
+        commandJSON: String = "{}", branchesJSON: String = "{}") async throws -> Response {
+        let payload = ManualArenaPayload(action: action, deviceId: deviceId, ts: Int64(Date().timeIntervalSince1970),
+            requestId: requestID.uuidString.lowercased(), battleId: battleID?.uuidString.lowercased() ?? "",
+            revision: revision, commandJson: commandJSON, branchesJson: branchesJSON)
+        let signature = try Self.signEncodable(payload, keyBase64: hmac)
+        return try await post(path: "manual-arena", body: ManualArenaRequest(payload: payload, signature: signature))
+    }
+    func manualArenaStatus(deviceId: String, hmac: String) async throws -> ManualArenaStatus {
+        try await manualArenaCall(deviceId: deviceId, hmac: hmac, action: "status")
+    }
+    func manualArenaAction(deviceId: String, hmac: String, action: String, requestID: UUID,
+        battleID: UUID?, revision: Int, commandJSON: String, branchesJSON: String) async throws -> ManualArenaResponse {
+        try await manualArenaCall(deviceId: deviceId, hmac: hmac, action: action, requestID: requestID,
+            battleID: battleID, revision: revision, commandJSON: commandJSON, branchesJSON: branchesJSON)
+    }
+
     /// 응답 statusline + body 만 검증. 본문 디코드가 없는 endpoint(`executeVoid`)와
     /// 공유하기 위해 추출. 404는 호출 측이 body 메시지로 분기 매핑하므로 여기선
     /// generic `.http(404, body)`만 throw — 사용자에게 정확한 메시지 노출.
@@ -2379,6 +2414,9 @@ actor RankingAPI {
         // 길드 도메인 에러 — 전역 상태코드 매핑보다 먼저 (409/403의 의미가 endpoint마다 다름).
         if let body = try? JSONDecoder().decode(ServerErrorBody.self, from: data),
            let errCode = body.error {
+            if response.url?.lastPathComponent == "manual-arena" {
+                throw ManualArenaAPIError(code: errCode)
+            }
             // 게시판 쓰기 게이트(403) — body 코드 우선 처리해 전역 403→banned 오매핑 방지.
             // "차단된 계정" 문구가 뜨면 원인을 오해하게 되므로 반드시 여기서 먼저 잡는다.
             if errCode == "github_required" {
