@@ -57,12 +57,76 @@ final class ScenePreviews: SandboxedTestCase {
                       note: "지역별 뱃지 진행도가 섞인 상태. 카테고리 행이 잘리지 않는지")
     }
 
+    func testRenderGymExplanations() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        let settings = Settings.shared
+        settings.guildJoinedAt = Calendar.current.date(byAdding: .day, value: -79, to: Date())
+        settings.guildContributionTotal = 0
+        for category in BadgeRegion.guild.categories {
+            for tier in [BadgeTier.localhost, .dev] {
+                settings.clearedBadges.insert(BadgeID(category: category, tier: tier).key)
+            }
+        }
+        try renderTab(GymView(initialRegion: .guild), title: "도장-설명-최소창", note: "길드 최초 가입 후 79일, 기본 화면의 한국어 설명")
+        try PreviewRenderer.renderInWindow(GymView(initialRegion: .guild), size: CGSize(width: 560, height: 1040),
+            section: "도장 설명", title: "길드-전체", note: "현재 기록과 다음 지표 기준, 관장 도전 조건을 구분합니다.", appearance: .darkAqua)
+        try PreviewRenderer.renderInWindow(
+            BadgeTierTooltip(category: .guildTenure, tier: .staging, currentValue: 79, threshold: 90,
+                cleared: false, available: true, strokeColor: .teal, countingContext: BadgeCategory.guildTenure.countingContext(settings)),
+            size: CGSize(width: 330, height: 330), section: "도장 설명", title: "가입기간-툴팁", appearance: .darkAqua)
+        let categories = BadgeCategory.allCases
+        for start in stride(from: 0, to: categories.count, by: 6) {
+            let batch = Array(categories.dropFirst(start).prefix(6))
+            let grid = VStack(alignment: .leading, spacing: 12) {
+                ForEach(0..<((batch.count + 2) / 3), id: \.self) { row in
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(Array(batch.dropFirst(row * 3).prefix(3)), id: \.self) { category in
+                            BadgeTierTooltip(category: category, tier: .staging,
+                                currentValue: category.currentValue(settings), threshold: category.thresholds[.staging]!,
+                                cleared: false, available: category.isAvailable(settings), strokeColor: .teal,
+                                countingContext: category.countingContext(settings))
+                                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }.padding(12).frame(maxWidth: .infinity, alignment: .topLeading)
+            try PreviewRenderer.renderInWindow(grid, size: CGSize(width: 1000, height: 950), section: "도장 설명",
+                title: "전체-툴팁-\(start / 6 + 1)", note: "모든 업적의 집계 방식·단위·보상 안내를 검수합니다.", appearance: .aqua)
+        }
+    }
+
     func testRenderReportTab() throws {
         try renderTab(ReportView(), title: "탭-4-레포트", note: "트레이너 카드 + 꾸미기 상점")
     }
 
     func testRenderArenaTab() throws {
         try renderTab(ArenaView(), title: "탭-7-아레나", note: "연습 모드 기본 상태. 팀 슬롯과 강화 패널")
+    }
+
+    func testRenderManualBattle() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let session = ManualBattleSession(directory: dir)
+        let a = [PetKind.fox, .warrior, .scrapBot].map { BattlePetSnapshot(kind: $0, variant: 4) }
+        let b = Array(a.reversed())
+        try renderTab(ManualBattleView(session: session, team: a, opponent: b), title: "수동전-편성", note: "궁극기 A·B 선택과 시작 버튼")
+        session.start(teamA: a, teamB: b)
+        try renderTab(ManualBattleView(session: session, team: a, opponent: b), title: "수동전-명령", note: "무대와 하단 고정 명령 영역")
+    }
+
+    func testRenderManualAchievements() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        let official = ManualAchievementProgress(progress: ["first_command": 1, "type_expert": 7, "switch_counter": 1],
+            unlocked: ["first_command", "switch_counter"])
+        let preview = ManualAchievementProgress(progress: ["speed_planner": 1], unlocked: ["speed_planner"])
+        try renderTab(ScrollView { ManualAchievementShelf(progress: official, preview: preview, expanded: true).padding(16) },
+            title: "수동전-업적", note: "공식 달성·연습 달성·누적 진행·히든 업적의 구분")
+        try PreviewRenderer.renderInWindow(
+            ScrollView { ManualAchievementShelf(progress: official, preview: preview, expanded: true).padding(16) },
+            size: CGSize(width: 560, height: 900), section: "수동전 업적", title: "업적-전체",
+            note: "히든 업적 두 개는 이름·조건·보상명을 숨깁니다.", appearance: .aqua)
     }
 
     // MARK: - 월드맵

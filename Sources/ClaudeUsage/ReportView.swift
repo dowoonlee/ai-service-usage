@@ -14,6 +14,8 @@ import UniformTypeIdentifiers
 @MainActor
 struct ReportView: View {
     @ObservedObject var settings = Settings.shared
+    @ObservedObject private var manualMastery = ManualMasteryStore.shared
+    @ObservedObject private var manualAchievements = ManualAchievementStore.shared
 
     /// 호버된 칭호/프레임 — popover 트리거 single-track. 한 번에 하나만 popover 노출.
     @State private var hoveringTitle: CardTitle?
@@ -73,7 +75,8 @@ struct ReportView: View {
                 medals: settings.medalTally,
                 animatedAvatar: true,
                 equippedEffects: settings.equippedEffects[settings.trainerCard.avatar.kind] ?? [],
-                guildName: settings.guildName.isEmpty ? nil : settings.guildName
+                guildName: settings.guildName.isEmpty ? nil : settings.guildName,
+                petMastery: manualMastery.record(kind: settings.trainerCard.avatar.kind, owner: settings.rankingDeviceID)
             )
             Spacer()
         }
@@ -314,6 +317,7 @@ struct ReportView: View {
     private func titleCell(_ t: CardTitle, available: Bool) -> some View {
         let isSelected = settings.trainerCard.title == t
         let canPurchase = !available && t.purchasePrice != nil
+        let hidden = !available && (ManualAchievement.forTitle(t)?.hidden ?? false)
         return Button {
             if available {
                 settings.trainerCard.title = t
@@ -322,7 +326,7 @@ struct ReportView: View {
                 settings.trainerCard.title = t
             }
         } label: {
-            Text(t.displayName)
+            Text(hidden ? "히든 전투 칭호" : t.displayName)
                 .font(.system(size: 10, weight: .semibold))
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(
@@ -347,7 +351,8 @@ struct ReportView: View {
                 if !isPresented, hoveringTitle == t { hoveringTitle = nil }
             }
         ), arrowEdge: .top) {
-            unlockTooltip(title: t.displayName, description: t.unlockDescription, unlocked: available)
+            unlockTooltip(title: hidden ? "히든 전투 칭호" : t.displayName,
+                description: hidden ? "특별한 전투 업적을 발견하면 해금됩니다." : t.unlockDescription, unlocked: available)
         }
     }
 
@@ -616,7 +621,8 @@ struct ReportView: View {
             width: TrainerCardView.standardWidth,
             medals: settings.medalTally,
             equippedEffects: settings.equippedEffects[settings.trainerCard.avatar.kind] ?? [],
-            guildName: settings.guildName.isEmpty ? nil : settings.guildName
+            guildName: settings.guildName.isEmpty ? nil : settings.guildName,
+            petMastery: manualMastery.record(kind: settings.trainerCard.avatar.kind, owner: settings.rankingDeviceID)
         )
         let renderer = ImageRenderer(content: cardView)
         renderer.scale = 2.0  // Retina export — 캡처 PNG 960×720
@@ -655,7 +661,8 @@ struct ReportView: View {
                 medals: settings.medalTally,
                 avatarFrame: i,
                 equippedEffects: effects,
-                guildName: settings.guildName.isEmpty ? nil : settings.guildName
+                guildName: settings.guildName.isEmpty ? nil : settings.guildName,
+                petMastery: manualMastery.record(kind: settings.trainerCard.avatar.kind, owner: settings.rankingDeviceID)
             )
             let renderer = ImageRenderer(content: cardView)
             renderer.scale = 2.0

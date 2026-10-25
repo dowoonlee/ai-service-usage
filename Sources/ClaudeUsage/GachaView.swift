@@ -1627,13 +1627,14 @@ private struct PetPreviewView: View {
         PetEffectShelf(kind: kind, settings: settings, onPreview: { previewEffect = $0 })
             .padding(.top, 4)
             .padding(.bottom, 6)
+        OwnedManualMasteryBadge(kind: kind)
         }
         .alert("레인보우 레어 해금 시도", isPresented: $showPrestigeConfirm) {
             Button("\(PetOwnership.prestigeAttemptCost)조각으로 시도") {
                 switch ShardLedger.shared.attemptPrestige(kind) {
                 case .success:
                     selectedVariant = PetOwnership.prestigeVariant
-                    prestigeResultMessage = "🌈 레인보우 레어 해금 성공!"
+                    prestigeResultMessage = "🌈 레인보우 레어 해금 성공!\n아레나 수동 연습전에서 궁극기 A·B를 선택할 수 있습니다."
                 case .failure(let pity):
                     let left = PetOwnership.prestigePityCeiling - pity
                     prestigeResultMessage = left <= 1

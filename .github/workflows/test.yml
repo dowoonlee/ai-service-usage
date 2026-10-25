@@ -34,6 +34,12 @@ jobs:
       - name: Server tests (파리티 골든 + 정책 경계)
         run: deno test supabase/functions/_shared/
 
+      - name: Manual battle Swift parity fixture freshness
+        run: |
+          MANUAL_PARITY_OUT="$RUNNER_TEMP/manual-battle.json" swift test --filter testExportServerParityVectors
+          python3 scripts/update-manual-parity.py "$RUNNER_TEMP/manual-battle.json"
+          git diff --exit-code supabase/functions/_shared/manual_battle.vectors.json
+
       # Edge Function 타입 체크. 지금까지 CI에 없어서 타입 오류가 배포 시점에야 드러났다.
       # 함수가 늘어도 자동으로 포함되도록 glob으로 훑는다.
       - name: Edge Function 타입 체크
@@ -45,3 +51,12 @@ jobs:
         run: |
           python3 scripts/gen_pet_meta.py
           git diff --exit-code supabase/functions/_shared/pet_meta_gen.ts
+
+  manual-arena-database:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare isolated PostgreSQL test image
+        run: docker pull postgres:17.6-alpine
+      - name: Session and mastery transaction tests
+        run: bash scripts/test-manual-arena-db.sh

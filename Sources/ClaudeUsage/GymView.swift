@@ -3,7 +3,7 @@ import SwiftUI
 
 // 도장 탭 — 가챠 윈도우 안 segmented picker로 진입.
 // 상단 4 region 2x2 그리드(자유 진행), 하단 선택 region의 2 카테고리 × 4 tier 셀.
-// 호버 tooltip으로 임계값/현재 진행/보상 한 줄 노출. 클릭은 안 받음.
+// 기본 화면에서 활동 의미·현재 기록·다음 기준을 안내하고, 호버로 집계 방식과 보상을 설명한다.
 
 @MainActor
 struct GymView: View {
@@ -14,10 +14,12 @@ struct GymView: View {
     /// 진행 중인 관장 배틀(sheet 트리거). nil이면 배틀 창 닫힘.
     @State private var activeBattle: GymBattleRequest?
 
-    // 도장 페이지 자연 높이가 ≈658pt인데 가챠 창이 560×640 고정이라(탭 picker 제외 588pt 가용)
-    // 70pt가 넘쳐 마지막 카테고리 행이 잘렸다. 2 카테고리 지역은 그 자리가 `maxCategoryRows`
-    // 패딩용 빈 행이라 티가 안 났고, 3 카테고리인 vibe(Claude/Cursor/Codex)만 실제 항목이
-    // 사라져 보였다. 스크롤로 접근을 보장한다 — 맵은 onTapGesture만 써서 스크롤과 겹치지 않는다.
+    init(settings: Settings? = nil, initialRegion: BadgeRegion = .coffee) {
+        self.settings = settings ?? .shared
+        self._selectedRegion = State(initialValue: initialRegion)
+    }
+
+    // 설명이 추가된 업적 카드도 최소 560×640 창에서 모두 접근할 수 있도록 전체 페이지를 스크롤한다.
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
@@ -168,17 +170,21 @@ struct GymView: View {
                     .foregroundStyle(Self.strokeColor(for: req.tier))
             }
             .foregroundStyle(.secondary)
-            Text("지표 합산 기준 — 하나를 깊게 파도 열립니다")
-                .font(.system(size: 8))
+            Text("항목별 진행률 평균이 \(Int(BadgeRegistry.challengeProgressRatio * 100))%면 도전할 수 있습니다.")
+                .font(.system(size: 9))
                 .foregroundStyle(.secondary)
+            Text("기준을 넘긴 진행도도 항목당 \(Int(BadgeRegistry.challengeCategoryCap * 100))%까지 인정합니다.")
+                .font(.system(size: 9)).foregroundStyle(.secondary)
             ForEach(req.unmet.prefix(3), id: \.category) { item in
                 let pct = item.threshold > 0
                     ? min(1.0, Double(item.current) / Double(item.threshold)) : 0
-                HStack(spacing: 5) {
-                    Text(item.category.displayName)
-                        .font(.system(size: 9))
-                        .frame(width: 74, alignment: .leading)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(item.category.activityTitle).font(.system(size: 10))
+                        Spacer(minLength: 6)
+                        Text("\(item.current.formatted()) / \(item.threshold.formatted())\(item.category.metricUnit)")
+                            .font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                    }
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule().fill(Color.secondary.opacity(0.18))
@@ -187,11 +193,7 @@ struct GymView: View {
                         }
                     }
                     .frame(height: 4)
-                    Text("\(item.current)/\(item.threshold)")
-                        .font(.system(size: 8, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 58, alignment: .trailing)
-                }
+                }.padding(.top, 3).help(item.category.countingGuide)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -252,10 +254,6 @@ struct GymView: View {
     private static let tierCellHeight: CGFloat = 44
 
     /// 모든 region 중 최대 카테고리 수 (현재 vibe=3, 나머지=2). region 추가/변경 시 자동 반영.
-    private var maxCategoryRows: Int {
-        BadgeRegion.allCases.map { $0.categories.count }.max() ?? 0
-    }
-
     private var categorySection: some View {
         let regionProgress = BadgeRegistry.progress(forRegion: selectedRegion, settings)
         return VStack(alignment: .leading, spacing: 8) {
@@ -270,25 +268,19 @@ struct GymView: View {
                     .monospacedDigit()
                 Spacer()
             }
-            tierHeader
-            VStack(spacing: 6) {
+            Text("활동 기록으로 관장 도전 자격을 얻고, 관장을 격파하면 뱃지와 코인을 받습니다.")
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+            VStack(spacing: 10) {
                 ForEach(selectedRegion.categories, id: \.self) { cat in
                     categoryRow(cat)
-                }
-                // 카테고리 수가 적은 region(2개)은 빈 행으로 높이를 최대치(vibe=3)에 맞춘다 —
-                // 안 그러면 vibe 선택 시 categorySection이 한 행 더 높아져 하단 Spacer가 줄고
-                // 패널 전체 레이아웃이 region마다 점프한다.
-                ForEach(0..<max(0, maxCategoryRows - selectedRegion.categories.count), id: \.self) { _ in
-                    Color.clear.frame(height: Self.tierCellHeight)
                 }
             }
         }
     }
 
-    /// tier 컬럼 헤더 — 카테고리 라벨 폭만큼 left padding 후 4 tier 이름.
+    /// 각 업적 카드의 보석 바로 위에 단계 이름을 표시한다.
     private var tierHeader: some View {
         HStack(spacing: 10) {
-            Spacer().frame(width: 90)
             ForEach(BadgeTier.allCases, id: \.self) { tier in
                 Text(tier.displayName)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
@@ -301,20 +293,38 @@ struct GymView: View {
     private func categoryRow(_ cat: BadgeCategory) -> some View {
         let value = cat.currentValue(settings)
         let available = cat.isAvailable(settings)
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(cat.displayName)
-                    .font(.system(size: 12, weight: .medium))
-                Text("\(value) \(cat.unit)")
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary)
+        let next = BadgeTier.allCases.first { !settings.clearedBadges.contains(BadgeID(category: cat, tier: $0).key) }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(cat.activityTitle).font(.system(size: 12, weight: .semibold))
+                Text(cat.displayName).font(.system(size: 9)).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                if !available { Image(systemName: "lock.fill").font(.caption2).foregroundStyle(.secondary) }
             }
-            .frame(width: 90, alignment: .leading)
-
-            ForEach(BadgeTier.allCases, id: \.self) { tier in
-                tierCell(category: cat, tier: tier, currentValue: value, available: available)
+            Text(cat.activitySummary).font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("현재 · \(cat.metricDescription(value))").font(.system(size: 10, weight: .medium)).monospacedDigit()
+            if let notice = cat.trackingNotice {
+                Label(notice, systemImage: "clock").font(.system(size: 10)).foregroundStyle(.orange)
+            } else if !available {
+                Text(cat.lockReason).font(.system(size: 10)).foregroundStyle(.secondary)
+            } else if let next, let threshold = cat.thresholds[next] {
+                Text("\(next.displayName) 지표 기준 \(threshold.formatted())\(cat.metricUnit) · \(cat.remainingDescription(current: value, threshold: threshold))")
+                    .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label("이 업적의 뱃지를 모두 획득했습니다", systemImage: "checkmark.seal.fill")
+                    .font(.system(size: 10)).foregroundStyle(.green)
+            }
+            tierHeader
+            HStack(spacing: 10) {
+                ForEach(BadgeTier.allCases, id: \.self) { tier in
+                    tierCell(category: cat, tier: tier, currentValue: value, available: available)
+                }
             }
         }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.045), in: RoundedRectangle(cornerRadius: AppRadius.md))
     }
 
     private func tierCell(category: BadgeCategory, tier: BadgeTier, currentValue: Int, available: Bool) -> some View {
@@ -362,6 +372,8 @@ struct GymView: View {
         // cell intrinsic size 고정 — hover 상태와 무관하게 column 폭 일정.
         .frame(maxWidth: .infinity, minHeight: Self.tierCellHeight, maxHeight: Self.tierCellHeight)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(category.activityTitle), \(tier.displayName), 현재 \(category.metricDescription(currentValue)), 기준 \(threshold)\(category.metricUnit)\(cleared ? ", 뱃지 획득" : "")")
         .onHover { hovering in
             hoveredKey = hovering ? id.key : (hoveredKey == id.key ? nil : hoveredKey)
         }
@@ -377,7 +389,7 @@ struct GymView: View {
             BadgeTierTooltip(category: category, tier: tier,
                              currentValue: currentValue, threshold: threshold,
                              cleared: cleared, available: available,
-                             strokeColor: strokeColor)
+                             strokeColor: strokeColor, countingContext: category.countingContext(settings))
         }
     }
 
@@ -478,9 +490,9 @@ struct GymView: View {
 }
 
 /// 도장 셀 호버 popover. 가챠 컬렉션 뱃지의 `CollectionBadgeTooltip`과 동일 톤 —
-/// 헤더(카테고리·tier) + 본문(상태별 분기: cleared/locked/in-progress) + 보상.
+/// 활동 의미 + 현재 기록·기준 + 획득 상태·보상 + 집계 방식과 시작일.
 /// macOS 시스템 popover라 ScrollView clip 영향 없고 페이드/스케일 애니메이션 자동.
-private struct BadgeTierTooltip: View {
+struct BadgeTierTooltip: View {
     let category: BadgeCategory
     let tier: BadgeTier
     let currentValue: Int
@@ -488,6 +500,7 @@ private struct BadgeTierTooltip: View {
     let cleared: Bool
     let available: Bool
     let strokeColor: Color
+    var countingContext: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -496,11 +509,18 @@ private struct BadgeTierTooltip: View {
                 Circle()
                     .fill(strokeColor)
                     .frame(width: 8, height: 8)
-                Text("\(category.displayName) · \(tier.displayName)")
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
+                Text("\(category.activityTitle) · \(tier.displayName)")
+                    .font(.system(size: 13, weight: .bold))
                 Spacer(minLength: 4)
             }
+            Text(category.displayName).font(.caption2).foregroundStyle(.secondary)
+            Text(category.activitySummary).font(.system(size: 11))
+                .fixedSize(horizontal: false, vertical: true)
             Divider()
+            Text("현재 · \(category.metricDescription(currentValue))")
+                .font(.caption.monospacedDigit().weight(.semibold))
+            Text("지표 기준 · \(category.metricDescription(threshold))")
+                .font(.caption2).foregroundStyle(.secondary)
             // 상태별 본문.
             if !available {
                 Label {
@@ -512,23 +532,20 @@ private struct BadgeTierTooltip: View {
                 }
             } else if cleared {
                 Label {
-                    Text("클리어")
+                    Text("관장 격파로 뱃지 획득")
                         .font(.caption.weight(.semibold))
                 } icon: {
                     Image(systemName: "checkmark.seal.fill")
                         .foregroundStyle(.green)
                 }
-                Text("\(threshold) \(category.unit) 달성")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Text("+\(tier.coinReward) coin 적립됨")
+                Text("뱃지 보상 +\(tier.coinReward) coin · 중복 지급되지 않습니다")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             } else {
                 // 진행도 + 진행 바 + 보상.
                 let pct = threshold > 0 ? min(1.0, Double(currentValue) / Double(threshold)) : 0
-                Text("\(currentValue)/\(threshold) \(category.unit)")
-                    .font(.caption.monospacedDigit().weight(.semibold))
+                Text(category.remainingDescription(current: currentValue, threshold: threshold))
+                    .font(.caption2).foregroundStyle(currentValue >= threshold ? .green : .secondary)
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.secondary.opacity(0.2))
@@ -537,13 +554,27 @@ private struct BadgeTierTooltip: View {
                     }
                 }
                 .frame(height: 4)
-                Text("달성 시 +\(tier.coinReward) coin")
+                Text("관장 격파 시 뱃지와 +\(tier.coinReward) coin")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(strokeColor)
             }
+            Divider()
+            Text(category.countingGuide).font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let countingContext {
+                Text(countingContext).font(.caption2).foregroundStyle(.secondary)
+            }
+            if let notice = category.trackingNotice {
+                Label(notice, systemImage: "clock").font(.caption2).foregroundStyle(.orange)
+            }
+            if !cleared && available {
+                Text("지표는 지역 관장 도전 자격에 반영됩니다. 뱃지는 관장을 격파해야 획득합니다.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
         .padding(12)
-        .frame(width: 230, alignment: .leading)
+        .frame(width: 310, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

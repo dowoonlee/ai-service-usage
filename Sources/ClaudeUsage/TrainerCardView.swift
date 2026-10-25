@@ -58,6 +58,8 @@ struct TrainerCardView: View {
     /// 소속 길드명 태그 (P2a) — 이름 행 아래 캡슐. nil/빈 문자열이면 미표시.
     /// 원격 사용자는 profileJson.guildName(본인 submit 시 포함)에서 옴 — 표시용 캐시라 최신성은 느슨.
     var guildName: String? = nil
+    /// Only inject the card owner's server-confirmed record for this avatar, never the viewer's record.
+    var petMastery: ManualMasteryRecord? = nil
 
     /// avatar walk 애니메이션 속도 (preview·GIF 공통). GIF delay = 1/avatarFPS.
     static let avatarFPS: Double = 8
@@ -227,6 +229,9 @@ struct TrainerCardView: View {
             RoundedRectangle(cornerRadius: AppRadius.xl)
                 .fill(.black.opacity(0.22))
         )
+        .overlay(alignment: .bottom) {
+            if let petMastery, petMastery.wins > 0 { ManualMasteryBadge(record: petMastery, compact: true).padding(3) }
+        }
     }
 
     // 펫 + RP 이펙트 + 액세서리를 한 frameIndex 기준으로 함께 그린다. z-order: 광원/무지개(뒤) →
