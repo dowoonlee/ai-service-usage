@@ -243,6 +243,9 @@ enum Gacha {
         }
         DebugLog.log("Gacha commit: \(pull.kind.rawValue) [\(pull.rarity.rawValue)] count=\(owned[pull.kind]!.count)" +
                      (newVariant != nil ? " newVariant=\(newVariant!)" : ""))
+        RecapLog.record(RecapEvent(at: pull.pulledAt, kind: .gachaPull, pet: pull.kind.rawValue,
+                                   rarity: pull.rarity.rawValue, isNew: owned[pull.kind]!.count == 1,
+                                   variant: newVariant))
         // 새 펫 보유 → 펫 컬렉션 컴플리트 평가. dedup은 Registry 내부.
         PetCollectionRegistry.evaluate()
         return GachaPull(pulledAt: pull.pulledAt, kind: pull.kind, rarity: pull.rarity,
