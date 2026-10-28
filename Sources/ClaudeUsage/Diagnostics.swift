@@ -68,6 +68,17 @@ enum DiagnosticsCLI {
         lines.append("GET /api/organizations: \(statusText(os))")
         if os != 200 { bump(.fail) }
 
+        if !d.orgProbes.isEmpty {
+            lines.append("조직 \(d.orgProbes.count)개 (조회 순서):")
+            for p in d.orgProbes {
+                let caps = p.capabilities.isEmpty ? "-" : p.capabilities.joined(separator: ",")
+                let tier = p.rateLimitTier.isEmpty ? "-" : p.rateLimitTier
+                // 조직별 usage 403 은 세션 만료가 아니라 그 조직에 권한이 없다는 뜻이다.
+                let usage = p.usageStatus == 403 ? "403 (권한 없음, 건너뜀)" : statusText(p.usageStatus)
+                lines.append("  \(p.maskedID)  caps=[\(caps)] tier=\(tier) → \(p.planName) / usage \(usage)")
+            }
+        }
+
         if let id = d.orgID {
             lines.append("조직 ID: \(id.prefix(8))… (파싱 OK)")
         } else {

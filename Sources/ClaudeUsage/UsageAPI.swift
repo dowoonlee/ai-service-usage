@@ -48,15 +48,41 @@ actor UsageAPI {
             throw UsageError.notLoggedIn
         }
         let sess = session(for: key)
-        let orgID = try await resolveOrgID(sess: sess)
-        let usage = try await fetchUsage(sess: sess, orgID: orgID)
+
+        if let orgID = cachedOrgID {
+            do {
+                return snapshot(try await fetchUsage(sess: sess, orgID: orgID))
+            } catch is OrgUsageForbidden {
+                // 캐시한 org 의 403 만으로는 세션 만료인지 org 권한 문제인지 구분할 수 없다.
+                // org 목록을 다시 받는다. 세션이 만료됐다면 그 요청이 401/403 으로 unauthorized 를 던진다.
+                cachedOrgID = nil
+            }
+        }
+
+        let orgs = try await fetchOrganizations(sess: sess)
+        for org in Self.usageCandidates(orgs) {
+            let usage: APIUsageResponse
+            do {
+                usage = try await fetchUsage(sess: sess, orgID: org.uuid)
+            } catch is OrgUsageForbidden {
+                continue
+            }
+            cachedOrgID = org.uuid
+            cachedPlanName = Self.derivePlanName(capabilities: org.capabilities, rateLimitTier: org.rateLimitTier)
+            return snapshot(usage)
+        }
+        // org 목록은 200 이었으므로 세션은 유효하다. 로그아웃(unauthorized)이 아니라 조직 없음으로 보고한다.
+        DebugLog.log(" Claude: usage 를 허용하는 조직 없음 (orgs=\(orgs.count))")
+        throw UsageError.noOrganization
+    }
+
+    private func snapshot(_ usage: APIUsageResponse) -> UsageSnapshot {
         var snap = toSnapshot(usage)
         snap.planName = cachedPlanName
         return snap
     }
 
-    private func resolveOrgID(sess: URLSession) async throws -> String {
-        if let cached = cachedOrgID { return cached }
+    private func fetchOrganizations(sess: URLSession) async throws -> [APIOrganization] {
         let url = base.appendingPathComponent("api/organizations")
         let (data, resp) = try await get(sess: sess, url: url)
         let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
@@ -64,21 +90,30 @@ actor UsageAPI {
         // GitHub Issue 첨부 동선에 노출되지 않게 status/length만 기록.
         DebugLog.log(" GET /api/organizations -> status=\(status) bytes=\(data.count)")
         try assertOK(resp)
+        let orgs: [APIOrganization]
         do {
-            let orgs = try JSONDecoder().decode([APIOrganization].self, from: data)
-            guard let first = orgs.first else { throw UsageError.noOrganization }
-            cachedOrgID = first.uuid
+            orgs = try JSONDecoder().decode([APIOrganization].self, from: data)
+        } catch { throw UsageError.decoding(error) }
+        guard !orgs.isEmpty else { throw UsageError.noOrganization }
+        return orgs
+    }
 
-            // 원시 JSON에서 capabilities / rate_limit_tier 추출해 plan 이름 구성
-            if let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-               let org0 = raw.first {
-                let caps = (org0["capabilities"] as? [String]) ?? []
-                let tier = (org0["rate_limit_tier"] as? String) ?? ""
-                cachedPlanName = Self.derivePlanName(capabilities: caps, rateLimitTier: tier)
-            }
-            return first.uuid
-        } catch let e as UsageError { throw e }
-        catch { throw UsageError.decoding(error) }
+    /// usage 를 조회해 볼 org 순서.
+    ///
+    /// `/api/organizations` 는 계정이 속한 org 를 전부 준다. API 콘솔 org, 팀 org 처럼 claude.ai 구독
+    /// 사용량이 없는 org 가 배열 앞에 올 수 있고, 그 org 의 `/usage` 는 403 을 준다.
+    /// 그래서 `chat` capability 가 있는 org 를 앞에 두고, 그중 유료 플랜 capability 가 붙은 org 를 먼저 둔다.
+    /// 같은 순위 안에서는 응답 순서를 유지한다. `chat` 이 없는 org 도 버리지 않고 맨 뒤에 둔다.
+    /// capability 이름이 바뀌어도 순서만 밀릴 뿐 조회 대상에서 빠지지 않게 하기 위해서다.
+    nonisolated static func usageCandidates(_ orgs: [APIOrganization]) -> [APIOrganization] {
+        func rank(_ org: APIOrganization) -> Int {
+            let caps = Set(org.capabilities.map { $0.lowercased() })
+            guard caps.contains("chat") else { return 2 }
+            return caps.count > 1 ? 0 : 1
+        }
+        return orgs.enumerated()
+            .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }
+            .map(\.element)
     }
 
     /// capabilities + rate_limit_tier → 표시용 플랜명. `nonisolated static`인 것은 테스트가
@@ -120,6 +155,9 @@ actor UsageAPI {
         // orgID 자체도 식별자라 로그에서 마스킹 (앞 8자만).
         let maskedOrg = orgID.prefix(8) + "…"
         DebugLog.log(" GET /api/organizations/\(maskedOrg)/usage -> status=\(status) bytes=\(data.count)")
+        // 403 은 이 org 에 usage 권한이 없다는 뜻일 수 있다. 호출부가 다른 org 를 시도하도록
+        // unauthorized 와 구분해서 던진다. 401 은 그대로 세션 만료로 본다.
+        if status == 403 { throw OrgUsageForbidden() }
         try assertOK(resp)
         do {
             return try JSONDecoder().decode(APIUsageResponse.self, from: data)
@@ -177,31 +215,39 @@ actor UsageAPI {
         let (orgData, orgStatus) = await rawGet(sess: sess, url: orgURL)
         d.orgStatus = orgStatus
         d.orgRawData = orgData
-        if let orgData,
-           let orgs = try? JSONDecoder().decode([APIOrganization].self, from: orgData),
-           let first = orgs.first {
-            d.orgID = first.uuid
-            if let raw = try? JSONSerialization.jsonObject(with: orgData) as? [[String: Any]],
-               let org0 = raw.first {
-                let caps = (org0["capabilities"] as? [String]) ?? []
-                let tier = (org0["rate_limit_tier"] as? String) ?? ""
-                d.planName = Self.derivePlanName(capabilities: caps, rateLimitTier: tier)
-            }
-        }
-        guard let orgID = d.orgID else {
+        guard let orgData,
+              let orgs = try? JSONDecoder().decode([APIOrganization].self, from: orgData),
+              !orgs.isEmpty else {
             d.fatal = "조직 ID를 파싱하지 못함 (organizations 응답을 --raw로 확인)"
             return d
         }
 
-        let usageURL = base.appendingPathComponent("api/organizations/\(orgID)/usage")
-        let (usageData, usageStatus) = await rawGet(sess: sess, url: usageURL)
-        d.usageStatus = usageStatus
-        d.usageRawData = usageData
-        if let usageData,
-           let r = try? JSONDecoder().decode(APIUsageResponse.self, from: usageData) {
-            var snap = toSnapshot(r)
-            snap.planName = d.planName
-            d.snapshot = snap
+        // refresh() 와 같은 순서로 시도하되, 첫 성공에서 멈추지 않고 전부 조회해 org 별 결과를 남긴다.
+        for org in Self.usageCandidates(orgs) {
+            let usageURL = base.appendingPathComponent("api/organizations/\(org.uuid)/usage")
+            let (usageData, usageStatus) = await rawGet(sess: sess, url: usageURL)
+            let planName = Self.derivePlanName(capabilities: org.capabilities, rateLimitTier: org.rateLimitTier)
+            d.orgProbes.append(ClaudeOrgProbe(
+                maskedID: String(org.uuid.prefix(8)) + "…",
+                capabilities: org.capabilities,
+                rateLimitTier: org.rateLimitTier,
+                planName: planName,
+                usageStatus: usageStatus
+            ))
+            guard d.orgID == nil, usageStatus != 403 else { continue }
+            d.orgID = org.uuid
+            d.planName = planName
+            d.usageStatus = usageStatus
+            d.usageRawData = usageData
+            if let usageData,
+               let r = try? JSONDecoder().decode(APIUsageResponse.self, from: usageData) {
+                var snap = toSnapshot(r)
+                snap.planName = planName
+                d.snapshot = snap
+            }
+        }
+        if d.orgID == nil {
+            d.fatal = "usage 를 허용하는 조직 없음 (모든 조직이 403)"
         }
         return d
     }
@@ -229,10 +275,23 @@ actor UsageAPI {
     }
 }
 
+/// org 의 `/usage` 가 403 일 때 던진다. 세션 만료(`UsageError.unauthorized`)와 달리
+/// 다음 org 를 시도하라는 신호라 actor 밖으로 나가지 않는다.
+private struct OrgUsageForbidden: Error {}
+
+struct ClaudeOrgProbe: Sendable {
+    var maskedID: String
+    var capabilities: [String]
+    var rateLimitTier: String
+    var planName: String
+    var usageStatus: Int
+}
+
 struct ClaudeDiagnostics: Sendable {
     var loggedIn = false
     var orgStatus: Int?
     var orgRawData: Data?
+    var orgProbes: [ClaudeOrgProbe] = []
     var orgID: String?
     var planName: String?
     var usageStatus: Int?

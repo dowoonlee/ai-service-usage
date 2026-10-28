@@ -16,6 +16,30 @@ struct UsageSnapshot: Codable, Hashable {
 struct APIOrganization: Decodable {
     let uuid: String
     let name: String?
+    let capabilities: [String]
+    let rateLimitTier: String
+
+    private enum CodingKeys: String, CodingKey {
+        case uuid, name, capabilities
+        case rateLimitTier = "rate_limit_tier"
+    }
+
+    init(uuid: String, name: String? = nil, capabilities: [String] = [], rateLimitTier: String = "") {
+        self.uuid = uuid
+        self.name = name
+        self.capabilities = capabilities
+        self.rateLimitTier = rateLimitTier
+    }
+
+    // uuid 외 필드는 try? 로 푼다. capabilities 타입이 바뀌어도 org 목록 전체가 디코드 실패하면
+    // 안 된다. uuid 만 있으면 usage 조회는 할 수 있다.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        uuid = try c.decode(String.self, forKey: .uuid)
+        name = try? c.decodeIfPresent(String.self, forKey: .name)
+        capabilities = (try? c.decodeIfPresent([String].self, forKey: .capabilities)) ?? []
+        rateLimitTier = (try? c.decodeIfPresent(String.self, forKey: .rateLimitTier)) ?? ""
+    }
 }
 
 struct APIUsageResponse: Decodable {
