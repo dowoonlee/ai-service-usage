@@ -94,6 +94,50 @@ final class UsageDecodingTests: XCTestCase {
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["pro"], rateLimitTier: "20x_default"), "Pro")
     }
 
+    // MARK: - Claude: 조직 목록
+
+    /// org 가 여러 개인 계정에서 응답 첫 번째 org 의 /usage 가 403 이었다. 그때 첫 번째 org 를 고정으로
+    /// 쓰던 코드가 403 을 세션 만료로 처리해 로그인 직후 바로 로그아웃시켰다.
+    /// 순서는 chat + 유료 플랜, chat 만, chat 없음 순이고 같은 순위에서는 응답 순서를 유지한다.
+    func testClaudeUsageCandidatesPreferChatOrgs() {
+        let orgs = [
+            APIOrganization(uuid: "api", capabilities: ["api"]),
+            APIOrganization(uuid: "free", capabilities: ["chat"]),
+            APIOrganization(uuid: "max", capabilities: ["chat", "claude_max"]),
+            APIOrganization(uuid: "none"),
+            APIOrganization(uuid: "team", capabilities: ["CHAT", "raven"]),
+        ]
+        XCTAssertEqual(UsageAPI.usageCandidates(orgs).map(\.uuid), ["max", "team", "free", "api", "none"])
+    }
+
+    /// org 가 하나뿐이면 capabilities 와 무관하게 그 org 를 조회한다. 기존 단일 org 사용자 동작 유지.
+    func testClaudeUsageCandidatesKeepsSingleOrg() {
+        XCTAssertEqual(UsageAPI.usageCandidates([APIOrganization(uuid: "only", capabilities: ["api"])]).map(\.uuid),
+                       ["only"])
+        XCTAssertTrue(UsageAPI.usageCandidates([]).isEmpty)
+    }
+
+    /// capabilities / rate_limit_tier 의 타입이 바뀌거나 빠져도 org 목록 전체가 디코드 실패하면 안 된다.
+    func testClaudeOrganizationsDecodeTolerantly() throws {
+        let json = """
+        [
+          { "uuid": "a", "name": "API", "capabilities": ["api"], "rate_limit_tier": "default_api" },
+          { "uuid": "b", "name": "Personal", "capabilities": ["claude_max", "chat"],
+            "rate_limit_tier": "default_claude_max_20x", "billing_type": "stripe" },
+          { "uuid": "c", "capabilities": "chat", "rate_limit_tier": 5 },
+          { "uuid": "d", "name": null }
+        ]
+        """.data(using: .utf8)!
+        let orgs = try JSONDecoder().decode([APIOrganization].self, from: json)
+        XCTAssertEqual(orgs.map(\.uuid), ["a", "b", "c", "d"])
+        XCTAssertEqual(orgs[1].capabilities, ["claude_max", "chat"])
+        XCTAssertEqual(orgs[1].rateLimitTier, "default_claude_max_20x")
+        XCTAssertEqual(orgs[2].capabilities, [])
+        XCTAssertEqual(orgs[2].rateLimitTier, "")
+        XCTAssertNil(orgs[3].name)
+        XCTAssertEqual(UsageAPI.usageCandidates(orgs).first?.uuid, "b")
+    }
+
     // MARK: - Cursor: 사용량 응답
 
     /// 모델명이 동적 키로 오고 그 사이에 `startOfMonth`가 섞인다. 요청 수는 모델별 합, 한도는 최대값.
