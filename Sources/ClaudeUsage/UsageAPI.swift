@@ -102,14 +102,17 @@ actor UsageAPI {
     ///
     /// `/api/organizations` 는 계정이 속한 org 를 전부 준다. API 콘솔 org, 팀 org 처럼 claude.ai 구독
     /// 사용량이 없는 org 가 배열 앞에 올 수 있고, 그 org 의 `/usage` 는 403 을 준다.
-    /// 그래서 `chat` capability 가 있는 org 를 앞에 두고, 그중 유료 플랜 capability 가 붙은 org 를 먼저 둔다.
-    /// 같은 순위 안에서는 응답 순서를 유지한다. `chat` 이 없는 org 도 버리지 않고 맨 뒤에 둔다.
-    /// capability 이름이 바뀌어도 순서만 밀릴 뿐 조회 대상에서 빠지지 않게 하기 위해서다.
+    /// 그래서 `chat` capability 가 있는 org 를 앞에 두고, 그 안에서는 응답 순서를 유지한다.
+    ///
+    /// ⚠️ `chat` org 끼리 유료 플랜을 앞으로 올리지 않는다. 개인 Free + 팀 좌석처럼 둘 다 200 을 주는
+    /// 계정은 예전부터 응답 첫 org 를 추적해 왔는데, 순서를 바꾸면 업데이트 직후 추적 대상과 플랜명,
+    /// `CoinLedger.planMultiplier` 가 함께 바뀐다. 이 정렬은 403 org 를 피하는 용도로만 쓴다.
+    ///
+    /// `chat` 이 없는 org 도 버리지 않고 맨 뒤에 둔다. capability 이름이 바뀌어도 순서만 밀릴 뿐
+    /// 조회 대상에서 빠지지 않게 하기 위해서다.
     nonisolated static func usageCandidates(_ orgs: [APIOrganization]) -> [APIOrganization] {
         func rank(_ org: APIOrganization) -> Int {
-            let caps = Set(org.capabilities.map { $0.lowercased() })
-            guard caps.contains("chat") else { return 2 }
-            return caps.count > 1 ? 0 : 1
+            org.capabilities.contains { $0.lowercased() == "chat" } ? 0 : 1
         }
         return orgs.enumerated()
             .sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }

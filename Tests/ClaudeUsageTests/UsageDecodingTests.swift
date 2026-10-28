@@ -98,7 +98,9 @@ final class UsageDecodingTests: XCTestCase {
 
     /// org 가 여러 개인 계정에서 응답 첫 번째 org 의 /usage 가 403 이었다. 그때 첫 번째 org 를 고정으로
     /// 쓰던 코드가 403 을 세션 만료로 처리해 로그인 직후 바로 로그아웃시켰다.
-    /// 순서는 chat + 유료 플랜, chat 만, chat 없음 순이고 같은 순위에서는 응답 순서를 유지한다.
+    /// 순서는 chat 있음, chat 없음 순이고 같은 순위에서는 응답 순서를 유지한다.
+    /// chat org 끼리 유료 플랜을 앞으로 올리지 않는다 — 개인 Free + 팀처럼 둘 다 200 인 계정의 추적 대상이
+    /// 업데이트만으로 바뀌면 안 된다(#269 리뷰).
     func testClaudeUsageCandidatesPreferChatOrgs() {
         let orgs = [
             APIOrganization(uuid: "api", capabilities: ["api"]),
@@ -107,7 +109,7 @@ final class UsageDecodingTests: XCTestCase {
             APIOrganization(uuid: "none"),
             APIOrganization(uuid: "team", capabilities: ["CHAT", "raven"]),
         ]
-        XCTAssertEqual(UsageAPI.usageCandidates(orgs).map(\.uuid), ["max", "team", "free", "api", "none"])
+        XCTAssertEqual(UsageAPI.usageCandidates(orgs).map(\.uuid), ["free", "max", "team", "api", "none"])
     }
 
     /// org 가 하나뿐이면 capabilities 와 무관하게 그 org 를 조회한다. 기존 단일 org 사용자 동작 유지.
