@@ -1382,6 +1382,7 @@ enum PetSprite {
         .bat:      HeadAnchor(x: 0.60, top: 0.13),   // 머리 x 0.50 — 날개 끝이 더 높아 자동 규칙이 날개를 잡는다
         .blueBird: HeadAnchor(x: 0.79, top: 0.28),   // 머리 x 0.69 — 부리가 앞으로 길어 중심이 부리로 쏠린다
         .radish:   HeadAnchor(x: 0.60, top: 0.32),   // 몸통 꼭대기 — 잎 끝(0.13)에 얹으면 공중에 뜬다
+        .bear:     HeadAnchor(x: 0.35, top: 0.24),   // 머리 x 0.25 — 걷기 프레임은 등과 머리 높이가 비슷해 앞쪽 규칙이 안 걸린다
     ]
 
     /// (kind, action, frameIndex)별 캐시. 알파 스캔은 첫 1회뿐이라 30Hz 메뉴바에서도 비용이 없다.
