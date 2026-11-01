@@ -1,0 +1,516 @@
+# 시즌 이벤트 — 1번: 분위기 레이어 + 시즌 레지스트리
+
+12월 크리스마스를 첫 사례로 하되, 할로윈·벚꽃·설날 등 다른 시즌에도 데이터만 추가해 재사용할 수 있는
+구조로 만든다. 1번은 **구매도, 보상도, 서버도 없는** 순수 연출이다. 설치된 앱이 12월이 되면 알아서
+겨울이 되고 1월이 되면 알아서 돌아온다. 2번(한정 코스메틱)·3번(참여 이벤트)·4번(겨울 관장)은 이 문서의
+`Season` 구조체에 필드를 늘리는 방식으로 이어진다.
+
+> 결정(사용자 확정, 2026-11-01): ①시즌 레지스트리로 추상화 ②크리스마스/연말을 시즌 2개로 분리
+> ③눈은 "가짜 날씨"가 아니라 날씨와 분리된 ambient 파티클 ④사용자 토글 1개 + 환경변수 강제 + 서버 킬스위치
+> ⑤사전 공지 없음(12월 1일 아침에 조용히 켜짐).
+>
+> 결정(2번, 2026-11-01): ⑥기존 액세서리 8종을 도트 PNG로 **이번 시즌에 함께 교체** ⑦12월 초 공지 릴리스
+> 여부는 보류 ⑧구매 칭호 포함.
+>
+> 결정(3번, 2026-11-01): ⑨서버 훅은 `submit`("AI를 쓴 날") ⑩참여 UI는 별도 카드가 아니라 **리포트 탭의 상시
+> 사용량 잔디** 위에 얹는다 ⑪리포트 탭을 리포트/꾸미기로 분리 정리 ⑫사용자 노출 용어는 "어드벤트"가 아니라
+> **"보상"**(내부 식별자 `advent-*`는 유지). 시안: https://claude.ai/artifact/RuGzDhyN9dx772KcLhquf3
+>
+> 결정(4번, 2026-11-01): ⑬관장은 `BadgeRegion`이 아니라 별도 `SeasonalBoss` ⑭보스 팀은 **기존 펫의 흰색 리컬러
+> (북극 동물) + 모자**로 만든 이벤트 전용 스킨 ⑮tier 오픈은 **3번 보상 진행도(N/24)에 연동** ⑯오픈 기준 0/6/12/18일,
+> 스킨은 올해 보스 전용, 격파 보상은 지역 관장의 10~20배(1,000/3,000/6,000/15,000 + 프리미엄 가챠권) **확정**.
+
+## 1. 추상화 — 소비자는 날짜를 보지 않는다
+
+핵심 경계는 하나다. 렌더러·대사·상점은 **`SeasonRegistry.active(now:)`가 돌려주는 `Season`의 필드만
+읽는다.** 소비자 코드에 `Calendar`/`Date` 비교가 나오면 리뷰에서 반려한다.
+
+```swift
+struct Season: Identifiable, Equatable {
+    enum Kind: String, CaseIterable { case xmas, newYear, halloween, sakura }   // case 삭제 금지
+    let kind: Kind
+    let window: SeasonWindow
+
+    // ── 1번: 분위기 ──
+    let ambient: ParticleStyle?        // 눈송이/꽃잎/낙엽 — WeatherCondition과 분리
+    let headwear: String?              // 펫 머리 장식 리소스명 (산타모자/호박/꽃)
+    let quotes: [String]
+    let officeWindowParticles: Bool
+
+    // ── 3번: 잔디 장식·보상 구간 ──
+    let grassDecoration: ParticleStyle?    // 불 켜진 셀 위 장식(눈/꽃잎). 잔디 자체는 상시 기능
+    let rewardDays: ClosedRange<Int>?      // 서버 일일 보상 구간(1...24). nil이면 보상 없음
+
+    // ── 4번: 겨울 관장 ──
+    let boss: SeasonalBoss?                // 뱃지·지역과 무관한 이벤트 보스. newYear는 nil
+    // 상점 아이템 목록은 여기 두지 않는다 — 각 아이템이 `season: Season.Kind?`로 자기 시즌을 안다(§10).
+
+    var id: String { kind.rawValue }                 // 코스메틱 노출 판정 키 (연도 없음)
+    func instanceID(now: Date) -> String             // "xmas-2026" — 1회성 지급 dedup 키 (연도 포함)
+}
+
+enum SeasonRegistry {
+    static let all: [Season]
+    /// 유일한 진입점. 설정 off / 환경변수 강제 / 서버 킬스위치 / 날짜 창을 모두 여기서 합성.
+    static func active(now: Date = Date(), settings: Settings = .shared) -> Season?
+}
+```
+
+`SeasonWindow`는 두 형태를 지원한다.
+
+* **매년 반복** `(월/일) ~ (월/일)` — 12/1 → 1/4처럼 연도를 넘는 창 처리 필수.
+* **연도별 고정** `[년: DateInterval]` — 설날·추석(음력). 테이블에 없는 연도는 비활성.
+
+판정은 사용자 로컬 캘린더 기준. 1번은 연출만이라 시계를 돌려도 얻는 게 없다. 서버 게이트는 2번(상점)·
+3번(지급)부터 필요하다.
+
+규칙 3개:
+
+* **`Season.Kind` case와 상점용 enum case(`CardAccessory` 등)는 삭제 금지.** `tshirt = "scarf"`와 같은
+  이유 — 저장된 rawValue가 깨진다. 시즌 폐지는 `all` 배열에서만 뺀다.
+* **1회성 지급은 `instanceID`(연도 포함), 코스메틱 노출은 `id`(연도 없음).** 섞이면 내년에 보상이 안 나오거나
+  작년 모자가 안 뜬다.
+* **시즌 창은 서로 겹치지 않는다.** 테스트가 고정한다. 동시에 활성인 시즌은 최대 1개.
+
+## 2. 스위치 3겹
+
+| 층 | 수단 | 용도 |
+|---|---|---|
+| 사용자 | 설정 토글 `seasonalEffectsEnabled` 1개 (기본 on, 날씨 토글 바로 아래) | 모든 시즌 연출 일괄 off. 시즌별 토글은 두지 않는다 |
+| 개발 | 환경변수 `AIUSAGE_SEASON=xmas` / `AIUSAGE_SEASON=none` | 프리뷰·dev run에서 날짜 무시하고 강제 |
+| 운영 | `sync` 응답 선택 필드 `disabledSeasons: [String]` (`try?` 디코딩) | 배포 후 버그 시 릴리스 없이 끄는 킬스위치 |
+
+운영 킬스위치는 2번부터 가치가 커지지만 필드 하나 수준이라 1번에서 미리 뚫는다. 눈 파티클이 특정 환경에서
+CPU를 먹는다는 제보가 오면 그날 끈다.
+
+## 3. 구성 요소
+
+### A. ambient 파티클 (눈)
+
+* `WeatherParticles`의 파티클 생성부를 `ParticleStyle(sprite, pixelSize, maxCount, speed, sway)`로 뽑아낸다.
+  눈·비는 날씨가, 꽃잎·낙엽은 시즌이 같은 구조체를 넘긴다.
+* 우선순위 **실제 강수 > 시즌 ambient**. 비·뇌우가 오면 그대로 보인다(설정 이름이 "실제 날씨 효과"다).
+  실제 눈이면 실제 강도, 시즌 눈이면 고정 **0.35**(가랑눈 — 한 달 내내 떠 있으니 조용해야 한다).
+* `MainView`가 `vm.weather`를 읽는 5곳(파티클 1 + 차트/WalkingCat 4)을 `vm.effectiveWeather`(실제 강수
+  또는 시즌 ambient를 합성한 값) 하나로 모은다. WalkingCat에 시즌 눈이 전달되면 기존
+  `Quotes.weatherCommon[.snow]` 6줄이 추가 작업 없이 살아난다.
+* `weatherEffectEnabled`가 off면 시즌 눈도 안 내린다. 시즌 토글은 그 위에 한 겹 더 거는 것.
+
+### B. headwear (산타 모자)
+
+메뉴바 펫 + 메인 패널 차트 WalkingCat 둘 다. 길드 오피스 펫은 컨트롤러가 달라 이번엔 제외.
+
+* **에셋**: 7×6px 도트 PNG 1장 → `Resources/seasonal/santa_hat.png`. `Resources/weather/snowflake.png`(9×9)와
+  같은 방식. 벡터가 아닌 픽셀 단위 도트라 화풍 원칙에 어긋나지 않는다.
+* **머리 위치**: 195종의 cellSize·여백이 전부 달라 셀 상단 고정은 작은 펫에서 모자가 뜬다. 프레임
+  **알파 스캔**으로 가장 위 불투명 행 → 그 근처 불투명 픽셀의 x 중심을 머리로 본다.
+  `PetSprite.hatAnchor(for:action:frameIndex:)`, (kind, action, frameIdx) 캐시. `MenuBarRenderer.tintedSpriteCache`와
+  같은 키 패턴.
+* **좌우 반전**: 두 렌더러 모두 ctx/scaleEffect 플립 안쪽에서 그려 모자도 함께 뒤집힌다.
+* **점프·구르기**: WalkingCat의 `jumpY`/`rollAngle`(Mythic 오라가 쓰는 것)과 같은 offset 적용.
+* **RenderKey**: `MenuBarRenderer.RenderKey`에 `seasonID: String?` 추가. 없으면 0시 경계에서 재합성을
+  건너뛰어 모자가 안 나타난다.
+
+### C. 시즌 대사
+
+`Season.quotes` 풀. `WalkingCat.quoteForContext`에서 시즌 중 30% 확률로 먼저 뽑고, 나머지는 기존
+날씨→종 전용 순서. `OfficePetController`(156행 근처)도 같은 풀을 섞는다. 톤은 기존 `Quotes`와 동일 —
+사실 + dev 농담, 35자 이하, 비장한 문구 금지([[copy-no-ai-slop]]).
+
+xmas 초안:
+
+```
+cron은 0 0 25 12 * 입니다.
+올해 커밋 트리에 장식 다는 중.
+산타도 rate limit은 못 피해요.
+선물 배송은 at-least-once예요.
+눈 오니 빌드가 느린 기분.
+연말 배포 freeze 아직이죠?
+트리 밑에 PR 두고 갔어요.
+12월엔 토큰도 따뜻하게.
+루돌프는 GPU 없이 뜁니다.
+올해 마지막 force-push는 참아요.
+```
+
+newYear 풀은 별도 작성(연말 정산·새해 다짐 톤, 10줄).
+
+### D. 길드 오피스
+
+* **창문 눈**: 오피스 창문 가구는 `DrawKind.window`로 코드가 직접 그린다. 시즌 중 창 밖에 눈송이 점을
+  떨어뜨리는 건 에셋 없이 된다. 포함.
+* **트리 데코**: `pixel-office` 팩(33파일)에 트리 **없음**. 2dPig 화풍(16×32) CC0 트리를 researcher로 하루
+  조사 → 없으면 1번에서 제외. 있으면 `decorCatalog`에 `CHRISTMAS_TREE`(floor, behind, 0 또는 300코인) 추가,
+  상점 노출만 `Season.decorKinds`로 게이트. **주의**: 오피스 데코는 서버에 kind 문자열로 저장돼 다른 멤버가
+  본다. 미업데이트 클라가 모르는 kind를 받았을 때 `decorItem(kind:)`가 nil → 조용히 스킵하는지 확인.
+
+## 4. 첫 해 캘린더
+
+| kind | 창 | ambient | headwear | 비고 |
+|---|---|---|---|---|
+| xmas | 12/1 ~ 12/26 | 눈 0.35 | 산타 모자 | 올해 첫 적용 |
+| newYear | 12/26 ~ 1/4 | 눈 0.35 | 없음 | 연말 리캡과 시기 겹침 — 코드/PR 분리 유지 |
+| halloween | 10/24 ~ 11/1 | 없음 | 호박 | `skull`·`roboPumpkin` 설명문이 이미 "할로윈 한정"을 말함. 내년 |
+| sakura | 4/1 ~ 4/15 | 꽃잎 | 꽃 | `TerrainMotif.petal` 재사용. 내년 |
+
+올해 코드에 들어가는 건 xmas·newYear 두 **데이터 항목**. 할로윈 추가가 PNG 1장 + `Season` 리터럴 1개 +
+대사 10줄 이상을 요구하면 추상화가 새는 신호다.
+
+## 5. 경계 넘김
+
+`ViewModel.activeSeason: Season?`(`@Published`) — 폴링 tick마다 재계산 + **다음 창 경계 시각에 1회 타이머**로
+0시 정각 갱신. 메뉴바는 RenderKey의 `seasonID`로 재합성.
+
+## 6. 바뀌는 파일
+
+* 신규 `Season.swift` — `Season`, `SeasonWindow`, `ParticleStyle`, `SeasonalItem` 프로토콜
+* 신규 `SeasonRegistry.swift` — `all` 데이터 + `active(now:)` 합성(설정·환경변수·킬스위치·창)
+* 신규 `Resources/seasonal/santa_hat.png`
+* `Settings.swift` / `SettingsView.swift` — `seasonalEffectsEnabled`
+* `ViewModel.swift` — `activeSeason`, `effectiveWeather`, 경계 타이머
+* `MainView.swift` — `vm.weather` 5곳 → effective
+* `WeatherParticles.swift` — `ParticleStyle` 추출
+* `PetSprite.swift` — `hatAnchor` 알파 스캔 + 캐시
+* `MenuBarRenderer.swift` — headwear 그리기, RenderKey `seasonID`
+* `WalkingCat.swift` — headwear 레이어, `quoteForContext` 시즌 분기
+* `OfficePetController.swift` — 대사 분기
+* 오피스 창문 뷰 — 창밖 눈
+* `RankingAPI.swift` — `sync` 응답 `disabledSeasons` 선택 디코딩
+
+## 7. 검증
+
+* **테스트**: 창 경계(11/30 23:59, 12/1 00:00, 12/26 00:00, 1/4 00:00), 연도 넘김, 창 비중첩, 연도별 고정 창
+  미등록 연도 비활성, 환경변수 강제·설정 off·킬스위치 우선순위, effective weather 합성(clear→시즌 눈, rain 유지,
+  토글 off 시 실제값), 앵커가 셀 안에 들어오는지 195종 순회, RenderKey에 seasonID, 대사 길이 상한.
+* **프리뷰**: `AnimationPreviews` 메뉴바 30Hz GIF + 걷기 사이클에 `AIUSAGE_SEASON=xmas` 변형 추가. 모자가 머리에
+  붙어 있는지, 플립 시 어긋나지 않는지는 눈으로 본다. 머리 큰 펫, 납작한 펫(슬라임), 비행 펫(박쥐·새) 중점.
+* 메뉴바 dev run은 실제 키체인을 공유하므로 `AIUSAGE_SANDBOX=1`로만.
+
+## 8. 릴리스
+
+11월 하순 릴리스에 실어 보내고 날짜 게이트로 잠겨 있다가 12/1에 열린다. Sparkle 업데이트 지연을 감안해
+11월 넷째 주. 사전 공지 없음 — 2번(상점) 공지에 함께 적는다.
+
+## 9. 미결
+
+* 트리 데코 에셋 조사 결과(있으면 포함, 없으면 창문 눈만).
+* newYear 대사 10줄.
+
+---
+
+# 2번: 한정 코스메틱
+
+## 10. 원칙
+
+* **한정은 "상점 노출 기간"이지 "보유 기간"이 아니다.** 산 사람은 영구 보유·장착. 시즌이 끝나면 상점에서만
+  사라지고 내년에 다시 나온다.
+* **가격은 같은 등급의 상시 아이템과 동일.** 희소성은 시간이 만든다. 가격 프리미엄은 코인을 덜 모은 신규
+  사용자를 배제하므로 두지 않는다.
+* **서버 변경 없음.** 코인·RP는 기존 ledger로만 움직이고 노출 판정은 `SeasonRegistry.active()`가 한다.
+* **아이템이 자기 시즌을 안다.** 각 enum/카탈로그 항목에 `season: Season.Kind?`(상시=nil). 시즌이 아이템
+  목록을 들고 있는 역방향 필드는 두지 않는다 — 같은 정보가 두 곳이면 어긋났을 때 어느 쪽이 맞는지 모른다.
+
+```swift
+protocol SeasonalItem { var season: Season.Kind? { get } }
+
+extension Settings {
+    /// 상점 노출 여부. 상시 아이템은 항상, 시즌 아이템은 활성 시즌 일치 또는 이미 보유 시.
+    func shopVisible<T: SeasonalItem>(_ item: T, owned: Bool) -> Bool {
+        guard let s = item.season else { return true }
+        return owned || SeasonRegistry.active()?.kind == s
+    }
+}
+```
+
+상점 4곳(액세서리 `ReportView` ~390행, 이펙트 `PetEffectShelf` ~30행, 테마 `PartyView` ~299행, 칭호
+`ReportView` ~306행)이 전부 `allCases`를 직접 순회한다. 각자 if를 심지 말고 `.filter { shopVisible(...) }`로
+통일한다. 시즌 아이템 칩에는 "한정" 뱃지 + "12/26까지" 꼬리말, 보유한 시즌 아이템은 시즌이 끝나도 보이되
+뱃지만 남긴다.
+
+## 11. 아이템
+
+| 종류 | 항목 | 화폐 | 가격 | 비고 |
+|---|---|---|---|---|
+| 액세서리 | 산타 모자 `santaHat` | 코인 | 800 | 1번 B의 도트 PNG를 확대해 그대로 사용 |
+| 액세서리 | 사슴뿔 `antlers` | 코인 | 800 | |
+| 액세서리 | 목도리 `muffler` | 코인 | 1500 | rawValue `scarf`는 `tshirt`가 점유 중(v0.7.0 호환) — 사용 금지 |
+| 이펙트 | 눈내림 `snowfall` | RP | 400 | `.particle` 카테고리. `riser()`를 하강으로 뒤집은 `faller()` |
+| 맵 테마 | 겨울밤 `winterNight` | 코인 | 2000 | 동적. 짙은 남색 하늘, 사용량↑ 위에서 전구색 점등. `TerrainMotif.bulb` 추가 |
+| 칭호 | 크리스마스에도 코딩함 `codedOnChristmas` | 자동 | — | 12/25에 `UsageEvent` 1건 이상 |
+| 칭호 | 연말 배포 freeze 위반 `freezeViolator` | 코인 | 1500 | dev 자조 밈 계열, 상시 구매 칭호와 같은 톤 |
+| 오피스 데코 | 트리 `CHRISTMAS_TREE` | 코인 | 300 | 1번 D 에셋 조사에 종속 |
+
+코인 싱크 합계 ≈ 6,600(뽑기 22회분), RP 400.
+
+## 12. 기존 액세서리 8종 도트 교체 (결정 ⑥)
+
+현재 `Resources/trainer-accessories/`가 **존재하지 않는다.** 8종 전부 `fallbackSymbol`(SF Symbol, 노란색)로
+그려지고 있고, 시즌 3종이 첫 실제 스프라이트가 된다. 도트 모자와 SF 안경이 한 카드에 섞이면 화풍이 갈리므로
+8종을 함께 교체한다.
+
+* **규격**: 카드에서 50pt 박스(`AccessoryTransform.scale` 배수)에 `interpolation(.none)`으로 그려진다.
+  펫 아바타 110px 위에 얹히므로 **16×16 도트**가 3배 확대돼 적절하다. 11종 모두 같은 캔버스 크기로 통일.
+* **소싱**: 직접 그리지 않는다([[asset-no-handdraw-source-packs]]). 16×16 아이템/장비 아이콘 CC0·CC-BY 팩을
+  researcher로 조사해 `docs/research/accessory-icon-assets.md`에 정리. 후보(라이선스·크기 확인 필요): Kenney
+  계열 CC0 팩, Shikashi Fantasy Icons, Kyrise RPG Icon Pack. 11종(밀짚모자·안경·왕관·티셔츠·후광·마스크·선물·
+  헤드폰·산타모자·사슴뿔·목도리)이 한 팩에서 다 나오면 최선, 둘 이상 섞으면 팔레트·외곽선 두께가 맞는 것만.
+* **분리 원칙**: 8종 교체는 이벤트와 무관한 개선이므로 **별도 PR**. 시즌 PR이 이 PR 위에 올라간다.
+  `resourceName`(`accessory_<rawValue>`)과 `fallbackSymbol`은 그대로 두어 PNG 누락 시 폴백이 살아 있게 한다.
+* **검증**: 트레이너 카드 프리뷰가 모든 액세서리 조합을 자동으로 굽는다 — PNG만 넣으면 갤러리에 나온다.
+  기존 사용자의 `AccessoryTransform`(위치·배율)이 SF 심볼 기준으로 저장돼 있어 PNG 교체 후 어긋날 수 있다.
+  기본값 `offsetY: -32`가 16×16 확대본에도 맞는지 프리뷰로 확인하고, 필요하면 1회 마이그레이션으로 리셋.
+
+## 13. 구현 지점
+
+* **액세서리**: `CardAccessory` case 3개 + `displayName`/`fallbackSymbol`/`price`/`season`. 카드 위치는 기존
+  `AccessoryDragModifier`(사용자 드래그) 그대로 — 1번의 알파 스캔 앵커는 걷는 펫 전용.
+* **이펙트**: `EffectKind.snowfall`(`.particle`, 400, `season: .xmas`). `PetEffectOverlay.faller()` — `riser()`와
+  같은 TimelineView 구조, `dy` 부호 반대, 시작점 머리 위, 흰 `Circle` 6개, 느린 sway. 시즌 ambient 눈과 구분되게
+  펫 몸 폭 안에서만 내린다.
+* **테마**: `PetTheme.winterNight`, `isDynamic` true, price 2000, `season: .xmas`. `dynamicStops`는 edge-fill
+  모델로 위에서 따뜻한 금색이 내려온다. `TrainerBackground.unlocked`가 `PetTheme.allCases`를 읽어 카드 배경으로
+  자동 등록, 메뉴바도 `fillStops` 공유로 따라온다. `PartyView` 496행(테마 선택)은 보유 기준이라 그대로.
+* **자동 칭호**: `Settings.seasonalFlags: Set<String>`에 `"codedOn:2026-12-25"`를 기록하는 `UsageEventBus`
+  consumer 1개(ledger와 같은 독립 consumer 패턴). `CardTitle.unlocked`는 플래그 존재만 본다. 연도별 키라
+  매년 다시 받을 수 있지만 칭호는 하나.
+* **구매 칭호**: `CardTitle.freezeViolator` + `purchasePrice` 1500 + `season`. `CoinLedger.purchaseTitle` 경로
+  그대로.
+* **오피스 데코**: `DecorItem`에 `season` 추가, 스튜디오 상점 목록도 `shopVisible`로 필터.
+
+## 14. 공지 (결정 ⑦ 보류)
+
+공지 시스템은 **업데이트 직후에만** 뜬다. 11월 하순 릴리스에 1·2번을 다 실으면 12/1에 상점이 조용히 열린다.
+선택지: (a) 12/1~2에 공지만 실은 소형 릴리스 1회 추가 — 1번의 "조용히"와 2번의 "열렸어요"를 둘 다 지킴
+(b) 11월 릴리스 공지에 "12/1 상점 오픈" 예고 — 릴리스 1회 절약, 1번 서프라이즈 포기. 결정은 릴리스 직전에.
+
+## 15. 검증
+
+* 테스트: `season != nil`인 모든 case가 `shopVisible`에서 시즌 밖·미보유 시 숨고 보유 시 보이는지.
+  `CardAccessory.allCases` rawValue 유일성(`scarf` 충돌 방지). `winterNight.fillStops`가 pct 0/50/100에서
+  stop 수·location 단조성 유지. 자동 칭호 플래그가 12/25 이벤트에서만 기록. 모든 `SeasonalItem` 채택 enum의
+  `season`이 `Season.Kind`에 존재.
+* 프리뷰: 트레이너 카드 조합 시트(자동, 11종 전부), `snowfall` 걷기 GIF, `winterNight` 맵 카드 + 메뉴바 GIF.
+
+---
+
+# 3번: 참여 이벤트 — 사용량 잔디 + 12월 일일 보상
+
+## 16. 한 줄 정의
+
+12/1~24 동안 **그날 AI를 실제로 쓴 날**마다 코인이 들어오고, 24일 중 20일을 채우면 칭호 "12월 완주"를 받는다.
+참여 UI는 이벤트 전용 화면이 아니라 **상시 기능인 사용량 잔디** 위에 보상 표시가 얹히는 형태다. 이벤트가 끝나도
+잔디는 남는다.
+
+## 17. 사용량 잔디 (상시, 시즌 무관)
+
+* **위치**: 리포트 탭, 트레이너 카드 아래 "리포트" 모드(§21). 메인 패널·상점 탭은 기각 — 메인 패널은 높이 부담,
+  상점은 맥락 불일치.
+* **창**: 캘린더 월(1일~말일), **KST**. 랭킹 보드가 이번 달 누적 기준이라 "숫자의 합 = 잔디의 합"이 성립한다.
+  서버 보상 grant와 퀴즈가 KST 날짜로 끊기므로 로컬 자정을 쓰면 밤 11시대 사용분이 다른 칸에 들어간다.
+* **방향**: GitHub식(열=주)이 아니라 **달력식(열=요일 월~일, 행=주)**. 한 달 창엔 이쪽이 읽히고 요일 헤더가 붙는다.
+  셀 18pt, 간격 3pt. 16pt 아래로는 눈 장식(2~3px)이 안 보인다.
+* **농도 5단계 = 현재 맵 테마 색**. `PetTheme`의 top/bottom/line을 보간해 0~4단계(`grassLevels`). 잔디밭=녹색,
+  벚꽃=분홍, 2번 `winterNight`=남색 바탕 금색. 단계는 **본인 최근 30일 최대값 대비 사분위** — 절대값이면 Max 20x만
+  진하고 Pro는 평생 연두색.
+* **시즌 장식 = `Season.grassDecoration`**. xmas엔 불 켜진 셀 위 흰 눈 2~3px, sakura엔 꽃잎 점. 메인 패널 ambient와
+  같은 소재라 "눈이 잔디에 쌓인다"로 읽힌다.
+* **보상 표시** (rewardDays 구간, 시즌 중만): 수령한 날 = 셀 모서리 붉은 점, 쓴 날이지만 도착 전(≤1h) = 점선
+  테두리, 미래 = 빈 셀, 오늘 = 흰 테두리. 호버 툴팁: 날짜 · VP · "보상 +50".
+* **숫자 4개**(잔디 왼쪽): 이번 달 VP, 활동 일수/경과일, 스트릭, 보상 N/24(시즌 중만). 안내문 한 줄:
+  "12/1~24 · AI를 쓴 날마다 +50 코인, 24일엔 +300 · 20일 채우면 칭호 "12월 완주". 보상은 1시간 안에 도착."
+* **데이터**: 일별 VP가 로컬에 없다(`StreakLedger`는 "오늘 썼나"만). `UsageEventBus`에 consumer `DailyUsageLedger`
+  추가 → `Settings.dailyVP: [KST 날짜: Int]`, 90일 보관. 코인·VP·스트릭 ledger와 같은 패턴. 과거 소급 없음 —
+  11월 하순 배포 후부터 쌓인다(그래서 잔디 PR이 가장 급하다, §22).
+* 보상 표시 데이터는 `Settings.claimedGrants`의 `advent-2026-12-` 접두 필터. **새 상태 없음.**
+
+## 18. 서버 — 기존 `reward_grants` 재사용
+
+`daily-quiz`가 쓰는 패턴 그대로: 서버가 `reward_grants`에 행을 넣고, 클라가 `leaderboard` 폴링의 `pendingGrant`
+(가장 오래된 1건)를 받아 `claim-reward(rewardType=grant)`로 수령한다. 새 테이블·새 클레임 경로 없음.
+
+* **훅 = `submit` Edge Function.** HMAC 서명 검증 + VP 증가분이 있을 때만 호출되므로 "쓴 날"이 자동 정의된다.
+  `accepted` 처리 직후 KST 날짜가 보상 구간이면
+  `INSERT INTO reward_grants(device_id, currency, amount, reason, grant_key) ... ON CONFLICT DO NOTHING`
+  (`grant_key = 'advent-2026-12-DD'`). 한 문장이라 레이스 없음, `UNIQUE(device_id, grant_key)`가 하루 1회 보장.
+* `sync`(120s, 켠 날)가 아닌 이유: 빈도와 의미. `leaderboard`는 서명 없는 GET이라 쓰기 훅 금지(남의 deviceId로
+  보상 삽입 가능).
+* 20번째 행을 넣는 submit에서 `advent-2026-complete`(coin 500)를 함께 삽입.
+* 날짜 창 상수는 `_shared/season.ts` — 클라 `SeasonRegistry`와 같은 값 유지. 서버 시계 기준이라 클라 시계 조작 무효.
+* 전달 지연 최대 1h(`claimLeaderboardIntervalSec`). 같은 날 퀴즈 보상과 겹치면 두 번째는 다음 시간.
+* 알림: `NotificationManager.rewardGrantEarned`의 grantKey 접두 분기에 `advent-` 추가 → "🎄 12월 N일차 보상 +50 코인".
+
+## 19. 보상
+
+| 항목 | 금액 | 비고 |
+|---|---|---|
+| 1~23일 | 코인 50 | 스트릭 일일(15~50)과 같은 급 |
+| 24일 | 코인 300 | 뽑기 1회 |
+| 20일 달성 | 코인 500 + 칭호 "12월 완주" | 서버 complete 행 + 로컬 칭호 판정 |
+
+합계 ≈ 1,950 코인(뽑기 6~7회). 진입 유인은 되지만 경제를 흔들지 않는다.
+
+* **RP 금지** — 순위 전용 화폐(주간 1등 250). 참여 보상으로 주면 이펙트 가격 체계가 무너진다.
+* **프리미엄 티켓 금지** — `reward_grants.currency`는 `rp|coin`뿐이고, 클라는 모르는 currency를 **클레임은 성공시키고
+  적립은 건너뛴다.** 새 currency는 구버전 클라가 받아서 버리는 사고가 된다.
+* 20/24인 이유: 주말·휴가. 24/24는 하루 놓치면 이탈.
+* 칭호 `CardTitle.decemberFinisher`는 **로컬 판정** — `claimedGrants`의 접두 행 ≥ 20. 서버 complete 행과 독립이라
+  전달 지연에 안전.
+
+## 20. 범위 제한
+
+랭킹 미등록 사용자는 참여 불가(`submit` 자체가 안 감). 퀴즈와 같은 제약. 잔디 안내문에 "랭킹 참여 시 수령" 한 줄.
+로컬 폴백은 만들지 않는다(시계 조작 + 경로 2개 유지).
+
+부수: `daily-quiz` 생성 프롬프트에 12월 시즌 힌트 한 줄(서버만, 릴리스 없음). 시크릿 산타·길드 눈싸움은 내년
+(DM 매칭 함수·상태 테이블, 길드 RP 가드 충돌 검토 필요).
+
+## 21. 리포트 탭 정리 (결정 ⑪, 시즌 무관 별도 PR)
+
+현재 탭은 세 가지 일을 세로로 쌓는다 — 카드(3초 보기), 꾸미기 6섹션(월 1회 편집, 면적 70%, 칭호 66개 가로 스크롤),
+공유 버튼 5개. 잔디를 그 아래 붙이면 편집기 밑에 묻힌다.
+
+```
+[ 트레이너 카드 ]                     ← 두 모드 공통, 편집 중에도 위에 유지
+( 리포트 | 꾸미기 )          [공유 ▾]   ← 세그먼트, 탭 열면 항상 리포트. 공유 5버튼 → 메뉴 1개
+리포트: 숫자 4개(좌) + 달력식 잔디(우) + 범례
+꾸미기: 아바타 / 배경 / 프레임 / 칭호 / 액세서리 / 공유 설정 (현행 유지)
+```
+
+* 칭호: 가로 스크롤 → **보유 / 구매 가능 / 잠김 세 묶음 줄바꿈 그리드**. 시즌 한정은 붉은 테두리.
+* 액세서리: 11종이라 줄바꿈 그리드.
+* 세그먼트 상태 비저장. "꾸미기" 시트 방식은 카드를 보며 편집하는 경험이 깨져 기각.
+* 프리뷰: `ScenePreviews.testRenderReportTab`이 리포트 모드를, 꾸미기 모드 렌더를 하나 추가. `PreviewDemoState`에
+  `dailyVP` 시드 필요(빈 잔디는 검토 가치 없음).
+
+## 22. PR 순서
+
+1. **리포트 탭 정리** (§21) — 시즌 코드 없음.
+2. **사용량 잔디** (`DailyUsageLedger`, `UsageGrassView`, `PetTheme.grassLevels`) — 시즌 코드 없음. **11월 중 배포
+   필수**: 12/1에 잔디가 한 달치 쌓여 있어야 한다.
+3. 액세서리 8종 도트 교체 (§12) — 2와 병렬 가능.
+4. 시즌 1·2·3 PR — 그 위에 올라간다. 보상 표시·눈 장식은 3번 PR에서 잔디에 얹는다.
+5. 서버: `_shared/season.ts`, `submit`, `daily-quiz` — 마이그레이션 없음, 배포 순서 제약 없음.
+
+## 23. 검증
+
+* 서버 `deno test`: 날짜 창 경계(11/30 KST 23:59, 12/1 00:00, 12/25 00:00), 같은 날 2회 submit → 행 1개,
+  20번째에 complete 동반, 19번째엔 미삽입.
+* 클라: KST 날짜 키(자정 경계), 사분위 농도(0건·1건·동일값), 테마별 5색 단조 증가, 접두 필터 수령 일수,
+  20일 이상 칭호 해금, 시즌 장식·보상 행이 시즌 밖에서 숨는지. `claimedGrants`에 가짜 키로 전부 단위 테스트 가능.
+* 프리뷰: 테마 12종 × 잔디, xmas 장식 on/off, `renderInWindow`로 리포트 모드·꾸미기 모드 각 1장.
+* 운영: 12/1 KST 0시 이후 첫 submit 계정의 `reward_grants` 1회 육안 확인.
+
+---
+
+# 4번: 겨울 관장
+
+## 24. 구조 — 지역이 아니라 이벤트 보스 (결정 ⑬)
+
+현재 관장은 `BadgeRegion`에 1:1이고, 승리 = 그 지역 카테고리 뱃지 클리어, 도전 자격 = 지역 진행률. 즉 관장은
+뱃지 시스템의 일부다. 10번째 지역으로 만들면 뱃지 카테고리 2개·보석 스프라이트 2개(19↔19 테스트가 막음)·월드맵
+마을·진행률 계산이 따라오고, 시즌 후 "못 받는 뱃지"가 도감에 남는다. 그래서 **뱃지와 무관한 `SeasonalBoss`**.
+
+```swift
+struct SeasonalBoss {
+    let lead: SkinnedPet                 // 루돌프(사슴 + 산타 모자)
+    let supports: [SkinnedPet]           // 북극 원정대 4 (common만 — EP 밴드)
+    let name: String
+    let dialogues: [String]              // 4단계, 보상 진행도 연동
+    let tierThresholds: [BadgeTier: Int] // 보상 일수 → tier 오픈
+    let titleReward: CardTitle           // production 격파
+}
+struct SkinnedPet { let kind: PetKind; let skin: PetSkin?; let headwear: String? }
+enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 자유
+```
+
+재사용: `team(tier:)`의 EP 역산 솔버, `BattleEngine`, `GymBattleView`, `gymLeaderSection` 카드 레이아웃.
+변경: `GymLeader.team(tier:)`의 `supportKinds(region)` 직접 호출을 `team(lead:supports:tier:)`로 추출.
+`GymBattleView(region:tier:)`는 승리 시 `defeatLeader`를 부르므로, 상대+승리 처리를 묶은 `GymOpponent`
+(지역 관장 / 시즌 보스)를 받게 넓힌다. 지역 관장 경로 동작은 그대로.
+
+## 25. 이벤트 스킨 — 흰색 리컬러 + 모자 (결정 ⑭)
+
+**새 PNG를 그리지 않는다.** 이로치(variant)가 `hueRotation`/`saturation`으로 런타임 틴트하는 것과 같은 방식으로,
+`PetSkin.snow`는 `CIColorMonochrome`(옅은 청백) + 밝기 보정으로 흰색화한다. 외곽선은 어둡게 남아 도트 느낌이
+유지된다. 모자는 1번 B의 `hatAnchor` 알파 스캔 + headwear 오버레이 그대로. 틴트 프레임은 `tintedSpriteCache`와
+같은 키로 캐시.
+
+흰색 리컬러는 그 자체로 **북극 동물**이 된다:
+
+| 역할 | 원본 | 스킨 | 표시명 |
+|---|---|---|---|
+| 선봉 | 사슴 `deer` | 원색 + 산타 모자 | **Rudolph** |
+| 서포터 | 곰 `bear` | snow | 북극곰 |
+| 서포터 | 여우 `fox` | snow | 북극여우 |
+| 서포터 | 늑대 `wolf` | snow | 흰늑대 |
+| 서포터 | 난초 올빼미 `orchidOwl` | snow | 흰올빼미 |
+
+전부 common(`Gacha.pool` 확인). 리컬러 결과는 기계로 판정 못 하므로 **프리뷰 시트 육안 확인** — 특정 펫이 흰색에서
+형체가 뭉개지면 픽셀을 손보지 말고 다른 common 펫으로 교체한다(펭귄·얼음 좀비·토끼가 예비).
+
+**스킨은 보스 전용이며 플레이어에게 주지 않는다**(이번 해). `BattlePetSnapshot`은 아레나 서버 파리티·HMAC 평면
+페이로드에 실리는 구조체라 `skin` 필드를 넣지 않는다. 렌더 전용 맵 `[PetKind: SkinnedPet]`을 `BattleReplayView`에
+기본값 빈 딕셔너리인 선택 인자로 넘긴다. 플레이어 보유 스킨은 파티·메뉴바·오피스·카드 등 모든 렌더 지점을 건드리는
+별개 기능이므로 내년 후보로 둔다.
+
+## 26. 배치·tier 오픈 (결정 ⑮)
+
+* **도장 탭 상단**, 지역 선택기 위에 시즌 카드 1장(스프라이트 + 말풍선 + tier 버튼 4개). 월드맵에는 넣지 않는다.
+* **tier는 3번 보상 일수(`claimedGrants`의 `advent-2026-12-` 행 수)로 오픈**(제안값):
+
+| tier | 오픈 조건 | 격파 보상(인스턴스당 1회) |
+|---|---|---|
+| localhost | 0일 (즉시) | 1,000 코인 |
+| dev | 6일 | 3,000 코인 |
+| staging | 12일 | 6,000 코인 |
+| production | 18일 | 15,000 코인 + **프리미엄 가챠권 1장** + 칭호 **"눈길 배포 성공"** |
+
+  보상은 지역 관장(50/150/500/1500)의 **약 10~20배**로 일부러 크게 둔다(사용자 결정). 시즌당 1회뿐이고,
+  production은 18일 참여 + 레인보우 선봉 격파라는 두 관문 뒤에 있다. 합계 25,000 코인 ≈ 뽑기 83회.
+  프리미엄 가챠권은 로컬 재화(`Settings.premiumTickets`)라 서버 grant의 currency 제약(§19)을 받지 않는다 —
+  보스 배틀이 완전 로컬이기에 가능한 보상. 지급은 `CoinLedger.creditBonus` + 티켓 증가를 같은 지점에서,
+  `seasonalFlags` dedup 뒤에.
+
+  12/1부터 매일 참여하면 12/18에 production이 열려 12/26까지 8일 남는다. 지역 관장처럼 tier별로 각각 1회 보상,
+  재도전 무제한. dedup은 `seasonalFlags`의 `boss:xmas-2026:<tier>`. production 선봉은 레인보우(기존 규칙).
+* 대사 4단계도 같은 진행도로: 0 / 1~5 / 6~11 / 12+ 또는 production 격파.
+* 랭킹 미등록 사용자는 진행도가 0이라 localhost만 열린다. 3번 범위 제한과 동일, 카드에 같은 안내 한 줄.
+* 서버 변경 없음 — 관장 배틀은 완전 로컬.
+
+대사 초안:
+
+```
+배송 큐가 비었군. 아직 아무것도 안 쓴 건가.
+패킷이 들어오기 시작했다. 경로는 내가 잡지.
+절반 넘겼군. 썰매도 이 정도면 autoscale 된다.
+...눈길에서도 배포가 되는군. 인정.
+```
+
+## 27. 12월 칭호 정리
+
+| 칭호 | 출처 | 조건 |
+|---|---|---|
+| 크리스마스에도 코딩함 | 2번 | 12/25 사용 이벤트 1건 |
+| 연말 배포 freeze 위반 | 2번 | 코인 1,500 구매 |
+| 12월 완주 | 3번 | 보상 20/24 |
+| 눈길 배포 성공 | 4번 | production 보스 격파 |
+
+전부 다른 행동을 보상하고 겹치지 않는다. 해금 판정은 모두 로컬(`seasonalFlags`/`claimedGrants`).
+
+## 28. 바뀌는 곳
+
+* `Season.swift`: `SeasonalBoss`, `SkinnedPet`, `PetSkin`
+* `PetSprite.swift`: `skinned(_:skin:)` 리컬러 + 캐시 (hatAnchor는 1번에서 추가됨)
+* `GymLeader.swift`: `team(lead:supports:tier:)` 추출
+* `GymBattleView.swift`: `GymOpponent`, 승리 콜백 분리
+* `BattleReplayView.swift`: 렌더 전용 스킨 맵 선택 인자
+* `GymView.swift`: 시즌 보스 카드
+* `TrainerCard.swift`: `CardTitle.snowDeployer`
+* `Settings.swift`: `seasonalFlags: Set<String>` (2번 자동 칭호와 공유)
+
+## 29. 검증
+
+* 테스트: 보상 일수 → 오픈 tier 집합(0/5/6/12/18 경계), tier별 보상 1회 dedup(재승리 0코인·티켓 0장, 내년 인스턴스는 재지급),
+  칭호 해금, 시즌 밖 카드 숨김, 보스 팀 EP = 같은 tier 지역 관장 팀 EP(솔버 공유 증명), 기존 `GymBattle` 테스트
+  회귀 없음, `BattlePetSnapshot` 인코딩이 변하지 않았음(파리티 보호).
+* 프리뷰: 북극 원정대 5종 스킨 시트(원본↔snow 나란히, 체커 배경), 도장 탭 시즌 카드(`AIUSAGE_SEASON=xmas`,
+  대사 4단계), 배틀 시트 `GymBattleSizeProbe`.
