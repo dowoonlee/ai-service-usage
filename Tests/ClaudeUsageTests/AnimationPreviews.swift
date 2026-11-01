@@ -95,17 +95,21 @@ final class AnimationPreviews: SandboxedTestCase {
             let pct: Double = $0 < 20 ? Double($0) * 4 : max(5, 80 - Double($0 - 20) * 7)
             return (Date(timeIntervalSince1970: 1_800_000_000 + Double($0) * 300), pct)
         }
-        let cases: [(String, PetKind, Int)] = [
-            ("여우-기본", .fox, 0),
-            ("전사-이로치", .warrior, 2),
-            ("슬라임-프레스티지", .slime, PetOwnership.prestigeVariant),
+        let cases: [(String, PetKind, Int, String?)] = [
+            ("여우-기본", .fox, 0, nil),
+            ("전사-이로치", .warrior, 2, nil),
+            ("슬라임-프레스티지", .slime, PetOwnership.prestigeVariant, nil),
+            // 시즌 머리 장식 — 반전·구르기 변환 안에서 모자가 머리에 붙어 다니는지.
+            ("여우-산타모자", .fox, 0, "santa_hat"),
+            ("박쥐-산타모자", .bat, 0, "santa_hat"),
         ]
-        for (title, kind, variant) in cases {
+        for (title, kind, variant, headwear) in cases {
             let renderer = MenuBarRenderer()
             let start = Date(timeIntervalSince1970: 1_800_000_000)
             renderer.reset(now: start)
             let feed = MenuBarRenderer.Feed(pct: 62, history: history, kind: kind,
-                                            variant: variant, theme: PetTheme.defaultFor(kind))
+                                            variant: variant, theme: PetTheme.defaultFor(kind),
+                                            headwear: headwear)
             // 30Hz로 3초 — 걷기 한 바퀴와 방향 전환이 들어갈 정도의 길이.
             //
             // render는 보이는 것이 안 바뀐 틱에 nil을 준다(렌더 키로 재합성을 건너뛴다). 그 틱을

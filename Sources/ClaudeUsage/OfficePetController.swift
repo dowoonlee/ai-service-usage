@@ -154,6 +154,11 @@ final class OfficeSimulation: ObservableObject {
         var pet = pets[i]
         if visitingPetID == pet.id { visitingPetID = nil }
         var line = Quotes.random(for: pet.kind)
+        // 시즌 대사 — 차트 WalkingCat과 같은 30%.
+        if let season = SeasonRegistry.active(), !season.quotes.isEmpty,
+           Double.random(in: 0...1) < 0.30, let sq = season.quotes.randomElement() {
+            line = sq
+        }
         if let spec = Mythic.spec(for: pet.kind), let action = spec.specials.keys.randomElement() {
             pet.specialAction = action
             if let quote = spec.moveQuotes[action]?.randomElement() { line = quote }

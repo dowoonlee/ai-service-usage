@@ -54,6 +54,7 @@ fileprivate extension View {
         anxietyAt: Double,
         bigDropThreshold: Double,
         weather: WeatherCondition = .clear,
+        season: Season? = nil,
         wellnessNudge: String? = nil,
         onDismissWellness: (() -> WellnessDismissResult)? = nil
     ) -> some View {
@@ -73,6 +74,8 @@ fileprivate extension View {
                             partyCount: party.count,
                             mood: PetMood.from(pct: pct, anxietyAt: anxietyAt),
                             weather: weather,
+                            headwear: season?.headwear,
+                            seasonQuotes: season?.quotes ?? [],
                             bigDropThreshold: bigDropThreshold,
                             wellnessNudge: idx == 0 ? wellnessNudge : nil,
                             onDismissWellness: idx == 0 ? onDismissWellness : nil
@@ -276,9 +279,9 @@ struct MainView: View {
                 .cornerRadius(AppRadius.xl)
         )
         .overlay {
-            // 실제 날씨 파티클(비/눈/뇌우). clear면 렌더 안 함. 패널 둥근 모서리로 클립.
-            if settings.weatherEffectEnabled, vm.weather != .clear {
-                WeatherParticles(condition: vm.weather, intensity: vm.weatherIntensity)
+            // 파티클 — 실제 날씨(비/눈/뇌우)가 우선, 없으면 시즌 ambient(12월 가랑눈). 패널 둥근 모서리로 클립.
+            if let style = vm.ambientStyle {
+                WeatherParticles(style: style)
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.xl))
                     .allowsHitTesting(false)
             }
@@ -766,7 +769,8 @@ struct ClaudeSection: View {
                     pct: vm.claudeCurrent?.fiveHourPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
-                    weather: vm.weather,
+                    weather: vm.effectiveWeather,
+                    season: vm.activeSeason,
                     wellnessNudge: vm.wellnessNudge,
                     onDismissWellness: { vm.dismissWellnessNudge() }
                 )
@@ -994,7 +998,8 @@ struct CursorSection: View {
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
-                    weather: vm.weather,
+                    weather: vm.effectiveWeather,
+                    season: vm.activeSeason,
                     wellnessNudge: vm.wellnessNudge,
                     onDismissWellness: { vm.dismissWellnessNudge() }
                 )
@@ -1063,7 +1068,8 @@ struct CursorSection: View {
                     pct: vm.cursorCurrentPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
-                    weather: vm.weather,
+                    weather: vm.effectiveWeather,
+                    season: vm.activeSeason,
                     wellnessNudge: vm.wellnessNudge,
                     onDismissWellness: { vm.dismissWellnessNudge() }
                 )
@@ -1228,7 +1234,8 @@ struct CodexSection: View {
                     pct: vm.codexPrimaryPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
-                    weather: vm.weather,
+                    weather: vm.effectiveWeather,
+                    season: vm.activeSeason,
                     wellnessNudge: vm.wellnessNudge,
                     onDismissWellness: { vm.dismissWellnessNudge() }
                 )

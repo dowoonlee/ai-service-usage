@@ -40,6 +40,10 @@ struct SettingsView: View {
                 Text("선택한 위치의 현재 날씨가 비·눈·뇌우면 패널에 파티클이 내립니다.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+                Toggle("시즌 연출 (12월 눈·모자 등)", isOn: $settings.seasonalEffectsEnabled)
+                Text("시즌 중 펫 머리 장식, 패널 가랑눈, 시즌 대사를 켭니다. 실제 날씨 효과가 꺼져 있으면 눈도 내리지 않습니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
             Section("시작") {
                 Toggle("로그인 시 자동 시작", isOn: Binding(

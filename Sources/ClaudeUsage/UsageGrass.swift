@@ -141,7 +141,6 @@ struct UsageGrassView: View {
     var decoration: GrassDecoration? = nil
 
     enum RewardMark: Equatable { case received, pending }
-    enum GrassDecoration: Equatable { case snow }
 
     static let cellSize: CGFloat = 18
     static let cellGap: CGFloat = 3

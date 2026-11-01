@@ -21,6 +21,8 @@ final class MenuBarRenderer {
         /// 파티 리더의 이로치 variant.
         let variant: Int
         let theme: PetTheme
+        /// 시즌 머리 장식 리소스명. nil이면 없음.
+        var headwear: String? = nil
     }
 
     // MARK: - 레이아웃 상수
@@ -77,6 +79,7 @@ final class MenuBarRenderer {
         let theme: PetTheme
         let action: PetController.Action
         let historyCount: Int     // history 끝부분이 push되면 변화 감지
+        let headwear: String?     // 시즌 경계(0시)에 다른 입력이 전부 같아도 재합성되도록
     }
 
     // MARK: - 공개 API
@@ -132,7 +135,8 @@ final class MenuBarRenderer {
             variant: feed.variant,
             theme: feed.theme,
             action: action,
-            historyCount: feed.history.count
+            historyCount: feed.history.count,
+            headwear: feed.headwear
         )
         if key == lastRenderKey { return nil }
         lastRenderKey = key
@@ -165,7 +169,8 @@ final class MenuBarRenderer {
                             history: feed.history, theme: feed.theme, kind: feed.kind,
                             variant: feed.variant, action: action, frameIdx: frameIdx,
                             petXNorm: petX, facingRight: facingRight, rollAngle: rollAngle,
-                            pct: feed.pct, threshold: Settings.shared.petAnxietyThreshold)
+                            pct: feed.pct, threshold: Settings.shared.petAnxietyThreshold,
+                            headwear: feed.headwear)
         }
 
         canvas.isTemplate = false
@@ -227,7 +232,7 @@ final class MenuBarRenderer {
         history: [(Date, Double)], theme: PetTheme, kind: PetKind, variant: Int,
         action: PetController.Action, frameIdx: Int,
         petXNorm: Double, facingRight: Bool, rollAngle: Double,
-        pct: Double?, threshold: Double
+        pct: Double?, threshold: Double, headwear: String? = nil
     ) {
         // 1) gradient backdrop (라인 아래 영역) — 데이터가 있을 때만 색감 입힘.
         //    y 축은 visible window의 min/max로 정규화(가장 큰 값이 천장).
@@ -333,6 +338,18 @@ final class MenuBarRenderer {
                 frame.draw(in: drawRect,
                            from: NSRect(origin: .zero, size: frame.size),
                            operation: .sourceOver, fraction: 1.0)
+                // 시즌 머리 장식 — 같은 변환(반전·회전) 안에서 그려 펫과 함께 뒤집히고 구른다.
+                // 좌표는 y-up: sprite 상단 = +petHeight/2, 앵커 top은 위에서 잰 비율.
+                if let headwear, let hat = PetSprite.image(named: headwear),
+                   let anchor = PetSprite.headAnchor(for: kind, action: action, frameIndex: frameIdx) {
+                    let hatH = petHeight * 0.42
+                    let hatW = hatH * (hat.size.width / max(1, hat.size.height))
+                    let cx = -petW / 2 + anchor.x * petW
+                    let headTop = petHeight / 2 - anchor.top * petHeight
+                    let hatRect = NSRect(x: cx - hatW / 2, y: headTop - hatH * 0.20, width: hatW, height: hatH)
+                    hat.draw(in: hatRect, from: NSRect(origin: .zero, size: hat.size),
+                             operation: .sourceOver, fraction: 1.0)
+                }
                 ctx.restoreGState()
             }
         }

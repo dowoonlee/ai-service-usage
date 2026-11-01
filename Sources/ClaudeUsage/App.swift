@@ -373,7 +373,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // 현재 5h 창만 — 만료 창이 섞이면 펫이 빈 구간을 가로질러 걷는다.
             let history = ViewModel.claudeFiveHourSeries(Array(vm.claudeHistory.suffix(48)))
             return MenuBarRenderer.Feed(pct: vm.claudeCurrent?.fiveHourPct, history: history,
-                               kind: kind, variant: leader?.variant ?? 0, theme: theme)
+                               kind: kind, variant: leader?.variant ?? 0, theme: theme,
+                               headwear: vm.activeSeason?.headwear)
         case .cursor:
             let leader = Settings.shared.petCursorParty.first
             let kind = leader?.kind ?? .wolf
@@ -383,7 +384,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 Self.cursorPct(s).flatMap { v in v > 0 ? (s.takenAt, v) : nil }
             })
             return MenuBarRenderer.Feed(pct: vm.cursorCurrentPct, history: history,
-                               kind: kind, variant: leader?.variant ?? 0, theme: theme)
+                               kind: kind, variant: leader?.variant ?? 0, theme: theme,
+                               headwear: vm.activeSeason?.headwear)
         case .codex:
             let leader = Settings.shared.petCodexParty.first
             let kind = leader?.kind ?? .fox
@@ -391,7 +393,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             // 현재 주력 창(Plus/Pro=5h, free=monthly)만 — 만료 창이 섞이면 펫이 빈 구간을 걷는다.
             let history = ViewModel.codexPrimarySeries(Array(vm.codexHistory.suffix(48)))
             return MenuBarRenderer.Feed(pct: vm.codexPrimaryPct, history: history,
-                               kind: kind, variant: leader?.variant ?? 0, theme: theme)
+                               kind: kind, variant: leader?.variant ?? 0, theme: theme,
+                               headwear: vm.activeSeason?.headwear)
         }
     }
 

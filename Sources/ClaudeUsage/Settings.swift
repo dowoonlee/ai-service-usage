@@ -176,6 +176,22 @@ final class Settings: ObservableObject {
         didSet { AppEnv.defaults.set(weatherLocation.rawValue, forKey: Keys.weatherLocation) }
     }
 
+    // MARK: - 시즌 이벤트 (cf. docs/plans/seasonal-events.md)
+
+    /// 시즌 연출(12월 눈·모자 등) 일괄 on/off. 기본 ON. 시즌별 토글은 두지 않는다.
+    @Published var seasonalEffectsEnabled: Bool {
+        didSet { AppEnv.defaults.set(seasonalEffectsEnabled, forKey: Keys.seasonalEffectsEnabled) }
+    }
+    /// 운영 킬스위치 — `sync` 응답의 `disabledSeasons`(Season.Kind rawValue). 배포 후 버그 시 릴리스 없이 끈다.
+    @Published var disabledSeasons: Set<String> {
+        didSet { persist(disabledSeasons, forKey: Keys.disabledSeasons) }
+    }
+    /// 시즌 1회성 사실 기록 — 자동 칭호 조건(`codedOn:2026-12-25`), 보스 격파 dedup(`boss:xmas-2026:dev`) 등.
+    /// 연도가 붙은 키라 내년에 다시 받을 수 있다. 지우지 않는다(칭호 해금 근거).
+    @Published var seasonalFlags: Set<String> {
+        didSet { persist(seasonalFlags, forKey: Keys.seasonalFlags) }
+    }
+
     // MARK: - Gacha (M2)
 
     /// 가챠 화폐 잔액. CoinLedger가 사용량 기반으로 적립.
@@ -887,6 +903,9 @@ final class Settings: ObservableObject {
         self.bigDropThreshold = max(0.10, min(0.80, storedBigDrop))
         self.weatherEffectEnabled = (d.object(forKey: Keys.weatherEffectEnabled) as? Bool) ?? true
         self.weatherLocation = (d.string(forKey: Keys.weatherLocation).flatMap { WeatherLocation(rawValue: $0) }) ?? .utower
+        self.seasonalEffectsEnabled = (d.object(forKey: Keys.seasonalEffectsEnabled) as? Bool) ?? true
+        self.disabledSeasons = (d.data(forKey: Keys.disabledSeasons).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        self.seasonalFlags = (d.data(forKey: Keys.seasonalFlags).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
 
         // Gacha 필드 로드
         // 마이그레이션 판정용으로 legacy 키 존재 여부를 init 안에서 미리 캡처.
@@ -1804,6 +1823,10 @@ final class Settings: ObservableObject {
         // 날씨 이펙트
         static let weatherEffectEnabled = "settings.weatherEffectEnabled"
         static let weatherLocation      = "settings.weatherLocation"
+        // 시즌 이벤트
+        static let seasonalEffectsEnabled = "settings.seasonalEffectsEnabled"
+        static let disabledSeasons        = "settings.disabledSeasons"
+        static let seasonalFlags          = "settings.seasonalFlags"
         // Gacha (M2)
         static let coins                       = "settings.coins"
         static let gachaTickets                = "settings.gachaTickets"

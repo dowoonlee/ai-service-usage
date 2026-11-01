@@ -1264,6 +1264,58 @@ enum PetSprite {
         return f[frameIndex % f.count]
     }
 
+    // MARK: - 머리 앵커 (시즌 headwear)
+
+    /// 프레임 안에서 "머리"의 위치 — 셀 기준 정규화(0...1). `x`는 머리 x 중심, `top`은 가장 위 불투명 행.
+    /// 195종의 cellSize·여백이 전부 달라 셀 상단 고정은 작은 펫에서 모자가 공중에 뜬다 — 알파를 직접 스캔한다.
+    struct HeadAnchor: Equatable {
+        let x: CGFloat
+        let top: CGFloat
+    }
+
+    private final class AnchorBox { let anchor: HeadAnchor?; init(_ a: HeadAnchor?) { anchor = a } }
+    nonisolated(unsafe) private static let anchorCache = NSCache<NSString, AnchorBox>()
+
+    /// (kind, action, frameIndex)별 캐시. 알파 스캔은 첫 1회뿐이라 30Hz 메뉴바에서도 비용이 없다.
+    /// 전부 투명한 프레임(없어야 하지만)은 nil.
+    static func headAnchor(for kind: PetKind, action: PetController.Action, frameIndex: Int) -> HeadAnchor? {
+        let f = frames(for: kind, action: action)
+        guard !f.isEmpty else { return nil }
+        let idx = frameIndex % f.count
+        let key = "\(kind.rawValue)/\(action)/\(idx)" as NSString
+        if let cached = anchorCache.object(forKey: key) { return cached.anchor }
+        let anchor = scanHeadAnchor(f[idx])
+        anchorCache.setObject(AnchorBox(anchor), forKey: key)
+        return anchor
+    }
+
+    /// 가장 위 불투명 행을 찾고, 그 행부터 셀 높이의 1/6 구간에 있는 불투명 픽셀의 x 평균을 머리 중심으로 본다.
+    /// (몸통 전체 평균을 쓰면 꼬리·날개가 중심을 끌어가 모자가 등에 얹힌다.)
+    static func scanHeadAnchor(_ image: NSImage, alphaThreshold: UInt8 = 64) -> HeadAnchor? {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let w = cg.width, h = cg.height
+        guard w > 0, h > 0 else { return nil }
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        // 비트맵 컨텍스트의 메모리 첫 행이 이미지의 **맨 위**다(좌표계는 y-up이지만 저장은 top-down).
+        func alpha(_ x: Int, _ yFromTop: Int) -> UInt8 { pixels[(yFromTop * w + x) * 4 + 3] }
+        var topRow: Int? = nil
+        outer: for y in 0..<h {
+            for x in 0..<w where alpha(x, y) >= alphaThreshold { topRow = y; break outer }
+        }
+        guard let top = topRow else { return nil }
+        let band = Swift.max(2, h / 6)
+        var sumX = 0, n = 0
+        for y in top..<Swift.min(h, top + band) {
+            for x in 0..<w where alpha(x, y) >= alphaThreshold { sumX += x; n += 1 }
+        }
+        guard n > 0 else { return nil }
+        return HeadAnchor(x: (CGFloat(sumX) / CGFloat(n) + 0.5) / CGFloat(w), top: CGFloat(top) / CGFloat(h))
+    }
+
     /// 단일 PNG 로딩 (sprite strip이 아닌 일반 이미지 — 예: 가챠 알). 캐시됨.
     static func image(named name: String) -> NSImage? {
         let key = name as NSString

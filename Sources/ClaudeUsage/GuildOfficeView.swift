@@ -1689,6 +1689,21 @@ private struct CodeDrawnFurniture: View {
                 Capsule().fill(Color.white.opacity(0.8))
                     .frame(width: w * 0.3, height: h * 0.15)
                     .position(x: w * 0.35, y: h * 0.3)
+                // 시즌 — 창밖에 눈. 에셋 없이 2px 점 7개가 서로 다른 속도로 내린다.
+                if SeasonRegistry.active()?.officeWindowParticles == true {
+                    TimelineView(.animation(minimumInterval: 1.0 / 10)) { ctx in
+                        let t = ctx.date.timeIntervalSinceReferenceDate
+                        ForEach(0..<7, id: \.self) { i in
+                            let phase = (t * (0.07 + Double(i % 3) * 0.02) + Double(i) / 7)
+                                .truncatingRemainder(dividingBy: 1)
+                            let x = 0.1 + Double(i) * 0.13 + 0.03 * sin(t * 0.8 + Double(i))
+                            Rectangle().fill(Color.white.opacity(0.9))
+                                .frame(width: 2, height: 2)
+                                .position(x: w * x, y: h * phase)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 1))
+                }
             }
         }
     }
