@@ -1388,6 +1388,15 @@ enum PetSprite {
         .snipCrab: HeadAnchor(x: 0.46, top: 0.50),   // 눈자루 사이 — 들어 올린 집게가 더 높다
         .hermie:   HeadAnchor(x: 0.59, top: 0.75),   // 머리(눈) — 소라 껍데기가 더 높다
         .kingHuman: HeadAnchor(x: 0.30, top: 0.31),  // 왕관 위 — 가로로 긴 셀에 방패가 앞쪽이라 앞쪽 규칙이 방패를 잡는다
+        // 사용자 지목 2차 (시트 2·3·6)
+        .turtle:   HeadAnchor(x: 0.60, top: 0.15),   // 등딱지 꼭대기 가시 사이 (왼쪽 봄)
+        .dwarfF:   HeadAnchor(x: 0.40, top: 0.29),   // 머리카락 위
+        .elfF:     HeadAnchor(x: 0.40, top: 0.50),   // 머리카락 위 — 셀 위 절반이 비어 있다
+        .angel:    HeadAnchor(x: 0.46, top: 0.19),   // 후광 위
+        .imp:      HeadAnchor(x: 0.40, top: 0.31),   // 뿔 사이
+        .tinySlug: HeadAnchor(x: 0.46, top: 0.19),   // 눈자루 위
+        .orc:      HeadAnchor(x: 0.43, top: 0.19),   // 뿔 사이 — 가로로 긴 셀에 창이 앞쪽
+        .orangeFruit: HeadAnchor(x: 0.46, top: 0.59),// 몸통 꼭대기 — 잎이 더 높다
     ]
 
     /// (kind, action, frameIndex)별 캐시. 알파 스캔은 첫 1회뿐이라 30Hz 메뉴바에서도 비용이 없다.
