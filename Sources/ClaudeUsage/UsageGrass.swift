@@ -72,6 +72,31 @@ struct UsageGrassModel: Equatable {
         return best
     }
 
+    // MARK: - 시즌 보상 마크
+
+    /// 잔디 셀에 얹을 보상 표시(날짜 키 → 마크). 시즌 보상 구간의 날 중 오늘까지:
+    /// `claimedGrants`에 해당 grant_key가 있으면 수령, 없지만 그날 VP가 있으면 도착 대기(≤1h), 둘 다 아니면 없음.
+    /// 시즌이 없거나 보상 구간이 없거나 이번 달이 보상 월이 아니면 빈 딕셔너리.
+    nonisolated static func rewardMarks(season: Season?, dailyVP: [String: Double], claimedGrants: Set<String>,
+                                        now: Date, calendar: Calendar = .kst) -> [String: UsageGrassView.RewardMark] {
+        guard let season, let days = season.rewardDays,
+              let prefix = season.rewardGrantPrefix(now: now, calendar: calendar) else { return [:] }
+        let c = calendar.dateComponents([.year, .month, .day], from: now)
+        guard let year = c.year, let month = c.month, let today = c.day else { return [:] }
+        // 접두의 월이 이번 달이어야 한다(연말연시 창에서 1월에 12월 마크를 그리지 않게).
+        guard prefix.hasSuffix(String(format: "-%02d-", month)) else { return [:] }
+        var out: [String: UsageGrassView.RewardMark] = [:]
+        for day in days where day <= today {
+            let dateKey = dayKey(year: year, month: month, day: day)
+            if claimedGrants.contains(prefix + String(format: "%02d", day)) {
+                out[dateKey] = .received
+            } else if (dailyVP[dateKey] ?? 0) > 0 {
+                out[dateKey] = .pending
+            }
+        }
+        return out
+    }
+
     // MARK: - 빌드
 
     nonisolated static func build(dailyVP: [String: Double], now: Date, calendar: Calendar = .kst) -> UsageGrassModel {
@@ -139,6 +164,8 @@ struct UsageGrassView: View {
     var rewardDayCount: Int? = nil
     /// 불 켜진 셀 위의 시즌 장식(눈 등). nil이면 없음.
     var decoration: GrassDecoration? = nil
+    /// 보상 안내 한 줄(시즌 중만). 숫자 아래에 작게.
+    var rewardNote: String? = nil
 
     enum RewardMark: Equatable { case received, pending }
 
@@ -176,6 +203,12 @@ struct UsageGrassView: View {
                 if let n = rewardDayCount {
                     stat("보상", "\(receivedCount)", "/ \(n)", color: levels[4])
                 }
+            }
+            if let rewardNote {
+                Text(rewardNote)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

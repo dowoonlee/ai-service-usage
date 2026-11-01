@@ -39,6 +39,21 @@ enum PreviewDemoState {
         seedDailyVP(now: grassNow)
     }
 
+    /// 12월 시즌 프리뷰의 고정 "오늘" — 2026-12-18 12:00 KST. 보상 구간(1~24) 안, 완주 전.
+    static let xmasNow: Date = {
+        var c = DateComponents(); c.year = 2026; c.month = 12; c.day = 18; c.hour = 12
+        return Calendar.kst.date(from: c)!
+    }()
+
+    /// 12월 보상 수령 상태 — 1~17일 중 일요일(6·13)만 빠지고 18일은 도착 대기(VP는 있고 grant 없음).
+    static func seedXmasRewards(now: Date = xmasNow) {
+        var grants: Set<String> = []
+        for day in 1...17 where day != 6 && day != 13 {
+            grants.insert(String(format: "advent-2026-12-%02d", day))
+        }
+        Settings.shared.claimedGrants = grants
+    }
+
     /// 리포트 탭 잔디 — 이번 달(KST) 1일부터 오늘까지 결정적인 값으로 채운다. 빈 날(주말 느낌)과
     /// 농도 4단계가 한 화면에 다 나오게. 지난달 끝자락도 조금 넣어 사분위 기준(최근 30일)에 섞인다.
     static func seedDailyVP(now: Date = Date()) {

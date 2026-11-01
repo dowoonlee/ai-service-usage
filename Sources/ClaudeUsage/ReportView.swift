@@ -144,10 +144,18 @@ struct ReportView: View {
     private var reportPane: some View {
         let theme = settings.themeClaudeOverride
             ?? PetTheme.defaultFor(settings.petClaudeParty.first?.kind ?? .fox)
+        let season = SeasonRegistry.active(now: grassNow)
         return UsageGrassView(
             model: UsageGrassModel.build(dailyVP: settings.dailyVP, now: grassNow),
             theme: theme,
-            streak: settings.usageStreak
+            streak: settings.usageStreak,
+            rewardMarks: UsageGrassModel.rewardMarks(season: season, dailyVP: settings.dailyVP,
+                                                     claimedGrants: settings.claimedGrants, now: grassNow),
+            rewardDayCount: season?.rewardDays?.count,
+            decoration: season?.grassDecoration,
+            rewardNote: season?.rewardDays != nil
+                ? "12/1~24 · AI를 쓴 날마다 +50 코인, 24일엔 +300 · 20일 채우면 칭호 \"12월 완주\". 보상은 1시간 안에 도착. 랭킹 참여 시 수령."
+                : nil
         )
     }
 

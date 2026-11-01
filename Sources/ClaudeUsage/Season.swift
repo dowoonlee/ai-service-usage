@@ -170,6 +170,19 @@ struct Season: Identifiable, Equatable {
     func instanceID(now: Date, calendar: Calendar = .kst) -> String {
         "\(kind.rawValue)-\(window.instanceYear(for: now, calendar: calendar))"
     }
+
+    /// 서버 일일 보상 grant_key 접두(`advent-<year>-<MM>-`). 서버 `_shared/season.ts`의 `adventDailyPrefix`와 합의.
+    /// 보상 구간은 창 시작 월에 속한다(12월).
+    func rewardGrantPrefix(now: Date, calendar: Calendar = .kst) -> String? {
+        guard rewardDays != nil, case .yearly(let start, _) = window.rule else { return nil }
+        return String(format: "advent-%04d-%02d-", window.instanceYear(for: now, calendar: calendar), start.month)
+    }
+
+    /// 완주 grant_key(`advent-<year>-complete`).
+    func rewardCompleteKey(now: Date, calendar: Calendar = .kst) -> String? {
+        guard rewardDays != nil else { return nil }
+        return "advent-\(window.instanceYear(for: now, calendar: calendar))-complete"
+    }
 }
 
 /// 상점 아이템(액세서리·이펙트·테마·칭호·데코)이 자기 시즌을 안다. 상시 아이템은 nil.

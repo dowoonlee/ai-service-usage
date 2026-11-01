@@ -19,6 +19,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { quizSeasonHint } from "../_shared/season.ts";
 
 interface QuizPayload {
   action: string;        // "today" | "submit"
@@ -372,6 +373,7 @@ async function selectBestArticle(articles: Article[], apiKey: string, recentTitl
     "아래는 여러 매체의 최신 기사 제목 목록입니다 (형식: 번호. [매체] 제목).",
     "이 중 퀴즈 소재로 가장 좋은 기사 하나의 번호를 고르세요.",
     "기준: (1) AI/머신러닝이 핵심 주제일 것, (2) 화제성·중요도가 높을 것(단순 펀딩·인사·홍보성은 제외), (3) 사실관계가 분명해 문제를 낼 수 있을 것, (4) 최근 출제 주제와 겹치지 않는 새로운 소재일 것.",
+    quizSeasonHint(new Date()) ?? "",
     recentBlock,
     "출력은 반드시 JSON: {\"index\": 정수}.",
   ].join(" ");

@@ -105,6 +105,11 @@ final class ScenePreviews: SandboxedTestCase {
     func testRenderSeasonXmasShops() throws {
         SeasonRegistry.override = .season(.xmas)
         defer { SeasonRegistry.override = Override.none }
+        // 리포트 모드 — 잔디에 눈 장식·보상 마크(수령 점·대기 점선)·"보상 N/24"·안내문.
+        PreviewDemoState.seedDailyVP(now: PreviewDemoState.xmasNow)
+        PreviewDemoState.seedXmasRewards()
+        try renderTab(ReportView(grassNow: PreviewDemoState.xmasNow), title: "탭-4-레포트-12월",
+                      note: "12/18 고정. 불 켜진 셀 위 눈, 수령일 붉은 점, 18일 점선(도착 대기), 일요일 빈 칸")
         try renderTab(PartyView(), title: "탭-2-파티-12월", note: "맵 상점에 겨울밤(한정) 카드가 보이는지")
         try renderTab(ReportView(initialMode: .customize, grassNow: PreviewDemoState.grassNow),
                       title: "탭-4-레포트-꾸미기-12월",

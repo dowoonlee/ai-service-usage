@@ -98,3 +98,64 @@ final class SeasonalShopTests: SandboxedTestCase {
         XCTAssertNotNil(PetSprite.image(named: CardAccessory.santaHat.resourceName))
     }
 }
+
+/// 3번 — 잔디 보상 마크·완주 칭호·알림 문구. 서버 grant_key 규칙(`advent-<y>-12-<DD>`)과의 합의가 깨지면 여기서 잡힌다.
+@MainActor
+final class SeasonRewardTests: SandboxedTestCase {
+    private func kst(_ y: Int, _ m: Int, _ d: Int) -> Date {
+        Calendar.kst.date(from: DateComponents(year: y, month: m, day: d, hour: 12))!
+    }
+
+    func testRewardGrantPrefixMatchesServerRule() {
+        let xmas = SeasonRegistry.season(.xmas)!
+        XCTAssertEqual(xmas.rewardGrantPrefix(now: kst(2026, 12, 5)), "advent-2026-12-")
+        XCTAssertEqual(xmas.rewardCompleteKey(now: kst(2026, 12, 5)), "advent-2026-complete")
+        XCTAssertNil(SeasonRegistry.season(.newYear)!.rewardGrantPrefix(now: kst(2026, 12, 28)))
+    }
+
+    func testRewardMarksReceivedPendingNoneFuture() {
+        let xmas = SeasonRegistry.season(.xmas)!
+        let marks = UsageGrassModel.rewardMarks(
+            season: xmas,
+            dailyVP: ["2026-12-01": 100, "2026-12-02": 50, "2026-12-04": 10, "2026-12-20": 999],
+            claimedGrants: ["advent-2026-12-01", "quiz-2026-12-02"],
+            now: kst(2026, 12, 4))
+        XCTAssertEqual(marks["2026-12-01"], .received)
+        XCTAssertEqual(marks["2026-12-02"], .pending)      // 썼지만 grant 아직
+        XCTAssertNil(marks["2026-12-03"])                  // 안 쓴 날
+        XCTAssertEqual(marks["2026-12-04"], .pending)      // 오늘
+        XCTAssertNil(marks["2026-12-20"])                  // 미래는 값이 있어도 없음
+    }
+
+    func testRewardMarksEmptyOutsideRewardMonthOrSeason() {
+        let ny = SeasonRegistry.season(.newYear)!
+        XCTAssertTrue(UsageGrassModel.rewardMarks(season: ny, dailyVP: ["2026-12-28": 1],
+                                                  claimedGrants: [], now: kst(2026, 12, 28)).isEmpty)
+        XCTAssertTrue(UsageGrassModel.rewardMarks(season: nil, dailyVP: ["2026-12-05": 1],
+                                                  claimedGrants: [], now: kst(2026, 12, 5)).isEmpty)
+    }
+
+    func testDecemberFinisherNeedsTwentyDailyGrantsInOneYear() {
+        let s = Settings.shared
+        var grants: Set<String> = []
+        for d in 1...19 { grants.insert(String(format: "advent-2026-12-%02d", d)) }
+        grants.insert("advent-2026-complete")          // 완주 행은 일일 행이 아니다
+        grants.insert("advent-2025-12-24")             // 다른 해 1개 — 합산하지 않는다
+        s.claimedGrants = grants
+        XCTAssertFalse(CardTitle.hasDecemberFinish(claimedGrants: s.claimedGrants))
+        XCTAssertFalse(CardTitle.unlocked(in: s).contains(.decemberFinisher))
+        s.claimedGrants.insert("advent-2026-12-20")
+        XCTAssertTrue(CardTitle.unlocked(in: s).contains(.decemberFinisher))
+    }
+
+    func testGrantNotificationCopy() {
+        XCTAssertEqual(NotificationManager.grantCopy(currency: "coin", amount: 50, grantKey: "advent-2026-12-07").title,
+                       "🎄 12월 7일 보상")
+        XCTAssertEqual(NotificationManager.grantCopy(currency: "coin", amount: 500, grantKey: "advent-2026-complete").title,
+                       "🎄 12월 완주")
+        XCTAssertEqual(NotificationManager.grantCopy(currency: "coin", amount: 300, grantKey: "quiz-2026-12-07").title,
+                       "🎁 보상 도착")
+        XCTAssertEqual(NotificationManager.grantCopy(currency: "rp", amount: 10, grantKey: "pvp-season-3").title,
+                       "🏆 아레나 시즌 보상")
+    }
+}
