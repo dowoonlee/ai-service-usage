@@ -96,3 +96,19 @@ struct FlowLayout: Layout {
         return (CGSize(width: width, height: y + lineHeight), origins)
     }
 }
+
+
+// MARK: - SeasonBadge
+
+/// 시즌 한정 아이템 표시 — 상점 셀 좌상단 작은 캡슐 + 테두리 색. 어느 상점이든 같은 모양.
+struct SeasonBadge: View {
+    static let color = Color(red: 0.90, green: 0.33, blue: 0.24)
+    var body: some View {
+        Text("한정")
+            .font(.system(size: 7, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 3).padding(.vertical, 1)
+            .background(Capsule().fill(Self.color))
+            .offset(x: -3, y: -3)
+    }
+}

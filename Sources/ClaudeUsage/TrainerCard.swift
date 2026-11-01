@@ -64,7 +64,10 @@ enum TrainerBackground: Codable, Hashable {
     /// PetTheme 4개는 기본 unlock, collection 색은 컬렉션 컴플리트로 unlock.
     @MainActor
     static func unlocked(in s: Settings) -> [TrainerBackground] {
-        var out: [TrainerBackground] = PetTheme.allCases.map { .theme($0) }
+        // 시즌 한정 테마는 시즌 중이거나 구매했을 때만 — 카드 배경으로 1년 내내 새면 "한정"이 아니다.
+        var out: [TrainerBackground] = PetTheme.allCases
+            .filter { s.shopVisible($0, owned: s.ownedThemes.contains($0.rawValue)) }
+            .map { .theme($0) }
         for c in PetCollection.allCases where s.completedCollections.contains(c.rawValue) {
             out.append(.collection(c.rawValue))
         }
@@ -245,6 +248,10 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     case tenXEngineer              // 5,000
     case ceoOfVibes                // 10,000
 
+    // ── 12월 시즌 (season: .xmas) — case 삭제 금지 ──
+    case codedOnChristmas          // 자동: 12/25 사용 이벤트 1건 (seasonalFlags "codedOn:<yyyy>-12-25")
+    case freezeViolator            // 코인 1,500 (12월 한정 노출)
+
     var displayName: String {
         switch self {
         // 자동 unlock
@@ -305,6 +312,8 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .shippedItToProd:       return "Shipped It To Prod"
         case .tenXEngineer:          return "10x Engineer"
         case .ceoOfVibes:            return "CEO of Vibes"
+        case .codedOnChristmas:      return "크리스마스에도 코딩함"
+        case .freezeViolator:        return "연말 배포 freeze 위반"
         }
     }
 
@@ -363,6 +372,8 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .shippedItToProd:       return "2,500 coin · 금요일 오후 5시"
         case .tenXEngineer:          return "5,000 coin · 모두가 부르는 그 사람"
         case .ceoOfVibes:            return "10,000 coin · 회사를 차렸다"
+        case .codedOnChristmas:      return "12월 25일에 AI 사용 기록이 있으면"
+        case .freezeViolator:        return "1,500 coin · 12월 한정 · 그래도 배포함"
         }
     }
 
@@ -377,6 +388,15 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .shippedItToProd:                                             return 2500
         case .tenXEngineer:                                                return 5000
         case .ceoOfVibes:                                                  return 10000
+        case .freezeViolator:                                              return 1500
+        default: return nil
+        }
+    }
+
+    /// 시즌 한정 칭호 — 자동 해금이든 구매든 "12월에만 상점/목록에 보임". 해금된 뒤엔 영구.
+    var season: Season.Kind? {
+        switch self {
+        case .codedOnChristmas, .freezeViolator: return .xmas
         default: return nil
         }
     }
@@ -457,6 +477,11 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         if !s.creditedPRNumbers.isEmpty { set.insert(.openSourceContributor) }
         if s.creditedPRNumbers.count >= 5 { set.insert(.openSourceVeteran) }
 
+        // ── 시즌 자동 칭호 (seasonalFlags — 연도 키라 어느 해든 한 번이면 됨) ──
+        if s.seasonalFlags.contains(where: { $0.hasPrefix("codedOn:") && $0.hasSuffix("-12-25") }) {
+            set.insert(.codedOnChristmas)
+        }
+
         // ── 코인 구매 칭호 (인벤토리에서 합산) ──
         for raw in s.ownedTitles {
             if let t = CardTitle(rawValue: raw) { set.insert(t) }
@@ -482,6 +507,10 @@ enum CardAccessory: String, CaseIterable, Codable, Hashable {
     case mask
     case gift = "ribbon"        // rawValue는 v0.7.0 호환
     case headphones
+    // ── 12월 한정 (season: .xmas) — 상점 노출만 시즌 중, 보유는 영구. case 삭제 금지.
+    case santaHat
+    case antlers
+    case muffler                // "scarf"는 tshirt가 점유(v0.7.0 호환) — 쓰면 PNG 이름이 충돌한다
 
     var displayName: String {
         switch self {
@@ -493,6 +522,9 @@ enum CardAccessory: String, CaseIterable, Codable, Hashable {
         case .mask:       return "마스크"
         case .gift:       return "선물"
         case .headphones: return "헤드폰"
+        case .santaHat:   return "산타 모자"
+        case .antlers:    return "사슴뿔"
+        case .muffler:    return "목도리"
         }
     }
 
@@ -511,6 +543,9 @@ enum CardAccessory: String, CaseIterable, Codable, Hashable {
         case .mask:       return "theatermasks.fill"
         case .gift:       return "gift.fill"
         case .headphones: return "headphones"
+        case .santaHat:   return "snowflake"
+        case .antlers:    return "leaf.fill"
+        case .muffler:    return "wind"
         }
     }
 
@@ -520,6 +555,20 @@ enum CardAccessory: String, CaseIterable, Codable, Hashable {
         case .strawHat, .glasses, .tshirt: return 800
         case .gift, .mask, .headphones:    return 1500
         case .crown, .halo:                return 3000
+        // 한정은 같은 등급의 상시 아이템과 같은 가격 — 희소성은 시간이 만든다.
+        case .santaHat, .antlers:          return 800
+        case .muffler:                     return 1500
+        }
+    }
+}
+
+extension CardTitle: SeasonalItem {}
+
+extension CardAccessory: SeasonalItem {
+    var season: Season.Kind? {
+        switch self {
+        case .santaHat, .antlers, .muffler: return .xmas
+        default: return nil
         }
     }
 }

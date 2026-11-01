@@ -101,6 +101,16 @@ final class ScenePreviews: SandboxedTestCase {
                       note: "트레이너 카드 + 리포트 모드(이번 달 잔디, 11/18 고정)")
     }
 
+    /// 12월 시즌 강제 — 상점에 한정 아이템("한정" 뱃지)이 보이는지. 파티 탭(맵 상점)과 꾸미기 모드.
+    func testRenderSeasonXmasShops() throws {
+        SeasonRegistry.override = .season(.xmas)
+        defer { SeasonRegistry.override = Override.none }
+        try renderTab(PartyView(), title: "탭-2-파티-12월", note: "맵 상점에 겨울밤(한정) 카드가 보이는지")
+        try renderTab(ReportView(initialMode: .customize, grassNow: PreviewDemoState.grassNow),
+                      title: "탭-4-레포트-꾸미기-12월",
+                      note: "액세서리 11종(한정 3종 뱃지)·칭호 구매 가능 묶음에 12월 한정이 붉은 테두리로")
+    }
+
     func testRenderReportCustomizeMode() throws {
         try renderTab(ReportView(initialMode: .customize), title: "탭-4-레포트-꾸미기",
                       note: "꾸미기 모드 — 칭호 세 묶음 그리드·액세서리 줄바꿈이 잘리지 않는지")

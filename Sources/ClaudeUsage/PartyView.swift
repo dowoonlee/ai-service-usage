@@ -296,7 +296,9 @@ struct PartyView: View {
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 8)], spacing: 8) {
-                ForEach(PetTheme.allCases.filter { $0.isDynamic }) { theme in
+                ForEach(PetTheme.allCases.filter {
+                    $0.isDynamic && settings.shopVisible($0, owned: settings.isThemeUnlocked($0))
+                }) { theme in
                     mapCard(theme)
                 }
             }
@@ -324,6 +326,9 @@ struct PartyView: View {
                             .font(.system(size: 10))
                             .foregroundStyle(owned ? .green : .white.opacity(0.85))
                             .padding(3)
+                    }
+                    .overlay(alignment: .topLeading) {
+                        if theme.season != nil { SeasonBadge().offset(x: 6, y: 6) }
                     }
                 Text(theme.displayName)
                     .font(.system(size: 10, weight: .medium))

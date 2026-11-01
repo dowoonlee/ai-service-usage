@@ -452,7 +452,7 @@ enum OfficeLayout {
 
     /// 구매 가능 데코 카탈로그 — kind = 서버 item_kind = 리소스 basename.
     /// 가격은 기획 §2 (소품 300 / 중형 500 / 대형 1,000).
-    struct DecorItem: Identifiable {
+    struct DecorItem: Identifiable, SeasonalItem {
         let kind: String
         let name: String
         let category: DecorCategory
@@ -460,6 +460,8 @@ enum OfficeLayout {
         let size: CGSize
         let blockingWidth: CGFloat   // passing == .avoid인 바닥 데코의 충돌 폭
         let passing: PetPassing      // 벽 데코는 펫 동선 밖이라 무의미 (behind로 통일)
+        /// 시즌 한정 데코 — 상점 노출만 시즌 중. 서버엔 kind 문자열로 저장되므로 카탈로그 항목은 삭제 금지.
+        var season: Season.Kind? = nil
         var id: String { kind }
         var imageName: String { kind }
     }

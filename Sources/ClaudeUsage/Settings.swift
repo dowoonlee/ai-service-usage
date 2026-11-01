@@ -192,6 +192,13 @@ final class Settings: ObservableObject {
         didSet { persist(seasonalFlags, forKey: Keys.seasonalFlags) }
     }
 
+    /// 상점 노출 판정 — 상시 아이템은 항상, 시즌 아이템은 활성 시즌 일치 또는 이미 보유 시.
+    /// 상점 4곳(액세서리·이펙트·테마·칭호)과 오피스 데코가 전부 이 함수를 거친다 — 각자 if를 심지 않는다.
+    func shopVisible<T: SeasonalItem>(_ item: T, owned: Bool) -> Bool {
+        guard let s = item.season else { return true }
+        return owned || SeasonRegistry.active()?.kind == s
+    }
+
     // MARK: - Gacha (M2)
 
     /// 가챠 화폐 잔액. CoinLedger가 사용량 기반으로 적립.

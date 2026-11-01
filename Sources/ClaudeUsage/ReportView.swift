@@ -362,9 +362,12 @@ struct ReportView: View {
     /// 줄바꿈 그리드로 전부 한눈에. 각 묶음 안에선 enum 정의 순서 유지(filter는 stable).
     private var titleRow: some View {
         let unlocked = CardTitle.unlocked(in: settings)
-        let owned = CardTitle.allCases.filter { unlocked.contains($0) }
-        let purchasable = CardTitle.allCases.filter { !unlocked.contains($0) && $0.purchasePrice != nil }
-        let locked = CardTitle.allCases.filter { !unlocked.contains($0) && $0.purchasePrice == nil }
+        // 시즌 한정 칭호는 시즌 중이거나 이미 해금됐을 때만 목록에 — 시즌 밖 "잠김" 목록에 두면 영영 못 받는
+        // 칭호처럼 보인다.
+        let visible = CardTitle.allCases.filter { settings.shopVisible($0, owned: unlocked.contains($0)) }
+        let owned = visible.filter { unlocked.contains($0) }
+        let purchasable = visible.filter { !unlocked.contains($0) && $0.purchasePrice != nil }
+        let locked = visible.filter { !unlocked.contains($0) && $0.purchasePrice == nil }
         return VStack(alignment: .leading, spacing: 8) {
             titleGroup("보유 \(owned.count)", owned, unlocked: unlocked)
             if !purchasable.isEmpty {
@@ -414,7 +417,8 @@ struct ReportView: View {
                     )
                 )
                 .overlay(
-                    Capsule().stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                    Capsule().stroke(isSelected ? Color.accentColor
+                                     : (t.season != nil ? SeasonBadge.color : Color.clear), lineWidth: 1.5)
                 )
                 .foregroundStyle(available ? .primary : .secondary)
         }
@@ -465,7 +469,9 @@ struct ReportView: View {
     private var accessoryRow: some View {
         FlowLayout(spacing: 6) {
             accessoryChoice(nil)
-            ForEach(CardAccessory.allCases, id: \.self) { acc in
+            ForEach(CardAccessory.allCases.filter {
+                settings.shopVisible($0, owned: settings.ownedAccessories.contains($0.rawValue))
+            }, id: \.self) { acc in
                 accessoryChoice(acc)
             }
         }
@@ -512,8 +518,12 @@ struct ReportView: View {
                 }
                 .overlay(
                     RoundedRectangle(cornerRadius: AppRadius.sm)
-                        .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                        .stroke(isSelected ? Color.accentColor
+                                : (acc?.season != nil ? SeasonBadge.color : Color.clear), lineWidth: isSelected ? 2 : 1)
                 )
+                .overlay(alignment: .topLeading) {
+                    if acc?.season != nil { SeasonBadge() }
+                }
                 Text(acc?.displayName ?? "없음")
                     .font(.system(size: 8))
                     .lineLimit(1)

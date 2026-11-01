@@ -29,6 +29,8 @@ struct PetEffectShelf: View {
                     // 카테고리 내 저가→고가 정렬. 동가는 allCases(선언) 순서 유지(offset tiebreak).
                     ForEach(EffectKind.allCases.enumerated()
                         .filter { $0.element.category == cat }
+                        .filter { settings.shopVisible($0.element,
+                                                       owned: settings.petEffects[kind]?.contains($0.element) == true) }
                         .sorted { ($0.element.price, $0.offset) < ($1.element.price, $1.offset) }
                         .map(\.element)) { chip($0) }
                     Spacer(minLength: 4)
@@ -90,6 +92,9 @@ struct PetEffectShelf: View {
                 RoundedRectangle(cornerRadius: AppRadius.md)
                     .fill(equipped ? Color.green.opacity(0.18) : Color.secondary.opacity(0.08))
             )
+            .overlay(alignment: .topLeading) {
+                if effect.season != nil { SeasonBadge() }
+            }
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.md)
                     .strokeBorder(equipped ? Color.green.opacity(0.6) : Color.clear, lineWidth: 1)

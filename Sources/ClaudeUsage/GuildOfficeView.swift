@@ -1153,7 +1153,7 @@ private struct OfficeShopSheet: View {
 
     @ViewBuilder
     private var decorTab: some View {
-        ForEach(OfficeLayout.decorCatalog) { item in
+        ForEach(OfficeLayout.decorCatalog.filter { settings.shopVisible($0, owned: false) }) { item in
             let freeSlot = firstFreeSlot(category: item.category)
             let affordable = settings.coins >= item.price
             let selected = pendingDecor?.item.kind == item.kind
