@@ -41,9 +41,13 @@ struct ReportView: View {
     }
     @State private var mode: Mode = .report
 
-    /// `initialMode`는 프리뷰 렌더용 — 앱은 항상 기본값(리포트)으로 연다.
-    init(initialMode: Mode = .report) {
+    /// 잔디의 "오늘". 프리뷰가 월 중순을 고정해 넘긴다 — 1일에 찍으면 칸이 하나뿐이라 검토할 게 없다.
+    private let grassNow: Date
+
+    /// `initialMode`/`grassNow`는 프리뷰 렌더용 — 앱은 항상 기본값(리포트, 지금)으로 연다.
+    init(initialMode: Mode = .report, grassNow: Date = Date()) {
         _mode = State(initialValue: initialMode)
+        self.grassNow = grassNow
     }
 
     var body: some View {
@@ -135,14 +139,16 @@ struct ReportView: View {
 
     // MARK: - Report pane
 
-    /// 리포트 모드 — 이번 달 활동. 사용량 잔디(`UsageGrassView`)가 여기 들어온다.
+    /// 리포트 모드 — 이번 달 활동 잔디. 농도 색은 Claude 차트에 적용된 맵 테마를 따른다
+    /// (메뉴바 기본 피드와 같은 해석 — 세 차트 중 첫 번째).
     private var reportPane: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("이번 달")
-            Text("이번 달 활동 잔디가 여기에 표시됩니다.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
+        let theme = settings.themeClaudeOverride
+            ?? PetTheme.defaultFor(settings.petClaudeParty.first?.kind ?? .fox)
+        return UsageGrassView(
+            model: UsageGrassModel.build(dailyVP: settings.dailyVP, now: grassNow),
+            theme: theme,
+            streak: settings.usageStreak
+        )
     }
 
     // MARK: - Customization

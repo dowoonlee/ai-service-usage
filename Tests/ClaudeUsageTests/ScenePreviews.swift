@@ -97,7 +97,8 @@ final class ScenePreviews: SandboxedTestCase {
     }
 
     func testRenderReportTab() throws {
-        try renderTab(ReportView(), title: "탭-4-레포트", note: "트레이너 카드 + 리포트 모드(이번 달 잔디)")
+        try renderTab(ReportView(grassNow: PreviewDemoState.grassNow), title: "탭-4-레포트",
+                      note: "트레이너 카드 + 리포트 모드(이번 달 잔디, 11/18 고정)")
     }
 
     func testRenderReportCustomizeMode() throws {

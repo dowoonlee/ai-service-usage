@@ -390,6 +390,12 @@ final class Settings: ObservableObject {
     @Published var usageStreakLastDay: Date? {
         didSet { AppEnv.defaults.set(usageStreakLastDay, forKey: Keys.usageStreakLastDay) }
     }
+    /// 일별 VP 누적 — 리포트 탭 사용량 잔디의 농도. 키는 KST `yyyy-MM-dd`(서버 보상·퀴즈와 같은 날짜 경계),
+    /// 값은 그날 `UsageEvent`의 VP 환산 합(소수). `DailyUsageLedger`가 쓰고 90일만 보관한다.
+    /// 랭킹 제출 단위와 같은 VP라 "보드 순위 = 이번 달 잔디의 합"이 성립한다. 과거 소급 없음.
+    @Published var dailyVP: [String: Double] {
+        didSet { persist(dailyVP, forKey: Keys.dailyVP) }
+    }
     // ── 클라우드 제도 신규 카운터 (gym-expansion.md §5.5) ──
     /// Guild·Contribution — 길드 기여(코인/VP) 누적.
     @Published var guildContributionTotal: Int {
@@ -1061,6 +1067,8 @@ final class Settings: ObservableObject {
         self.ownedTitles = (titlesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         let themesData = d.data(forKey: Keys.ownedThemes)
         self.ownedThemes = (themesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let dailyVPData = d.data(forKey: Keys.dailyVP)
+        self.dailyVP = (dailyVPData.flatMap { try? JSONDecoder().decode([String: Double].self, from: $0) }) ?? [:]
         let invCollapsedData = d.data(forKey: Keys.gachaInventoryCollapsed)
         self.gachaInventoryCollapsed = (invCollapsedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.showGitHubLoginInCard = (d.object(forKey: Keys.showGitHubLoginInCard) as? Bool) ?? false
@@ -1904,6 +1912,7 @@ final class Settings: ObservableObject {
         static let heartbeatLastActiveAt       = "settings.heartbeatLastActiveAt"
         static let nightOwlSecondsAccumulated  = "settings.nightOwlSecondsAccumulated"
         static let usageStreak                 = "settings.usageStreak"
+        static let dailyVP                     = "settings.dailyVP"
         static let usageStreakLastDay          = "settings.usageStreakLastDay"
         static let clearedBadges               = "settings.clearedBadges"
         static let masteredRegions             = "settings.masteredRegions"

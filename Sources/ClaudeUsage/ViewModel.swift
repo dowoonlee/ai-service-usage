@@ -200,6 +200,7 @@ final class ViewModel: ObservableObject {
         UsageEventBus.shared.register(CoinLedger.shared)
         UsageEventBus.shared.register(VPLedger.shared)
         UsageEventBus.shared.register(StreakLedger.shared)
+        UsageEventBus.shared.register(DailyUsageLedger.shared)
 
         let d = AppEnv.defaults
         self.claudeCollapsed = d.bool(forKey: "section.claude.collapsed")
