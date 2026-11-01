@@ -35,7 +35,7 @@ enum SeasonRegistry {
             grassDecoration: .snow,
             rewardDays: 1...24,
             boss: SeasonalBoss(
-                lead: SkinnedPet(kind: .deer, skin: nil, headwear: "santa_hat", displayName: "Rudolph"),
+                lead: SkinnedPet(kind: .deer, skin: .snow, headwear: "santa_hat", displayName: "Rudolph"),
                 supports: [
                     SkinnedPet(kind: .bear, skin: .snow, displayName: "북극곰"),
                     SkinnedPet(kind: .fox, skin: .snow, displayName: "북극여우"),

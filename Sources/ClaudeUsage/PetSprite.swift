@@ -1289,13 +1289,19 @@ enum PetSprite {
         var ci = CIImage(cgImage: cg)
         switch skin {
         case .snow:
-            // 단색화 뒤 대비를 올려 어두운 외곽선·눈을 남기고, 밝기는 조금만 — 많이 올리면 형체가 뭉개진다(프리뷰 1차).
+            // 단색화 뒤 톤 커브로 중간톤을 흰색까지 끌어올린다. 밝기/대비 조절(1·2차 프리뷰)은 몸통이 회색에
+            // 머물거나 외곽선이 같이 날아갔다 — 커브는 0(외곽선)은 0에 고정하고 0.25부터 급하게 올려
+            // 어두운 선은 남기고 몸통만 희게 만든다.
             ci = ci.applyingFilter("CIColorMonochrome", parameters: [
-                kCIInputColorKey: CIColor(red: 0.84, green: 0.90, blue: 1.0),
-                kCIInputIntensityKey: 0.9,
+                kCIInputColorKey: CIColor(red: 0.94, green: 0.97, blue: 1.0),
+                kCIInputIntensityKey: 1.0,
             ])
-            .applyingFilter("CIColorControls", parameters: [
-                kCIInputBrightnessKey: 0.05, kCIInputContrastKey: 1.35,
+            .applyingFilter("CIToneCurve", parameters: [
+                "inputPoint0": CIVector(x: 0.00, y: 0.00),
+                "inputPoint1": CIVector(x: 0.22, y: 0.62),
+                "inputPoint2": CIVector(x: 0.45, y: 0.90),
+                "inputPoint3": CIVector(x: 0.70, y: 0.97),
+                "inputPoint4": CIVector(x: 1.00, y: 1.00),
             ])
         }
         guard let out = skinContext.createCGImage(ci, from: ci.extent) else { return image }
