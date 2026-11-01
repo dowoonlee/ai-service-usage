@@ -514,3 +514,20 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
   회귀 없음, `BattlePetSnapshot` 인코딩이 변하지 않았음(파리티 보호).
 * 프리뷰: 북극 원정대 5종 스킨 시트(원본↔snow 나란히, 체커 배경), 도장 탭 시즌 카드(`AIUSAGE_SEASON=xmas`,
   대사 4단계), 배틀 시트 `GymBattleSizeProbe`.
+
+---
+
+# 구현 상태 (2026-11-01, 브랜치 `feat/season-2026`, 미push)
+
+| 커밋 | 범위 | 상태 |
+|---|---|---|
+| T1 `refactor(report)` | 리포트/꾸미기 분리, 칭호 3묶음 그리드, 공유 메뉴, `FlowLayout` | 완료 |
+| T2 `feat(report)` 잔디 | `DailyUsageLedger`, `UsageGrassModel/View`, `PetTheme.grassLevels` | 완료 — **11월 중 배포 필수** |
+| T4 `feat(season)` 기반 | `Season`/`SeasonRegistry`(KST), `ParticleStyle`, headwear 앵커, 시즌 대사, 오피스 창문 눈, 킬스위치 | 완료 |
+| T5 `feat(season)` 코스메틱 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge` | 완료 — 사슴뿔·목도리 PNG는 T3 대기(SF 폴백) |
+| T6 `feat(season)` 일일 보상 | 서버 `_shared/season.ts`+`submit` 훅+퀴즈 힌트, 잔디 보상 마크, 12월 완주, 알림 | 완료 — 서버 배포는 `supabase-ranking` skill |
+| T7 `feat(season)` 겨울 관장 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공 | 완료 |
+| T3 액세서리 11종 도트 PNG | `docs/research/accessory-icon-assets.md` | **미착수** — 사내망에서 팩 실물 확인 불가, 11종 커버 팩 미발견 |
+
+프리뷰: `bash scripts/render-previews.sh` 후 `0-headwear-*`(195종 모자 앵커), `0-season-boss-skins`, `탭-*-12월`.
+테스트: `swift test` 497개 + `deno test supabase/functions/_shared/season.test.ts`.
