@@ -342,11 +342,12 @@ final class MenuBarRenderer {
                 // 좌표는 y-up: sprite 상단 = +petHeight/2, 앵커 top은 위에서 잰 비율.
                 if let headwear, let hat = PetSprite.image(named: headwear),
                    let anchor = PetSprite.headAnchor(for: kind, action: action, frameIndex: frameIdx) {
-                    let hatH = petHeight * 0.42
-                    let hatW = hatH * (hat.size.width / max(1, hat.size.height))
-                    let cx = -petW / 2 + anchor.x * petW
-                    let headTop = petHeight / 2 - anchor.top * petHeight
-                    let hatRect = NSRect(x: cx - hatW / 2, y: headTop - hatH * 0.20, width: hatW, height: hatH)
+                    let lay = PetSprite.headwearLayout(cellWidth: petW, cellHeight: petHeight, anchor: anchor,
+                                                       hatSize: hat.size, facesLeft: kind.defaultFacingLeft)
+                    // 셀 좌표(좌상단 원점) → 이 ctx(펫 중심 원점, y-up).
+                    let hatRect = NSRect(x: -petW / 2 + lay.centerX - lay.width / 2,
+                                         y: petHeight / 2 - lay.top - lay.height,
+                                         width: lay.width, height: lay.height)
                     hat.draw(in: hatRect, from: NSRect(origin: .zero, size: hat.size),
                              operation: .sourceOver, fraction: 1.0)
                 }

@@ -249,16 +249,17 @@ struct WalkingCat: View {
                let hat = PetSprite.image(named: headwear),
                let anchor = PetSprite.headAnchor(for: kind, action: ctrl.action, frameIndex: ctrl.frameIndex) {
                 let flipped = kind.defaultFacingLeft == ctrl.facingRight
-                let ax = flipped ? (1 - anchor.x) : anchor.x
-                let hatH = h * 0.42
-                let hatW = hatH * (hat.size.width / max(1, hat.size.height))
-                let headTopY = pos.y - h + jy - jumpY + anchor.top * h
+                // 반전 전 셀 좌표로 배치한 뒤, 반전이면 x만 거울상.
+                let lay = PetSprite.headwearLayout(cellWidth: w, cellHeight: h, anchor: anchor,
+                                                   hatSize: hat.size, facesLeft: kind.defaultFacingLeft)
+                let cx = flipped ? (w - lay.centerX) : lay.centerX
+                let cellTopY = pos.y - h + jy - jumpY
                 Image(nsImage: hat)
                     .resizable()
                     .interpolation(.none)
-                    .frame(width: hatW, height: hatH)
+                    .frame(width: lay.width, height: lay.height)
                     .scaleEffect(x: flipped ? -1 : 1, y: 1, anchor: .center)
-                    .position(x: pos.x + jx - w / 2 + ax * w, y: headTopY - hatH * 0.30)
+                    .position(x: pos.x + jx - w / 2 + cx, y: cellTopY + lay.top + lay.height / 2)
                     .allowsHitTesting(false)
             }
 

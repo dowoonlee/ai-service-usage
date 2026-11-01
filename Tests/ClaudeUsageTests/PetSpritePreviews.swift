@@ -110,10 +110,12 @@ final class PetSpritePreviews: SandboxedTestCase {
                 var picked: [NSImage] = []
                 let walk = PetSprite.frames(for: kind, action: .walk)
                 let run = PetSprite.frames(for: kind, action: .run)
-                if !walk.isEmpty, let img = Self.composeHeadwear(kind: kind, action: .walk, frameIndex: 0, hat: hat) {
+                if !walk.isEmpty, let img = PetSprite.composedImage(for: kind, action: .walk, frameIndex: 0,
+                                                                    skin: nil, headwear: "santa_hat") {
                     picked.append(img)
                 }
-                if !run.isEmpty, let img = Self.composeHeadwear(kind: kind, action: .run, frameIndex: run.count / 2, hat: hat) {
+                if !run.isEmpty, let img = PetSprite.composedImage(for: kind, action: .run, frameIndex: run.count / 2,
+                                                                   skin: nil, headwear: "santa_hat") {
                     picked.append(img)
                 }
                 return ("\(kind.rawValue)", picked)
@@ -128,28 +130,6 @@ final class PetSpritePreviews: SandboxedTestCase {
                     + "\(index + 1)번째 묶음. 모자가 공중에 뜨거나 등·날개에 얹힌 종은 앵커 밴드 조정 대상. "
                     + "WalkingCat·메뉴바가 같은 앵커를 쓴다.")
         }
-    }
-
-    /// 프레임 원본 셀 크기 그대로, 모자를 앵커에 합성한 NSImage. WalkingCat의 배치식과 동일
-    /// (높이 42%, 상단이 머리 꼭대기 위로 30% 넘침).
-    private static func composeHeadwear(kind: PetKind, action: PetController.Action, frameIndex: Int,
-                                        hat: NSImage) -> NSImage? {
-        guard let frame = PetSprite.image(for: kind, action: action, frameIndex: frameIndex),
-              let anchor = PetSprite.headAnchor(for: kind, action: action, frameIndex: frameIndex) else { return nil }
-        let w = frame.size.width, h = frame.size.height
-        let hatH = h * 0.42
-        // 머리가 셀 꼭대기에 닿는 종은 모자가 셀 밖으로 나간다 — 위로 모자 높이만큼 여유를 둔다.
-        let out = NSImage(size: NSSize(width: w, height: h + hatH))
-        out.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .none
-        frame.draw(in: NSRect(x: 0, y: 0, width: w, height: h), from: .zero, operation: .sourceOver, fraction: 1)
-        let hatW = hatH * (hat.size.width / max(1, hat.size.height))
-        let cx = anchor.x * w
-        let headTop = h - anchor.top * h          // y-up
-        hat.draw(in: NSRect(x: cx - hatW / 2, y: headTop - hatH * 0.20, width: hatW, height: hatH),
-                 from: .zero, operation: .sourceOver, fraction: 1)
-        out.unlockFocus()
-        return out
     }
 
     /// 북극 원정대 — 시즌 보스 팀 5종의 원본 ↔ snow 스킨(+모자). 리컬러 품질은 기계로 못 잡는다:

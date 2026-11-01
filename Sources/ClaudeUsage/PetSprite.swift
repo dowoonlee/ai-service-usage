@@ -1318,19 +1318,49 @@ enum PetSprite {
         let key = "\(kind.rawValue)/\(action)/\(frameIndex % max(1, frames(for: kind, action: action).count))/skin:\(skin?.rawValue ?? "-")/hat:\(headwear)" as NSString
         if let cached = skinCache.object(forKey: key) { return cached }
         let w = frame.size.width, h = frame.size.height
-        let hatH = h * 0.42
-        let hatW = hatH * (hat.size.width / max(1, hat.size.height))
-        let out = NSImage(size: NSSize(width: w, height: h + hatH))
+        let lay = headwearLayout(cellWidth: w, cellHeight: h, anchor: anchor, hatSize: hat.size,
+                                 facesLeft: kind.defaultFacingLeft)
+        let headroom = max(0, -lay.top)
+        let out = NSImage(size: NSSize(width: w, height: h + headroom))
         out.lockFocus()
         NSGraphicsContext.current?.imageInterpolation = .none
         frame.draw(in: NSRect(x: 0, y: 0, width: w, height: h), from: .zero, operation: .sourceOver, fraction: 1)
-        let cx = anchor.x * w
-        let headTop = h - anchor.top * h
-        hat.draw(in: NSRect(x: cx - hatW / 2, y: headTop - hatH * 0.20, width: hatW, height: hatH),
+        // y-up 변환: 캔버스 높이 = h + headroom, 셀 상단은 y = h 가 아니라 h + headroom - 0 … 셀을 바닥(0)에 두었으므로
+        // 셀 좌표 top(아래로 양수) → y = h - top - height.
+        hat.draw(in: NSRect(x: lay.centerX - lay.width / 2, y: h - lay.top - lay.height,
+                            width: lay.width, height: lay.height),
                  from: .zero, operation: .sourceOver, fraction: 1)
         out.unlockFocus()
         skinCache.setObject(out, forKey: key)
         return out
+    }
+
+    // MARK: - 머리 장식 배치 (공용)
+
+    /// 머리 장식의 위치·크기 — 스프라이트 셀 좌표(원점 좌상단, y 아래로), **반전 전** 기준.
+    /// WalkingCat·메뉴바·합성 이미지가 전부 이 값을 써서 세 곳이 어긋나지 않는다.
+    struct HeadwearLayout: Equatable {
+        let centerX: CGFloat
+        let top: CGFloat
+        let width: CGFloat
+        let height: CGFloat
+    }
+
+    /// 배치 규칙(사용자 검수로 조정됨):
+    ///   * 높이 = 셀 높이의 42%.
+    ///   * 세로: 모자 바닥이 머리 꼭대기보다 `height × 0.35`만큼 아래 — 머리에 "눌러쓴" 느낌. (처음 0.20은 떠 보였다.)
+    ///   * 가로: 상단 밴드 x 중심에서 **바라보는 방향으로 셀 폭의 10%** 전진 — 옆모습 동물은 가장 높은 곳이
+    ///     등·귀라 중심을 그대로 쓰면 모자가 뒤통수에 얹힌다.
+    nonisolated static func headwearLayout(cellWidth w: CGFloat, cellHeight h: CGFloat,
+                                           anchor: HeadAnchor, hatSize: CGSize,
+                                           facesLeft: Bool) -> HeadwearLayout {
+        let height = h * 0.42
+        let width = height * (hatSize.width / max(1, hatSize.height))
+        let forward: CGFloat = (facesLeft ? -1 : 1) * w * 0.10
+        let headTop = anchor.top * h
+        return HeadwearLayout(centerX: anchor.x * w + forward,
+                              top: headTop + height * 0.35 - height,
+                              width: width, height: height)
     }
 
     // MARK: - 머리 앵커 (시즌 headwear)

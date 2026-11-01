@@ -156,3 +156,17 @@ final class HeadAnchorTests: XCTestCase {
         }
     }
 }
+
+final class HeadwearLayoutTests: XCTestCase {
+    func testLayoutMovesForwardAndSitsOnHead() {
+        let anchor = PetSprite.HeadAnchor(x: 0.5, top: 0.25)
+        let hat = CGSize(width: 16, height: 16)
+        let right = PetSprite.headwearLayout(cellWidth: 100, cellHeight: 100, anchor: anchor, hatSize: hat, facesLeft: false)
+        let left = PetSprite.headwearLayout(cellWidth: 100, cellHeight: 100, anchor: anchor, hatSize: hat, facesLeft: true)
+        XCTAssertEqual(right.height, 42)
+        XCTAssertEqual(right.centerX, 60)                 // 중심 50 + 앞(오른쪽) 10%
+        XCTAssertEqual(left.centerX, 40)                  // 왼쪽을 보면 왼쪽으로
+        // 모자 바닥 = 머리 꼭대기(25) + 42×0.35
+        XCTAssertEqual(right.top + right.height, 25 + 42 * 0.35, accuracy: 0.001)
+    }
+}
