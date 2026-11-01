@@ -27,12 +27,34 @@ struct ReportView: View {
     /// 미리보기에서 카드 폭. 컨테이너(480) 안에 패딩 포함.
     private static let previewWidth: CGFloat = 440
 
+    /// 카드 아래 두 모드. 탭을 열면 항상 `report` — 카드는 3초 보고, 꾸미기는 한 달에 한 번이라
+    /// 편집기(6섹션, 칭호 66개)가 기본 화면의 70%를 차지하던 것을 접는다. 상태는 저장하지 않는다.
+    enum Mode: String, CaseIterable, Identifiable {
+        case report, customize
+        var id: String { rawValue }
+        var displayName: String {
+            switch self {
+            case .report:    return "리포트"
+            case .customize: return "꾸미기"
+            }
+        }
+    }
+    @State private var mode: Mode = .report
+
+    /// `initialMode`는 프리뷰 렌더용 — 앱은 항상 기본값(리포트)으로 연다.
+    init(initialMode: Mode = .report) {
+        _mode = State(initialValue: initialMode)
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 cardPreview
-                customizationGroups
-                shareSection
+                modeBar
+                switch mode {
+                case .report:    reportPane
+                case .customize: customizationGroups
+                }
             }
             .padding(16)
         }
@@ -90,6 +112,37 @@ struct ReportView: View {
             get: { settings.trainerCard.effectiveAccessoryTransform },
             set: { settings.trainerCard.accessoryTransform = $0 }
         )
+    }
+
+    // MARK: - Mode bar (세그먼트 + 공유 메뉴)
+
+    /// 카드 바로 아래 한 줄 — 왼쪽 모드 세그먼트, 오른쪽 공유 메뉴. 두 모드 공통이라 카드와
+    /// 함께 항상 보이고, 편집 중에도 카드가 위에 남는다(시트 방식은 그 경험이 깨져 기각).
+    private var modeBar: some View {
+        HStack(spacing: 8) {
+            Picker("", selection: $mode) {
+                ForEach(Mode.allCases) { m in
+                    Text(m.displayName).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 160)
+            Spacer()
+            shareMenu
+        }
+    }
+
+    // MARK: - Report pane
+
+    /// 리포트 모드 — 이번 달 활동. 사용량 잔디(`UsageGrassView`)가 여기 들어온다.
+    private var reportPane: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("이번 달")
+            Text("이번 달 활동 잔디가 여기에 표시됩니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 
     // MARK: - Customization
@@ -299,16 +352,35 @@ struct ReportView: View {
 
     // MARK: - Title
 
+    /// 칭호 66개를 한 줄 가로 스크롤로 두면 끝까지 넘기는 사람이 없다 — 보유 / 구매 가능 / 잠김 세 묶음의
+    /// 줄바꿈 그리드로 전부 한눈에. 각 묶음 안에선 enum 정의 순서 유지(filter는 stable).
     private var titleRow: some View {
         let unlocked = CardTitle.unlocked(in: settings)
-        // 보유(unlocked) 칭호를 먼저, 잠긴 것을 뒤로 — 사용자가 즉시 사용 가능한 옵션부터 노출.
-        // 각 그룹 내에선 enum 정의 순서 유지(filter는 stable).
-        let ordered = CardTitle.allCases.filter { unlocked.contains($0) }
-                    + CardTitle.allCases.filter { !unlocked.contains($0) }
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(ordered, id: \.self) { t in
-                    titleCell(t, available: unlocked.contains(t))
+        let owned = CardTitle.allCases.filter { unlocked.contains($0) }
+        let purchasable = CardTitle.allCases.filter { !unlocked.contains($0) && $0.purchasePrice != nil }
+        let locked = CardTitle.allCases.filter { !unlocked.contains($0) && $0.purchasePrice == nil }
+        return VStack(alignment: .leading, spacing: 8) {
+            titleGroup("보유 \(owned.count)", owned, unlocked: unlocked)
+            if !purchasable.isEmpty {
+                titleGroup("구매 가능 \(purchasable.count)", purchasable, unlocked: unlocked)
+            }
+            if !locked.isEmpty {
+                titleGroup("잠김 \(locked.count) · 호버하면 해금 조건", locked, unlocked: unlocked)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func titleGroup(_ label: String, _ titles: [CardTitle], unlocked: Set<CardTitle>) -> some View {
+        if !titles.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                FlowLayout(spacing: 6) {
+                    ForEach(titles, id: \.self) { t in
+                        titleCell(t, available: unlocked.contains(t))
+                    }
                 }
             }
         }
@@ -383,13 +455,12 @@ struct ReportView: View {
 
     // MARK: - Accessory
 
+    /// 액세서리는 줄바꿈 그리드 — 시즌 한정이 붙으면 11종이라 가로 스크롤로는 뒤가 안 보인다.
     private var accessoryRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                accessoryChoice(nil)
-                ForEach(CardAccessory.allCases, id: \.self) { acc in
-                    accessoryChoice(acc)
-                }
+        FlowLayout(spacing: 6) {
+            accessoryChoice(nil)
+            ForEach(CardAccessory.allCases, id: \.self) { acc in
+                accessoryChoice(acc)
             }
         }
     }
@@ -505,40 +576,43 @@ struct ReportView: View {
         }
     }
 
-    // MARK: - Share section (Phase D에서 채움)
+    // MARK: - Share menu (Phase D에서 채움)
 
-    private var shareSection: some View {
-        HStack(spacing: 8) {
+    /// 내보내기 5종을 메뉴 하나로 — 버튼 5개가 한 줄을 차지했지만 실제로 자주 쓰는 건 한둘이다.
+    private var shareMenu: some View {
+        Menu {
             Button {
                 copyCardToPasteboard()
             } label: {
-                Label("클립보드 복사", systemImage: "doc.on.doc")
+                Label("클립보드에 복사", systemImage: "doc.on.doc")
             }
             Button {
                 saveCardToFile()
             } label: {
-                Label("이미지로 저장", systemImage: "square.and.arrow.down")
+                Label("이미지로 저장…", systemImage: "square.and.arrow.down")
             }
             Button {
                 shareCard()
             } label: {
-                Label("공유...", systemImage: "square.and.arrow.up")
+                Label("공유…", systemImage: "square.and.arrow.up")
             }
-            Divider().frame(height: 16)
+            Divider()
             // 움직이는 GIF — avatar walk 사이클을 애니메이션으로 내보낸다.
             Button {
                 saveGIFToFile()
             } label: {
-                Label("GIF 저장", systemImage: "square.and.arrow.down.on.square")
+                Label("GIF 저장…", systemImage: "square.and.arrow.down.on.square")
             }
             Button {
                 shareGIF()
             } label: {
-                Label("GIF 공유", systemImage: "square.and.arrow.up.on.square")
+                Label("GIF 공유…", systemImage: "square.and.arrow.up.on.square")
             }
-            Spacer()
+        } label: {
+            Label("공유", systemImage: "square.and.arrow.up")
         }
-        .padding(.top, 8)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     // MARK: - Trainer name fallback chain

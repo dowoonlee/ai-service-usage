@@ -53,3 +53,46 @@ extension View {
     /// 우상단 빨간 숫자 배지 — 미확인 개수(99+ clamp, 쪽지·게시판).
     func countBadge(_ count: Int) -> some View { modifier(CountBadge(count: count)) }
 }
+
+// MARK: - FlowLayout
+
+/// 줄바꿈 수평 배치 — 칩·셀이 컨테이너 폭을 넘으면 다음 줄로. `LazyVGrid`는 열 폭이 고정이라
+/// 폭이 제각각인 칭호 칩에 맞지 않고, 가로 `ScrollView`는 뒤쪽 항목이 묻힌다(리포트 탭 칭호 66개).
+/// 제안 폭이 없으면(unbounded) 한 줄로 늘어놓는다.
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        return arrange(subviews: subviews, maxWidth: maxWidth).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let maxWidth = proposal.width ?? bounds.width
+        let placed = arrange(subviews: subviews, maxWidth: maxWidth)
+        for (i, origin) in placed.origins.enumerated() {
+            subviews[i].place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                              proposal: .unspecified)
+        }
+    }
+
+    private func arrange(subviews: Subviews, maxWidth: CGFloat) -> (size: CGSize, origins: [CGPoint]) {
+        var origins: [CGPoint] = []
+        origins.reserveCapacity(subviews.count)
+        var x: CGFloat = 0, y: CGFloat = 0, lineHeight: CGFloat = 0, width: CGFloat = 0
+        for sub in subviews {
+            let size = sub.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += lineHeight + lineSpacing
+                lineHeight = 0
+            }
+            origins.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+            width = max(width, x - spacing)
+        }
+        return (CGSize(width: width, height: y + lineHeight), origins)
+    }
+}

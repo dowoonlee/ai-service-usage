@@ -97,7 +97,12 @@ final class ScenePreviews: SandboxedTestCase {
     }
 
     func testRenderReportTab() throws {
-        try renderTab(ReportView(), title: "탭-4-레포트", note: "트레이너 카드 + 꾸미기 상점")
+        try renderTab(ReportView(), title: "탭-4-레포트", note: "트레이너 카드 + 리포트 모드(이번 달 잔디)")
+    }
+
+    func testRenderReportCustomizeMode() throws {
+        try renderTab(ReportView(initialMode: .customize), title: "탭-4-레포트-꾸미기",
+                      note: "꾸미기 모드 — 칭호 세 묶음 그리드·액세서리 줄바꿈이 잘리지 않는지")
     }
 
     func testRenderArenaTab() throws {
