@@ -530,7 +530,7 @@ struct ReportView: View {
                                 : (acc?.season != nil ? SeasonBadge.color : Color.clear), lineWidth: isSelected ? 2 : 1)
                 )
                 .overlay(alignment: .topLeading) {
-                    if acc?.season != nil { SeasonBadge() }
+                    if acc?.season != nil { SeasonBadge().offset(x: 5, y: 5) }
                 }
                 Text(acc?.displayName ?? "없음")
                     .font(.system(size: 8))
