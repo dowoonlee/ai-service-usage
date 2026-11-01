@@ -1383,14 +1383,19 @@ enum PetSprite {
         let idx = frameIndex % f.count
         let key = "\(kind.rawValue)/\(action)/\(idx)" as NSString
         if let cached = anchorCache.object(forKey: key) { return cached.anchor }
-        let anchor = scanHeadAnchor(f[idx])
+        let anchor = scanHeadAnchor(f[idx], facesLeft: kind.defaultFacingLeft)
         anchorCache.setObject(AnchorBox(anchor), forKey: key)
         return anchor
     }
 
     /// 가장 위 불투명 행을 찾고, 그 행부터 셀 높이의 1/6 구간에 있는 불투명 픽셀의 x 평균을 머리 중심으로 본다.
     /// (몸통 전체 평균을 쓰면 꼬리·날개가 중심을 끌어가 모자가 등에 얹힌다.)
-    static func scanHeadAnchor(_ image: NSImage, alphaThreshold: UInt8 = 64) -> HeadAnchor? {
+    ///
+    /// 옆모습인데 **등이 머리보다 높은** 종(곰·멧돼지)은 전체 꼭대기가 등이라 모자가 등에 얹혔다(검수 시트).
+    /// 그래서 **가로로 긴(폭 > 높이×1.3) 옆모습**에 한해 바라보는 방향 앞쪽 30% 폭의 꼭대기를 따로 재고,
+    /// 그게 전체 꼭대기보다 셀 높이의 12% 이상 낮으면 앞쪽을 머리로 본다. 세로로 긴 정면 캐릭터·로봇은
+    /// 앞쪽 구간이 팔이나 어깨라 이 규칙을 끄고 기존 중심 규칙을 쓴다(miniBot이 어깨에 쓰는 사고).
+    static func scanHeadAnchor(_ image: NSImage, facesLeft: Bool = false, alphaThreshold: UInt8 = 64) -> HeadAnchor? {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let w = cg.width, h = cg.height
         guard w > 0, h > 0 else { return nil }
@@ -1407,12 +1412,36 @@ enum PetSprite {
         }
         guard let top = topRow else { return nil }
         let band = Swift.max(2, h / 6)
-        var sumX = 0, n = 0
-        for y in top..<Swift.min(h, top + band) {
-            for x in 0..<w where alpha(x, y) >= alphaThreshold { sumX += x; n += 1 }
+        func centroid(top: Int, xRange: Range<Int>) -> HeadAnchor? {
+            var sumX = 0, n = 0
+            for y in top..<Swift.min(h, top + band) {
+                for x in xRange where alpha(x, y) >= alphaThreshold { sumX += x; n += 1 }
+            }
+            guard n > 0 else { return nil }
+            return HeadAnchor(x: (CGFloat(sumX) / CGFloat(n) + 0.5) / CGFloat(w), top: CGFloat(top) / CGFloat(h))
         }
-        guard n > 0 else { return nil }
-        return HeadAnchor(x: (CGFloat(sumX) / CGFloat(n) + 0.5) / CGFloat(w), top: CGFloat(top) / CGFloat(h))
+        // 불투명 영역의 가로·세로 범위 → 가로로 긴 옆모습만 앞쪽 규칙.
+        var minX = w, maxX = -1, bottom = top
+        for y in 0..<h {
+            for x in 0..<w where alpha(x, y) >= alphaThreshold {
+                minX = Swift.min(minX, x); maxX = Swift.max(maxX, x); bottom = y
+            }
+        }
+        guard maxX >= minX else { return nil }
+        let span = maxX - minX + 1
+        let tall = bottom - top + 1
+        guard Double(span) > Double(tall) * 1.3 else { return centroid(top: top, xRange: 0..<w) }
+        let frontW = Swift.max(1, Int((Double(span) * 0.30).rounded()))
+        let front: Range<Int> = facesLeft ? minX..<(minX + frontW) : (maxX - frontW + 1)..<(maxX + 1)
+        var frontTop: Int? = nil
+        outerFront: for y in 0..<h {
+            for x in front where alpha(x, y) >= alphaThreshold { frontTop = y; break outerFront }
+        }
+        if let ft = frontTop, ft - top >= Swift.max(2, Int(Double(h) * 0.12)),
+           let a = centroid(top: ft, xRange: front) {
+            return a
+        }
+        return centroid(top: top, xRange: 0..<w)
     }
 
     /// 단일 PNG 로딩 (sprite strip이 아닌 일반 이미지 — 예: 가챠 알). 캐시됨.
