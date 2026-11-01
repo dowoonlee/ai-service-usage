@@ -152,6 +152,26 @@ final class PetSpritePreviews: SandboxedTestCase {
         return out
     }
 
+    /// 북극 원정대 — 시즌 보스 팀 5종의 원본 ↔ snow 스킨(+모자). 리컬러 품질은 기계로 못 잡는다:
+    /// 흰색에서 형체가 뭉개지는 종은 픽셀을 손보지 말고 다른 common 펫으로 교체한다(§25).
+    func testRenderSeasonBossSkins() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        guard let boss = SeasonRegistry.season(.xmas)?.boss else { throw XCTSkip("xmas 보스 없음") }
+        let rows: [(label: String, images: [NSImage])] = ([boss.lead] + boss.supports).map { sp in
+            var imgs: [NSImage] = []
+            for action in [PetController.Action.sit, .walk, .run] {
+                if let orig = PetSprite.image(for: sp.kind, action: action, frameIndex: 0) { imgs.append(orig) }
+                if let skinned = PetSprite.composedImage(for: sp.kind, action: action, frameIndex: 0,
+                                                         skin: sp.skin, headwear: sp.headwear) { imgs.append(skinned) }
+            }
+            return ("\(sp.displayName ?? sp.kind.rawValue) (\(sp.kind.rawValue))", imgs)
+        }
+        let sheet = PreviewRenderer.contactSheet(rows: rows, cell: CGSize(width: 64, height: 64), labelWidth: 190)
+        try PreviewRenderer.writeImage(
+            sheet, section: "펫 스프라이트", title: "0-season-boss-skins",
+            note: "열마다 원본/스킨 쌍(sit·walk·run). snow 리컬러가 외곽선을 살린 채 흰색으로 읽히는지, 모자 위치.")
+    }
+
     /// Mythic 5종의 특수 모션. 일반 펫엔 없는 strip이라 셀 크기가 종마다 제각각이고,
     /// 실제로 프레임 수가 어긋난 채 커밋된 적이 있어 따로 크게 본다.
     func testRenderMythicSpecialMotions() throws {

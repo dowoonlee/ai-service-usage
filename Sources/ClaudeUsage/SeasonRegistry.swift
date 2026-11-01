@@ -33,7 +33,32 @@ enum SeasonRegistry {
             ],
             officeWindowParticles: true,
             grassDecoration: .snow,
-            rewardDays: 1...24
+            rewardDays: 1...24,
+            boss: SeasonalBoss(
+                lead: SkinnedPet(kind: .deer, skin: nil, headwear: "santa_hat", displayName: "Rudolph"),
+                supports: [
+                    SkinnedPet(kind: .bear, skin: .snow, displayName: "북극곰"),
+                    SkinnedPet(kind: .fox, skin: .snow, displayName: "북극여우"),
+                    SkinnedPet(kind: .wolf, skin: .snow, displayName: "흰늑대"),
+                    SkinnedPet(kind: .orchidOwl, skin: .snow, displayName: "흰올빼미"),
+                ],
+                name: "Rudolph", title: "배송 라우팅 관장",
+                dialogues: [
+                    "배송 큐가 비었군. 아직 아무것도 안 쓴 건가.",
+                    "패킷이 들어오기 시작했다. 경로는 내가 잡지.",
+                    "절반 넘겼군. 썰매도 이 정도면 autoscale 된다.",
+                    "...눈길에서도 배포가 되는군. 인정.",
+                ],
+                tierThresholds: [.localhost: 0, .dev: 6, .staging: 12, .production: 18],
+                // 지역 관장(50/150/500/1500)의 10~20배 — 사용자 결정(§26). 시즌당 1회, production은 18일 참여 뒤.
+                rewards: [
+                    .localhost: BossReward(coins: 1_000),
+                    .dev: BossReward(coins: 3_000),
+                    .staging: BossReward(coins: 6_000),
+                    .production: BossReward(coins: 15_000, premiumTickets: 1),
+                ],
+                titleReward: .snowDeployer
+            )
         ),
         Season(
             kind: .newYear, displayName: "연말연시",
@@ -54,7 +79,8 @@ enum SeasonRegistry {
             ],
             officeWindowParticles: true,
             grassDecoration: .snow,
-            rewardDays: nil
+            rewardDays: nil,
+            boss: nil
         ),
     ]
 

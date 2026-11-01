@@ -252,6 +252,7 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     case codedOnChristmas          // 자동: 12/25 사용 이벤트 1건 (seasonalFlags "codedOn:<yyyy>-12-25")
     case freezeViolator            // 코인 1,500 (12월 한정 노출)
     case decemberFinisher          // 자동: 12월 일일 보상 20/24 수령 (claimedGrants "advent-<yyyy>-12-DD" ≥ 20)
+    case snowDeployer              // 자동: 겨울 관장 production 격파 (seasonalFlags "boss:xmas-<yyyy>:production")
 
     var displayName: String {
         switch self {
@@ -316,6 +317,7 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .codedOnChristmas:      return "크리스마스에도 코딩함"
         case .freezeViolator:        return "연말 배포 freeze 위반"
         case .decemberFinisher:      return "12월 완주"
+        case .snowDeployer:          return "눈길 배포 성공"
         }
     }
 
@@ -377,6 +379,7 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .codedOnChristmas:      return "12월 25일에 AI 사용 기록이 있으면"
         case .freezeViolator:        return "1,500 coin · 12월 한정 · 그래도 배포함"
         case .decemberFinisher:      return "12월 1~24일 중 20일 이상 보상 수령"
+        case .snowDeployer:          return "겨울 관장 production 격파"
         }
     }
 
@@ -399,7 +402,7 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     /// 시즌 한정 칭호 — 자동 해금이든 구매든 "12월에만 상점/목록에 보임". 해금된 뒤엔 영구.
     var season: Season.Kind? {
         switch self {
-        case .codedOnChristmas, .freezeViolator, .decemberFinisher: return .xmas
+        case .codedOnChristmas, .freezeViolator, .decemberFinisher, .snowDeployer: return .xmas
         default: return nil
         }
     }
@@ -501,6 +504,9 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
             set.insert(.codedOnChristmas)
         }
         if hasDecemberFinish(claimedGrants: s.claimedGrants) { set.insert(.decemberFinisher) }
+        if s.seasonalFlags.contains(where: { $0.hasPrefix("boss:xmas-") && $0.hasSuffix(":production") }) {
+            set.insert(.snowDeployer)
+        }
 
         // ── 코인 구매 칭호 (인벤토리에서 합산) ──
         for raw in s.ownedTitles {

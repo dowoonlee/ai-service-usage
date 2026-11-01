@@ -1264,6 +1264,69 @@ enum PetSprite {
         return f[frameIndex % f.count]
     }
 
+    // MARK: - 스킨 (시즌 보스 리컬러) + 머리 장식 합성
+
+    nonisolated(unsafe) private static let skinCache = NSCache<NSString, NSImage>()
+    nonisolated(unsafe) private static let skinContext = CIContext(options: nil)
+
+    /// 스킨을 입힌 프레임. `skin == nil`이면 원본. (kind, action, frame, skin) 캐시.
+    static func image(for kind: PetKind, action: PetController.Action, frameIndex: Int, skin: PetSkin?) -> NSImage? {
+        guard let skin else { return image(for: kind, action: action, frameIndex: frameIndex) }
+        let f = frames(for: kind, action: action)
+        guard !f.isEmpty else { return nil }
+        let idx = frameIndex % f.count
+        let key = "\(kind.rawValue)/\(action)/\(idx)/skin:\(skin.rawValue)" as NSString
+        if let cached = skinCache.object(forKey: key) { return cached }
+        let out = applySkin(f[idx], skin)
+        skinCache.setObject(out, forKey: key)
+        return out
+    }
+
+    /// 리컬러 필터. 외곽선(어두운 픽셀)은 어둡게 남아 도트 느낌이 유지된다.
+    static func applySkin(_ image: NSImage, _ skin: PetSkin) -> NSImage {
+        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+              let cg = bitmap.cgImage else { return image }
+        var ci = CIImage(cgImage: cg)
+        switch skin {
+        case .snow:
+            // 단색화 뒤 대비를 올려 어두운 외곽선·눈을 남기고, 밝기는 조금만 — 많이 올리면 형체가 뭉개진다(프리뷰 1차).
+            ci = ci.applyingFilter("CIColorMonochrome", parameters: [
+                kCIInputColorKey: CIColor(red: 0.84, green: 0.90, blue: 1.0),
+                kCIInputIntensityKey: 0.9,
+            ])
+            .applyingFilter("CIColorControls", parameters: [
+                kCIInputBrightnessKey: 0.05, kCIInputContrastKey: 1.35,
+            ])
+        }
+        guard let out = skinContext.createCGImage(ci, from: ci.extent) else { return image }
+        return NSImage(cgImage: out, size: image.size)
+    }
+
+    /// 스킨 + 머리 장식을 한 장에 합성(위로 모자 높이만큼 여유). 도장 카드·배틀 시트·재생 썸네일 공용.
+    /// WalkingCat·메뉴바와 같은 배치식(높이 42%, 상단이 머리 위로 20% 넘침).
+    static func composedImage(for kind: PetKind, action: PetController.Action, frameIndex: Int,
+                              skin: PetSkin?, headwear: String?) -> NSImage? {
+        guard let frame = image(for: kind, action: action, frameIndex: frameIndex, skin: skin) else { return nil }
+        guard let headwear, let hat = image(named: headwear),
+              let anchor = headAnchor(for: kind, action: action, frameIndex: frameIndex) else { return frame }
+        let key = "\(kind.rawValue)/\(action)/\(frameIndex % max(1, frames(for: kind, action: action).count))/skin:\(skin?.rawValue ?? "-")/hat:\(headwear)" as NSString
+        if let cached = skinCache.object(forKey: key) { return cached }
+        let w = frame.size.width, h = frame.size.height
+        let hatH = h * 0.42
+        let hatW = hatH * (hat.size.width / max(1, hat.size.height))
+        let out = NSImage(size: NSSize(width: w, height: h + hatH))
+        out.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .none
+        frame.draw(in: NSRect(x: 0, y: 0, width: w, height: h), from: .zero, operation: .sourceOver, fraction: 1)
+        let cx = anchor.x * w
+        let headTop = h - anchor.top * h
+        hat.draw(in: NSRect(x: cx - hatW / 2, y: headTop - hatH * 0.20, width: hatW, height: hatH),
+                 from: .zero, operation: .sourceOver, fraction: 1)
+        out.unlockFocus()
+        skinCache.setObject(out, forKey: key)
+        return out
+    }
+
     // MARK: - 머리 앵커 (시즌 headwear)
 
     /// 프레임 안에서 "머리"의 위치 — 셀 기준 정규화(0...1). `x`는 머리 x 중심, `top`은 가장 위 불투명 행.

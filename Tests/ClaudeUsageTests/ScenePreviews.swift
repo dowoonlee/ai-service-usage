@@ -111,6 +111,10 @@ final class ScenePreviews: SandboxedTestCase {
         try renderTab(ReportView(grassNow: PreviewDemoState.xmasNow), title: "탭-4-레포트-12월",
                       note: "12/18 고정. 불 켜진 셀 위 눈, 수령일 붉은 점, 18일 점선(도착 대기), 일요일 빈 칸")
         try renderTab(PartyView(), title: "탭-2-파티-12월", note: "맵 상점에 겨울밤(한정) 카드가 보이는지")
+        // 도장 탭 — 지역 선택기 위 겨울 관장 카드. 보상 15일이라 staging까지 열림, localhost는 격파 상태.
+        Settings.shared.seasonalFlags.insert("boss:xmas-2026:localhost")
+        try renderTab(GymView(), title: "탭-3-도장-12월",
+                      note: "겨울 관장 카드 — Rudolph(사슴+모자), 대사 3단계, tier 버튼(격파/열림/잠김)")
         try renderTab(ReportView(initialMode: .customize, grassNow: PreviewDemoState.grassNow),
                       title: "탭-4-레포트-꾸미기-12월",
                       note: "액세서리 11종(한정 3종 뱃지)·칭호 구매 가능 묶음에 12월 한정이 붉은 테두리로")

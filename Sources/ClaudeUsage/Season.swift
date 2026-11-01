@@ -140,6 +140,44 @@ enum GrassDecoration: Equatable {
     case snow
 }
 
+/// 이벤트 전용 런타임 리컬러. 새 PNG를 그리지 않는다 — 이로치가 hueRotation으로 틴트하듯 CoreImage 필터.
+/// (cf. docs/plans/seasonal-events.md §25) `BattlePetSnapshot`에는 넣지 않는다(서버 파리티·HMAC 페이로드).
+enum PetSkin: String, Equatable {
+    /// 청백 단색화 + 밝기 보정 — 흰색으로 바꾸면 그대로 북극 동물이 된다.
+    case snow
+}
+
+/// 스킨·머리 장식을 입힌 펫 — 보스 팀 구성원. 렌더 전용(`kind`만 배틀에 간다).
+struct SkinnedPet: Equatable {
+    let kind: PetKind
+    var skin: PetSkin? = nil
+    var headwear: String? = nil
+    /// 표시명 덮어쓰기(북극곰 등). nil이면 종 이름.
+    var displayName: String? = nil
+}
+
+/// 보스 tier 격파 보상. 로컬 재화만 — 보스 배틀이 완전 로컬이라 서버 grant currency 제약을 받지 않는다.
+struct BossReward: Equatable {
+    let coins: Int
+    var premiumTickets: Int = 0
+}
+
+/// 뱃지·지역과 무관한 시즌 보스 (cf. §24). 팀 생성은 지역 관장과 같은 EP 솔버(`GymLeader.team(lead:supports:tier:)`).
+struct SeasonalBoss: Equatable {
+    let lead: SkinnedPet
+    /// 서포터 4 — 전부 common(EP 밴드). 리컬러 결과가 뭉개지는 종은 프리뷰 보고 교체.
+    let supports: [SkinnedPet]
+    let name: String
+    let title: String
+    /// 4단계 — 3번 보상 진행도(일)에 연동: 0 / 1~5 / 6+ / production 격파.
+    let dialogues: [String]
+    /// tier 오픈에 필요한 보상 일수(3번 `claimedGrants` 접두 행 수).
+    let tierThresholds: [BadgeTier: Int]
+    let rewards: [BadgeTier: BossReward]
+    /// production 격파 칭호.
+    let titleReward: CardTitle?
+}
+
 /// 시즌 하나의 정의. 데이터만 들고 있고 로직은 없다.
 struct Season: Identifiable, Equatable {
     /// case 삭제 금지 — 저장된 rawValue가 깨진다. 폐지는 `SeasonRegistry.all`에서만 뺀다.
@@ -163,6 +201,9 @@ struct Season: Identifiable, Equatable {
     let grassDecoration: GrassDecoration?
     /// 서버 일일 보상 구간(일). nil이면 보상 없음. grant_key는 `advent-<instanceYear>-<MM>-<DD>`.
     let rewardDays: ClosedRange<Int>?
+
+    // ── 4번: 겨울 관장 ──
+    let boss: SeasonalBoss?
 
     var id: String { kind.rawValue }
 

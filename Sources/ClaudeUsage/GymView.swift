@@ -24,6 +24,9 @@ struct GymView: View {
         ScrollView {
             VStack(spacing: 12) {
                 header
+                if let season = SeasonRegistry.active(), let boss = season.boss {
+                    seasonBossSection(season: season, boss: boss)
+                }
                 WorldMapView(selected: $selectedRegion)
                     .frame(height: 220)
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
@@ -43,7 +46,7 @@ struct GymView: View {
             }
         }
         .sheet(item: $activeBattle) { req in
-            GymBattleView(region: req.region, tier: req.tier)
+            GymBattleView(opponent: req.opponent)
         }
     }
 
@@ -580,9 +583,104 @@ struct BadgeTierTooltip: View {
 
 /// 관장 배틀 sheet 트리거 — region + 도전 tier. id는 조합 키(같은 조합이면 동일 sheet).
 struct GymBattleRequest: Identifiable {
-    let region: BadgeRegion
-    let tier: BadgeTier
-    var id: String { "\(region.rawValue).\(tier.rawValue)" }
+    let opponent: GymOpponent
+    var id: String { opponent.id }
+    init(opponent: GymOpponent) { self.opponent = opponent }
+    init(region: BadgeRegion, tier: BadgeTier) { self.opponent = .region(region, tier) }
+}
+
+// MARK: - 시즌 보스 카드
+
+extension GymView {
+    /// 지역 선택기 위 시즌 카드 — 스프라이트(스킨+모자) + 말풍선 + tier 버튼 4개. tier는 3번 보상 일수로 열린다.
+    /// 월드맵에는 넣지 않는다(지형 데이터 편집이 비용 대비 과함). cf. docs/plans/seasonal-events.md §26
+    @ViewBuilder
+    func seasonBossSection(season: Season, boss: SeasonalBoss) -> some View {
+        let now = Date()
+        let days = SeasonalBoss.rewardDayCount(season: season, claimedGrants: settings.claimedGrants, now: now)
+        let productionCleared = boss.isCleared(tier: .production, season: season, now: now, settings: settings)
+        let stage = SeasonalBoss.stage(rewardDays: days, productionCleared: productionCleared)
+        let open = boss.openTiers(rewardDays: days)
+        VStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                ZStack {
+                    if let img = PetSprite.composedImage(for: boss.lead.kind, action: .scan, frameIndex: 0,
+                                                         skin: boss.lead.skin, headwear: boss.lead.headwear) {
+                        Image(nsImage: img)
+                            .resizable().interpolation(.none).scaledToFit()
+                            .frame(width: 52, height: 52)
+                            .scaleEffect(x: boss.lead.kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    }
+                }
+                .frame(width: 64, height: 64)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "snowflake").font(.system(size: 9)).foregroundStyle(.cyan)
+                        Text("\(season.displayName) 관장 · \(boss.name)")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(boss.title)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        if productionCleared {
+                            Text("VICTORY").font(.system(size: 9, weight: .bold)).foregroundStyle(.yellow)
+                        }
+                    }
+                    Text(boss.dialogue(stage: stage))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.black)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 16).padding(.trailing, 10).padding(.vertical, 6)
+                        .background(SpeechBubble(tailWidth: 8, tailHeight: 6, cornerRadius: AppRadius.lg).fill(Color.white))
+                        .overlay(SpeechBubble(tailWidth: 8, tailHeight: 6, cornerRadius: AppRadius.lg)
+                            .stroke(Color.black.opacity(0.4), lineWidth: 0.8))
+                }
+            }
+            HStack(spacing: 6) {
+                ForEach(BadgeTier.allCases, id: \.self) { tier in
+                    bossTierButton(season: season, boss: boss, tier: tier,
+                                   isOpen: open.contains(tier),
+                                   cleared: boss.isCleared(tier: tier, season: season, now: now, settings: settings))
+                }
+            }
+            Text("보상 \(days)/\(season.rewardDays?.count ?? 0)일 · 리포트 탭의 12월 보상을 받을수록 높은 tier가 열립니다. 보상은 tier당 1회.")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.lg)
+                .fill(Color(hue: 0.64, saturation: 0.45, brightness: 0.22).opacity(0.35))
+        )
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.lg).stroke(Color.cyan.opacity(0.35), lineWidth: 0.8))
+    }
+
+    private func bossTierButton(season: Season, boss: SeasonalBoss, tier: BadgeTier,
+                                isOpen: Bool, cleared: Bool) -> some View {
+        let reward = boss.rewards[tier]
+        let threshold = boss.tierThresholds[tier] ?? 0
+        return Button {
+            activeBattle = GymBattleRequest(opponent: .boss(season, boss, tier))
+        } label: {
+            VStack(spacing: 2) {
+                HStack(spacing: 3) {
+                    Image(systemName: cleared ? "checkmark.seal.fill" : (isOpen ? "flame.fill" : "lock.fill"))
+                        .font(.system(size: 9))
+                    Text(tier.displayName).font(.system(size: 10, weight: .bold))
+                }
+                Text(isOpen
+                     ? (cleared ? "격파" : "🪙\(reward?.coins.formatted() ?? "0")" + ((reward?.premiumTickets ?? 0) > 0 ? " +가챠권" : ""))
+                     : "보상 \(threshold)일")
+                    .font(.system(size: 8, design: .monospaced))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(cleared ? .green : Self.strokeColor(for: tier))
+        .disabled(!isOpen)
+    }
 }
 
 // MARK: - Color hex helper
