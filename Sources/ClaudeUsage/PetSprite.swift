@@ -1375,9 +1375,19 @@ enum PetSprite {
     private final class AnchorBox { let anchor: HeadAnchor?; init(_ a: HeadAnchor?) { anchor = a } }
     nonisolated(unsafe) private static let anchorCache = NSCache<NSString, AnchorBox>()
 
+    /// 알파 스캔으로는 못 잡는 종의 수동 앵커(셀 정규화, 반전 전). 날개·잎이 머리보다 높은 종 — 검수 시트에서
+    /// 사용자가 지목한 것만 넣는다. `headwearLayout`의 전진 10%가 더해지므로, 원하는 중심에서 바라보는 방향의
+    /// **반대쪽으로 0.10** 적어 둔다(박쥐·파랑새·무는 전부 왼쪽을 봄 → +0.10).
+    nonisolated static let headAnchorOverrides: [PetKind: HeadAnchor] = [
+        .bat:      HeadAnchor(x: 0.60, top: 0.13),   // 머리 x 0.50 — 날개 끝이 더 높아 자동 규칙이 날개를 잡는다
+        .blueBird: HeadAnchor(x: 0.79, top: 0.28),   // 머리 x 0.69 — 부리가 앞으로 길어 중심이 부리로 쏠린다
+        .radish:   HeadAnchor(x: 0.60, top: 0.32),   // 몸통 꼭대기 — 잎 끝(0.13)에 얹으면 공중에 뜬다
+    ]
+
     /// (kind, action, frameIndex)별 캐시. 알파 스캔은 첫 1회뿐이라 30Hz 메뉴바에서도 비용이 없다.
-    /// 전부 투명한 프레임(없어야 하지만)은 nil.
+    /// 전부 투명한 프레임(없어야 하지만)은 nil. 수동 앵커가 있으면 프레임과 무관하게 그 값.
     static func headAnchor(for kind: PetKind, action: PetController.Action, frameIndex: Int) -> HeadAnchor? {
+        if let fixed = headAnchorOverrides[kind] { return fixed }
         let f = frames(for: kind, action: action)
         guard !f.isEmpty else { return nil }
         let idx = frameIndex % f.count
