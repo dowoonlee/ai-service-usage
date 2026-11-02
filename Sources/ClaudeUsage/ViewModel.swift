@@ -342,9 +342,11 @@ final class ViewModel: ObservableObject {
             return
         }
 
+        // 5h가 없는 계정(인증된 Ultra)은 주간 창의 증가분으로 활동을 본다 — 5h만 보면 영원히 안 뜬다.
+        let window = ClaudePrimaryWindow.resolve(recent.last)
         var hadActivity = false
         for i in 1..<recent.count {
-            guard let curr = recent[i].fiveHourPct, let prev = recent[i - 1].fiveHourPct else { continue }
+            guard let curr = window.pct(from: recent[i]), let prev = window.pct(from: recent[i - 1]) else { continue }
             if curr - prev > 0.1 { hadActivity = true; break }
         }
         guard hadActivity else { return }
@@ -1414,25 +1416,74 @@ final class ViewModel: ObservableObject {
         return dedupAdjacentByTime(filtered)
     }
 
-    /// Claude 5h 차트/펫용 시계열.
-    nonisolated static func claudeFiveHourSeries(_ history: [UsageSnapshot]) -> [(Date, Double)] {
-        currentWindowSeries(history, takenAt: \.takenAt,
-                            pct: \.fiveHourPct, resetAt: \.fiveHourResetAt)
+    // Claude 대표 창 — 우선순위 5h > 주간(7d). 2026-10-30부터 인증된 Ultra 계정은 `/usage`에
+    // `five_hour`가 `null`로 와서(주간 한도만 남음) 5h만 보던 큰 숫자·스파크라인·펫·메뉴바가
+    // 통째로 비었다. `CodexPrimaryWindow`와 같은 구조로, 창 종류별 분기는 이 enum 안에만 둔다.
+    enum ClaudePrimaryWindow {
+        case fiveHour, weekly, none
+
+        static func resolve(_ snapshot: UsageSnapshot?) -> ClaudePrimaryWindow {
+            guard let s = snapshot else { return .none }
+            if s.fiveHourPct != nil { return .fiveHour }
+            if s.sevenDayPct != nil { return .weekly }
+            return .none
+        }
+
+        func pct(from s: UsageSnapshot) -> Double? {
+            switch self {
+            case .fiveHour: return s.fiveHourPct
+            case .weekly:   return s.sevenDayPct
+            case .none:     return nil
+            }
+        }
+
+        func resetAt(from s: UsageSnapshot) -> Date? {
+            switch self {
+            case .fiveHour: return s.fiveHourResetAt
+            case .weekly:   return s.sevenDayResetAt
+            case .none:     return nil
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .fiveHour: return "5시간 창"
+            case .weekly, .none: return "주간"
+            }
+        }
+
+        var periodLength: TimeInterval {
+            switch self {
+            case .fiveHour: return 5 * 3600
+            case .weekly, .none: return 7 * 86400
+            }
+        }
     }
 
-    var claude5hProjectedPct: Double? {
-        ViewModel.projectedPct(
-            current: claudeCurrent?.fiveHourPct,
-            resetAt: claudeCurrent?.fiveHourResetAt,
-            periodLength: 5 * 3600, now: now
-        )
+    var claudePrimaryWindow: ClaudePrimaryWindow { .resolve(claudeCurrent) }
+    var claudeUsesFiveHour: Bool { claudePrimaryWindow == .fiveHour }
+    var claudePrimaryPct: Double? { claudeCurrent.flatMap { claudePrimaryWindow.pct(from: $0) } }
+    var claudePrimaryResetAt: Date? { claudeCurrent.flatMap { claudePrimaryWindow.resetAt(from: $0) } }
+    var claudePrimaryLabel: String { claudePrimaryWindow.label }
+    var claudePrimaryPeriodLength: TimeInterval { claudePrimaryWindow.periodLength }
+
+    /// Claude 대표 창 차트/펫용 시계열 — 대표 창은 **가장 최근 스냅샷** 기준으로 정하고 그 창의
+    /// 현재 리셋 주기에 속하는 점만 뽑는다(만료 창이 섞이면 펫이 빈 구간을 가로질러 걷는다).
+    nonisolated static func claudePrimarySeries(_ history: [UsageSnapshot]) -> [(Date, Double)] {
+        guard let last = history.last else { return [] }
+        let kind = ClaudePrimaryWindow.resolve(last)
+        return currentWindowSeries(history, takenAt: \.takenAt,
+                                   pct: { kind.pct(from: $0) },
+                                   resetAt: { kind.resetAt(from: $0) })
     }
-    var claude5hExhaustionAt: Date? {
-        ViewModel.projectedExhaustionDate(
-            current: claudeCurrent?.fiveHourPct,
-            resetAt: claudeCurrent?.fiveHourResetAt,
-            periodLength: 5 * 3600, now: now
-        )
+
+    var claudePrimaryProjectedPct: Double? {
+        ViewModel.projectedPct(current: claudePrimaryPct, resetAt: claudePrimaryResetAt,
+                               periodLength: claudePrimaryPeriodLength, now: now)
+    }
+    var claudePrimaryExhaustionAt: Date? {
+        ViewModel.projectedExhaustionDate(current: claudePrimaryPct, resetAt: claudePrimaryResetAt,
+                                          periodLength: claudePrimaryPeriodLength, now: now)
     }
     var claude7dProjectedPct: Double? {
         ViewModel.projectedPct(

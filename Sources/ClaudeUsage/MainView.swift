@@ -625,7 +625,7 @@ struct ClaudeSection: View {
                 if vm.claudeNeedsLogin {
                     loginPrompt
                 } else {
-                    body5h
+                    usageBody
                     sparkline
                     footer
                 }
@@ -647,9 +647,11 @@ struct ClaudeSection: View {
 
     private var summary: String {
         if vm.claudeNeedsLogin { return "로그인 필요" }
-        let a = SectionFormat.pct(vm.claudeCurrent?.fiveHourPct)
-        let b = SectionFormat.pct(vm.claudeCurrent?.sevenDayPct)
-        return "5h \(a) · 주간 \(b)"
+        let weekly = "주간 \(SectionFormat.pct(vm.claudeCurrent?.sevenDayPct))"
+        // 5h가 없는 계정(인증된 Ultra)은 "5h —"를 보여줄 이유가 없다.
+        return vm.claudeUsesFiveHour
+            ? "5h \(SectionFormat.pct(vm.claudeCurrent?.fiveHourPct)) · \(weekly)"
+            : weekly
     }
 
     private var collapsedPct: Double? {
@@ -674,36 +676,44 @@ struct ClaudeSection: View {
         }
     }
 
-    private var body5h: some View {
+    /// 대표 창(5h, 없으면 주간)을 큰 숫자로. 인증된 Ultra는 5h 창이 없어 주간이 대표가 된다.
+    private var usageBody: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .lastTextBaseline, spacing: 6) {
-                Text(SectionFormat.pct(vm.claudeCurrent?.fiveHourPct))
+                Text(SectionFormat.pct(vm.claudePrimaryPct))
                     .font(.system(size: 24, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                Text("5시간 창")
+                Text(vm.claudePrimaryLabel)
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                 Spacer()
-                if let reset = vm.claudeCurrent?.fiveHourResetAt {
+                if let reset = vm.claudePrimaryResetAt {
                     ResetBadge(reset: reset, now: vm.now)
                 }
             }
-            ProgressView(value: (vm.claudeCurrent?.fiveHourPct ?? 0) / 100)
+            ProgressView(value: min(1, (vm.claudePrimaryPct ?? 0) / 100))
                 .progressViewStyle(.linear)
-                .tint(SectionFormat.barColor(vm.claudeCurrent?.fiveHourPct))
+                .tint(SectionFormat.barColor(vm.claudePrimaryPct))
             if settings.showPace {
-                PaceLine(projected: vm.claude5hProjectedPct, exhaustionAt: vm.claude5hExhaustionAt, now: vm.now)
+                PaceLine(projected: vm.claudePrimaryProjectedPct, exhaustionAt: vm.claudePrimaryExhaustionAt, now: vm.now)
             }
             HStack(alignment: .top, spacing: 12) {
-                smallStat("주간", vm.claudeCurrent?.sevenDayPct)
-                if settings.showPace,
-                   let _ = vm.claude7dProjectedPct {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("주간 페이스")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                        PaceLine(projected: vm.claude7dProjectedPct, exhaustionAt: vm.claude7dExhaustionAt, now: vm.now)
+                // 보조 창 — 5h가 대표일 때만 주간을 따로 보여준다(주간이 대표면 위 큰 숫자와 중복).
+                if vm.claudeUsesFiveHour {
+                    smallStat("주간", vm.claudeCurrent?.sevenDayPct)
+                    if settings.showPace,
+                       let _ = vm.claude7dProjectedPct {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("주간 페이스")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                            PaceLine(projected: vm.claude7dProjectedPct, exhaustionAt: vm.claude7dExhaustionAt, now: vm.now)
+                        }
                     }
+                }
+                // 모델 한정 주간 한도(Fable 등) — 전체 주간과 별개로 먼저 차는 한도라 항상 노출.
+                if let scoped = vm.claudeCurrent?.scopedWeeklyPct {
+                    smallStat("\(vm.claudeCurrent?.scopedWeeklyLabel ?? "모델") 주간", scoped)
                 }
             }
         }
@@ -715,10 +725,10 @@ struct ClaudeSection: View {
 
     private var sparkline: some View {
         Group {
-            // 현재 5h 창에 속하는 점만 — 이전(만료) 창이 섞이면 두 세션 사이
+            // 현재 대표 창(5h, 없으면 주간)에 속하는 점만 — 이전(만료) 창이 섞이면 두 세션 사이
             // 수시간 빈 구간을 가로지르는 대각선 + 색칠 튐이 생긴다. (ViewModel 헬퍼 참조)
-            // fiveHourPct=0/nil 도 여기서 함께 제외된다.
-            let validData: [(Date, Double)] = ViewModel.claudeFiveHourSeries(Array(vm.claudeHistory.suffix(48)))
+            // pct=0/nil 도 여기서 함께 제외된다.
+            let validData: [(Date, Double)] = ViewModel.claudePrimarySeries(Array(vm.claudeHistory.suffix(48)))
             if validData.count >= 2 {
                 let values = validData.map(\.1)
                 let dataMax = values.max() ?? 0
@@ -735,7 +745,7 @@ struct ClaudeSection: View {
                             y: .value("v", item.1)
                         )
                         .interpolationMethod(.linear)
-                        .foregroundStyle(claudeTheme.gradient(pct: vm.claudeCurrent?.fiveHourPct, threshold: petAnxietyAt))
+                        .foregroundStyle(claudeTheme.gradient(pct: vm.claudePrimaryPct, threshold: petAnxietyAt))
                         LineMark(
                             x: .value("t", item.0),
                             y: .value("v", item.1)
@@ -763,7 +773,7 @@ struct ClaudeSection: View {
                     points: validData,
                     party: settings.petClaudeParty,
                     equippedEffects: { settings.equippedEffects[$0] ?? [] },
-                    pct: vm.claudeCurrent?.fiveHourPct,
+                    pct: vm.claudePrimaryPct,
                     anxietyAt: petAnxietyAt,
                     bigDropThreshold: settings.bigDropThreshold,
                     weather: vm.weather,

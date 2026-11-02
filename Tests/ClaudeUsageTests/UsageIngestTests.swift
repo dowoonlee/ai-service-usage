@@ -25,6 +25,42 @@ final class UsageIngestTests: SandboxedTestCase {
             .claude(fiveHourPct: pct, fiveHourResetAt: resetAt ?? window, plan: plan))
     }
 
+    // MARK: - 7d 단독 스케일 (인증된 Ultra: five_hour=null)
+
+    // 5h가 함께 오면 7d 만점은 60 — 기존 동작 불변.
+    func testSevenDayWithFiveHourUsesSplitScale() {
+        let s = Settings.shared
+        s.coins = 0
+        let weekly = window.addingTimeInterval(7 * 86400)
+        UsageEventProducer.ingestClaude(.claude(fiveHourPct: 0, fiveHourResetAt: window,
+                                                sevenDayPct: 0, sevenDayResetAt: weekly))
+        UsageEventProducer.ingestClaude(.claude(fiveHourPct: 0, fiveHourResetAt: window,
+                                                sevenDayPct: 100, sevenDayResetAt: weekly))
+        XCTAssertEqual(s.coins, 60)
+    }
+
+    // 5h가 없으면 7d 하나가 한 달치를 대표한다 — 만점 1068(= 4578 × 7/30). 60으로 두면
+    // Ultra 사용자가 월 이론치의 5.6%만 받는다(Codex 2026-07 회귀와 동일).
+    func testSevenDayOnlyUsesMonthlyRepresentativeScale() {
+        let s = Settings.shared
+        s.coins = 0
+        let weekly = window.addingTimeInterval(7 * 86400)
+        UsageEventProducer.ingestClaude(.claude(sevenDayPct: 0, sevenDayResetAt: weekly))
+        UsageEventProducer.ingestClaude(.claude(sevenDayPct: 100, sevenDayResetAt: weekly))
+        XCTAssertEqual(s.coins, Int(CoinLedger.claudeSevenDayOnlyMaxCoin))
+        XCTAssertEqual(Int(CoinLedger.claudeSevenDayOnlyMaxCoin), 1068)
+    }
+
+    // 스케일은 plan 이름이 아니라 실제로 온 창 집합으로 정해진다.
+    func testSevenDayScaleFollowsWindowSetNotPlanName() {
+        XCTAssertEqual(UsageEventProducer.claudeSevenDayScale(.claude(sevenDayPct: 10, plan: "Ultra")),
+                       CoinLedger.claudeSevenDayOnlyMaxCoin)
+        XCTAssertEqual(UsageEventProducer.claudeSevenDayScale(.claude(fiveHourPct: 5, sevenDayPct: 10, plan: "Ultra")),
+                       CoinLedger.claudeSevenDayMaxCoin)
+        XCTAssertEqual(UsageEventProducer.claudeSevenDayScale(.claude(sevenDayPct: 10, plan: "Pro")),
+                       CoinLedger.claudeSevenDayOnlyMaxCoin)
+    }
+
     // MARK: - 베이스라인
 
     // 설치 직후 첫 폴에서 이미 80%를 쓰고 있어도 그 80%는 남의 사용량이다 — 적립하지 않는다.

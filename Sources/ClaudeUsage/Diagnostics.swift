@@ -101,6 +101,13 @@ enum DiagnosticsCLI {
             lines.append("파싱: ✅")
             lines.append("  5h 사용률: \(pct(snap.fiveHourPct))  (리셋 \(dateText(snap.fiveHourResetAt)))")
             lines.append("  7d 사용률: \(pct(snap.sevenDayPct))  (리셋 \(dateText(snap.sevenDayResetAt)))")
+            if let scoped = snap.scopedWeeklyPct {
+                lines.append("  \(snap.scopedWeeklyLabel ?? "모델") 주간: \(pct(scoped))  (리셋 \(dateText(snap.scopedWeeklyResetAt)))")
+            }
+            // 인증된 Ultra(구 Max 20x)는 2026-10-30부터 five_hour=null — 드리프트가 아니라 정상.
+            if us == 200, snap.fiveHourPct == nil, snap.sevenDayPct != nil {
+                lines.append("  ℹ️ 5h 창 없음 — 인증된 Ultra 계정은 주간 한도만 온다(코인은 7d 단독 스케일로 적립)")
+            }
             if snap.extraUsageEnabled == true {
                 lines.append("  추가 사용: 활성 \(pct(snap.extraUsageUtilPct))")
             } else {
