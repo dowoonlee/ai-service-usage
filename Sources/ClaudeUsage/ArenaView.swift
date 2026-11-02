@@ -814,7 +814,8 @@ struct ArenaView: View {
         let destroyed = enhancePhase == .result(.destroy)
         let safeAllowed = EnhanceEngine.canSafeEnhance(level: level)
         let useSafe = safeMode && safeAllowed
-        let oddsRow = useSafe ? EnhanceEngine.safeOdds(level: level, failStreak: 0) : EnhanceEngine.odds[level]
+        // 만렙(+15) 펫도 이 getter는 전부 평가된다 — 직접 인덱싱은 #268 크래시.
+        let oddsRow = useSafe ? EnhanceEngine.safeOdds(level: level, failStreak: 0) : EnhanceEngine.oddsRow(level: level)
         let baseCost = useSafe ? EnhanceEngine.safeCost(level: level, rarity: rarity)
                                : EnhanceEngine.cost(level: level, rarity: rarity)
         let attemptCost = Int((Double(baseCost) * (1 - eventDiscount)).rounded())   // 이벤트 VP 할인

@@ -81,6 +81,13 @@ enum EnhanceEngine {
     /// 시도 가능 여부 (만렙 미만).
     static func canEnhance(level: Int) -> Bool { level >= 0 && level < maxLevel }
 
+    /// 현재 레벨의 확률행 — 범위 밖(만렙 +15 포함)은 마지막 행으로 클램프한다.
+    /// `odds`는 시도 +L→+L+1 기준 15행(0…14)이라 만렙 펫을 `odds[15]`로 직접 읽으면 크래시(#268).
+    /// 만렙은 시도 자체가 없어 어떤 행을 돌려줘도 표시용일 뿐이다.
+    static func oddsRow(level: Int) -> [Double] {
+        odds[min(max(0, level), odds.count - 1)]
+    }
+
     /// 기본(Common 기준) 시도 VP 비용.
     static func cost(level: Int) -> Int {
         vpCost[min(max(0, level), vpCost.count - 1)]

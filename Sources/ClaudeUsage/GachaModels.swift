@@ -111,7 +111,7 @@ extension PetOwnership {
 /// 사용자가 차트에 띄우려고 활성화한 펫 (kind + variant 페어).
 struct PetSelection: Codable, Hashable {
     var kind: PetKind
-    var variant: Int  // 0 = 기본, 1/2/3 = shiny tier
+    var variant: Int  // 0 = 기본, 1/2/3 = shiny tier, 4 = 레인보우(prestige)
 }
 
 /// 재사용 가능한 명명된 파티 프리셋. 최대 `Settings.maxPartySize` 마리(종 유니크). `members[0]` = 리더.
