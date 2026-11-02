@@ -224,6 +224,18 @@ actor RankingAPI {
         let rank: Int
         let ts: Int64
     }
+    struct RenameNicknamePayload: Encodable {
+        let deviceId: String
+        let nickname: String
+        let ts: Int64
+    }
+    struct RenameNicknameRequest: Encodable {
+        let payload: RenameNicknamePayload
+        let signature: String
+    }
+    struct RenameNicknameResponse: Decodable {
+        let nickname: String
+    }
     struct SetPodiumMessageRequest: Encodable {
         let payload: SetPodiumMessagePayload
         let signature: String
@@ -1105,6 +1117,18 @@ actor RankingAPI {
         return try await post(path: "claim-reward", body: req)
     }
 
+    /// 등록 후 닉네임 변경. 서버 `users.nickname`이 유일한 진실이라 로컬 `Settings.rankingNickname`은
+    /// 이 호출이 성공한 뒤에만 갱신한다(과거엔 로컬만 바뀌어 보드와 어긋났음).
+    /// 중복 시 전역 409 매핑으로 `.nicknameTaken` throw — 호출 측이 다른 닉네임으로 재시도.
+    func renameNickname(deviceId: String, nickname: String,
+                        hmacKeyBase64: String) async throws -> RenameNicknameResponse {
+        let payload = RenameNicknamePayload(deviceId: deviceId, nickname: nickname,
+                                            ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signRename(payload: payload, keyBase64: hmacKeyBase64)
+        let req = RenameNicknameRequest(payload: payload, signature: sig)
+        return try await post(path: "rename-nickname", body: req)
+    }
+
     /// 시상대 한마디 1회 등록. 본인이 그 (period, rank) 우승자일 때만 서버가 수락.
     /// 이미 등록된 경우 `alreadySet=true`로 기존 값 반환(immutable). `message`는 trim된 상태로 전달.
     func setPodiumMessage(deviceId: String, period: String, rank: Int, message: String,
@@ -1910,6 +1934,11 @@ actor RankingAPI {
 
     /// SetPodiumMessagePayload 서명. 동일 알고리즘.
     static func signPodium(payload: SetPodiumMessagePayload, keyBase64: String) throws -> String {
+        try signEncodable(payload, keyBase64: keyBase64)
+    }
+
+    /// RenameNicknamePayload 서명. 동일 알고리즘 — 사용자 입력 한글이 서명 대상이 되는 점은 podium과 같다.
+    static func signRename(payload: RenameNicknamePayload, keyBase64: String) throws -> String {
         try signEncodable(payload, keyBase64: keyBase64)
     }
 
