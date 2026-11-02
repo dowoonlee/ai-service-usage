@@ -241,7 +241,9 @@ struct RankingView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(entries) { entry in
-                        LeaderboardRowView(entry: entry, isMe: entry.nickname == settings.rankingNickname)
+                        // 내 행 판정은 서버가 준 myRank로 — 닉네임 문자열 비교는 로컬 닉네임이 서버와
+                        // 어긋나는 순간(변경 실패·구버전) 본인이 보드에서 사라진 것처럼 보였다.
+                        LeaderboardRowView(entry: entry, isMe: myRank != nil && entry.rank == myRank)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                         Divider()
