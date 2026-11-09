@@ -304,9 +304,7 @@ struct GymView: View {
             Text(cat.activitySummary).font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text("현재 · \(cat.metricDescription(value))").font(.system(size: 10, weight: .medium)).monospacedDigit()
-            if let notice = cat.trackingNotice {
-                Label(notice, systemImage: "clock").font(.system(size: 10)).foregroundStyle(.orange)
-            } else if !available {
+            if !available {
                 Text(cat.lockReason).font(.system(size: 10)).foregroundStyle(.secondary)
             } else if let next, let threshold = cat.thresholds[next] {
                 Text("\(next.displayName) 지표 기준 \(threshold.formatted())\(cat.metricUnit) · \(cat.remainingDescription(current: value, threshold: threshold))")
@@ -563,9 +561,6 @@ struct BadgeTierTooltip: View {
                 .fixedSize(horizontal: false, vertical: true)
             if let countingContext {
                 Text(countingContext).font(.caption2).foregroundStyle(.secondary)
-            }
-            if let notice = category.trackingNotice {
-                Label(notice, systemImage: "clock").font(.caption2).foregroundStyle(.orange)
             }
             if !cleared && available {
                 Text("지표는 지역 관장 도전 자격에 반영됩니다. 뱃지는 관장을 격파해야 획득합니다.")

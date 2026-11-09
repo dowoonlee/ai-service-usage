@@ -900,6 +900,8 @@ struct GuildView: View {
                 settings.isGuildLeader = resp.guild.isLeader
                 // 받은 방명록을 본 것으로 — 가챠 창 길드 탭의 새 글 점이 꺼진다.
                 settings.guildGuestbookSeenAt = Date()
+                // 도장 Guild·Contribution — 내 이번 달 VP를 누적 지표에 반영.
+                GuildContributionTracker.record(info: resp)
             } catch RankingAPI.RankingError.guildConflict(let code) where code == "not_in_guild" {
                 info = nil
                 notInGuild = true
