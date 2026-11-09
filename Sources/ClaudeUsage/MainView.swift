@@ -239,6 +239,9 @@ struct MainView: View {
     @ObservedObject var vm: ViewModel
     @ObservedObject var settings = Settings.shared
     @ObservedObject var dm = DMViewModel.shared
+    // 버전 칩 깜빡임 — 패널이 숨겨지면 멈추고(WindowVisibility.swift), 동작 줄이기면 고정 표시.
+    @Environment(\.windowIsVisible) private var windowIsVisible
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var onLogin: () -> Void
     var onSettings: () -> Void
     var onContributors: () -> Void
@@ -450,9 +453,12 @@ struct MainView: View {
 
     /// 'Usage' 옆 버전 칩 — (...) 메뉴의 "업데이트 확인"을 대체하는 단일 진입점.
     /// 평소엔 현재 버전을 회색 텍스트로 표시하고, feed에 더 높은 버전이 있으면 주황 캡슐 +
-    /// 위 화살표 + 최신 버전으로 강하게 강조해 업데이트 필요를 한눈에 알린다.
+    /// 위 화살표 + 최신 버전으로 강하게 강조하고 **깜빡여서** 업데이트 필요를 한눈에 알린다.
     /// 어느 상태든 클릭하면 Sparkle 업데이트 확인이 열린다.
     /// 현재 버전이 nil인 dev(`swift run`) 빌드에서는 칩 자체를 숨긴다.
+    /// 버전 칩 깜빡임 주기(초). 켜짐/꺼짐이 각각 이 시간만큼 유지된다.
+    private static let blinkPeriod: TimeInterval = 0.7
+
     @ViewBuilder
     private var versionChip: some View {
         if let v = vm.currentVersion {
@@ -462,7 +468,7 @@ struct MainView: View {
                 Group {
                     if vm.updateAvailable {
                         // 업데이트 필요 — 주황 캡슐로 확실히 시선을 끈다.
-                        HStack(spacing: 2) {
+                        let capsule = HStack(spacing: 2) {
                             Image(systemName: "arrow.up.circle.fill")
                                 .font(.system(size: 9, weight: .bold))
                             Text("v\(vm.latestVersion ?? v)")
@@ -473,6 +479,22 @@ struct MainView: View {
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1.5)
                         .background(Capsule().fill(Color.orange))
+
+                        if reduceMotion {
+                            capsule
+                        } else {
+                            // 깜빡임 — `@State` + repeatForever 대신 시각 기반으로 계산한다. 이 뷰는
+                            // 폴링/`now` 틱마다 다시 그려지는데, 상태 기반 반복 애니메이션은 리렌더에
+                            // 끊기거나 중복 기동되는 일이 있어 다른 화면들(GuildOfficeView 등)과 같은
+                            // TimelineView 관례를 따른다. 0.7s마다 on/off, 전환은 0.4s 페이드.
+                            TimelineView(.animation(minimumInterval: Self.blinkPeriod,
+                                                    paused: !windowIsVisible)) { ctx in
+                                let on = Int(ctx.date.timeIntervalSinceReferenceDate / Self.blinkPeriod) % 2 == 0
+                                capsule
+                                    .opacity(on ? 1 : 0.35)
+                                    .animation(.easeInOut(duration: 0.4), value: on)
+                            }
+                        }
                     } else {
                         // 최신 — 현재 버전을 조용히 표시.
                         Text("v\(v)")
