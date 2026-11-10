@@ -979,6 +979,8 @@ final class ViewModel: ObservableObject {
         didAttemptGuildLogoSync = true
         guard let info = try? await RankingAPI.shared.fetchGuildInfo(
             deviceId: s.rankingDeviceID, hmacKeyBase64: hmacKey) else { return }
+        // 어차피 받은 guild-info — 기여 지표도 같이 반영(길드 탭을 안 열어도 실행당 1회는 쌓인다).
+        GuildContributionTracker.record(info: info)
         guard let logo = info.guild.logo, !logo.isEmpty else { return }
         s.guildLogo = logo
         DebugLog.log("Guild: 로고 캐시 보강 (\(logo.prefix(2)))")

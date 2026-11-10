@@ -42,7 +42,7 @@ extension BadgeCategory {
         case .fork: return "펫별로 해금한 이로치 단계의 총개수를 셉니다."
         case .arenaWins: return "자동 랭크전에서 승리한 기록을 쌓으세요."
         case .arenaRating: return "자동 랭크전에서 자신의 최고 레이팅을 갱신하세요."
-        case .guildContribution: return "길드에 기록된 기여 점수를 누적하는 업적입니다."
+        case .guildContribution: return "길드에 기여한 VP를 달마다 이어 붙여 누적하는 업적입니다."
         case .guildTenure: return "처음 길드에 가입한 날부터 오늘까지 지난 기간입니다."
         case .dailyQuizCorrect: return "데일리 퀴즈에서 맞힌 문항 수를 누적합니다."
         case .dailyRitual: return "매일 데일리 퀴즈 답안을 제출해 연속 참여일을 쌓으세요."
@@ -78,7 +78,7 @@ extension BadgeCategory {
         case .arenaRating:
             return "기존 자동 랭크전에서 기록한 최고 레이팅입니다. 이후 점수가 내려가도 최고 기록은 유지됩니다. 아레나의 랭크전 화면에서 기록을 갱신할 수 있습니다."
         case .guildContribution:
-            return "저장된 길드 기여 점수의 누적값입니다. 현재 버전에서는 기여 활동을 이 지표에 자동 반영하는 기능이 연결되어 있지 않습니다."
+            return "길드 화면을 열 때 서버가 집계한 내 이번 달 길드 기여 VP를 받아 누적합니다. 같은 달에는 늘어난 만큼만, 달이 바뀌면 새 달의 값을 이어서 더합니다. 처음 연결한 달 이전의 기여는 소급하지 않습니다."
         case .guildTenure:
             return "앱에 처음 기록된 길드 가입일을 기준으로 경과일을 계산합니다. 매일 접속해야 하는 연속 출석 업적이 아니며, 길드 변경·탈퇴 후에도 최초 가입일 기준을 유지합니다."
         case .dailyQuizCorrect:
@@ -136,10 +136,6 @@ extension BadgeCategory {
     func remainingDescription(current: Int, threshold: Int) -> String {
         let remaining = max(0, threshold - current)
         return remaining == 0 ? "이 지표 기준을 충족했습니다" : "이 지표 기준까지 \(remaining.formatted())\(metricUnit) 남았습니다"
-    }
-
-    var trackingNotice: String? {
-        self == .guildContribution ? "기여 점수 자동 집계 준비 중" : nil
     }
 
     @MainActor
