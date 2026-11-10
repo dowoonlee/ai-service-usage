@@ -16,7 +16,9 @@ enum SeasonRegistry {
     nonisolated static let all: [Season] = [
         Season(
             kind: .xmas, displayName: "크리스마스",
-            window: .yearly(12, 1, to: 12, 26),
+            // 11/16 릴리스와 함께 켠다(사용자 결정 2026-11-10 — 애초 12/1). 눈·모자·한정 상점·겨울 관장이 같이 열린다.
+            // 일일 보상(12/1~24)과 주간 선물(12/21~25)은 이 창 안에서 각자 날짜를 따른다.
+            window: .yearly(11, 16, to: 12, 26),
             ambient: .seasonSnow,
             headwear: "santa_hat",
             quotes: [
@@ -27,13 +29,14 @@ enum SeasonRegistry {
                 "눈 오니 빌드가 느린 기분.",
                 "연말 배포 freeze 아직이죠?",
                 "트리 밑에 PR 두고 갔어요.",
-                "12월엔 토큰도 따뜻하게.",
+                "겨울엔 토큰도 따뜻하게.",
                 "루돌프는 GPU 없이 뜁니다.",
                 "올해 마지막 force-push는 참아요.",
             ],
             officeWindowParticles: true,
             grassDecoration: .snow,
             rewardDays: 1...24,
+            rewardMonth: 12,
             boss: SeasonalBoss(
                 lead: SkinnedPet(kind: .deer, skin: .snow, headwear: "santa_hat", displayName: "Rudolph"),
                 supports: [
@@ -43,7 +46,7 @@ enum SeasonRegistry {
                     SkinnedPet(kind: .orchidOwl, skin: .snow, displayName: "흰올빼미"),
                 ],
                 name: "Rudolph", title: "배송 라우팅 관장",
-                // 시즌(12/1~)보다 먼저 연다 — 2026-11-16 릴리스와 함께(사용자 결정).
+                // 시즌 창과 같다 — 2026-11-16 릴리스와 함께 연다(사용자 결정).
                 window: .yearly(11, 16, to: 12, 26),
                 dialogues: [
                     "배송 큐가 비었군. 아직 아무것도 안 쓴 건가.",
@@ -150,8 +153,8 @@ enum SeasonRegistry {
         return s
     }
 
-    /// 지금 열려 있는 시즌 보스. 보스는 자기 창(`SeasonalBoss.window`)을 따르므로 시즌이 아직 활성 전이어도
-    /// 열릴 수 있다(겨울 관장 11/16 vs 시즌 12/1). 스위치는 시즌과 같은 3겹을 그대로 탄다.
+    /// 지금 열려 있는 시즌 보스. 보스는 자기 창(`SeasonalBoss.window`)을 따른다 — 시즌 창과 다르게 잡을 수 있게
+    /// 분리해 뒀다(올해는 둘 다 11/16~12/26). 스위치는 시즌과 같은 3겹을 그대로 탄다.
     @MainActor
     static func activeBoss(now: Date = Date(), settings: Settings? = nil) -> (season: Season, boss: SeasonalBoss)? {
         let settings = settings ?? Settings.shared

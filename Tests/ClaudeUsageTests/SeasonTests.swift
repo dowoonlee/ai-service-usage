@@ -37,7 +37,9 @@ final class SeasonWindowTests: XCTestCase {
 
     func testXmasWindowBoundaries() {
         let w = SeasonRegistry.season(.xmas)!.window
-        XCTAssertFalse(w.contains(kst(2026, 11, 30, 23, 59)))
+        // 겨울 시즌은 11/16에 켠다(2026-11-16 릴리스와 함께).
+        XCTAssertFalse(w.contains(kst(2026, 11, 15, 23, 59)))
+        XCTAssertTrue(w.contains(kst(2026, 11, 16, 0, 0)))
         XCTAssertTrue(w.contains(kst(2026, 12, 1, 0, 0)))
         XCTAssertTrue(w.contains(kst(2026, 12, 25, 23, 59)))
         XCTAssertFalse(w.contains(kst(2026, 12, 26, 0, 0)))   // end는 배타
@@ -72,7 +74,7 @@ final class SeasonWindowTests: XCTestCase {
     }
 
     func testNextBoundary() {
-        XCTAssertEqual(SeasonRegistry.nextBoundary(after: kst(2026, 11, 15)), kst(2026, 12, 1, 0, 0))
+        XCTAssertEqual(SeasonRegistry.nextBoundary(after: kst(2026, 11, 15)), kst(2026, 11, 16, 0, 0))
         XCTAssertEqual(SeasonRegistry.nextBoundary(after: kst(2026, 12, 10)), kst(2026, 12, 26, 0, 0))
         XCTAssertEqual(SeasonRegistry.nextBoundary(after: kst(2026, 12, 30)), kst(2027, 1, 4, 0, 0))
     }

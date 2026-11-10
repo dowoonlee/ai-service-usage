@@ -34,7 +34,7 @@ struct GymView: View {
                 header
                 // 시즌 보스의 진입점은 맵 위 하늘에 뜬 이벤트 섬이다. 섬이 있는 동안 월드가 위로 늘어나므로
                 // 맵 높이도 같은 비율로 키워 지상 지역이 평소와 같은 크기로 보이게 한다.
-                // 보스는 자기 창(11/16~)을 따른다 — 시즌 연출(눈·모자, 12/1~)보다 먼저 열린다.
+                // 보스는 자기 창(`SeasonalBoss.window`)을 따른다. 맵 눈은 시즌 연출이 켜졌을 때.
                 let event = SeasonRegistry.activeBoss(now: eventNow ?? Date())
                 let season = event?.season
                 let boss = event?.boss

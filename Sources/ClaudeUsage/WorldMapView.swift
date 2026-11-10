@@ -24,7 +24,7 @@ struct WorldMapView: View {
     @Binding var islandSelected: Bool
     /// 섬 지역 뷰에서 걸어다닐 보스 선봉(스킨·모자 포함). nil이면 아바타 없음.
     var islandAvatar: SkinnedPet? = nil
-    /// 맵 전체에 눈을 내릴지 — 시즌 연출(12/1~)이 켜졌을 때만. 섬은 그보다 먼저(11/16) 뜬다.
+    /// 맵 전체에 눈을 내릴지 — 시즌 연출이 켜졌을 때. 섬(보스 창)과 따로 받는다.
     var snowing: Bool = false
     /// 호버된 region — nil이면 selected만 강조, non-nil이면 그 region도 강조.
     @State private var hovered: BadgeRegion?

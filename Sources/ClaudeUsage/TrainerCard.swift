@@ -380,7 +380,7 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .tenXEngineer:          return "5,000 coin · 모두가 부르는 그 사람"
         case .ceoOfVibes:            return "10,000 coin · 회사를 차렸다"
         case .codedOnChristmas:      return "12월 25일에 AI 사용 기록이 있으면"
-        case .freezeViolator:        return "1,500 coin · 12월 한정 · 그래도 배포함"
+        case .freezeViolator:        return "1,500 coin · 겨울 한정 · 그래도 배포함"
         case .decemberFinisher:      return "12월 1~24일 중 20일 이상 보상 수령"
         case .snowDeployer:          return "겨울 관장 production 격파"
         case .newYearFirstDay:       return "1월 1일에 AI 사용 기록이 있으면"

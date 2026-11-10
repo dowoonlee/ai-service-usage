@@ -19,12 +19,13 @@ final class SeasonalBossTests: SandboxedTestCase {
         return m
     }
 
-    /// 보스는 시즌(12/1~)보다 먼저 11/16에 열리고 12/26에 닫힌다.
-    func testBossWindowOpensBeforeSeason() {
+    /// 보스는 11/16에 열리고 12/26에 닫힌다. 올해는 시즌 창과 같다(눈·모자·상점도 11/16부터).
+    func testBossWindowOpensWithSeason() {
         SeasonRegistry.override = nil
         XCTAssertNil(SeasonRegistry.activeBoss(now: kst(2026, 11, 15)))
         XCTAssertEqual(SeasonRegistry.activeBoss(now: kst(2026, 11, 16))?.season.kind, .xmas)
-        XCTAssertNil(SeasonRegistry.active(now: kst(2026, 11, 16)), "시즌 연출은 아직")
+        XCTAssertEqual(SeasonRegistry.active(now: kst(2026, 11, 16))?.kind, .xmas, "시즌 연출도 같은 날 켜진다")
+        XCTAssertNil(SeasonRegistry.active(now: kst(2026, 11, 15)))
         XCTAssertNotNil(SeasonRegistry.activeBoss(now: kst(2026, 12, 25)))
         XCTAssertNil(SeasonRegistry.activeBoss(now: kst(2026, 12, 26)))
         // 보상 dedup 키의 연도는 11월에도 같은 인스턴스.

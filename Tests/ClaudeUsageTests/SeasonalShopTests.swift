@@ -157,6 +157,20 @@ final class SeasonalShopTests: SandboxedTestCase {
         XCTAssertTrue(s.shopVisible(CardTitle.codedOnChristmas, owned: true))
     }
 
+    /// 시즌 창이 11월에 시작해도 일일 보상 키는 12월이다 — 서버 `ADVENT.month`(12)와 어긋나면 수령 표시가 전부 빈다.
+    func testRewardPrefixStaysDecemberThoughSeasonStartsInNovember() throws {
+        let xmas = try XCTUnwrap(SeasonRegistry.season(.xmas))
+        func at(_ m: Int, _ d: Int) -> Date { Calendar.kst.date(from: DateComponents(year: 2026, month: m, day: d, hour: 12))! }
+        XCTAssertEqual(xmas.rewardGrantPrefix(now: at(11, 20)), "advent-2026-12-")
+        XCTAssertEqual(xmas.rewardGrantPrefix(now: at(12, 10)), "advent-2026-12-")
+        // 11월엔 잔디에 보상 마크가 없다(보상 월이 아님). 12월엔 그린다.
+        let grants: Set<String> = ["advent-2026-12-01"]
+        XCTAssertTrue(UsageGrassModel.rewardMarks(season: xmas, dailyVP: ["2026-11-20": 10], claimedGrants: grants,
+                                                  now: at(11, 20)).isEmpty)
+        XCTAssertEqual(UsageGrassModel.rewardMarks(season: xmas, dailyVP: ["2026-12-01": 10], claimedGrants: grants,
+                                                   now: at(12, 2))["2026-12-01"], .received)
+    }
+
     // MARK: - 날짜별 선물 (12/21~25)
 
     private func kst(_ y: Int, _ m: Int, _ d: Int, hour: Int = 12) -> Date {

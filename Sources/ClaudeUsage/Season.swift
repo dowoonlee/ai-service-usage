@@ -169,7 +169,7 @@ struct SeasonalBoss: Equatable {
     let supports: [SkinnedPet]
     let name: String
     let title: String
-    /// 보스가 열려 있는 기간. 시즌 창과 별개다 — 겨울 관장은 시즌(12/1~)보다 먼저 11/16에 연다.
+    /// 보스가 열려 있는 기간. 시즌 창과 별개로 둘 수 있다(올해 겨울 관장은 시즌과 같은 11/16~12/26).
     let window: SeasonWindow
     /// 4단계 — 사용 일수에 연동: 0 / 1~5 / 6+ / production 격파.
     let dialogues: [String]
@@ -225,6 +225,9 @@ struct Season: Identifiable, Equatable {
     let grassDecoration: GrassDecoration?
     /// 서버 일일 보상 구간(일). nil이면 보상 없음. grant_key는 `advent-<instanceYear>-<MM>-<DD>`.
     let rewardDays: ClosedRange<Int>?
+    /// 일일 보상의 월. 시즌 창이 그 전 달에 시작해도(겨울 시즌 11/16~) 보상은 이 달에만 있다.
+    /// 서버 `ADVENT.month`와 같은 값. nil이면 창 시작 월.
+    var rewardMonth: Int? = nil
 
     // ── 4번: 겨울 관장 ──
     let boss: SeasonalBoss?
@@ -240,10 +243,11 @@ struct Season: Identifiable, Equatable {
     }
 
     /// 서버 일일 보상 grant_key 접두(`advent-<year>-<MM>-`). 서버 `_shared/season.ts`의 `adventDailyPrefix`와 합의.
-    /// 보상 구간은 창 시작 월에 속한다(12월).
+    /// 보상 구간의 월은 `rewardMonth`(없으면 창 시작 월).
     func rewardGrantPrefix(now: Date, calendar: Calendar = .kst) -> String? {
         guard rewardDays != nil, case .yearly(let start, _) = window.rule else { return nil }
-        return String(format: "advent-%04d-%02d-", window.instanceYear(for: now, calendar: calendar), start.month)
+        return String(format: "advent-%04d-%02d-", window.instanceYear(for: now, calendar: calendar),
+                      rewardMonth ?? start.month)
     }
 
     /// 완주 grant_key(`advent-<year>-complete`).
