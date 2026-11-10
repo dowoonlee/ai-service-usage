@@ -13,19 +13,11 @@ on:
 permissions:
   contents: write
 
-# 2026/6/2부터 GitHub Actions 런타임이 Node 20 → Node 24로 강제 전환됨.
-# 현재 사용 중인 actions(checkout@v4 / upload-artifact@v4 / action-gh-release@v2)는
-# 모두 Node 20 의존이라 deprecation warning이 뜸. 환경변수로 Node 24 런타임을 즉시 활성화 —
-# action 자체 코드 변경 없이 deprecation 해소. 향후 actions major bump (v6/v7/v3)는
-# breaking changes 검증 후 별도로 진행.
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 jobs:
   build:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # main 브랜치에 appcast 푸시하려면 전체 히스토리 필요
 
@@ -86,13 +78,13 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AIUsage-${{ steps.ver.outputs.version }}
           path: dist/AIUsage.zip
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.ver.outputs.version }}
           name: v${{ steps.ver.outputs.version }}
