@@ -5,7 +5,7 @@ import SwiftUI
 // 시즌 보스 — 판정·보상 + 도장 배틀 상대 추상화 (cf. docs/plans/seasonal-events.md §24~26)
 // ============================================================================
 //
-// 보스는 뱃지·지역과 무관하다. tier는 사용 일수 + 오픈일로 열리고, 보상은 시즌 인스턴스·tier당 1회
+// 보스는 뱃지·지역과 무관하다. tier는 오픈일 AND (사용 일수 OR 누적 VP)로 열리고, 보상은 시즌 인스턴스·tier당 1회
 // (`seasonalFlags` "boss:<instanceID>:<tier>"). 팀은 지역 관장과 같은 EP 솔버라 같은 tier면 같은 난이도.
 // 완전 로컬 — 서버 의존 0.
 
@@ -27,24 +27,48 @@ extension SeasonalBoss {
         return calendar.date(from: DateComponents(year: year, month: md.month, day: md.day))
     }
 
-    /// tier가 잠겨 있는 이유. 열려 있으면 nil. 날짜가 먼저다 — 날짜 전엔 일수를 채워도 소용없으니.
-    enum TierLock: Equatable {
-        case date(month: Int, day: Int)
-        case usage(have: Int, need: Int)
+    /// 보스가 열린 뒤 누적 VP — 같은 구간의 `dailyVP` 합(내림).
+    nonisolated func usageVP(dailyVP: [String: Double], now: Date, calendar: Calendar = .kst) -> Int {
+        guard case .yearly(let start, _) = window.rule else { return 0 }
+        let year = window.instanceYear(for: now, calendar: calendar)
+        let from = UsageGrassModel.dayKey(year: year, month: start.month, day: start.day)
+        let to = UsageGrassModel.dayKey(now)
+        return Int(dailyVP.filter { $0.key >= from && $0.key <= to }.reduce(0) { $0 + max(0, $1.value) })
     }
 
-    nonisolated func lock(tier: BadgeTier, usageDays: Int, now: Date, calendar: Calendar = .kst) -> TierLock? {
+    /// 보스 오픈 뒤의 참여량 — 일수와 VP.
+    struct Usage: Equatable {
+        var days: Int
+        var vp: Int
+    }
+
+    nonisolated func usage(dailyVP: [String: Double], now: Date, calendar: Calendar = .kst) -> Usage {
+        Usage(days: usageDayCount(dailyVP: dailyVP, now: now, calendar: calendar),
+              vp: usageVP(dailyVP: dailyVP, now: now, calendar: calendar))
+    }
+
+    /// tier가 잠겨 있는 이유. 열려 있으면 nil. 날짜가 먼저다 — 날짜 전엔 참여량을 채워도 소용없으니.
+    enum TierLock: Equatable {
+        case date(month: Int, day: Int)
+        /// 일수·VP 둘 다 모자람(하나만 채우면 열린다).
+        case usage(have: Usage, needDays: Int, needVP: Int)
+    }
+
+    /// 오픈일 AND (사용 일수 OR 누적 VP).
+    nonisolated func lock(tier: BadgeTier, usage: Usage, now: Date, calendar: Calendar = .kst) -> TierLock? {
         if let open = openDate(tier: tier, now: now, calendar: calendar), now < open,
            let md = tierOpenDates[tier] {
             return .date(month: md.month, day: md.day)
         }
-        guard let need = tierThresholds[tier] else { return .usage(have: usageDays, need: .max) }
-        return usageDays >= need ? nil : .usage(have: usageDays, need: need)
+        let needDays = tierThresholds[tier] ?? .max
+        let needVP = tierUsageVP[tier] ?? .max
+        if usage.days >= needDays || usage.vp >= needVP { return nil }
+        return .usage(have: usage, needDays: needDays, needVP: needVP)
     }
 
-    /// 열린 tier들(낮은 순) — 사용 일수와 오픈일을 **둘 다** 만족한 것.
-    nonisolated func openTiers(usageDays: Int, now: Date, calendar: Calendar = .kst) -> [BadgeTier] {
-        BadgeTier.allCases.filter { lock(tier: $0, usageDays: usageDays, now: now, calendar: calendar) == nil }
+    /// 열린 tier들(낮은 순).
+    nonisolated func openTiers(usage: Usage, now: Date, calendar: Calendar = .kst) -> [BadgeTier] {
+        BadgeTier.allCases.filter { lock(tier: $0, usage: usage, now: now, calendar: calendar) == nil }
     }
 
     /// 대사 단계 — 0(미참여) / 1~5 / 6+ / production 격파. 마지막 줄("인정")은 격파 뒤에만 나온다.

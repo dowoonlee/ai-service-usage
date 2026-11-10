@@ -1,7 +1,7 @@
 import XCTest
 @testable import ClaudeUsage
 
-/// 4번 — 겨울 관장. 보스 기간(11/16~), tier 오픈(사용 일수 + 오픈일), 보상 1회 dedup, 칭호, 팀 구성, 스킨 렌더.
+/// 4번 — 겨울 관장. 보스 기간(11/16~), tier 오픈(오픈일 AND (사용 일수 OR 누적 VP)), 보상 1회 dedup, 칭호, 팀 구성, 스킨 렌더.
 @MainActor
 final class SeasonalBossTests: SandboxedTestCase {
     private var xmas: Season { SeasonRegistry.season(.xmas)! }
@@ -56,43 +56,72 @@ final class SeasonalBossTests: SandboxedTestCase {
         XCTAssertEqual(boss.usageDayCount(dailyVP: [:], now: kst(2026, 12, 1)), 0)
     }
 
-    /// 핵심 계약 — 사용 일수와 오픈일을 **둘 다** 채워야 열린다.
-    func testTierNeedsBothUsageDaysAndOpenDate() {
-        // 일수는 넘치지만 날짜가 안 됨: 11/22엔 dev(11/23)가 잠김.
-        XCTAssertEqual(boss.openTiers(usageDays: 99, now: kst(2026, 11, 22)), [.localhost])
-        XCTAssertEqual(boss.lock(tier: .dev, usageDays: 99, now: kst(2026, 11, 22)), .date(month: 11, day: 23))
-        XCTAssertEqual(boss.openTiers(usageDays: 99, now: kst(2026, 11, 23)), [.localhost, .dev])
-        XCTAssertEqual(boss.openTiers(usageDays: 99, now: kst(2026, 11, 30)), [.localhost, .dev, .staging])
-        XCTAssertEqual(boss.openTiers(usageDays: 99, now: kst(2026, 12, 6)), [.localhost, .dev, .staging])
-        XCTAssertEqual(boss.openTiers(usageDays: 99, now: kst(2026, 12, 7)), BadgeTier.allCases)
-        // 날짜는 됐지만 일수가 모자람.
-        XCTAssertEqual(boss.openTiers(usageDays: 0, now: kst(2026, 12, 20)), [.localhost])
-        XCTAssertEqual(boss.openTiers(usageDays: 5, now: kst(2026, 12, 20)), [.localhost])
-        XCTAssertEqual(boss.openTiers(usageDays: 6, now: kst(2026, 12, 20)), [.localhost, .dev])
-        XCTAssertEqual(boss.openTiers(usageDays: 17, now: kst(2026, 12, 20)), [.localhost, .dev, .staging])
-        XCTAssertEqual(boss.openTiers(usageDays: 18, now: kst(2026, 12, 20)), BadgeTier.allCases)
-        XCTAssertEqual(boss.lock(tier: .production, usageDays: 17, now: kst(2026, 12, 20)), .usage(have: 17, need: 18))
-        XCTAssertNil(boss.lock(tier: .localhost, usageDays: 0, now: kst(2026, 11, 16)))
-        // 둘 다 모자라면 날짜를 먼저 알린다.
-        XCTAssertEqual(boss.lock(tier: .production, usageDays: 2, now: kst(2026, 11, 20)), .date(month: 12, day: 7))
+    private typealias U = SeasonalBoss.Usage
+
+    /// 핵심 계약 — 오픈일 AND (사용 일수 OR 누적 VP).
+    func testTierNeedsOpenDateAndEitherDaysOrVP() {
+        let lots = U(days: 99, vp: 99_999)
+        // 참여량은 넘치지만 날짜가 안 됨: 11/22엔 dev(11/23)가 잠김.
+        XCTAssertEqual(boss.openTiers(usage: lots, now: kst(2026, 11, 22)), [.localhost])
+        XCTAssertEqual(boss.lock(tier: .dev, usage: lots, now: kst(2026, 11, 22)), .date(month: 11, day: 23))
+        XCTAssertEqual(boss.openTiers(usage: lots, now: kst(2026, 11, 23)), [.localhost, .dev])
+        XCTAssertEqual(boss.openTiers(usage: lots, now: kst(2026, 11, 30)), [.localhost, .dev, .staging])
+        XCTAssertEqual(boss.openTiers(usage: lots, now: kst(2026, 12, 6)), [.localhost, .dev, .staging])
+        XCTAssertEqual(boss.openTiers(usage: lots, now: kst(2026, 12, 7)), BadgeTier.allCases)
+
+        let late = kst(2026, 12, 20)        // 날짜는 전부 지남
+        // 일수만으로.
+        XCTAssertEqual(boss.openTiers(usage: U(days: 0, vp: 0), now: late), [.localhost])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 5, vp: 0), now: late), [.localhost])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 6, vp: 0), now: late), [.localhost, .dev])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 17, vp: 0), now: late), [.localhost, .dev, .staging])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 18, vp: 0), now: late), BadgeTier.allCases)
+        // VP만으로 — 늦게 시작해 일수가 모자라도 몰아 쓰면 열린다.
+        XCTAssertEqual(boss.openTiers(usage: U(days: 1, vp: 399), now: late), [.localhost])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 1, vp: 400), now: late), [.localhost, .dev])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 1, vp: 800), now: late), [.localhost, .dev, .staging])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 3, vp: 1_200), now: late), BadgeTier.allCases)
+        // 한쪽씩 다른 tier를 열 수도 있다.
+        XCTAssertEqual(boss.openTiers(usage: U(days: 6, vp: 800), now: late), [.localhost, .dev, .staging])
+        // 둘 다 모자라면 양쪽 기준을 알려 준다.
+        XCTAssertEqual(boss.lock(tier: .production, usage: U(days: 17, vp: 1_199), now: late),
+                       .usage(have: U(days: 17, vp: 1_199), needDays: 18, needVP: 1_200))
+        XCTAssertNil(boss.lock(tier: .localhost, usage: U(days: 0, vp: 0), now: kst(2026, 11, 16)))
+        // 날짜도 참여량도 모자라면 날짜를 먼저 알린다.
+        XCTAssertEqual(boss.lock(tier: .production, usage: U(days: 2, vp: 10), now: kst(2026, 11, 20)),
+                       .date(month: 12, day: 7))
         // 오픈일 경계는 KST 0시.
         let midnight = Calendar.kst.date(from: DateComponents(year: 2026, month: 11, day: 23))!
-        XCTAssertNotNil(boss.lock(tier: .dev, usageDays: 6, now: midnight.addingTimeInterval(-1)))
-        XCTAssertNil(boss.lock(tier: .dev, usageDays: 6, now: midnight))
+        XCTAssertNotNil(boss.lock(tier: .dev, usage: U(days: 6, vp: 0), now: midnight.addingTimeInterval(-1)))
+        XCTAssertNil(boss.lock(tier: .dev, usage: U(days: 6, vp: 0), now: midnight))
     }
 
-    /// 오픈일은 낮은 tier부터 순서대로이고 전부 보스 기간 안이다. 매일 쓰면 오픈일에 일수 조건도 이미 차 있다.
-    func testTierOpenDatesAreOrderedInsideWindowAndReachableByDailyUse() {
+    /// 누적 VP도 일수와 같은 구간(11/16~오늘)만 더한다.
+    func testUsageVPSumsSameWindowAsDays() {
+        let m: [String: Double] = ["2026-11-15": 500, "2026-11-16": 120.6, "2026-11-20": 80.5,
+                                   "2026-11-21": 0, "2026-12-30": 999, "2025-11-20": 999]
+        XCTAssertEqual(boss.usage(dailyVP: m, now: kst(2026, 11, 25)), U(days: 2, vp: 201))
+        XCTAssertEqual(boss.usageVP(dailyVP: m, now: kst(2026, 11, 16)), 120)
+    }
+
+    /// 오픈일은 낮은 tier부터 순서대로이고 전부 보스 기간 안이다. 기준도 tier 순으로 커진다.
+    /// 매일 쓰면 오픈일에 일수 조건이 이미 차 있고, 12/20에 시작해도 VP로 production에 닿을 수 있다(월 2,000 VP 플랜 기준).
+    func testTierOpenDatesAreOrderedInsideWindowAndReachable() {
         var prev: Date?
         for tier in BadgeTier.allCases {
             let open = boss.openDate(tier: tier, now: kst(2026, 11, 20))!
             XCTAssertTrue(boss.window.contains(open), "\(tier) 오픈일이 보스 기간 밖")
             if let prev { XCTAssertGreaterThan(open, prev) }
             prev = open
-            let daily = usage(from: kst(2026, 11, 16), days: 60)
-            let days = boss.usageDayCount(dailyVP: daily, now: open)
-            XCTAssertNil(boss.lock(tier: tier, usageDays: days, now: open), "\(tier): 매일 써도 오픈일에 안 열림")
+            let daily = usage(from: kst(2026, 11, 16), days: 60).mapValues { _ in 1.0 }   // VP는 거의 없이 일수만
+            XCTAssertNil(boss.lock(tier: tier, usage: boss.usage(dailyVP: daily, now: open), now: open),
+                         "\(tier): 매일 써도 오픈일에 안 열림")
         }
+        for (a, b) in zip(BadgeTier.allCases, BadgeTier.allCases.dropFirst()) {
+            XCTAssertLessThan(boss.tierThresholds[a]!, boss.tierThresholds[b]!)
+            XCTAssertLessThan(boss.tierUsageVP[a]!, boss.tierUsageVP[b]!)
+        }
+        XCTAssertLessThanOrEqual(boss.tierUsageVP[.production]!, 2_000, "Pro 한 달 최대 VP 안이어야 저가 플랜도 VP로 닿는다")
     }
 
     func testStageMapping() {

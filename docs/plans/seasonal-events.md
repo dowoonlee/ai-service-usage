@@ -481,25 +481,33 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
   * 섬은 고르지 않아도 거의 어두워지지 않고 이름표("겨울 관장")가 항상 붙는다 — 사전 공지가 없으니 맵에서
     스스로 눈에 띄어야 한다.
   * 내년 다른 시즌은 `EventIsland` 리터럴 하나(terrain 문자열·데코·건물)를 더 쓰면 된다.
-* **tier는 3번 보상 일수(`claimedGrants`의 `advent-2026-12-` 행 수)로 오픈**(제안값):
+* **보스 기간은 11/16~12/26**(2026-11-10 사용자 결정) — 시즌 연출(눈·모자·상점, 12/1~)보다 먼저 연다. 보스가 자기
+  창(`SeasonalBoss.window`)을 갖고 `SeasonRegistry.activeBoss()`가 시즌과 같은 스위치 3겹을 탄다. 맵 전체 눈은
+  시즌이 켜진 12/1부터, 섬은 11/16부터 보인다.
+* **tier 오픈 = 오픈일 AND (사용 일수 OR 누적 VP)**(2026-11-10 사용자 결정 — 애초 안은 "12월 일일 보상 수령 일수"였다):
 
-| tier | 오픈 조건 | 격파 보상(인스턴스당 1회) |
-|---|---|---|
-| localhost | 0일 (즉시) | 1,000 코인 |
-| dev | 6일 | 3,000 코인 |
-| staging | 12일 | 6,000 코인 |
-| production | 18일 | 15,000 코인 + **프리미엄 가챠권 1장** + 칭호 **"눈길 배포 성공"** |
+| tier | 오픈일 | 사용 일수 | 또는 누적 VP | 격파 보상(인스턴스당 1회) |
+|---|---|---|---|---|
+| localhost | 11/16 | — | — | 1,000 코인 |
+| dev | 11/23 | 6일 | 400 | 3,000 코인 |
+| staging | 11/30 | 12일 | 800 | 6,000 코인 |
+| production | 12/7 | 18일 | 1,200 | 15,000 코인 + **프리미엄 가챠권 1장** + 칭호 **"눈길 배포 성공"** |
 
-  보상은 지역 관장(50/150/500/1500)의 **약 10~20배**로 일부러 크게 둔다(사용자 결정). 시즌당 1회뿐이고,
-  production은 18일 참여 + 레인보우 선봉 격파라는 두 관문 뒤에 있다. 합계 25,000 코인 ≈ 뽑기 83회.
-  프리미엄 가챠권은 로컬 재화(`Settings.premiumTickets`)라 서버 grant의 currency 제약(§19)을 받지 않는다 —
-  보스 배틀이 완전 로컬이기에 가능한 보상. 지급은 `CoinLedger.creditBonus` + 티켓 증가를 같은 지점에서,
-  `seasonalFlags` dedup 뒤에.
+  * **오픈일**: 참여량을 아무리 채워도 그 날짜 전엔 안 열린다. 2026년 기준 매주 월요일(제안값).
+  * **사용 일수 / 누적 VP**: 보스가 열린 11/16 이후의 로컬 기록(`Settings.dailyVP`). 둘 중 하나만 채우면 된다.
+    일수만 두면 12월 중순에 시작한 사람은 18일을 못 채워 production이 원천 봉쇄된다. VP만 두면 VP가 플랜 가격에
+    비례해(월 최대 Free 500 / Pro 2,000 / Max 10,000 / Ultra 20,000) 저가 플랜이 막힌다. 그래서 OR —
+    늦게 시작하면 몰아 써서 VP로, 저가 플랜은 꾸준히 써서 일수로.
+  * VP 기준(400/800/1,200)은 Pro를 한도까지 쓸 때 일수 기준과 비슷한 시점에 닿는 **추정값**이다. 실사용 분포로
+    검증하지 않았다.
+  * 12월 일일 보상과의 연동은 없어졌다 → **랭킹 미등록 사용자도 전 tier에 닿는다**. 서버 의존 0.
+  * 잠긴 버튼은 사유를 보여 준다: 날짜 전이면 "11/30 오픈", 날짜는 됐으면 "12일 또는 800VP".
 
-  12/1부터 매일 참여하면 12/18에 production이 열려 12/26까지 8일 남는다. 지역 관장처럼 tier별로 각각 1회 보상,
-  재도전 무제한. dedup은 `seasonalFlags`의 `boss:xmas-2026:<tier>`. production 선봉은 레인보우(기존 규칙).
-* 대사 4단계도 같은 진행도로: 0 / 1~5 / 6+ / production 격파(마지막 줄 "인정"은 격파 뒤에만 — 구현 시 조정).
-* 랭킹 미등록 사용자는 진행도가 0이라 localhost만 열린다. 3번 범위 제한과 동일, 카드에 같은 안내 한 줄.
+  보상은 지역 관장(50/150/500/1500)의 **약 10~20배**로 일부러 크게 둔다(사용자 결정). 합계 25,000 코인 ≈ 뽑기 83회.
+  프리미엄 가챠권은 로컬 재화(`Settings.premiumTickets`)다. 지급은 `CoinLedger.creditBonus` + 티켓 증가를 같은
+  지점에서, `seasonalFlags` dedup 뒤에. tier별로 각각 1회 보상, 재도전 무제한. dedup은 `seasonalFlags`의
+  `boss:xmas-2026:<tier>`. production 선봉은 레인보우(기존 규칙).
+* 대사 4단계는 사용 일수로: 0 / 1~5 / 6+ / production 격파(마지막 줄 "인정"은 격파 뒤에만 — 구현 시 조정).
 * 서버 변경 없음 — 관장 배틀은 완전 로컬.
 
 대사 초안:
@@ -589,7 +597,7 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 | T4 `feat(season)` 기반 #275 | `Season`/`SeasonRegistry`(KST), `ParticleStyle`, headwear 앵커, 시즌 대사, 오피스 창문 눈, 킬스위치 | 완료 |
 | T5 `feat(season)` 코스메틱 #276 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge`·오피스 데코 6종(트리·전구 줄·배너·리스·눈사람·선물 상자) | 완료 — 6종 모두 컨펌 완료(2026-11-10) |
 | T6 `feat(season)` 일일 보상 #277 | 서버 `_shared/season.ts`+`submit` 훅+퀴즈 힌트, 잔디 보상 마크, 12월 완주, 알림 | 완료 — 서버 배포는 나중에(사용자) |
-| T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공, **월드맵 이벤트 섬 진입점** | 완료 — snow 톤 컨펌 완료(ebf10a1), 이벤트 섬 컨펌 대기 |
+| T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공, **월드맵 이벤트 섬 진입점**, 11/16 선오픈, tier = 오픈일 AND (일수 OR VP) | 완료 — snow 톤·이벤트 섬 컨펌 완료, tier 오픈일(매주 월)·VP 기준은 제안값 |
 | T3 액세서리 11종 도트 PNG #274 | 팩 미발견 → **직접 16×16 도트 제작 예외 허용(사용자)**, 결과물 컨펌 필수 | 완료 — 컨펌 완료(7affcd9) |
 | 5번 선물·새해 칭호 (이슈 없음) | `SeasonGift`/`SeasonGiftBox`, 패널 `SeasonGiftBanner`, `CardTitle.newYearFirstDay` | 완료 — 선물 합계(20,000 + 15장)·칭호 이름 사용자 확정 |
 
@@ -598,4 +606,4 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 main 반영: 2026-11-10 `a860732`(v0.19.4 이후)까지 **merge**(28c4be3). rebase 금지 — pre-push 훅이 첫 커밋
 `18e57e6`의 자손 여부로 막으므로 해시가 바뀌면 가드가 풀린다.
 
-테스트: `swift test` 538개(41 skip) + `deno test supabase/functions/_shared/season.test.ts`.
+테스트: `swift test` 541개(41 skip) + `deno test supabase/functions/_shared/season.test.ts`.

@@ -173,10 +173,13 @@ struct SeasonalBoss: Equatable {
     let window: SeasonWindow
     /// 4단계 — 사용 일수에 연동: 0 / 1~5 / 6+ / production 격파.
     let dialogues: [String]
-    /// tier 오픈 조건 ① — 보스가 열린 뒤 AI를 쓴 날 수(`Settings.dailyVP`, KST).
+    /// tier 오픈 조건 ①a — 보스가 열린 뒤 AI를 쓴 날 수(`Settings.dailyVP`, KST).
     let tierThresholds: [BadgeTier: Int]
-    /// tier 오픈 조건 ② — 이 날짜(KST 00:00)부터. 사용 일수를 아무리 채워도 이 전엔 안 열린다.
-    /// ①②를 **둘 다** 만족해야 열린다.
+    /// tier 오픈 조건 ①b — 보스가 열린 뒤 누적 VP. ①a와 **둘 중 하나**만 채우면 된다:
+    /// 늦게 시작한 사람은 몰아 써서 VP로, VP가 적게 쌓이는 저가 플랜은 꾸준히 써서 일수로 연다.
+    let tierUsageVP: [BadgeTier: Int]
+    /// tier 오픈 조건 ② — 이 날짜(KST 00:00)부터. ①을 아무리 채워도 이 전엔 안 열린다.
+    /// 최종: ② AND (①a OR ①b).
     let tierOpenDates: [BadgeTier: SeasonWindow.MonthDay]
     let rewards: [BadgeTier: BossReward]
     /// production 격파 칭호.

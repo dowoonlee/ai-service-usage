@@ -617,7 +617,8 @@ extension GymView {
     @ViewBuilder
     func seasonBossSection(season: Season, boss: SeasonalBoss) -> some View {
         let now = eventNow ?? Date()
-        let days = boss.usageDayCount(dailyVP: settings.dailyVP, now: now)
+        let usage = boss.usage(dailyVP: settings.dailyVP, now: now)
+        let days = usage.days
         let productionCleared = boss.isCleared(tier: .production, season: season, now: now, settings: settings)
         let stage = SeasonalBoss.stage(usageDays: days, productionCleared: productionCleared)
         VStack(spacing: 8) {
@@ -658,11 +659,12 @@ extension GymView {
             HStack(spacing: 6) {
                 ForEach(BadgeTier.allCases, id: \.self) { tier in
                     bossTierButton(season: season, boss: boss, tier: tier,
-                                   lock: boss.lock(tier: tier, usageDays: days, now: now),
+                                   lock: boss.lock(tier: tier, usage: usage, now: now),
                                    cleared: boss.isCleared(tier: tier, season: season, now: now, settings: settings))
                 }
             }
-            Text("사용 \(days)일 · AI를 쓴 날이 쌓이고 오픈일이 지나면 다음 tier가 열립니다. 보상은 tier당 1회.")
+            Text("사용 \(usage.days)일 · \(usage.vp.formatted()) VP · 오픈일이 지나고 사용 일수나 누적 VP 중 하나를 채우면 다음 tier가 열립니다. 보상은 tier당 1회.")
+                .fixedSize(horizontal: false, vertical: true)
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -683,7 +685,7 @@ extension GymView {
         let lockText: String = {
             switch lock {
             case .date(let m, let d): return "\(m)/\(d) 오픈"
-            case .usage(let have, let need): return "사용 \(have)/\(need)일"
+            case .usage(_, let needDays, let needVP): return "\(needDays)일 또는 \(needVP.formatted())VP"
             case nil: return ""
             }
         }()

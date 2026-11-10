@@ -123,6 +123,11 @@ final class ScenePreviews: SandboxedTestCase {
         let nov25 = Calendar.kst.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 12))!
         try renderTab(GymView(initialEventSelected: true, eventNow: nov25), title: "탭-3-도장-11월25일-섬선택",
                       note: "tier 잠금 문구 — 날짜가 안 된 tier는 '11/30 오픈'·'12/7 오픈'. 사용 일수는 11/16부터 센다")
+        // 12/18인데 늦게 시작해 사흘·150 VP뿐 — 날짜는 다 지났고 참여량이 모자란 잠금 문구("6일 또는 400VP").
+        Settings.shared.dailyVP = ["2026-12-16": 40, "2026-12-17": 60, "2026-12-18": 50]
+        try renderTab(GymView(initialEventSelected: true, eventNow: PreviewDemoState.xmasNow),
+                      title: "탭-3-도장-12월-참여부족",
+                      note: "오픈일은 지났지만 사용 일수·VP가 둘 다 모자란 tier — 버튼에 두 기준이 잘리지 않고 들어가는지")
         // 맵만 — 월드 뷰와 섬 줌인. 밑동 바위·그림자·구름으로 "떠 있는 섬"이 읽히는지, 눈이 맵 전체에 내리는지.
         let boss = SeasonRegistry.season(.xmas)!.boss!
         for (title, zoomed) in [("map-xmas-월드", false), ("map-xmas-섬", true)] {

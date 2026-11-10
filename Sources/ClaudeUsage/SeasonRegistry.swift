@@ -51,8 +51,10 @@ enum SeasonRegistry {
                     "절반 넘겼군. 썰매도 이 정도면 autoscale 된다.",
                     "...눈길에서도 배포가 되는군. 인정.",
                 ],
-                // 사용 일수 + 오픈일 — 둘 다 채워야 열린다(사용자 결정). 오픈일은 2026년 기준 매주 월요일.
+                // 오픈일 AND (사용 일수 OR 누적 VP) — 사용자 결정. 오픈일은 2026년 기준 매주 월요일.
+                // VP 기준은 Pro($20, 월 최대 2,000 VP)를 한도까지 쓸 때 일수 기준과 비슷한 시점에 닿는 추정값.
                 tierThresholds: [.localhost: 0, .dev: 6, .staging: 12, .production: 18],
+                tierUsageVP: [.localhost: 0, .dev: 400, .staging: 800, .production: 1_200],
                 tierOpenDates: [
                     .localhost: .init(month: 11, day: 16), .dev: .init(month: 11, day: 23),
                     .staging: .init(month: 11, day: 30), .production: .init(month: 12, day: 7),
