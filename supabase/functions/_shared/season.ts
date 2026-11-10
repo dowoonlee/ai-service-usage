@@ -84,8 +84,9 @@ export function adventCompleteRewardFor(year: number, receivedCount: number): Da
 /** 데일리 퀴즈 생성 프롬프트에 붙일 시즌 힌트. 시즌 밖이면 null. 릴리스 없이 서버만 바꾸는 항목. */
 export function quizSeasonHint(now: Date): string | null {
   const { month, day } = kstDate(now);
-  if (month === 12 && day <= 25) {
-    return "지금은 12월입니다 — 연말 결산·올해의 AI·크리스마스 시즌 성격의 기사가 있으면 우선 고르세요(없으면 평소 기준).";
+  // 클라 겨울 시즌 창(11/16~12/26)과 같은 구간 — 12/25까지.
+  if ((month === 11 && day >= 16) || (month === 12 && day <= 25)) {
+    return "지금은 연말 시즌입니다 — 연말 결산·올해의 AI·크리스마스 시즌 성격의 기사가 있으면 우선 고르세요(없으면 평소 기준).";
   }
   return null;
 }

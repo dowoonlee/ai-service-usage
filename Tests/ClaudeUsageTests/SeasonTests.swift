@@ -30,6 +30,19 @@ final class WindowSnowTests: XCTestCase {
     }
 }
 
+/// 날짜 고정은 샌드박스에서만 먹는다 — 실사용 빌드에 시계를 돌리는 지름길이 생기면 안 된다.
+final class SeasonClockTests: XCTestCase {
+    func testOverrideOnlyInSandbox() {
+        let env = ["AIUSAGE_SEASON_NOW": "2026-12-22"]
+        let fixed = SeasonClock.now(env, sandboxed: true)
+        XCTAssertEqual(UsageGrassModel.dayKey(fixed), "2026-12-22")
+        XCTAssertEqual(Calendar.kst.component(.hour, from: fixed), 12)
+        XCTAssertLessThan(abs(SeasonClock.now(env, sandboxed: false).timeIntervalSinceNow), 5)
+        XCTAssertLessThan(abs(SeasonClock.now([:], sandboxed: true).timeIntervalSinceNow), 5)
+        XCTAssertLessThan(abs(SeasonClock.now(["AIUSAGE_SEASON_NOW": "어제"], sandboxed: true).timeIntervalSinceNow), 5)
+    }
+}
+
 final class SeasonWindowTests: XCTestCase {
     private func kst(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 12, _ min: Int = 0) -> Date {
         Calendar.kst.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!

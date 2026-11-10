@@ -25,7 +25,7 @@ enum SeasonGiftBox {
     }
 
     /// 오늘(KST) 날짜에 해당하는 선물. 이미 열었는지는 보지 않는다.
-    static func todays(now: Date = Date(), settings: Settings? = nil) -> Pending? {
+    static func todays(now: Date = SeasonClock.now(), settings: Settings? = nil) -> Pending? {
         guard let season = SeasonRegistry.active(now: now, settings: settings), !season.gifts.isEmpty else { return nil }
         let c = Calendar.kst.dateComponents([.month, .day], from: now)
         guard let i = season.gifts.firstIndex(where: { $0.month == c.month && $0.day == c.day }) else { return nil }
@@ -35,14 +35,14 @@ enum SeasonGiftBox {
     }
 
     /// 아직 안 연 오늘의 선물.
-    static func pending(now: Date = Date(), settings: Settings? = nil) -> Pending? {
+    static func pending(now: Date = SeasonClock.now(), settings: Settings? = nil) -> Pending? {
         guard let p = todays(now: now, settings: settings) else { return nil }
         return (settings ?? Settings.shared).seasonalFlags.contains(p.flag) ? nil : p
     }
 
     /// 오늘의 선물을 연다. 이미 열었거나 선물 날이 아니면 nil(아무것도 지급하지 않는다).
     @discardableResult
-    static func open(now: Date = Date()) -> Pending? {
+    static func open(now: Date = SeasonClock.now()) -> Pending? {
         let s = Settings.shared
         guard let p = pending(now: now, settings: s) else { return nil }
         s.seasonalFlags.insert(p.flag)          // 지급보다 먼저 — 중복 클릭이 두 번 들어와도 한 번만

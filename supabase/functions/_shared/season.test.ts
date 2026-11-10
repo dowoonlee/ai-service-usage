@@ -54,8 +54,10 @@ Deno.test("완주 보상 — 정확히 임계값에 도달한 submit에서만", 
   assertEquals(adventCompleteRewardFor(2026, ADVENT.completeThreshold + 1), null, "그 다음 submit은 null");
 });
 
-Deno.test("퀴즈 시즌 힌트 — 12/1~25만", () => {
-  assertEquals(quizSeasonHint(utc(2026, 11, 20)), null);
+Deno.test("퀴즈 시즌 힌트 — 11/16~12/25만", () => {
+  assertEquals(quizSeasonHint(utc(2026, 11, 14, 15, 0)), null, "11/15 KST");
+  assertEquals(typeof quizSeasonHint(utc(2026, 11, 15, 15, 0)), "string", "11/16 KST 0시");
+  assertEquals(typeof quizSeasonHint(utc(2026, 11, 20)), "string");
   assertEquals(typeof quizSeasonHint(utc(2026, 12, 10)), "string");
   assertEquals(quizSeasonHint(utc(2026, 12, 25, 15, 0)), null, "12/26 KST");
 });

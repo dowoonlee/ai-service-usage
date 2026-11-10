@@ -102,7 +102,7 @@ extension SeasonalBoss {
     }
 
     @MainActor
-    func isCleared(tier: BadgeTier, season: Season, now: Date = Date(), settings: Settings? = nil) -> Bool {
+    func isCleared(tier: BadgeTier, season: Season, now: Date = SeasonClock.now(), settings: Settings? = nil) -> Bool {
         (settings ?? Settings.shared).seasonalFlags
             .contains(Self.flagKey(instanceID: season.instanceID(now: now), tier: tier))
     }
@@ -110,7 +110,7 @@ extension SeasonalBoss {
     /// 격파 보상 지급 — 인스턴스·tier당 1회. 이미 받았으면 nil. 코인은 ledger, 티켓은 로컬 재화.
     @MainActor
     @discardableResult
-    func claimReward(tier: BadgeTier, season: Season, now: Date = Date()) -> BossReward? {
+    func claimReward(tier: BadgeTier, season: Season, now: Date = SeasonClock.now()) -> BossReward? {
         let s = Settings.shared
         let key = Self.flagKey(instanceID: season.instanceID(now: now), tier: tier)
         guard !s.seasonalFlags.contains(key), let r = rewards[tier] else { return nil }

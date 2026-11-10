@@ -1,5 +1,17 @@
 import Foundation
 
+/// 시즌 판정의 "지금". 평소엔 실제 시각이고, **샌드박스에서만** `AIUSAGE_SEASON_NOW=2026-12-22`로 날짜를
+/// 고정할 수 있다(그날 KST 정오). 선물(12/21~25)·tier 오픈일처럼 날짜에 묶인 것을 릴리스 전에 눌러 보기 위한 것.
+/// 실사용 빌드에선 환경변수가 있어도 무시한다 — 시계를 돌리는 지름길을 하나 더 만들지 않는다.
+enum SeasonClock {
+    nonisolated static func now(_ env: [String: String] = ProcessInfo.processInfo.environment,
+                                sandboxed: Bool = AppEnv.isSandboxed) -> Date {
+        guard sandboxed, let raw = env["AIUSAGE_SEASON_NOW"]?.trimmingCharacters(in: .whitespaces),
+              let day = SajuEngine.kstDayFormatter.date(from: raw) else { return Date() }
+        return day.addingTimeInterval(12 * 3600)
+    }
+}
+
 /// 시즌 레지스트리 — "지금 활성인 시즌이 무엇인가"의 **유일한** 진입점.
 ///
 /// 스위치 3겹(cf. docs/plans/seasonal-events.md §2):
@@ -139,7 +151,7 @@ enum SeasonRegistry {
 
     /// 지금 활성인 시즌. 강제 → 설정 off → 운영 킬스위치 → 날짜 순으로 합성.
     @MainActor
-    static func active(now: Date = Date(), settings: Settings? = nil) -> Season? {
+    static func active(now: Date = SeasonClock.now(), settings: Settings? = nil) -> Season? {
         let settings = settings ?? Settings.shared
         if let forced = override ?? environmentOverride() {
             switch forced {
@@ -156,7 +168,7 @@ enum SeasonRegistry {
     /// 지금 열려 있는 시즌 보스. 보스는 자기 창(`SeasonalBoss.window`)을 따른다 — 시즌 창과 다르게 잡을 수 있게
     /// 분리해 뒀다(올해는 둘 다 11/16~12/26). 스위치는 시즌과 같은 3겹을 그대로 탄다.
     @MainActor
-    static func activeBoss(now: Date = Date(), settings: Settings? = nil) -> (season: Season, boss: SeasonalBoss)? {
+    static func activeBoss(now: Date = SeasonClock.now(), settings: Settings? = nil) -> (season: Season, boss: SeasonalBoss)? {
         let settings = settings ?? Settings.shared
         if let forced = override ?? environmentOverride() {
             switch forced {

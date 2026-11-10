@@ -86,7 +86,7 @@ final class ViewModel: ObservableObject {
     }
 
     /// 활성 시즌 재계산 + 다음 창 경계(KST 00:00)에 1회 깨어나는 타이머. 0시 정각에 모자가 씌워지고 벗겨진다.
-    func refreshSeason(now: Date = Date()) {
+    func refreshSeason(now: Date = SeasonClock.now()) {
         let next = SeasonRegistry.active(now: now)
         if next != activeSeason { activeSeason = next }
         seasonBoundaryTask?.cancel()

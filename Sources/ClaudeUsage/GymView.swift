@@ -35,7 +35,7 @@ struct GymView: View {
                 // 시즌 보스의 진입점은 맵 위 하늘에 뜬 이벤트 섬이다. 섬이 있는 동안 월드가 위로 늘어나므로
                 // 맵 높이도 같은 비율로 키워 지상 지역이 평소와 같은 크기로 보이게 한다.
                 // 보스는 자기 창(`SeasonalBoss.window`)을 따른다. 맵 눈은 시즌 연출이 켜졌을 때.
-                let event = SeasonRegistry.activeBoss(now: eventNow ?? Date())
+                let event = SeasonRegistry.activeBoss(now: eventNow ?? SeasonClock.now())
                 let season = event?.season
                 let boss = event?.boss
                 let onIsland = eventSelected && boss != nil
@@ -616,7 +616,7 @@ extension GymView {
     /// 월드맵의 이벤트 섬을 고르면 지역 관장·카테고리 자리에 나온다. cf. docs/plans/seasonal-events.md §26
     @ViewBuilder
     func seasonBossSection(season: Season, boss: SeasonalBoss) -> some View {
-        let now = eventNow ?? Date()
+        let now = eventNow ?? SeasonClock.now()
         let usage = boss.usage(dailyVP: settings.dailyVP, now: now)
         let days = usage.days
         let productionCleared = boss.isCleared(tier: .production, season: season, now: now, settings: settings)

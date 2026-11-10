@@ -45,7 +45,7 @@ struct ReportView: View {
     private let grassNow: Date
 
     /// `initialMode`/`grassNow`는 프리뷰 렌더용 — 앱은 항상 기본값(리포트, 지금)으로 연다.
-    init(initialMode: Mode = .report, grassNow: Date = Date()) {
+    init(initialMode: Mode = .report, grassNow: Date = SeasonClock.now()) {
         _mode = State(initialValue: initialMode)
         self.grassNow = grassNow
     }
@@ -151,7 +151,10 @@ struct ReportView: View {
             streak: settings.usageStreak,
             rewardMarks: UsageGrassModel.rewardMarks(season: season, dailyVP: settings.dailyVP,
                                                      claimedGrants: settings.claimedGrants, now: grassNow),
-            rewardDayCount: season?.rewardDays?.count,
+            // "보상 N/24"는 보상 월(12월)에만 — 시즌이 11/16에 켜져도 11월엔 받을 보상이 없어 0/24가 뜻 없이 보인다.
+            rewardDayCount: season.flatMap { s in
+                Calendar.kst.component(.month, from: grassNow) == s.rewardMonth ? s.rewardDays?.count : nil
+            },
             decoration: season?.grassDecoration,
             rewardNote: season?.rewardDays != nil
                 ? "12/1~24 · AI를 쓴 날마다 +50 코인, 24일엔 +300 · 20일 채우면 칭호 \"12월 완주\". 보상은 1시간 안에 도착. 랭킹 참여 시 수령."
