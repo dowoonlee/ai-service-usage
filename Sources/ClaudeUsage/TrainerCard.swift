@@ -253,6 +253,8 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     case freezeViolator            // 코인 1,500 (12월 한정 노출)
     case decemberFinisher          // 자동: 12월 일일 보상 20/24 수령 (claimedGrants "advent-<yyyy>-12-DD" ≥ 20)
     case snowDeployer              // 자동: 겨울 관장 production 격파 (seasonalFlags "boss:xmas-<yyyy>:production")
+    // ── 연말연시 시즌 (season: .newYear) — case 삭제 금지 ──
+    case newYearFirstDay           // 자동: 1/1 사용 이벤트 1건 (seasonalFlags "codedOn:<yyyy>-01-01")
 
     var displayName: String {
         switch self {
@@ -318,6 +320,7 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .freezeViolator:        return "연말 배포 freeze 위반"
         case .decemberFinisher:      return "12월 완주"
         case .snowDeployer:          return "눈길 배포 성공"
+        case .newYearFirstDay:       return "작심삼일 1일차"
         }
     }
 
@@ -380,6 +383,7 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .freezeViolator:        return "1,500 coin · 12월 한정 · 그래도 배포함"
         case .decemberFinisher:      return "12월 1~24일 중 20일 이상 보상 수령"
         case .snowDeployer:          return "겨울 관장 production 격파"
+        case .newYearFirstDay:       return "1월 1일에 AI 사용 기록이 있으면"
         }
     }
 
@@ -403,6 +407,7 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
     var season: Season.Kind? {
         switch self {
         case .codedOnChristmas, .freezeViolator, .decemberFinisher, .snowDeployer: return .xmas
+        case .newYearFirstDay: return .newYear
         default: return nil
         }
     }
@@ -502,6 +507,9 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         // ── 시즌 자동 칭호 (seasonalFlags — 연도 키라 어느 해든 한 번이면 됨) ──
         if s.seasonalFlags.contains(where: { $0.hasPrefix("codedOn:") && $0.hasSuffix("-12-25") }) {
             set.insert(.codedOnChristmas)
+        }
+        if s.seasonalFlags.contains(where: { $0.hasPrefix("codedOn:") && $0.hasSuffix("-01-01") }) {
+            set.insert(.newYearFirstDay)
         }
         if hasDecemberFinish(claimedGrants: s.claimedGrants) { set.insert(.decemberFinisher) }
         if s.seasonalFlags.contains(where: { $0.hasPrefix("boss:xmas-") && $0.hasSuffix(":production") }) {

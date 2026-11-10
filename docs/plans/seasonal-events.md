@@ -530,6 +530,40 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 
 ---
 
+# 5번: 크리스마스 주간 선물 + 새해 칭호 (2026-11-10 추가)
+
+## 30. 날짜별 선물 (12/21~25)
+
+12/21(월)~12/25(금) 닷새 동안 메인 패널에 "오늘의 선물 (n/5)" 배너가 뜨고, 열면 그날 선물을 받는다. 뒤로 갈수록 커진다.
+
+| 날짜 | 코인 | 가챠권 |
+|---|---|---|
+| 12/21 | 300 | — |
+| 12/22 | 500 | — |
+| 12/23 | 800 | 1 |
+| 12/24 | 1,200 | 2 |
+| 12/25 | 2,500 | 5 |
+
+합계 코인 5,300 + 가챠권 8장(뽑기 8회분 = 2,400 상당). 일일 보상(24일 합 1,500)보다 크고 겨울 관장(합 25,000 +
+프리미엄권)보다 작게 잡았다. 수치는 `SeasonRegistry`의 `gifts:` 배열 한 곳.
+
+* **그날 것만 열린다. 소급 없음** — 놓친 날을 나중에 몰아 받게 하면 "점점 커진다"가 "25일에 한 번"이 된다.
+* **로컬 지급**(`SeasonGiftBox`) — 서버를 거치지 않아 랭킹 미등록 사용자도 받는다(일일 보상 §20과 다른 점). 대신
+  시계를 돌리면 미리 열 수 있다. 코인·일반 가챠권은 원래 로컬 경제라 감수하고, 서버가 검증하는 RP·프리미엄권은
+  넣지 않는다.
+* dedup은 `seasonalFlags`의 `gift:<instanceID>:<MM>-<DD>`(예: `gift:xmas-2026:12-23`). 날짜 경계는 KST.
+* 시즌이 꺼져 있으면(연출 설정 off·킬스위치) 선물도 없다 — 판정은 `SeasonRegistry.active()` 한 곳.
+* 날짜는 월/일 고정이라 내년엔 요일이 어긋난다(2027-12-21은 화요일). 내년에 다시 쓸 때 `gifts:`를 손본다.
+* 프리뷰: `시즌/선물-배너`(1·3·5일차 × 열기 전/후).
+
+## 31. 새해 칭호
+
+`CardTitle.newYearFirstDay` "작심삼일 1일차" — 1/1(KST)에 `UsageEvent` 1건 이상이면 자동 해금. `codedOnChristmas`와
+같은 구조(`SeasonFlagLedger`가 `codedOn:<yyyy>-01-01` 기록), `season: .newYear`. 연말연시 시즌의 첫 고유 콘텐츠.
+표시 이름은 사용자 확정 전(2026-11-10 기준 제안값) — rawValue는 이름과 무관하게 고정.
+
+---
+
 # 구현 상태 (2026-11-10, 브랜치 `feat/season-2026`, 미push — 릴리스 2026-11-16 예정)
 
 이슈: Feature #271 / T1 #272 · T2 #273 · T3 #274 · T4 #275 · T5 #276 · T6 #277 · T7 #278
@@ -543,10 +577,11 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 | T6 `feat(season)` 일일 보상 #277 | 서버 `_shared/season.ts`+`submit` 훅+퀴즈 힌트, 잔디 보상 마크, 12월 완주, 알림 | 완료 — 서버 배포는 나중에(사용자) |
 | T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공 | 완료 — snow 톤 컨펌 완료(ebf10a1) |
 | T3 액세서리 11종 도트 PNG #274 | 팩 미발견 → **직접 16×16 도트 제작 예외 허용(사용자)**, 결과물 컨펌 필수 | 완료 — 컨펌 완료(7affcd9) |
+| 5번 선물·새해 칭호 (이슈 없음) | `SeasonGift`/`SeasonGiftBox`, 패널 `SeasonGiftBanner`, `CardTitle.newYearFirstDay` | 완료 — 선물 수치·칭호 이름 컨펌 대기 |
 
 프리뷰: `bash scripts/render-previews.sh` 후 `0-headwear-*`(195종 모자 앵커), `0-season-boss-skins`, `탭-*-12월`,
 `사무실-12월데코`(GIF — 트리·전구 줄 깜빡임과 벽 데코 배치).
 main 반영: 2026-11-10 `a860732`(v0.19.4 이후)까지 **merge**(28c4be3). rebase 금지 — pre-push 훅이 첫 커밋
 `18e57e6`의 자손 여부로 막으므로 해시가 바뀌면 가드가 풀린다.
 
-테스트: `swift test` 522개(39 skip) + `deno test supabase/functions/_shared/season.test.ts`.
+테스트: `swift test` 532개(40 skip) + `deno test supabase/functions/_shared/season.test.ts`.

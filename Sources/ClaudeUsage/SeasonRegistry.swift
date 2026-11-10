@@ -58,7 +58,16 @@ enum SeasonRegistry {
                     .production: BossReward(coins: 15_000, premiumTickets: 1),
                 ],
                 titleReward: .snowDeployer
-            )
+            ),
+            // 크리스마스 주간(2026년 기준 월~금) — 매일 하나, 갈수록 커진다. 합계 코인 5,300 + 가챠권 8장.
+            // 일일 보상(+50/일)보다 크고 겨울 관장(1,000~15,000)보다 작게 잡았다.
+            gifts: [
+                SeasonGift(month: 12, day: 21, coins: 300, tickets: 0),
+                SeasonGift(month: 12, day: 22, coins: 500, tickets: 0),
+                SeasonGift(month: 12, day: 23, coins: 800, tickets: 1),
+                SeasonGift(month: 12, day: 24, coins: 1_200, tickets: 2),
+                SeasonGift(month: 12, day: 25, coins: 2_500, tickets: 5),
+            ]
         ),
         Season(
             kind: .newYear, displayName: "연말연시",

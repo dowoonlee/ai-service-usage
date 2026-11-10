@@ -218,6 +218,30 @@ final class ScenePreviews: SandboxedTestCase {
         }
     }
 
+    // MARK: - 시즌 선물 배너
+
+    /// 메인 패널(폭 260~)에 끼어드는 배너라 두 줄 문구가 잘리거나 버튼이 밀리지 않는지 본다.
+    /// 첫날·중간(가챠권 포함)·마지막 날 × 열기 전/후.
+    func testRenderSeasonGiftBanner() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        let gifts = SeasonRegistry.season(.xmas)!.gifts
+        func pending(_ i: Int) -> SeasonGiftBox.Pending {
+            SeasonGiftBox.Pending(gift: gifts[i], index: i + 1, total: gifts.count, flag: "preview")
+        }
+        let view = VStack(alignment: .leading, spacing: 8) {
+            ForEach([0, 2, 4], id: \.self) { i in
+                SeasonGiftBanner(gift: pending(i), opened: false) {}
+                SeasonGiftBanner(gift: pending(i), opened: true) {}
+            }
+        }
+        .padding(10)
+        .frame(width: 280)
+        .background(Color(nsColor: .windowBackgroundColor))
+        _ = try PreviewRenderer.render(
+            view, section: "시즌", title: "선물-배너",
+            note: "12/21~25 메인 패널 배너. 위에서부터 1일차·3일차·5일차, 각각 열기 전/후.")
+    }
+
     func testRenderGuildOffice() throws {
         let info = PreviewDemoState.guildInfo()
         let view = officeView(info: info, rearrange: false, floor: nil, wall: nil)
