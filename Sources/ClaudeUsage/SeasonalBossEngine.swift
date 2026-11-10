@@ -5,27 +5,52 @@ import SwiftUI
 // 시즌 보스 — 판정·보상 + 도장 배틀 상대 추상화 (cf. docs/plans/seasonal-events.md §24~26)
 // ============================================================================
 //
-// 보스는 뱃지·지역과 무관하다. tier는 3번 보상 진행도(일)로 열리고, 보상은 시즌 인스턴스·tier당 1회
+// 보스는 뱃지·지역과 무관하다. tier는 사용 일수 + 오픈일로 열리고, 보상은 시즌 인스턴스·tier당 1회
 // (`seasonalFlags` "boss:<instanceID>:<tier>"). 팀은 지역 관장과 같은 EP 솔버라 같은 tier면 같은 난이도.
 // 완전 로컬 — 서버 의존 0.
 
 extension SeasonalBoss {
-    /// 3번 보상 수령 일수 — `claimedGrants`에서 이 시즌의 일일 grant 접두 행을 센다.
-    nonisolated static func rewardDayCount(season: Season, claimedGrants: Set<String>, now: Date,
-                                           calendar: Calendar = .kst) -> Int {
-        guard let prefix = season.rewardGrantPrefix(now: now, calendar: calendar) else { return 0 }
-        return claimedGrants.filter { $0.hasPrefix(prefix) && Int($0.dropFirst(prefix.count)) != nil }.count
+    /// 보스가 열린 뒤 AI를 쓴 날 수 — `dailyVP`(KST 날짜 → VP)에서 창 시작일~오늘 사이, 값이 있는 날.
+    /// 로컬 기록이라 랭킹 미등록 사용자도 센다. 시작일 전 사용분은 치지 않는다.
+    nonisolated func usageDayCount(dailyVP: [String: Double], now: Date, calendar: Calendar = .kst) -> Int {
+        guard case .yearly(let start, _) = window.rule else { return 0 }
+        let year = window.instanceYear(for: now, calendar: calendar)
+        let from = UsageGrassModel.dayKey(year: year, month: start.month, day: start.day)
+        let to = UsageGrassModel.dayKey(now)
+        return dailyVP.filter { $0.value > 0 && $0.key >= from && $0.key <= to }.count
     }
 
-    /// 보상 일수로 열린 tier들(낮은 순).
-    nonisolated func openTiers(rewardDays: Int) -> [BadgeTier] {
-        BadgeTier.allCases.filter { (tierThresholds[$0] ?? Int.max) <= rewardDays }
+    /// tier 오픈일(KST 00:00). 지정이 없으면 nil = 날짜 조건 없음.
+    nonisolated func openDate(tier: BadgeTier, now: Date, calendar: Calendar = .kst) -> Date? {
+        guard let md = tierOpenDates[tier] else { return nil }
+        let year = window.instanceYear(for: now, calendar: calendar)
+        return calendar.date(from: DateComponents(year: year, month: md.month, day: md.day))
+    }
+
+    /// tier가 잠겨 있는 이유. 열려 있으면 nil. 날짜가 먼저다 — 날짜 전엔 일수를 채워도 소용없으니.
+    enum TierLock: Equatable {
+        case date(month: Int, day: Int)
+        case usage(have: Int, need: Int)
+    }
+
+    nonisolated func lock(tier: BadgeTier, usageDays: Int, now: Date, calendar: Calendar = .kst) -> TierLock? {
+        if let open = openDate(tier: tier, now: now, calendar: calendar), now < open,
+           let md = tierOpenDates[tier] {
+            return .date(month: md.month, day: md.day)
+        }
+        guard let need = tierThresholds[tier] else { return .usage(have: usageDays, need: .max) }
+        return usageDays >= need ? nil : .usage(have: usageDays, need: need)
+    }
+
+    /// 열린 tier들(낮은 순) — 사용 일수와 오픈일을 **둘 다** 만족한 것.
+    nonisolated func openTiers(usageDays: Int, now: Date, calendar: Calendar = .kst) -> [BadgeTier] {
+        BadgeTier.allCases.filter { lock(tier: $0, usageDays: usageDays, now: now, calendar: calendar) == nil }
     }
 
     /// 대사 단계 — 0(미참여) / 1~5 / 6+ / production 격파. 마지막 줄("인정")은 격파 뒤에만 나온다.
-    nonisolated static func stage(rewardDays: Int, productionCleared: Bool) -> Int {
+    nonisolated static func stage(usageDays: Int, productionCleared: Bool) -> Int {
         if productionCleared { return 3 }
-        switch rewardDays {
+        switch usageDays {
         case ..<1: return 0
         case 1...5: return 1
         default: return 2
@@ -167,7 +192,7 @@ enum GymOpponent: Identifiable {
     var loseText: String {
         switch self {
         case .region: return "패배… 관장을 이겨야 도장을 얻습니다"
-        case .boss:   return "패배… 보상 일수를 더 채우면 낮은 tier부터 열립니다"
+        case .boss:   return "패배… 파티를 정비해 다시 도전하세요"
         }
     }
 }

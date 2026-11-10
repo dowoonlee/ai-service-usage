@@ -169,10 +169,15 @@ struct SeasonalBoss: Equatable {
     let supports: [SkinnedPet]
     let name: String
     let title: String
-    /// 4단계 — 3번 보상 진행도(일)에 연동: 0 / 1~5 / 6+ / production 격파.
+    /// 보스가 열려 있는 기간. 시즌 창과 별개다 — 겨울 관장은 시즌(12/1~)보다 먼저 11/16에 연다.
+    let window: SeasonWindow
+    /// 4단계 — 사용 일수에 연동: 0 / 1~5 / 6+ / production 격파.
     let dialogues: [String]
-    /// tier 오픈에 필요한 보상 일수(3번 `claimedGrants` 접두 행 수).
+    /// tier 오픈 조건 ① — 보스가 열린 뒤 AI를 쓴 날 수(`Settings.dailyVP`, KST).
     let tierThresholds: [BadgeTier: Int]
+    /// tier 오픈 조건 ② — 이 날짜(KST 00:00)부터. 사용 일수를 아무리 채워도 이 전엔 안 열린다.
+    /// ①②를 **둘 다** 만족해야 열린다.
+    let tierOpenDates: [BadgeTier: SeasonWindow.MonthDay]
     let rewards: [BadgeTier: BossReward]
     /// production 격파 칭호.
     let titleReward: CardTitle?

@@ -24,6 +24,8 @@ struct WorldMapView: View {
     @Binding var islandSelected: Bool
     /// 섬 지역 뷰에서 걸어다닐 보스 선봉(스킨·모자 포함). nil이면 아바타 없음.
     var islandAvatar: SkinnedPet? = nil
+    /// 맵 전체에 눈을 내릴지 — 시즌 연출(12/1~)이 켜졌을 때만. 섬은 그보다 먼저(11/16) 뜬다.
+    var snowing: Bool = false
     /// 호버된 region — nil이면 selected만 강조, non-nil이면 그 region도 강조.
     @State private var hovered: BadgeRegion?
     @State private var islandHovered = false
@@ -31,7 +33,8 @@ struct WorldMapView: View {
     /// `initiallyZoomed` — 지역 뷰로 시작(프리뷰용. 앱은 항상 월드 뷰에서 시작한다).
     init(selected: Binding<BadgeRegion>, island: EventIsland? = nil,
          islandSelected: Binding<Bool> = .constant(false), islandAvatar: SkinnedPet? = nil,
-         initiallyZoomed: Bool = false) {
+         snowing: Bool = false, initiallyZoomed: Bool = false) {
+        self.snowing = snowing
         self._selected = selected
         self.island = island
         self._islandSelected = islandSelected
@@ -58,7 +61,7 @@ struct WorldMapView: View {
         GeometryReader { geo in
             let size = geo.size
             // 지역 뷰에선 트레이너 아바타가 걸어다니므로 계속 프레임을 돌린다(전환 중에도).
-            // 섬이 있는 시즌엔 눈이 내리므로 월드 뷰에서도 프레임을 돌린다.
+            // 섬이 있으면 구름이 흐르고 눈이 내리므로 월드 뷰에서도 프레임을 돌린다.
             TimelineView(.animation(minimumInterval: 1.0 / 30.0,
                                     paused: !windowIsVisible
                                         || (!animating && mode != .region && island == nil))) { timeline in
@@ -68,6 +71,7 @@ struct WorldMapView: View {
                                   townProgress: townProgresses, discovered: discoveredSet,
                                   mastered: masteredRegions,
                                   island: island, islandHighlighted: onIsland || islandHovered,
+                                  snowing: snowing,
                                   time: timeline.date.timeIntervalSinceReferenceDate)
                     inputLayer(cam: cam, size: size)
                     avatarCanvas(cam: cam, date: timeline.date, size: size)
@@ -367,6 +371,7 @@ struct MapTileCanvas: View {
     /// 시즌 이벤트 섬(하늘 띠에 뜬다). nil이면 그리지 않는다.
     var island: EventIsland? = nil
     var islandHighlighted: Bool = false
+    var snowing: Bool = false
     /// 구름 흐름·눈 낙하용 시각. 정지 렌더(미니맵)는 0.
     var time: TimeInterval = 0
 
@@ -434,8 +439,8 @@ struct MapTileCanvas: View {
                 // 섬 위 구조물과 눈은 지상 건물·데코까지 다 그린 뒤 맨 위에.
                 if let island {
                     drawIslandProps(island, in: &context, size: size)
-                    drawSnowfall(in: &context, size: size)
                 }
+                if snowing { drawSnowfall(in: &context, size: size) }
             }
 
             // 다리 — vibe(본토)-guild(제도) 두 대륙을 잇는 바다 위 나무 판자.

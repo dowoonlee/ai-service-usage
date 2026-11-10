@@ -16,7 +16,12 @@ struct GymView: View {
     /// 진행 중인 관장 배틀(sheet 트리거). nil이면 배틀 창 닫힘.
     @State private var activeBattle: GymBattleRequest?
 
-    init(settings: Settings? = nil, initialRegion: BadgeRegion = .coffee, initialEventSelected: Bool = false) {
+    /// 시즌 보스 판정의 "지금" — 프리뷰가 날짜를 고정할 때만 넣는다. 앱은 nil(실제 시각).
+    private let eventNow: Date?
+
+    init(settings: Settings? = nil, initialRegion: BadgeRegion = .coffee, initialEventSelected: Bool = false,
+         eventNow: Date? = nil) {
+        self.eventNow = eventNow
         self.settings = settings ?? .shared
         self._selectedRegion = State(initialValue: initialRegion)
         self._eventSelected = State(initialValue: initialEventSelected)
@@ -29,11 +34,14 @@ struct GymView: View {
                 header
                 // 시즌 보스의 진입점은 맵 위 하늘에 뜬 이벤트 섬이다. 섬이 있는 동안 월드가 위로 늘어나므로
                 // 맵 높이도 같은 비율로 키워 지상 지역이 평소와 같은 크기로 보이게 한다.
-                let season = SeasonRegistry.active()
-                let boss = season?.boss
+                // 보스는 자기 창(11/16~)을 따른다 — 시즌 연출(눈·모자, 12/1~)보다 먼저 열린다.
+                let event = SeasonRegistry.activeBoss(now: eventNow ?? Date())
+                let season = event?.season
+                let boss = event?.boss
                 let onIsland = eventSelected && boss != nil
                 WorldMapView(selected: $selectedRegion, island: boss?.island,
-                             islandSelected: $eventSelected, islandAvatar: boss?.lead)
+                             islandSelected: $eventSelected, islandAvatar: boss?.lead,
+                             snowing: SeasonRegistry.active()?.ambient != nil)
                     .frame(height: Self.mapHeight(hasIsland: boss != nil))
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
                     .overlay(
@@ -608,11 +616,10 @@ extension GymView {
     /// 월드맵의 이벤트 섬을 고르면 지역 관장·카테고리 자리에 나온다. cf. docs/plans/seasonal-events.md §26
     @ViewBuilder
     func seasonBossSection(season: Season, boss: SeasonalBoss) -> some View {
-        let now = Date()
-        let days = SeasonalBoss.rewardDayCount(season: season, claimedGrants: settings.claimedGrants, now: now)
+        let now = eventNow ?? Date()
+        let days = boss.usageDayCount(dailyVP: settings.dailyVP, now: now)
         let productionCleared = boss.isCleared(tier: .production, season: season, now: now, settings: settings)
-        let stage = SeasonalBoss.stage(rewardDays: days, productionCleared: productionCleared)
-        let open = boss.openTiers(rewardDays: days)
+        let stage = SeasonalBoss.stage(usageDays: days, productionCleared: productionCleared)
         VStack(spacing: 8) {
             HStack(alignment: .center, spacing: 12) {
                 ZStack {
@@ -651,11 +658,11 @@ extension GymView {
             HStack(spacing: 6) {
                 ForEach(BadgeTier.allCases, id: \.self) { tier in
                     bossTierButton(season: season, boss: boss, tier: tier,
-                                   isOpen: open.contains(tier),
+                                   lock: boss.lock(tier: tier, usageDays: days, now: now),
                                    cleared: boss.isCleared(tier: tier, season: season, now: now, settings: settings))
                 }
             }
-            Text("보상 \(days)/\(season.rewardDays?.count ?? 0)일 · 리포트 탭의 12월 보상을 받을수록 높은 tier가 열립니다. 보상은 tier당 1회.")
+            Text("사용 \(days)일 · AI를 쓴 날이 쌓이고 오픈일이 지나면 다음 tier가 열립니다. 보상은 tier당 1회.")
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -669,9 +676,17 @@ extension GymView {
     }
 
     private func bossTierButton(season: Season, boss: SeasonalBoss, tier: BadgeTier,
-                                isOpen: Bool, cleared: Bool) -> some View {
+                                lock: SeasonalBoss.TierLock?, cleared: Bool) -> some View {
         let reward = boss.rewards[tier]
-        let threshold = boss.tierThresholds[tier] ?? 0
+        let isOpen = lock == nil
+        // 잠김 사유 — 날짜가 안 됐으면 날짜를, 날짜는 됐는데 일수가 모자라면 일수를 보여 준다.
+        let lockText: String = {
+            switch lock {
+            case .date(let m, let d): return "\(m)/\(d) 오픈"
+            case .usage(let have, let need): return "사용 \(have)/\(need)일"
+            case nil: return ""
+            }
+        }()
         return Button {
             activeBattle = GymBattleRequest(opponent: .boss(season, boss, tier))
         } label: {
@@ -683,7 +698,7 @@ extension GymView {
                 }
                 Text(isOpen
                      ? (cleared ? "격파" : "🪙\(reward?.coins.formatted() ?? "0")" + ((reward?.premiumTickets ?? 0) > 0 ? " +가챠권" : ""))
-                     : "보상 \(threshold)일")
+                     : lockText)
                     .font(.system(size: 8, design: .monospaced))
             }
             .frame(maxWidth: .infinity)

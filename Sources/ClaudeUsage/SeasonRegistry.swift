@@ -43,13 +43,20 @@ enum SeasonRegistry {
                     SkinnedPet(kind: .orchidOwl, skin: .snow, displayName: "흰올빼미"),
                 ],
                 name: "Rudolph", title: "배송 라우팅 관장",
+                // 시즌(12/1~)보다 먼저 연다 — 2026-11-16 릴리스와 함께(사용자 결정).
+                window: .yearly(11, 16, to: 12, 26),
                 dialogues: [
                     "배송 큐가 비었군. 아직 아무것도 안 쓴 건가.",
                     "패킷이 들어오기 시작했다. 경로는 내가 잡지.",
                     "절반 넘겼군. 썰매도 이 정도면 autoscale 된다.",
                     "...눈길에서도 배포가 되는군. 인정.",
                 ],
+                // 사용 일수 + 오픈일 — 둘 다 채워야 열린다(사용자 결정). 오픈일은 2026년 기준 매주 월요일.
                 tierThresholds: [.localhost: 0, .dev: 6, .staging: 12, .production: 18],
+                tierOpenDates: [
+                    .localhost: .init(month: 11, day: 16), .dev: .init(month: 11, day: 23),
+                    .staging: .init(month: 11, day: 30), .production: .init(month: 12, day: 7),
+                ],
                 // 지역 관장(50/150/500/1500)의 10~20배 — 사용자 결정(§26). 시즌당 1회, production은 18일 참여 뒤.
                 rewards: [
                     .localhost: BossReward(coins: 1_000),
@@ -139,6 +146,26 @@ enum SeasonRegistry {
         guard let s = scheduled(now: now) else { return nil }
         if settings.disabledSeasons.contains(s.kind.rawValue) { return nil }
         return s
+    }
+
+    /// 지금 열려 있는 시즌 보스. 보스는 자기 창(`SeasonalBoss.window`)을 따르므로 시즌이 아직 활성 전이어도
+    /// 열릴 수 있다(겨울 관장 11/16 vs 시즌 12/1). 스위치는 시즌과 같은 3겹을 그대로 탄다.
+    @MainActor
+    static func activeBoss(now: Date = Date(), settings: Settings? = nil) -> (season: Season, boss: SeasonalBoss)? {
+        let settings = settings ?? Settings.shared
+        if let forced = override ?? environmentOverride() {
+            switch forced {
+            case .none: return nil
+            case .season(let k): return season(k).flatMap { s in s.boss.map { (s, $0) } }
+            }
+        }
+        guard settings.seasonalEffectsEnabled else { return nil }
+        for s in all {
+            guard let boss = s.boss, boss.window.contains(now),
+                  !settings.disabledSeasons.contains(s.kind.rawValue) else { continue }
+            return (s, boss)
+        }
+        return nil
     }
 
     /// `date` 이후 가장 가까운 시즌 경계(모든 시즌의 시작/끝 중 최소). 경계 타이머용.
