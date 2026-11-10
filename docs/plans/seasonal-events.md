@@ -572,7 +572,7 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 | T1 `refactor(report)` #272 | 리포트/꾸미기 분리, 칭호 3묶음 그리드, 공유 메뉴, `FlowLayout` | 완료 |
 | T2 `feat(report)` 잔디 #273 | `DailyUsageLedger`, `UsageGrassModel/View`, `PetTheme.grassLevels` | 완료 — 11/16 릴리스로 12/1 전 보름치 적립 |
 | T4 `feat(season)` 기반 #275 | `Season`/`SeasonRegistry`(KST), `ParticleStyle`, headwear 앵커, 시즌 대사, 오피스 창문 눈, 킬스위치 | 완료 |
-| T5 `feat(season)` 코스메틱 #276 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge`·오피스 데코 6종(트리·전구 줄·배너·리스·눈사람·선물 상자) | 완료 — 트리·전구 줄·배너 컨펌 완료(2026-11-10), **리스·눈사람·선물 상자 컨펌 대기** |
+| T5 `feat(season)` 코스메틱 #276 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge`·오피스 데코 6종(트리·전구 줄·배너·리스·눈사람·선물 상자) | 완료 — 6종 모두 컨펌 완료(2026-11-10) |
 | T6 `feat(season)` 일일 보상 #277 | 서버 `_shared/season.ts`+`submit` 훅+퀴즈 힌트, 잔디 보상 마크, 12월 완주, 알림 | 완료 — 서버 배포는 나중에(사용자) |
 | T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공 | 완료 — snow 톤 컨펌 완료(ebf10a1) |
 | T3 액세서리 11종 도트 PNG #274 | 팩 미발견 → **직접 16×16 도트 제작 예외 허용(사용자)**, 결과물 컨펌 필수 | 완료 — 컨펌 완료(7affcd9) |
