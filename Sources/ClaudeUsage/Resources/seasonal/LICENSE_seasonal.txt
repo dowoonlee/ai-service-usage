@@ -2,3 +2,6 @@ seasonal/ — 시즌 연출용 자체 제작 도트 스프라이트 (AIUsage 프
 santa_hat.png: 8×7, 펫 머리 장식(12월). 투명 배경, 1px 외곽.
 CHRISTMAS_TREE.png / CHRISTMAS_TREE_2.png / CHRISTMAS_TREE_3.png: 16×32, 전구가 돌아가며 켜지는 3프레임, 길드 오피스 바닥 데코(12월 한정). 화분 부분은 2dPig Pixel Office Asset Pack(CC0)의
   POT.png를 그대로 썼고, 나무·별·장식은 같은 팩의 잎 팔레트로 자체 제작. 투명 배경.
+XMAS_LIGHTS.png / XMAS_LIGHTS_2.png / XMAS_LIGHTS_3.png: 32×32, 길드 오피스 벽 데코(12월 한정). 못 3개에 걸린
+  전선 + 전구 6개가 돌아가며 켜지는 3프레임. 그림은 위쪽 13px에만 있고 나머지는 투명. 자체 제작.
+XMAS_BANNER.png: 32×32, 길드 오피스 벽 데코(12월 한정). "MERRY XMAS" 붉은 천 배너, 3×5 자체 도트 글꼴. 자체 제작.

@@ -180,6 +180,44 @@ final class AnimationPreviews: SandboxedTestCase {
             note: "펫이 가구를 통과하지 않는지, 벽에 끼지 않는지, 걷는 방향과 그림 방향이 맞는지.")
     }
 
+    /// 12월 한정 데코 — 트리·전구 줄은 0.5초마다 프레임이 바뀐다. 정지 그림으론 깜빡임도, 벽 색 위에서
+    /// 전구가 묻히는지도 알 수 없다. 벽 슬롯 1·2·3은 35px 간격이라 32px 폭 데코 셋이 한 줄로 이어진다.
+    func testRenderGuildOfficeXmasDecor() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        SeasonRegistry.override = .season(.xmas)
+        defer { SeasonRegistry.override = Override.none }
+
+        let base = PreviewDemoState.guildInfo()
+        let decor = [
+            RankingAPI.GuildFurnitureItem(slotId: 1, itemKind: "XMAS_LIGHTS", donorNickname: "kimcoder"),
+            RankingAPI.GuildFurnitureItem(slotId: 2, itemKind: "XMAS_BANNER", donorNickname: "vibewolf"),
+            RankingAPI.GuildFurnitureItem(slotId: 3, itemKind: "XMAS_LIGHTS", donorNickname: "nightowl"),
+            RankingAPI.GuildFurnitureItem(slotId: 6, itemKind: "CHRISTMAS_TREE", donorNickname: "dowoon"),
+            RankingAPI.GuildFurnitureItem(slotId: 8, itemKind: "CHRISTMAS_TREE", donorNickname: "dowoon"),
+        ]
+        let info = RankingAPI.GuildInfoResponse(
+            guild: base.guild, members: base.members, furniture: decor,
+            sentInvites: base.sentInvites, joinRequests: base.joinRequests, guestbook: base.guestbook,
+            guestbookDeleteWindowSec: base.guestbookDeleteWindowSec,
+            guestbookCanInteract: base.guestbookCanInteract)
+        let view = GuildOfficeView(
+            info: info,
+            rearrangeMode: .constant(false),
+            previewFloorTheme: .constant(nil),
+            previewWallTheme: .constant(nil),
+            onSaveStudio: { _ in }, onSetLogoPos: { _, _ in },
+            onPlaceDecor: { _, _ in }, onRemoveDecor: { _ in }, onApplyTheme: {},
+            purchaseSheetOpen: .constant(false))
+
+        // 0.25초 간격 24프레임 = 6초 — 0.5초 박자의 3프레임 순환이 네 바퀴 돈다.
+        try PreviewRenderer.renderAnimated(
+            view, size: CGSize(width: 560, height: 400),
+            frameCount: 24, frameInterval: 0.25,
+            section: "애니 · 길드", title: "사무실-12월데코",
+            note: "트리 2그루 + 벽의 전구 줄·Merry Xmas 배너. 전구가 돌아가며 켜지는지, 벽 색에 묻히지 않는지, "
+                + "벽 데코 셋이 한 줄로 이어지는지.")
+    }
+
     // MARK: - RP 이펙트
 
     /// 깃발 이펙트 — 길드 로고가 있을 때와 없을 때.

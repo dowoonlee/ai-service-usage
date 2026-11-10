@@ -505,6 +505,14 @@ enum OfficeLayout {
                   season: .xmas,
                   // 전구 15개가 3그룹으로 돌아가며 켜짐/보통/꺼짐, 별은 2번째 프레임에 밝아진다.
                   animationFrames: ["CHRISTMAS_TREE", "CHRISTMAS_TREE_2", "CHRISTMAS_TREE_3"]),
+        // 벽 — 그림은 32×32 칸의 위쪽 절반에만 있다(아래는 투명). 벽 슬롯 baseline에 맞추면 천장 가까이 걸린다.
+        DecorItem(kind: "XMAS_LIGHTS", name: "전구 줄", category: .wall, price: 500,
+                  size: CGSize(width: 32, height: 32), blockingWidth: 0, passing: .behind,
+                  season: .xmas,
+                  animationFrames: ["XMAS_LIGHTS", "XMAS_LIGHTS_2", "XMAS_LIGHTS_3"]),
+        DecorItem(kind: "XMAS_BANNER", name: "Merry Xmas 배너", category: .wall, price: 500,
+                  size: CGSize(width: 32, height: 32), blockingWidth: 0, passing: .behind,
+                  season: .xmas),
     ]
 
     static func decorItem(kind: String) -> DecorItem? {

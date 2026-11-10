@@ -56,13 +56,20 @@ final class SeasonalShopTests: SandboxedTestCase {
             if let k = item.season { XCTAssertNotNil(SeasonRegistry.season(k), "\(item.kind) 시즌이 레지스트리에 없음") }
         }
 
+        // 12월 한정 데코 3종(바닥 1 + 벽 2) — 시즌 밖엔 상점에서 숨고, 놓인 것은 계속 조회된다.
+        let seasonal = OfficeLayout.decorCatalog.filter { $0.season == .xmas }
+        XCTAssertEqual(Set(seasonal.map(\.kind)), ["CHRISTMAS_TREE", "XMAS_LIGHTS", "XMAS_BANNER"])
+        XCTAssertEqual(seasonal.filter { $0.category == .wall }.count, 2)
+        for item in seasonal {
+            SeasonRegistry.override = Override.none
+            XCTAssertFalse(s.shopVisible(item, owned: false), item.kind)
+            XCTAssertNotNil(OfficeLayout.decorItem(kind: item.kind))            // 배치분 렌더 경로
+            SeasonRegistry.override = .season(.xmas)
+            XCTAssertTrue(s.shopVisible(item, owned: false), item.kind)
+            SeasonRegistry.override = .season(.newYear)
+            XCTAssertFalse(s.shopVisible(item, owned: false), item.kind)
+        }
         SeasonRegistry.override = Override.none
-        XCTAssertFalse(s.shopVisible(tree, owned: false))
-        XCTAssertNotNil(OfficeLayout.decorItem(kind: tree.kind))                // 배치분 렌더 경로
-        SeasonRegistry.override = .season(.xmas)
-        XCTAssertTrue(s.shopVisible(tree, owned: false))
-        SeasonRegistry.override = .season(.newYear)
-        XCTAssertFalse(s.shopVisible(tree, owned: false))
     }
 
     /// 트리 전구는 0.5초마다 프레임이 바뀐다. 프레임이 번들에 다 있고, 첫 프레임이 상점 썸네일과 같고,
@@ -83,6 +90,17 @@ final class SeasonalShopTests: SandboxedTestCase {
         XCTAssertEqual(seq[3], seq[0])
         XCTAssertEqual(tree.imageName(at: t0), tree.imageName(at: t0.addingTimeInterval(0.4)))   // 박자 안에선 고정
         XCTAssertTrue(tree.animationFrames.contains(tree.imageName(at: Date(timeIntervalSinceReferenceDate: -0.7))))
+
+        // 카탈로그 전체: 그림이 번들에 있고 선언한 크기와 같으며, 프레임이 있으면 첫 프레임이 썸네일과 같다.
+        for item in OfficeLayout.decorCatalog {
+            for name in [item.imageName] + item.animationFrames {
+                let img = try XCTUnwrap(OfficeLayout.officeImage(name), "\(name).png이 번들에 없음")
+                XCTAssertEqual(img.representations.first?.pixelsWide, Int(item.size.width), name)
+                XCTAssertEqual(img.representations.first?.pixelsHigh, Int(item.size.height), name)
+            }
+            if let first = item.animationFrames.first { XCTAssertEqual(first, item.imageName, item.kind) }
+        }
+        XCTAssertEqual(Set(OfficeLayout.decorCatalog.map(\.kind)).count, OfficeLayout.decorCatalog.count)
 
         let plant = try XCTUnwrap(OfficeLayout.decorItem(kind: "PLANT"))       // 정지 데코는 그대로
         XCTAssertEqual(plant.imageName(at: t0), "PLANT")
