@@ -74,6 +74,14 @@ final class CoinLedger: UsageConsumer {
     static let claudeFiveHourMaxCoin: Double    = 30
     /// Claude 7d 윈도우 100% 채울 때 받는 coin (Pro 기준).
     static let claudeSevenDayMaxCoin: Double    = 60
+    /// Claude 7d 창이 **단독으로** 올 때의 만점 pure. 5h가 같이 오면 위의 30/60을 쓴다.
+    ///
+    /// Anthropic이 2026-10-30 Max 20x를 Ultra로 바꾸면서 인증된 Ultra 계정의 5h 창을 없앴다
+    /// (`/usage`의 `five_hour`가 `null`, 로컬 수집 샘플 기준 10-31부터). 5h 144창이 월 이론치
+    /// 4578의 94%라, 7d 하나만 60으로 적립하면 월 5.6%(≈257)만 채워져 가장 비싼 플랜이
+    /// 가장 적게 받는 역전이 난다 — Codex가 2026-07에 겪은 것과 같은 문제(`codexSevenDayOnlyMaxCoin`).
+    /// 같은 식으로 7d 단독 만점을 월 이론치 ÷ 월 7d 창 수(30/7)로 올려 pure 스케일을 유지한다.
+    static let claudeSevenDayOnlyMaxCoin: Double = claudeMaxPureCoinPerMonth * 7.0 / 30.0
     /// Codex 5h/7d 윈도우 만점 coin — Claude와 동일 스케일(30/60).
     static let codexFiveHourMaxCoin: Double     = 30
     static let codexSevenDayMaxCoin: Double     = 60
@@ -103,9 +111,11 @@ final class CoinLedger: UsageConsumer {
         return clamped.squareRoot()
     }
 
-    /// Claude plan별 coin multiplier. Free=0.5 / Pro·Team=1 / Max 5x=1.5 / Max 20x=2.5 / Enterprise=1.5.
+    /// Claude plan별 coin multiplier. Free=0.5 / Pro·Team=1 / Max(구 5x)=1.5 / Ultra(구 Max 20x)=2.5 / Enterprise=1.5.
+    /// "max 20"은 2026-10-30 개명 전 스냅샷·표시명("Max 20x")을 위해 남긴다 — 둘 다 같은 $200 플랜.
     nonisolated static func planMultiplier(_ planName: String?) -> Double {
         guard let name = planName?.lowercased() else { return 1.0 }
+        if name.contains("ultra")    { return 2.5 }
         if name.contains("max 20")   { return 2.5 }
         if name.contains("max 5") || name.contains("max") { return 1.5 }
         if name.contains("enterprise") { return 1.5 }
@@ -131,6 +141,7 @@ final class CoinLedger: UsageConsumer {
     /// Claude plan별 한 달 max VP (= 가격 cents). Free는 Pro의 1/4 floor.
     nonisolated static func claudePlanPriceVP(_ planName: String?) -> Int {
         guard let name = planName?.lowercased() else { return 2000 }
+        if name.contains("ultra")  { return 20000 }
         if name.contains("max 20") { return 20000 }
         if name.contains("max 5") || name.contains("max") { return 10000 }
         if name.contains("enterprise") { return 10000 }

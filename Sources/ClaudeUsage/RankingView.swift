@@ -241,7 +241,9 @@ struct RankingView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(entries) { entry in
-                        LeaderboardRowView(entry: entry, isMe: entry.nickname == settings.rankingNickname)
+                        // 내 행 판정은 서버가 준 myRank로 — 닉네임 문자열 비교는 로컬 닉네임이 서버와
+                        // 어긋나는 순간(변경 실패·구버전) 본인이 보드에서 사라진 것처럼 보였다.
+                        LeaderboardRowView(entry: entry, isMe: myRank != nil && entry.rank == myRank)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                         Divider()
@@ -817,7 +819,7 @@ struct PodiumPetAvatar: View {
                 .offset(y: size * 0.46)
                 .blur(radius: 1.5)
             effectLayer(.backdrop, facingRight: movingRight)   // 광원·무지개 (뒤)
-            petSprite(kind: kind, frameIndex: idx, facingRight: movingRight)
+            petSprite(kind: kind, frameIndex: idx, facingRight: movingRight, now: now)
             effectLayer(.particles, facingRight: movingRight)  // 발자국·잔상 (앞)
         }
         .frame(width: size, height: size)
@@ -826,13 +828,18 @@ struct PodiumPetAvatar: View {
     }
 
     @ViewBuilder
-    private func petSprite(kind: PetKind, frameIndex: Int, facingRight: Bool) -> some View {
+    private func petSprite(kind: PetKind, frameIndex: Int, facingRight: Bool, now: Double) -> some View {
         if let img = PetSprite.image(for: kind, action: .walk, frameIndex: frameIndex) {
+            // 레인보우 레어(variant 4)는 hueDegrees가 0이라 기본색으로 보였다(#266) — 트레이너 카드와
+            // 같은 시간 기반 순환을 입힌다. TimelineView가 이미 30Hz로 now를 갱신한다.
+            let isRainbow = variant == PetOwnership.prestigeVariant
             Image(nsImage: img)
                 .interpolation(.none)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
+                .hueRotation(.degrees(isRainbow ? WalkingCat.prestigeHueDegrees(at: now) : WalkingCat.hueDegrees(for: variant)))
+                .saturation(variant > 0 ? 1.15 : 1.0)
+                .colorMultiply(isRainbow ? WalkingCat.prestigeTint(at: now) : .white)
                 .scaleEffect(x: kind.defaultFacingLeft == facingRight ? -1 : 1, y: 1)
                 // 1위 캐릭터는 금색 glow로 빛나게.
                 .shadow(color: rank == 1 ? .yellow.opacity(0.8) : .clear,

@@ -46,6 +46,11 @@ final class EnhanceEngineTests: XCTestCase {
         XCTAssertTrue(EnhanceEngine.canEnhance(level: 0))
         XCTAssertTrue(EnhanceEngine.canEnhance(level: 14))
         XCTAssertFalse(EnhanceEngine.canEnhance(level: 15), "만렙은 시도 불가")
+        // #268 회귀 가드: 강화소가 만렙(+15) 펫을 보여줄 때도 확률행을 읽는다 — 직접 odds[15]는 크래시였다.
+        XCTAssertEqual(EnhanceEngine.oddsRow(level: EnhanceEngine.maxLevel), EnhanceEngine.odds[EnhanceEngine.odds.count - 1])
+        XCTAssertEqual(EnhanceEngine.oddsRow(level: 99), EnhanceEngine.odds[EnhanceEngine.odds.count - 1])
+        XCTAssertEqual(EnhanceEngine.oddsRow(level: -1), EnhanceEngine.odds[0])
+        XCTAssertEqual(EnhanceEngine.oddsRow(level: 7), EnhanceEngine.odds[7])
         // 비용 단조 증가.
         for i in 1..<EnhanceEngine.vpCost.count {
             XCTAssertGreaterThan(EnhanceEngine.vpCost[i], EnhanceEngine.vpCost[i-1])

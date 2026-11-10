@@ -33,6 +33,42 @@ final class UsageDecodingTests: XCTestCase {
         XCTAssertEqual(r.extra_usage?.used_credits, 23.5)
     }
 
+    /// 2026-10-30 Ultra 개편 뒤 실계정 응답 형태 — `five_hour`가 `null`, `limits[]`에 전체 주간과
+    /// 모델 한정(Fable) 주간이 따로 온다. 모델 한정 한도는 `is_active`인 것을 고른다.
+    func testClaudeUltraResponseWithScopedWeeklyLimit() throws {
+        let json = """
+        {
+          "five_hour": null,
+          "seven_day": { "utilization": 57.0, "resets_at": "2026-11-04T14:59:59.675035+00:00" },
+          "limits": [
+            { "group": "weekly", "is_active": false, "kind": "weekly_all", "percent": 57,
+              "resets_at": "2026-11-04T15:00:00.137170+00:00", "scope": null, "severity": "normal" },
+            { "group": "weekly", "is_active": true, "kind": "weekly_scoped", "percent": 73,
+              "resets_at": "2026-11-04T15:00:00.137348+00:00",
+              "scope": { "model": { "display_name": "Fable", "id": null }, "surface": null }, "severity": "normal" }
+          ]
+        }
+        """.data(using: .utf8)!
+        let r = try JSONDecoder().decode(APIUsageResponse.self, from: json)
+        XCTAssertNil(r.five_hour)
+        XCTAssertEqual(r.seven_day?.utilization, 57)
+        XCTAssertEqual(r.limits?.count, 2)
+        let scoped = r.scopedWeeklyLimit
+        XCTAssertEqual(scoped?.percent, 73)
+        XCTAssertEqual(scoped?.scope?.model?.display_name, "Fable")
+        XCTAssertEqual(scoped?.resets_at, "2026-11-04T15:00:00.137348+00:00")
+    }
+
+    /// `limits`는 부가 정보다 — 배열 모양이 바뀌어도 5h/7d까지 버리면 안 된다(throw → schema-suspect 오탐).
+    func testClaudeMalformedLimitsDoNotKillWindows() throws {
+        let json = #"{"seven_day":{"utilization":12,"resets_at":"2026-11-04T15:00:00Z"},"limits":{"kind":"weekly_all"}}"#
+            .data(using: .utf8)!
+        let r = try JSONDecoder().decode(APIUsageResponse.self, from: json)
+        XCTAssertEqual(r.seven_day?.utilization, 12)
+        XCTAssertNil(r.limits)
+        XCTAssertNil(r.scopedWeeklyLimit)
+    }
+
     /// 창이 일부만 오는 계정(무료 등). 없는 창은 nil이어야 하고, 있는 창은 그대로 살아야 한다.
     func testClaudePartialWindowsSurvive() throws {
         let json = #"{"five_hour":{"utilization":5,"resets_at":"2026-08-12T15:00:00Z"}}"#
@@ -61,13 +97,22 @@ final class UsageDecodingTests: XCTestCase {
     // MARK: - Claude: 플랜명 파생
 
     func testClaudePlanNameFromCapabilitiesAndTier() {
-        // "Max 20x" 표기는 rate_limit_tier 접미사에서만 나온다 — capabilities엔 배수가 없다.
+        // 배수는 rate_limit_tier 접미사에서만 나온다 — capabilities엔 없다. 2026-10-30 개명 뒤에도
+        // 실계정 식별자는 옛 값 그대로(`claude_max` + `default_claude_max_20x`)라 표시명만 공식 명칭으로 맞춘다.
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "claude_max"],
-                                               rateLimitTier: "default_claude_max_20x"), "Max 20x")
+                                               rateLimitTier: "default_claude_max_20x"), "Ultra")
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "claude_max"],
-                                               rateLimitTier: "default_claude_max_5x"), "Max 5x")
+                                               rateLimitTier: "default_claude_max_5x"), "Max")
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "claude_max"],
                                                rateLimitTier: ""), "Max")
+        // 미지의 배수는 예전처럼 그대로 붙여 화면에서 보고 리포트할 수 있게 둔다.
+        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "claude_max"],
+                                               rateLimitTier: "default_claude_max_10x"), "Max 10x")
+        // Anthropic이 식별자까지 바꾸는 경우를 선제 매핑 — 어느 쪽이 와도 "Ultra".
+        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "claude_ultra"],
+                                               rateLimitTier: "default_claude_ultra"), "Ultra")
+        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "claude_ultra", "claude_max"],
+                                               rateLimitTier: "default_claude_max_20x"), "Ultra")
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "pro"], rateLimitTier: "default_pro"), "Pro")
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "team"], rateLimitTier: ""), "Team")
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "enterprise"], rateLimitTier: ""), "Enterprise")
@@ -76,12 +121,12 @@ final class UsageDecodingTests: XCTestCase {
 
     func testClaudePlanNameIsCaseInsensitiveAndFallsBack() {
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["CHAT", "CLAUDE_MAX"],
-                                               rateLimitTier: "DEFAULT_CLAUDE_MAX_20X"), "Max 20x")
+                                               rateLimitTier: "DEFAULT_CLAUDE_MAX_20X"), "Ultra")
         // 실계정 응답을 떠보니 Max 계정의 capabilities가 ["claude_max", "chat"]이었다 —
         // "chat"은 무료 표식이 아니라 모든 플랜에 붙는 공통 값이다. 그래서 미지의 등급이
         // "chat"과 함께 와도 Free로 뭉개지 않고 그 값을 살린다(코인 배수 0.5 강등 방지).
-        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["claude_ultra", "chat"],
-                                               rateLimitTier: ""), "Claude_Ultra")   // capitalized는 _ 뒤도 대문자화한다
+        XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["claude_premium", "chat"],
+                                               rateLimitTier: ""), "Claude_Premium")   // capitalized는 _ 뒤도 대문자화한다
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat", "newtier"], rateLimitTier: ""), "Newtier")
         // "chat"만 있는 계정이 진짜 Free다.
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["chat"], rateLimitTier: ""), "Free")
@@ -89,7 +134,7 @@ final class UsageDecodingTests: XCTestCase {
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: [], rateLimitTier: ""), "?")
         // 알려진 등급은 "chat"이 함께 와도 그대로 — 실계정에서 확인한 형태.
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["claude_max", "chat"],
-                                               rateLimitTier: "default_claude_max_20x"), "Max 20x")
+                                               rateLimitTier: "default_claude_max_20x"), "Ultra")
         // 배수가 접미사가 아니면 붙이지 않는다.
         XCTAssertEqual(UsageAPI.derivePlanName(capabilities: ["pro"], rateLimitTier: "20x_default"), "Pro")
     }

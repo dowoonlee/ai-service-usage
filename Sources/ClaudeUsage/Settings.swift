@@ -420,9 +420,17 @@ final class Settings: ObservableObject {
         didSet { persist(dailyVP, forKey: Keys.dailyVP) }
     }
     // ── 클라우드 제도 신규 카운터 (gym-expansion.md §5.5) ──
-    /// Guild·Contribution — 길드 기여(코인/VP) 누적.
+    /// Guild·Contribution — 길드 기여 VP 누적. 적립은 `GuildContributionTracker`만 한다.
     @Published var guildContributionTotal: Int {
         didSet { AppEnv.defaults.set(guildContributionTotal, forKey: Keys.guildContributionTotal) }
+    }
+    /// 기여 적립 기준선 — 마지막으로 반영한 서버 월("yyyy-MM", Asia/Seoul)과 그때의 월간 VP.
+    /// 같은 달엔 증가분만, 달이 바뀌면 새 값 전체를 더한다. 빈 문자열 = 미동기화.
+    @Published var guildContributionSyncMonth: String {
+        didSet { AppEnv.defaults.set(guildContributionSyncMonth, forKey: Keys.guildContributionSyncMonth) }
+    }
+    @Published var guildContributionSyncSeenVP: Int {
+        didSet { AppEnv.defaults.set(guildContributionSyncSeenVP, forKey: Keys.guildContributionSyncSeenVP) }
     }
     /// Guild·Tenure 기준 — 길드 최초 가입 시각. tenure = now − joinedAt(일).
     @Published var guildJoinedAt: Date? {
@@ -1050,6 +1058,8 @@ final class Settings: ObservableObject {
         self.grandChampionAt = d.object(forKey: Keys.grandChampionAt) as? Date
         self.discoveredRegions = (d.data(forKey: Keys.discoveredRegions).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.guildContributionTotal = (d.object(forKey: Keys.guildContributionTotal) as? Int) ?? 0
+        self.guildContributionSyncMonth = d.string(forKey: Keys.guildContributionSyncMonth) ?? ""
+        self.guildContributionSyncSeenVP = (d.object(forKey: Keys.guildContributionSyncSeenVP) as? Int) ?? 0
         self.guildJoinedAt = d.object(forKey: Keys.guildJoinedAt) as? Date
         self.dailyQuizCorrectTotal = (d.object(forKey: Keys.dailyQuizCorrectTotal) as? Int) ?? 0
         self.dailyRitualStreak = (d.object(forKey: Keys.dailyRitualStreak) as? Int) ?? 0
@@ -1952,6 +1962,8 @@ final class Settings: ObservableObject {
         static let grandChampionAt             = "settings.grandChampionAt"
         static let discoveredRegions           = "settings.discoveredRegions"
         static let guildContributionTotal      = "settings.guildContributionTotal"
+        static let guildContributionSyncMonth  = "settings.guildContributionSyncMonth"
+        static let guildContributionSyncSeenVP = "settings.guildContributionSyncSeenVP"
         static let guildJoinedAt               = "settings.guildJoinedAt"
         static let dailyQuizCorrectTotal       = "settings.dailyQuizCorrectTotal"
         static let dailyRitualStreak           = "settings.dailyRitualStreak"

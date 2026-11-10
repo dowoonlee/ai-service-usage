@@ -1536,5 +1536,35 @@
                  type="application/octet-stream"
                  sparkle:edSignature="uultJFcWovjAekwMnxIVU9u/CWO+UJZXpTcETj89CoH1alyRjmNCSkReicOwsPSTCvt3zEJJy+3cn/0iu7ciDA==" length="8848903" />
     </item>
+    <item>
+      <title>v0.19.2</title>
+      <pubDate>Mon, 02 Nov 2026 06:13:13 +0000</pubDate>
+      <sparkle:version>0.19.2</sparkle:version>
+      <sparkle:shortVersionString>0.19.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/dowoonlee/ai-service-usage/releases/download/v0.19.2/AIUsage.zip"
+                 type="application/octet-stream"
+                 sparkle:edSignature="OPWHy3U/3V6uEaz4UgHN/ZnHlv+meGoxMPqxcc8p225icrNEunM0k1yFpFNkWwjjPvB1JyLlNI9CoIiV043BAw==" length="8857897" />
+    </item>
+    <item>
+      <title>v0.19.3</title>
+      <pubDate>Mon, 02 Nov 2026 07:39:28 +0000</pubDate>
+      <sparkle:version>0.19.3</sparkle:version>
+      <sparkle:shortVersionString>0.19.3</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/dowoonlee/ai-service-usage/releases/download/v0.19.3/AIUsage.zip"
+                 type="application/octet-stream"
+                 sparkle:edSignature="IEs/KtzjeeWDKFRYiPBaJ2eFbBeYFf6YEp1gtK+ntE0qjdbM30BTosceukUm8YjGCA2v7PsSQohO49o+0fc3DQ==" length="8877168" />
+    </item>
+    <item>
+      <title>v0.19.4</title>
+      <pubDate>Tue, 10 Nov 2026 01:58:40 +0000</pubDate>
+      <sparkle:version>0.19.4</sparkle:version>
+      <sparkle:shortVersionString>0.19.4</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/dowoonlee/ai-service-usage/releases/download/v0.19.4/AIUsage.zip"
+                 type="application/octet-stream"
+                 sparkle:edSignature="UF/cgKqvXdS6EC6WNzgV9a2bz5ut0kBCI4kE77BKBatSSwPKzTcn1mvEe+azPs7qqfOikWPgxpVF3iiMh70JAA==" length="8904591" />
+    </item>
   </channel>
 </rss>

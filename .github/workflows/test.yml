@@ -8,9 +8,9 @@ on:
 
 jobs:
   test:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app
@@ -55,7 +55,7 @@ jobs:
   manual-arena-database:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Prepare isolated PostgreSQL test image
         run: docker pull postgres:17.6-alpine
       - name: Session and mastery transaction tests

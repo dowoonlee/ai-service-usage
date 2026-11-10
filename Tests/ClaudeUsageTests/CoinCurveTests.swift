@@ -55,7 +55,8 @@ final class CoinCurveTests: XCTestCase {
         XCTAssertEqual(CoinLedger.planMultiplier("Pro"),        1.0)
         XCTAssertEqual(CoinLedger.planMultiplier("Max"),        1.5)
         XCTAssertEqual(CoinLedger.planMultiplier("Max 5x"),     1.5)
-        XCTAssertEqual(CoinLedger.planMultiplier("Max 20x"),    2.5)
+        XCTAssertEqual(CoinLedger.planMultiplier("Max 20x"),    2.5)   // 개명 전 스냅샷에 남은 표기
+        XCTAssertEqual(CoinLedger.planMultiplier("Ultra"),      2.5)   // 2026-10-30 공식 명칭
         XCTAssertEqual(CoinLedger.planMultiplier("Team"),       1.0)
         XCTAssertEqual(CoinLedger.planMultiplier("Enterprise"), 1.5)
         XCTAssertEqual(CoinLedger.planMultiplier(nil),          1.0)
@@ -63,8 +64,18 @@ final class CoinCurveTests: XCTestCase {
     }
 
     // 대소문자/공백 변형도 정상 매칭.
+    // Ultra(구 Max 20x)는 이름이 어느 쪽으로 와도 같은 $200 플랜 — coin 배수와 VP 상한이 함께 같아야 한다.
+    func testUltraAndLegacyMax20xAreTheSamePlan() {
+        XCTAssertEqual(CoinLedger.planMultiplier("Ultra"), CoinLedger.planMultiplier("Max 20x"))
+        XCTAssertEqual(CoinLedger.claudePlanPriceVP("Ultra"), 20000)
+        XCTAssertEqual(CoinLedger.claudePlanPriceVP("Max 20x"), 20000)
+        XCTAssertEqual(CoinLedger.claudePlanPriceVP("Max"), 10000)
+        XCTAssertEqual(CoinLedger.claudePlanPriceVP("Max 5x"), 10000)
+    }
+
     func testPlanMultiplierCaseInsensitive() {
         XCTAssertEqual(CoinLedger.planMultiplier("MAX 20x"), 2.5)
+        XCTAssertEqual(CoinLedger.planMultiplier("ULTRA"),   2.5)
         XCTAssertEqual(CoinLedger.planMultiplier("max 5x"),  1.5)
         XCTAssertEqual(CoinLedger.planMultiplier("PRO"),     1.0)
     }

@@ -54,6 +54,12 @@ Deno.test("podium 메시지 서명 — 한글·슬래시·따옴표가 섞여도
     "99f920ba03db1f9c595f2aed5181e26f2ce24e7d00d8d0c273cf03adcb1cf8fc");
 });
 
+Deno.test("rename-nickname payload 서명 — Swift 골든과 일치", async () => {
+  assertEquals(
+    await sign({ deviceId: DEVICE, nickname: "내토큰이이렇게멍청할리가없어", ts: 1800000000 }),
+    "4af94ac15377cc5860cf11bd581ce5c35a2a69058d8aa18a8d9fc852e136ef2d");
+});
+
 Deno.test("canonical 문자열 자체 — Swift JSONEncoder 출력과 바이트 동일", () => {
   // 서명만 비교하면 두 구현이 **둘 다** 같은 방식으로 틀렸을 때를 못 잡고, 실패해도 어디가
   // 어긋났는지 안 보인다. 중간 산물을 직접 고정한다.

@@ -124,7 +124,11 @@ actor UsageAPI {
     nonisolated static func derivePlanName(capabilities: [String], rateLimitTier: String) -> String {
         let capSet = Set(capabilities.map { $0.lowercased() })
         let base: String
-        if capSet.contains("claude_max") { base = "Max" }
+        // 2026-10-30 개명 후에도 실계정 응답은 아직 `claude_max` + `default_claude_max_20x`다.
+        // `claude_ultra`는 Anthropic이 식별자를 따라 바꿀 때를 위한 선제 매핑 — 아래 미지-등급
+        // 폴백으로 가면 "Claude_Ultra"로 표시되고 CoinLedger 배수가 1.0(2.5여야 함)으로 떨어진다.
+        if capSet.contains("claude_ultra") { base = "Ultra" }
+        else if capSet.contains("claude_max") { base = "Max" }
         else if capSet.contains("pro") { base = "Pro" }
         else if capSet.contains("team") { base = "Team" }
         else if capSet.contains("enterprise") { base = "Enterprise" }
@@ -145,10 +149,18 @@ actor UsageAPI {
 
         // "default_claude_max_20x" → "20x" 추출
         let tier = rateLimitTier.lowercased()
-        if let range = tier.range(of: #"(\d+x)$"#, options: .regularExpression) {
-            return "\(base) \(tier[range])"
+        guard let range = tier.range(of: #"(\d+x)$"#, options: .regularExpression) else { return base }
+        let suffix = String(tier[range])
+        // Anthropic 공식 명칭(2026-10-30): Max 20x → **Ultra**, Max 5x → **Max**. 식별자는 옛
+        // 값 그대로 오므로 표시 단계에서 맞춘다 — 사용자가 claude.ai에서 보는 이름과 같아야 한다.
+        // 그 외 배수(예: 미지의 "10x")는 예전처럼 그대로 붙여 화면에서 보고 리포트할 수 있게 둔다.
+        if base == "Max" {
+            if suffix == "20x" { return "Ultra" }
+            if suffix == "5x"  { return "Max" }
         }
-        return base
+        // Ultra는 이름에 배수가 없다 — `claude_ultra` + 옛 `_20x` 접미사가 함께 와도 "Ultra 20x"로 만들지 않는다.
+        if base == "Ultra" { return base }
+        return "\(base) \(suffix)"
     }
 
     private func fetchUsage(sess: URLSession, orgID: String) async throws -> APIUsageResponse {
@@ -187,6 +199,7 @@ actor UsageAPI {
     func clearOrgCache() { cachedOrgID = nil }
 
     private func toSnapshot(_ r: APIUsageResponse) -> UsageSnapshot {
+        let scoped = r.scopedWeeklyLimit
         return UsageSnapshot(
             takenAt: Date(),
             fiveHourPct: r.five_hour?.utilization,
@@ -196,7 +209,10 @@ actor UsageAPI {
             extraUsageEnabled: r.extra_usage?.is_enabled,
             extraUsageUtilPct: r.extra_usage?.utilization,
             extraUsageMonthlyLimit: r.extra_usage?.monthly_limit,
-            extraUsageUsedCredits: r.extra_usage?.used_credits
+            extraUsageUsedCredits: r.extra_usage?.used_credits,
+            scopedWeeklyPct: scoped?.percent,
+            scopedWeeklyResetAt: Date.parseISO8601(scoped?.resets_at),
+            scopedWeeklyLabel: scoped?.scope?.model?.display_name
         )
     }
 
@@ -265,14 +281,15 @@ actor UsageAPI {
         }
     }
 
-    // 버그리포트 "사용량 이슈"용 PII-free 추출 — 사용률 창(five_hour/seven_day/extra_usage)만
+    // 버그리포트 "사용량 이슈"용 PII-free 추출 — 사용률 창(five_hour/seven_day/limits/extra_usage)만
     // 화이트리스트로 떼어 org uuid·capabilities 가 섞인 최상위에서 식별정보를 배제한다.
+    // `limits`는 창 종류·%·리셋 시각·모델 표시명만 담는다(2026-10-30 추가, Ultra의 5h 부재 진단용).
     func usageDiagnostic() async -> UsageDiagnosticExtract? {
         let d = await diagnose()
         guard d.loggedIn, let data = d.usageRawData,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return UsageDiagnosticExtract(
-            subtreeJson: DiagnosticExtract.subtreeJSON(from: obj, whitelist: ["five_hour", "seven_day", "extra_usage"]),
+            subtreeJson: DiagnosticExtract.subtreeJSON(from: obj, whitelist: ["five_hour", "seven_day", "limits", "extra_usage"]),
             planType: d.planName
         )
     }

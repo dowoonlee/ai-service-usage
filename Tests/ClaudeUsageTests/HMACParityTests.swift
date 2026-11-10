@@ -41,6 +41,15 @@ final class HMACParityTests: XCTestCase {
 
     /// 한글 + 슬래시 + 따옴표가 섞인 메시지. 셋 다 두 구현이 갈라질 수 있는 지점이다:
     /// non-ASCII를 raw UTF-8로 낼 것인가 `\u` 이스케이프할 것인가, `/`를 이스케이프할 것인가.
+    func testRenameNicknamePayloadSignature() throws {
+        // 닉네임 변경도 사용자 입력 한글이 그대로 서명 대상 — podium과 같은 갈림길을 가진다.
+        let payload = RankingAPI.RenameNicknamePayload(
+            deviceId: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+            nickname: "내토큰이이렇게멍청할리가없어", ts: 1_800_000_000)
+        XCTAssertEqual(try RankingAPI.signRename(payload: payload, keyBase64: Self.key),
+                       "4af94ac15377cc5860cf11bd581ce5c35a2a69058d8aa18a8d9fc852e136ef2d")
+    }
+
     func testPodiumPayloadSignatureWithNonASCII() throws {
         let payload = RankingAPI.SetPodiumMessagePayload(
             deviceId: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",

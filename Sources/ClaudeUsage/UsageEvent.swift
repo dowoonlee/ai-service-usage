@@ -131,6 +131,7 @@ final class UsageEventBus {
 enum UsageEventProducer {
     /// Claude 스냅샷 ingest — 5h/7d 두 윈도우를 각각 평가, delta가 양수면 이벤트 emit.
     /// resetAt 변경 시 baseline만 갱신 (소급 적립 X). 60s slack으로 sub-second 흔들림 방어.
+    /// 7d 만점은 **5h가 함께 왔는지**로 갈린다(`claudeSevenDayScale`) — 인증된 Ultra는 5h 창이 없다.
     static func ingestClaude(_ snapshot: UsageSnapshot) {
         let context = UsageContext(
             planName: snapshot.planName,
@@ -144,9 +145,20 @@ enum UsageEventProducer {
         }
         if let resetAt = snapshot.sevenDayResetAt, let pct = snapshot.sevenDayPct {
             ingestWindow(pct: pct, resetAt: resetAt, source: .claudeSevenDay,
-                         maxCoin: CoinLedger.claudeSevenDayMaxCoin, context: context,
+                         maxCoin: claudeSevenDayScale(snapshot), context: context,
                          lastResetKey: \.lastClaudeSevenDayReset, lastPctKey: \.lastClaudeSevenDayPctSeen)
         }
+    }
+
+    /// Claude 7d 창의 만점 pure — `codexSevenDayScale`과 같은 규칙. 응답에 5h가 함께 오면 30/60
+    /// 분할(합 4578)이 성립하므로 60, 7d 단독이면 그 하나가 월 전체를 대표하므로 1068.2.
+    ///
+    /// plan 이름이 아니라 **실제로 온 창 집합**으로 판정한다. 인증된 Ultra는 5h가 없고, 미인증
+    /// Ultra는 임시 5h 한도가 남아 있으며, Anthropic이 다시 5h를 주기 시작하면 이 분기가 저절로
+    /// 옛 스케일로 돌아온다. plan 이름에 고정하면 그때 17.8배 과다 적립된다.
+    nonisolated static func claudeSevenDayScale(_ snapshot: UsageSnapshot) -> Double {
+        snapshot.fiveHourPct == nil ? CoinLedger.claudeSevenDayOnlyMaxCoin
+                                    : CoinLedger.claudeSevenDayMaxCoin
     }
 
     /// Codex 스냅샷 ingest — Plus/Pro의 5h/7d, free의 monthly 창을 ingestClaude와 동일한 pct-delta

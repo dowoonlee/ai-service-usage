@@ -261,7 +261,16 @@ enum Renderer {
             rows.append(MetricRow(label: "5h", history: history, pct: pct, suffix: suffix))
         }
         if let pct = snap.sevenDayPct {
-            rows.append(MetricRow(label: "주간", history: nil, pct: pct, suffix: ""))
+            // 5h가 없는 계정(인증된 Ultra)은 주간이 대표 창 — 스파크라인과 리셋을 주간에 붙인다.
+            let weeklyIsPrimary = snap.fiveHourPct == nil
+            let history = weeklyIsPrimary ? vm.claudeHistory.compactMap { $0.sevenDayPct } : nil
+            let suffix = weeklyIsPrimary ? (snap.sevenDayResetAt.map {
+                "   \(DIM)reset \(formatRemaining(from: now, to: $0))\(RST)"
+            } ?? "") : ""
+            rows.append(MetricRow(label: "주간", history: history, pct: pct, suffix: suffix))
+        }
+        if let pct = snap.scopedWeeklyPct {
+            rows.append(MetricRow(label: "\(snap.scopedWeeklyLabel ?? "모델") 주간", history: nil, pct: pct, suffix: ""))
         }
         let axisTimes = vm.claudeHistory.map { $0.takenAt }
         return SectionData(bullet: bullet, title: "Claude", plan: plan, warning: nil, rows: rows, axisTimes: axisTimes)

@@ -274,6 +274,8 @@ private struct RankingSectionView: View {
     @State private var state: FlowState = .idle
     @State private var nicknameInput: String = ""
     @State private var editingNickname: Bool = false
+    @State private var renamingNickname: Bool = false
+    @State private var nicknameError: String? = nil
     @State private var showRecoveryCode: Bool = false
     @State private var recoveryInput: String = ""
     @State private var showRecoveryEntry: Bool = false
@@ -416,16 +418,19 @@ private struct RankingSectionView: View {
                 if editingNickname {
                     TextField("", text: $nicknameInput)
                         .textFieldStyle(.roundedBorder).font(.system(size: 11))
-                    Button("저장") {
-                        let trimmed = nicknameInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if NicknameGenerator.isValid(trimmed) {
-                            settings.rankingNickname = trimmed
+                    if renamingNickname {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Button("저장") { renameNickname() }
+                            .font(.system(size: 11))
+                            .disabled(!NicknameGenerator.isValid(nicknameInput.trimmingCharacters(in: .whitespacesAndNewlines)))
+                        Button("취소") {
+                            editingNickname = false
+                            nicknameError = nil
+                            nicknameInput = settings.rankingNickname
                         }
-                        editingNickname = false
-                    }
-                    .font(.system(size: 11))
-                    Button("취소") { editingNickname = false; nicknameInput = settings.rankingNickname }
                         .buttonStyle(.borderless).font(.system(size: 11))
+                    }
                 } else {
                     Text(settings.rankingNickname).font(.system(size: 12, weight: .medium))
                     Button {
@@ -435,6 +440,10 @@ private struct RankingSectionView: View {
                         .buttonStyle(.borderless)
                     Spacer()
                 }
+            }
+            if let nicknameError {
+                Text(nicknameError).font(.system(size: 10)).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let lastAt = settings.rankingLastSubmittedAt {
@@ -770,6 +779,40 @@ private struct RankingSectionView: View {
                 state = .idle
             } catch {
                 state = .error(error.localizedDescription)
+            }
+        }
+    }
+
+    /// 닉네임 변경 — 서버 `rename-nickname`이 수락한 뒤에만 로컬 값을 바꾼다. 로컬만 먼저 바꾸면
+    /// 보드(서버 닉네임)와 설정(로컬 닉네임)이 갈라져 "내 계정이 없다"는 문의로 돌아온다.
+    private func renameNickname() {
+        let trimmed = nicknameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard NicknameGenerator.isValid(trimmed) else {
+            nicknameError = "닉네임은 공백 없이 3~24자여야 합니다."
+            return
+        }
+        if trimmed == settings.rankingNickname {
+            editingNickname = false
+            nicknameError = nil
+            return
+        }
+        guard let hmacKey = Keychain.loadRankingHmacKey() else {
+            nicknameError = "인증 키를 읽을 수 없어 닉네임을 바꿀 수 없습니다. 키체인 접근을 승인한 뒤 다시 시도해주세요."
+            return
+        }
+        let deviceId = settings.rankingDeviceID
+        renamingNickname = true
+        nicknameError = nil
+        Task { @MainActor in
+            defer { renamingNickname = false }
+            do {
+                let resp = try await RankingAPI.shared.renameNickname(
+                    deviceId: deviceId, nickname: trimmed, hmacKeyBase64: hmacKey)
+                settings.rankingNickname = resp.nickname
+                nicknameInput = resp.nickname
+                editingNickname = false
+            } catch {
+                nicknameError = error.localizedDescription
             }
         }
     }

@@ -227,10 +227,12 @@ struct PartyView: View {
     }
 
     /// 해금된 이로치(variant) dot 토글. 잠긴 건 미표시.
+    /// 레인보우(prestige, 4)도 포함 — 배틀에서 크리·궁극기가 걸리는 건 variant ≥ 4라 프리셋에서
+    /// 고를 수 없으면 해금 효과를 아레나에 쓸 길이 없다(#266).
     private func variantToggle(sel: PetSelection, presetID: UUID) -> some View {
         let unlocked = settings.ownedPets[sel.kind]?.unlockedVariants ?? [0]
         return HStack(spacing: 5) {
-            ForEach([0, 1, 2, 3].filter { unlocked.contains($0) }, id: \.self) { v in
+            ForEach([0, 1, 2, 3, PetOwnership.prestigeVariant].filter { unlocked.contains($0) }, id: \.self) { v in
                 Circle()
                     .fill(variantColor(v))
                     .frame(width: 11, height: 11)
@@ -442,10 +444,13 @@ struct PartyView: View {
     private func thumbnail(_ sel: PetSelection, height: CGFloat) -> some View {
         if let img = PetSprite.frames(for: sel.kind, action: .walk).first
             ?? PetSprite.frames(for: sel.kind, action: .sit).first {
+            let isRainbow = sel.variant == PetOwnership.prestigeVariant
             Image(nsImage: img)
                 .resizable().interpolation(.none).aspectRatio(contentMode: .fit)
                 .frame(height: height)
-                .hueRotation(.degrees(WalkingCat.hueDegrees(for: sel.variant)))
+                // 정적 썸네일이라 애니 대신 고정 홀로 틴트(랭킹 리스트와 동일) — hueDegrees(4)=0이라 그냥 두면 기본색으로 보인다.
+                .hueRotation(.degrees(isRainbow ? 0 : WalkingCat.hueDegrees(for: sel.variant)))
+                .colorMultiply(isRainbow ? WalkingCat.prestigeTint(at: 0) : .white)
                 .saturation(sel.variant > 0 ? 1.15 : 1.0)
         } else {
             Image(systemName: "pawprint").font(.system(size: height * 0.7)).foregroundStyle(.secondary)

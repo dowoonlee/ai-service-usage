@@ -370,9 +370,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let leader = Settings.shared.petClaudeParty.first
             let kind = leader?.kind ?? .fox
             let theme = Settings.shared.themeClaudeOverride ?? PetTheme.defaultFor(kind)
-            // 현재 5h 창만 — 만료 창이 섞이면 펫이 빈 구간을 가로질러 걷는다.
-            let history = ViewModel.claudeFiveHourSeries(Array(vm.claudeHistory.suffix(48)))
-            return MenuBarRenderer.Feed(pct: vm.claudeCurrent?.fiveHourPct, history: history,
+            // 현재 대표 창(5h, 없으면 주간)만 — 만료 창이 섞이면 펫이 빈 구간을 가로질러 걷는다.
+            let history = ViewModel.claudePrimarySeries(Array(vm.claudeHistory.suffix(48)))
+            return MenuBarRenderer.Feed(pct: vm.claudePrimaryPct, history: history,
                                kind: kind, variant: leader?.variant ?? 0, theme: theme,
                                headwear: vm.activeSeason?.headwear)
         case .cursor:
