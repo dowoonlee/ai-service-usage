@@ -2,6 +2,34 @@ import XCTest
 @testable import ClaudeUsage
 
 /// 시즌 레지스트리 — 날짜 창·강제·스위치 합성. 소비자는 날짜를 안 보므로 여기가 유일한 날짜 테스트다.
+/// 오피스 창밖 눈 — 위치가 시각의 순수 함수라 숫자로 고정할 수 있다. "잘 안 보인다"는 피드백으로
+/// 7개 → 46개로 늘렸으니, 다시 줄어들면 여기서 걸린다.
+final class WindowSnowTests: XCTestCase {
+    func testSnowIsDenseAndStaysInsideTheWindowHorizontally() {
+        XCTAssertGreaterThanOrEqual(WindowSnow.flakeCount, 40)
+        for t in stride(from: 0.0, through: 30.0, by: 0.37) {
+            let flakes = WindowSnow.flakes(at: t)
+            XCTAssertEqual(flakes.count, WindowSnow.flakeCount)
+            for f in flakes {
+                XCTAssertTrue((0..<1).contains(f.x), "x=\(f.x) at t=\(t)")
+                XCTAssertTrue((-0.1...1.1).contains(f.y), "y=\(f.y) at t=\(t)")
+            }
+            // 어느 순간에도 창 안(0...1)에 절반 넘게 보여야 "펑펑"이다.
+            XCTAssertGreaterThan(flakes.filter { (0...1).contains($0.y) }.count, WindowSnow.flakeCount / 2)
+        }
+    }
+
+    func testSnowFallsDownwardAndIsDeterministic() {
+        XCTAssertEqual(WindowSnow.flakes(at: 12.5), WindowSnow.flakes(at: 12.5))
+        let a = WindowSnow.flakes(at: 100.0), b = WindowSnow.flakes(at: 100.05)
+        // 0.05초 뒤 대부분은 더 아래에 있다(위로 되감긴 것은 바닥을 지난 소수뿐).
+        let movedDown = zip(a, b).filter { $1.y > $0.y }.count
+        XCTAssertGreaterThan(movedDown, WindowSnow.flakeCount * 8 / 10)
+        // 가장 빠른 겹도 2초 안팎 — 예전(10초 넘게 걸리던 점 7개)처럼 느려지면 실패.
+        XCTAssertLessThanOrEqual(WindowSnow.layers.map(\.fallSeconds).min() ?? 99, 2.0)
+    }
+}
+
 final class SeasonWindowTests: XCTestCase {
     private func kst(_ y: Int, _ m: Int, _ d: Int, _ h: Int = 12, _ min: Int = 0) -> Date {
         Calendar.kst.date(from: DateComponents(year: y, month: m, day: d, hour: h, minute: min))!
