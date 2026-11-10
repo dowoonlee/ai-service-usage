@@ -138,10 +138,14 @@ newYear 풀은 별도 작성(연말 정산·새해 다짐 톤, 10줄).
 
 * **창문 눈**: 오피스 창문 가구는 `DrawKind.window`로 코드가 직접 그린다. 시즌 중 창 밖에 눈송이 점을
   떨어뜨리는 건 에셋 없이 된다. 포함.
-* **트리 데코**: `pixel-office` 팩(33파일)에 트리 **없음**. 2dPig 화풍(16×32) CC0 트리를 researcher로 하루
-  조사 → 없으면 1번에서 제외. 있으면 `decorCatalog`에 `CHRISTMAS_TREE`(floor, behind, 0 또는 300코인) 추가,
-  상점 노출만 `Season.decorKinds`로 게이트. **주의**: 오피스 데코는 서버에 kind 문자열로 저장돼 다른 멤버가
-  본다. 미업데이트 클라가 모르는 kind를 받았을 때 `decorItem(kind:)`가 nil → 조용히 스킵하는지 확인.
+* **트리 데코**: `pixel-office` 팩(33파일)에도, 그 미러(`pixel-agents-hq/pixel-agents`)의 furniture 28폴더에도
+  트리는 **없음**(2026-11-10 확인). 그래서 화분은 같은 팩의 `POT.png`를 그대로 쓰고 나무·별·장식만 팩의 잎
+  팔레트(`#292a2b`/`#356441`/`#458e48`/`#74b25d`)로 얹은 16×32 `CHRISTMAS_TREE.png`를 자체 제작해
+  `Resources/seasonal/`에 넣었다(액세서리 T3과 같은 예외 — **사용자 컨펌 대상**). `decorCatalog`에
+  `CHRISTMAS_TREE`(floor, behind, 300코인, `season: .xmas`)로 등록. 상점 노출만 `shopVisible`로 게이트하고,
+  이미 놓인 트리는 시즌이 끝나도 그대로 그려진다. 오피스 데코는 서버에 kind 문자열로 저장돼 다른 멤버가
+  보는데, 서버(`guild-office`)는 kind를 검증하지 않고 구버전 클라는 `decorItem(kind:)`가 nil이라 그 슬롯을
+  그리지 않고 넘어간다 — 서버 배포 없이 클라만으로 된다.
 
 ## 4. 첫 해 캘린더
 
@@ -192,8 +196,7 @@ newYear 풀은 별도 작성(연말 정산·새해 다짐 톤, 10줄).
 
 ## 9. 미결
 
-* 트리 데코 에셋 조사 결과(있으면 포함, 없으면 창문 눈만).
-* newYear 대사 10줄.
+없음 — 트리 데코는 자체 제작으로 포함(§3-D), newYear 대사 10줄은 `SeasonRegistry`에 작성 완료.
 
 ---
 
@@ -237,7 +240,7 @@ extension Settings {
 | 맵 테마 | 겨울밤 `winterNight` | 코인 | 2000 | 동적. 짙은 남색 하늘, 사용량↑ 위에서 전구색 점등. `TerrainMotif.bulb` 추가 |
 | 칭호 | 크리스마스에도 코딩함 `codedOnChristmas` | 자동 | — | 12/25에 `UsageEvent` 1건 이상 |
 | 칭호 | 연말 배포 freeze 위반 `freezeViolator` | 코인 | 1500 | dev 자조 밈 계열, 상시 구매 칭호와 같은 톤 |
-| 오피스 데코 | 트리 `CHRISTMAS_TREE` | 코인 | 300 | 1번 D 에셋 조사에 종속 |
+| 오피스 데코 | 트리 `CHRISTMAS_TREE` | 코인 | 300 | 바닥 슬롯, 자체 제작 16×32(§3-D) |
 
 코인 싱크 합계 ≈ 6,600(뽑기 22회분), RP 400.
 

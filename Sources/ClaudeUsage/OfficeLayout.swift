@@ -489,6 +489,11 @@ enum OfficeLayout {
                   size: CGSize(width: 16, height: 16), blockingWidth: 10, passing: .front),
         DecorItem(kind: "COFFEE_TABLE", name: "커피 테이블", category: .floor, price: 500,
                   size: CGSize(width: 32, height: 32), blockingWidth: 24, passing: .avoid),
+        // ── 12월 한정 (season: .xmas) — 상점 노출만 시즌 중, 배치된 트리는 시즌이 끝나도 남는다. 항목 삭제 금지.
+        // 이 kind를 모르는 구버전 클라는 decorItem(kind:)가 nil이라 그 슬롯을 그리지 않고 넘어간다.
+        DecorItem(kind: "CHRISTMAS_TREE", name: "크리스마스 트리", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 10, passing: .behind,
+                  season: .xmas),
     ]
 
     static func decorItem(kind: String) -> DecorItem? {

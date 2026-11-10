@@ -44,6 +44,27 @@ final class SeasonalShopTests: SandboxedTestCase {
         XCTAssertFalse(s.shopVisible(CardAccessory.santaHat, owned: false))
     }
 
+    /// 오피스 데코도 같은 판정을 탄다. 서버엔 kind 문자열로 남으므로, 시즌이 끝나도 카탈로그 조회는 살아 있어야
+    /// 이미 놓인 트리가 그려진다.
+    func testSeasonalDecorHidesFromShopOutsideSeasonButStaysResolvable() throws {
+        let s = Settings.shared
+        let tree = try XCTUnwrap(OfficeLayout.decorItem(kind: "CHRISTMAS_TREE"))
+        XCTAssertEqual(tree.season, .xmas)
+        XCTAssertEqual(tree.category, .floor)
+        XCTAssertNotNil(OfficeLayout.officeImage(tree.imageName), "CHRISTMAS_TREE.png이 번들에 없음")
+        for item in OfficeLayout.decorCatalog {
+            if let k = item.season { XCTAssertNotNil(SeasonRegistry.season(k), "\(item.kind) 시즌이 레지스트리에 없음") }
+        }
+
+        SeasonRegistry.override = Override.none
+        XCTAssertFalse(s.shopVisible(tree, owned: false))
+        XCTAssertNotNil(OfficeLayout.decorItem(kind: tree.kind))                // 배치분 렌더 경로
+        SeasonRegistry.override = .season(.xmas)
+        XCTAssertTrue(s.shopVisible(tree, owned: false))
+        SeasonRegistry.override = .season(.newYear)
+        XCTAssertFalse(s.shopVisible(tree, owned: false))
+    }
+
     func testTrainerBackgroundHidesSeasonalThemeOutsideSeason() {
         let s = Settings.shared
         SeasonRegistry.override = Override.none
