@@ -182,6 +182,7 @@ final class AnimationPreviews: SandboxedTestCase {
 
     /// 12월 한정 데코 — 트리·전구 줄은 0.5초마다 프레임이 바뀐다. 정지 그림으론 깜빡임도, 벽 색 위에서
     /// 전구가 묻히는지도 알 수 없다. 벽 슬롯 1·2·3은 35px 간격이라 32px 폭 데코 셋이 한 줄로 이어진다.
+    /// 흰 눈사람이 밝은 바닥에서 읽히는지도 여기서 본다.
     func testRenderGuildOfficeXmasDecor() throws {
         _ = try PreviewRenderer.requireOutputDir()
         SeasonRegistry.override = .season(.xmas)
@@ -193,7 +194,11 @@ final class AnimationPreviews: SandboxedTestCase {
             RankingAPI.GuildFurnitureItem(slotId: 2, itemKind: "XMAS_BANNER", donorNickname: "vibewolf"),
             RankingAPI.GuildFurnitureItem(slotId: 3, itemKind: "XMAS_LIGHTS", donorNickname: "nightowl"),
             RankingAPI.GuildFurnitureItem(slotId: 6, itemKind: "CHRISTMAS_TREE", donorNickname: "dowoon"),
-            RankingAPI.GuildFurnitureItem(slotId: 8, itemKind: "CHRISTMAS_TREE", donorNickname: "dowoon"),
+            RankingAPI.GuildFurnitureItem(slotId: 0, itemKind: "XMAS_WREATH", donorNickname: "kimcoder"),
+            RankingAPI.GuildFurnitureItem(slotId: 4, itemKind: "XMAS_WREATH", donorNickname: "kimcoder"),
+            RankingAPI.GuildFurnitureItem(slotId: 5, itemKind: "SNOWMAN", donorNickname: "vibewolf"),
+            RankingAPI.GuildFurnitureItem(slotId: 8, itemKind: "GIFT_BOXES", donorNickname: "nightowl"),
+            RankingAPI.GuildFurnitureItem(slotId: 9, itemKind: "SNOWMAN", donorNickname: "dowoon"),
         ]
         let info = RankingAPI.GuildInfoResponse(
             guild: base.guild, members: base.members, furniture: decor,
@@ -214,8 +219,8 @@ final class AnimationPreviews: SandboxedTestCase {
             view, size: CGSize(width: 560, height: 400),
             frameCount: 24, frameInterval: 0.25,
             section: "애니 · 길드", title: "사무실-12월데코",
-            note: "트리 2그루 + 벽의 전구 줄·Merry Xmas 배너. 전구가 돌아가며 켜지는지, 벽 색에 묻히지 않는지, "
-                + "벽 데코 셋이 한 줄로 이어지는지.")
+            note: "12월 데코 6종으로 슬롯 10칸을 채운 모습 — 트리·눈사람·선물 상자(바닥), 전구 줄·배너·리스(벽). "
+                + "전구가 돌아가며 켜지는지, 벽·바닥 색에 묻히지 않는지, 벽 데코가 한 줄로 이어지는지.")
     }
 
     // MARK: - RP 이펙트

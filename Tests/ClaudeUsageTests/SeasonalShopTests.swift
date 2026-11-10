@@ -56,10 +56,11 @@ final class SeasonalShopTests: SandboxedTestCase {
             if let k = item.season { XCTAssertNotNil(SeasonRegistry.season(k), "\(item.kind) 시즌이 레지스트리에 없음") }
         }
 
-        // 12월 한정 데코 3종(바닥 1 + 벽 2) — 시즌 밖엔 상점에서 숨고, 놓인 것은 계속 조회된다.
+        // 12월 한정 데코 6종(바닥 3 + 벽 3) — 시즌 밖엔 상점에서 숨고, 놓인 것은 계속 조회된다.
         let seasonal = OfficeLayout.decorCatalog.filter { $0.season == .xmas }
-        XCTAssertEqual(Set(seasonal.map(\.kind)), ["CHRISTMAS_TREE", "XMAS_LIGHTS", "XMAS_BANNER"])
-        XCTAssertEqual(seasonal.filter { $0.category == .wall }.count, 2)
+        XCTAssertEqual(Set(seasonal.map(\.kind)), ["CHRISTMAS_TREE", "XMAS_LIGHTS", "XMAS_BANNER",
+                                                    "XMAS_WREATH", "SNOWMAN", "GIFT_BOXES"])
+        XCTAssertEqual(seasonal.filter { $0.category == .wall }.count, 3)
         for item in seasonal {
             SeasonRegistry.override = Override.none
             XCTAssertFalse(s.shopVisible(item, owned: false), item.kind)

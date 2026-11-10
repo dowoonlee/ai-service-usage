@@ -513,6 +513,18 @@ enum OfficeLayout {
         DecorItem(kind: "XMAS_BANNER", name: "Merry Xmas 배너", category: .wall, price: 500,
                   size: CGSize(width: 32, height: 32), blockingWidth: 0, passing: .behind,
                   season: .xmas),
+        // 리스는 16px 폭 — 32px짜리 전구 줄·배너 사이 남는 벽 칸에 들어간다. 이 셋은 정지 그림
+        // (트리·전구 줄이 이미 깜빡여서 더 움직이면 산만하다).
+        DecorItem(kind: "XMAS_WREATH", name: "리스", category: .wall, price: 500,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 0, passing: .behind,
+                  season: .xmas),
+        // 눈사람은 키 큰 식물류처럼 뒤로, 선물 상자는 낮은 소품이라 앞으로 지나간다.
+        DecorItem(kind: "SNOWMAN", name: "눈사람", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 10, passing: .behind,
+                  season: .xmas),
+        DecorItem(kind: "GIFT_BOXES", name: "선물 상자", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 16), blockingWidth: 10, passing: .front,
+                  season: .xmas),
     ]
 
     static func decorItem(kind: String) -> DecorItem? {
