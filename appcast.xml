@@ -1556,5 +1556,15 @@
                  type="application/octet-stream"
                  sparkle:edSignature="IEs/KtzjeeWDKFRYiPBaJ2eFbBeYFf6YEp1gtK+ntE0qjdbM30BTosceukUm8YjGCA2v7PsSQohO49o+0fc3DQ==" length="8877168" />
     </item>
+    <item>
+      <title>v0.19.4</title>
+      <pubDate>Tue, 10 Nov 2026 01:58:40 +0000</pubDate>
+      <sparkle:version>0.19.4</sparkle:version>
+      <sparkle:shortVersionString>0.19.4</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/dowoonlee/ai-service-usage/releases/download/v0.19.4/AIUsage.zip"
+                 type="application/octet-stream"
+                 sparkle:edSignature="UF/cgKqvXdS6EC6WNzgV9a2bz5ut0kBCI4kE77BKBatSSwPKzTcn1mvEe+azPs7qqfOikWPgxpVF3iiMh70JAA==" length="8904591" />
+    </item>
   </channel>
 </rss>
