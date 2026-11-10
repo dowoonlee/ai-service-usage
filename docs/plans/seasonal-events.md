@@ -493,7 +493,7 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 | staging | 11/30 | 12일 | 800 | 6,000 코인 |
 | production | 12/7 | 18일 | 1,200 | 15,000 코인 + **프리미엄 가챠권 1장** + 칭호 **"눈길 배포 성공"** |
 
-  * **오픈일**: 참여량을 아무리 채워도 그 날짜 전엔 안 열린다. 2026년 기준 매주 월요일(제안값).
+  * **오픈일**: 참여량을 아무리 채워도 그 날짜 전엔 안 열린다. 2026년 기준 매주 월요일(사용자 확정).
   * **사용 일수 / 누적 VP**: 보스가 열린 11/16 이후의 로컬 기록(`Settings.dailyVP`). 둘 중 하나만 채우면 된다.
     일수만 두면 12월 중순에 시작한 사람은 18일을 못 채워 production이 원천 봉쇄된다. VP만 두면 VP가 플랜 가격에
     비례해(월 최대 Free 500 / Pro 2,000 / Max 10,000 / Ultra 20,000) 저가 플랜이 막힌다. 그래서 OR —
@@ -597,7 +597,7 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 | T4 `feat(season)` 기반 #275 | `Season`/`SeasonRegistry`(KST), `ParticleStyle`, headwear 앵커, 시즌 대사, 오피스 창문 눈, 킬스위치 | 완료 |
 | T5 `feat(season)` 코스메틱 #276 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge`·오피스 데코 6종(트리·전구 줄·배너·리스·눈사람·선물 상자) | 완료 — 6종 모두 컨펌 완료(2026-11-10) |
 | T6 `feat(season)` 일일 보상 #277 | 서버 `_shared/season.ts`+`submit` 훅+퀴즈 힌트, 잔디 보상 마크, 12월 완주, 알림 | 완료 — 서버 배포는 나중에(사용자) |
-| T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공, **월드맵 이벤트 섬 진입점**, 11/16 선오픈, tier = 오픈일 AND (일수 OR VP) | 완료 — snow 톤·이벤트 섬 컨펌 완료, tier 오픈일(매주 월)·VP 기준은 제안값 |
+| T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공, **월드맵 이벤트 섬 진입점**, 11/16 선오픈, tier = 오픈일 AND (일수 OR VP) | 완료 — snow 톤·이벤트 섬·tier 조건(오픈일·일수·VP 값 포함) 사용자 확정(2026-11-10) |
 | T3 액세서리 11종 도트 PNG #274 | 팩 미발견 → **직접 16×16 도트 제작 예외 허용(사용자)**, 결과물 컨펌 필수 | 완료 — 컨펌 완료(7affcd9) |
 | 5번 선물·새해 칭호 (이슈 없음) | `SeasonGift`/`SeasonGiftBox`, 패널 `SeasonGiftBanner`, `CardTitle.newYearFirstDay` | 완료 — 선물 합계(20,000 + 15장)·칭호 이름 사용자 확정 |
 
