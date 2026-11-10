@@ -141,7 +141,7 @@ newYear 풀은 별도 작성(연말 정산·새해 다짐 톤, 10줄).
 * **트리 데코**: `pixel-office` 팩(33파일)에도, 그 미러(`pixel-agents-hq/pixel-agents`)의 furniture 28폴더에도
   트리는 **없음**(2026-11-10 확인). 그래서 화분은 같은 팩의 `POT.png`를 그대로 쓰고 나무·별·장식만 팩의 잎
   팔레트(`#292a2b`/`#356441`/`#458e48`/`#74b25d`)로 얹은 16×32 `CHRISTMAS_TREE.png`를 자체 제작해
-  `Resources/seasonal/`에 넣었다(액세서리 T3과 같은 예외 — **사용자 컨펌 대상**). `decorCatalog`에
+  `Resources/seasonal/`에 넣었다(액세서리 T3과 같은 예외 — 사용자 컨펌 완료). `decorCatalog`에
   `CHRISTMAS_TREE`(floor, behind, 300코인, `season: .xmas`)로 등록. 전구 15개가 3그룹으로 돌아가며
   켜지는 3프레임(`_2`, `_3`)을 0.5초 간격으로 순환한다(`DecorItem.animationFrames`, PC 모니터와 같은 박자). 상점 노출만 `shopVisible`로 게이트하고,
   이미 놓인 트리는 시즌이 끝나도 그대로 그려진다. 오피스 데코는 서버에 kind 문자열로 저장돼 다른 멤버가
@@ -534,7 +534,7 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 | T1 `refactor(report)` #272 | 리포트/꾸미기 분리, 칭호 3묶음 그리드, 공유 메뉴, `FlowLayout` | 완료 |
 | T2 `feat(report)` 잔디 #273 | `DailyUsageLedger`, `UsageGrassModel/View`, `PetTheme.grassLevels` | 완료 — 11/16 릴리스로 12/1 전 보름치 적립 |
 | T4 `feat(season)` 기반 #275 | `Season`/`SeasonRegistry`(KST), `ParticleStyle`, headwear 앵커, 시즌 대사, 오피스 창문 눈, 킬스위치 | 완료 |
-| T5 `feat(season)` 코스메틱 #276 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge`·오피스 데코 3종(트리·전구 줄·배너) | 완료 — **데코 스프라이트 컨펌 대기** |
+| T5 `feat(season)` 코스메틱 #276 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge`·오피스 데코 3종(트리·전구 줄·배너) | 완료 — 데코 스프라이트 컨펌 완료(2026-11-10) |
 | T6 `feat(season)` 일일 보상 #277 | 서버 `_shared/season.ts`+`submit` 훅+퀴즈 힌트, 잔디 보상 마크, 12월 완주, 알림 | 완료 — 서버 배포는 나중에(사용자) |
 | T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공 | 완료 — snow 톤 컨펌 완료(ebf10a1) |
 | T3 액세서리 11종 도트 PNG #274 | 팩 미발견 → **직접 16×16 도트 제작 예외 허용(사용자)**, 결과물 컨펌 필수 | 완료 — 컨펌 완료(7affcd9) |
