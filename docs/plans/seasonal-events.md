@@ -142,7 +142,8 @@ newYear 풀은 별도 작성(연말 정산·새해 다짐 톤, 10줄).
   트리는 **없음**(2026-11-10 확인). 그래서 화분은 같은 팩의 `POT.png`를 그대로 쓰고 나무·별·장식만 팩의 잎
   팔레트(`#292a2b`/`#356441`/`#458e48`/`#74b25d`)로 얹은 16×32 `CHRISTMAS_TREE.png`를 자체 제작해
   `Resources/seasonal/`에 넣었다(액세서리 T3과 같은 예외 — **사용자 컨펌 대상**). `decorCatalog`에
-  `CHRISTMAS_TREE`(floor, behind, 300코인, `season: .xmas`)로 등록. 상점 노출만 `shopVisible`로 게이트하고,
+  `CHRISTMAS_TREE`(floor, behind, 300코인, `season: .xmas`)로 등록. 전구 15개가 3그룹으로 돌아가며
+  켜지는 3프레임(`_2`, `_3`)을 0.5초 간격으로 순환한다(`DecorItem.animationFrames`, PC 모니터와 같은 박자). 상점 노출만 `shopVisible`로 게이트하고,
   이미 놓인 트리는 시즌이 끝나도 그대로 그려진다. 오피스 데코는 서버에 kind 문자열로 저장돼 다른 멤버가
   보는데, 서버(`guild-office`)는 kind를 검증하지 않고 구버전 클라는 `decorItem(kind:)`가 nil이라 그 슬롯을
   그리지 않고 넘어간다 — 서버 배포 없이 클라만으로 된다.

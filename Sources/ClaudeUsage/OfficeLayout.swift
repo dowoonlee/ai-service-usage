@@ -462,8 +462,17 @@ enum OfficeLayout {
         let passing: PetPassing      // 벽 데코는 펫 동선 밖이라 무의미 (behind로 통일)
         /// 시즌 한정 데코 — 상점 노출만 시즌 중. 서버엔 kind 문자열로 저장되므로 카탈로그 항목은 삭제 금지.
         var season: Season.Kind? = nil
+        /// 깜빡이는 데코의 프레임(리소스 basename, 0.5초 간격 순환). 비어 있으면 `imageName` 한 장짜리 정지 그림.
+        /// 첫 프레임은 `imageName`과 같게 둔다 — 상점 썸네일과 씬의 첫 모습이 일치하도록.
+        var animationFrames: [String] = []
         var id: String { kind }
         var imageName: String { kind }
+        /// 주어진 시각에 그릴 리소스. PC 모니터(`PC_FRONT_ON_n`)와 같은 0.5초 박자.
+        func imageName(at date: Date) -> String {
+            guard !animationFrames.isEmpty else { return imageName }
+            let tick = Int((date.timeIntervalSinceReferenceDate * 2).rounded(.down))
+            return animationFrames[((tick % animationFrames.count) + animationFrames.count) % animationFrames.count]
+        }
     }
 
     static let decorCatalog: [DecorItem] = [
@@ -493,7 +502,9 @@ enum OfficeLayout {
         // 이 kind를 모르는 구버전 클라는 decorItem(kind:)가 nil이라 그 슬롯을 그리지 않고 넘어간다.
         DecorItem(kind: "CHRISTMAS_TREE", name: "크리스마스 트리", category: .floor, price: 300,
                   size: CGSize(width: 16, height: 32), blockingWidth: 10, passing: .behind,
-                  season: .xmas),
+                  season: .xmas,
+                  // 전구 15개가 3그룹으로 돌아가며 켜짐/보통/꺼짐, 별은 2번째 프레임에 밝아진다.
+                  animationFrames: ["CHRISTMAS_TREE", "CHRISTMAS_TREE_2", "CHRISTMAS_TREE_3"]),
     ]
 
     static func decorItem(kind: String) -> DecorItem? {

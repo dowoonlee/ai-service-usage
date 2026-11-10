@@ -65,6 +65,29 @@ final class SeasonalShopTests: SandboxedTestCase {
         XCTAssertFalse(s.shopVisible(tree, owned: false))
     }
 
+    /// 트리 전구는 0.5초마다 프레임이 바뀐다. 프레임이 번들에 다 있고, 첫 프레임이 상점 썸네일과 같고,
+    /// 한 바퀴 돌아 제자리로 오는지 — 음수 시각(기준일 이전)에서도 인덱스가 범위를 벗어나지 않아야 한다.
+    func testAnimatedDecorCyclesThroughBundledFrames() throws {
+        let tree = try XCTUnwrap(OfficeLayout.decorItem(kind: "CHRISTMAS_TREE"))
+        XCTAssertEqual(tree.animationFrames.count, 3)
+        XCTAssertEqual(tree.animationFrames.first, tree.imageName)
+        XCTAssertEqual(Set(tree.animationFrames).count, 3)
+        for name in tree.animationFrames {
+            let img = try XCTUnwrap(OfficeLayout.officeImage(name), "\(name).png이 번들에 없음")
+            XCTAssertEqual(img.representations.first?.pixelsWide, 16)
+            XCTAssertEqual(img.representations.first?.pixelsHigh, 32)
+        }
+        let t0 = Date(timeIntervalSinceReferenceDate: 1000)
+        let seq = (0..<4).map { tree.imageName(at: t0.addingTimeInterval(Double($0) * 0.5)) }
+        XCTAssertEqual(Set(seq.prefix(3)).count, 3)
+        XCTAssertEqual(seq[3], seq[0])
+        XCTAssertEqual(tree.imageName(at: t0), tree.imageName(at: t0.addingTimeInterval(0.4)))   // 박자 안에선 고정
+        XCTAssertTrue(tree.animationFrames.contains(tree.imageName(at: Date(timeIntervalSinceReferenceDate: -0.7))))
+
+        let plant = try XCTUnwrap(OfficeLayout.decorItem(kind: "PLANT"))       // 정지 데코는 그대로
+        XCTAssertEqual(plant.imageName(at: t0), "PLANT")
+    }
+
     func testTrainerBackgroundHidesSeasonalThemeOutsideSeason() {
         let s = Settings.shared
         SeasonRegistry.override = Override.none

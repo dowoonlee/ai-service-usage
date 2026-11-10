@@ -615,8 +615,18 @@ struct GuildOfficeView: View {
             if let slot = OfficeLayout.decorSlot(id: placed.slotId),
                let item = OfficeLayout.decorItem(kind: placed.itemKind) {
                 let isPreview = previewDecor?.slot == placed.slotId
-                itemView(imageName: item.imageName, drawKind: nil, size: item.size,
-                         anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                Group {
+                    if item.animationFrames.isEmpty {
+                        itemView(imageName: item.imageName, drawKind: nil, size: item.size,
+                                 anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                    } else {
+                        // 깜빡이는 데코(트리 전구) — PC 모니터와 같은 0.5초 박자로 프레임 교체.
+                        TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+                            itemView(imageName: item.imageName(at: ctx.date), drawKind: nil, size: item.size,
+                                     anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                        }
+                    }
+                }
                     .opacity(isPreview ? 0.75 : 1)   // 미리보기는 반투명 — 아직 결제 전임이 보이게
                     .help(placed.donorNickname.map { "\(item.name) — \($0) 기부" } ?? item.name)
                     .zIndex(decorZ(slot: slot, item: item))
