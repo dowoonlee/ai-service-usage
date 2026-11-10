@@ -212,7 +212,7 @@ newYear 풀은 별도 작성(연말 정산·새해 다짐 톤, 10줄).
 * 창이 11월에 시작해도 일일 보상 키는 12월이다(`Season.rewardMonth = 12`, 서버 `ADVENT.month`). 11월엔 리포트 탭에
   "12/1~24 …" 안내문만 보이고, "보상 N/24" 숫자와 잔디 보상 마크는 12월에만 나온다.
 * 서버의 퀴즈 시즌 힌트도 11/16~12/25로 맞췄다(`quizSeasonHint`).
-* **릴리스 전 수동 확인**: `AIUSAGE_SANDBOX=1 AIUSAGE_SEASON_NOW=2026-12-22 swift run` — 샌드박스에서만 날짜를 고정한다
+* **릴리스 전 수동 확인**(2026-11-10 사용자가 12/22 고정으로 실행해 확인 — "잘된다"): `AIUSAGE_SANDBOX=1 AIUSAGE_SEASON_NOW=2026-12-22 swift run` — 샌드박스에서만 날짜를 고정한다
   (`SeasonClock`). 길드 오피스 데코는 `AIUSAGE_OFFICE_DEMO=decor`를 함께.
 * PR 단위: 나눠도 되고 합쳐도 된다(사용자). 브랜치가 30여 커밋으로 얽혀 있어 한 PR이 기본안.
 
