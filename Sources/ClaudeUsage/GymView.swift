@@ -9,14 +9,17 @@ import SwiftUI
 struct GymView: View {
     @ObservedObject var settings: Settings = .shared
     @State private var selectedRegion: BadgeRegion = .coffee
+    /// 시즌 이벤트 섬을 골랐는지. 섬은 `BadgeRegion`이 아니라 따로 든다 — 고르면 관장·카테고리 자리에 보스 카드가 온다.
+    @State private var eventSelected = false
     /// 호버된 뱃지 ID (BadgeID.key). nil이면 tooltip 숨김.
     @State private var hoveredKey: String?
     /// 진행 중인 관장 배틀(sheet 트리거). nil이면 배틀 창 닫힘.
     @State private var activeBattle: GymBattleRequest?
 
-    init(settings: Settings? = nil, initialRegion: BadgeRegion = .coffee) {
+    init(settings: Settings? = nil, initialRegion: BadgeRegion = .coffee, initialEventSelected: Bool = false) {
         self.settings = settings ?? .shared
         self._selectedRegion = State(initialValue: initialRegion)
+        self._eventSelected = State(initialValue: initialEventSelected)
     }
 
     // 설명이 추가된 업적 카드도 최소 560×640 창에서 모두 접근할 수 있도록 전체 페이지를 스크롤한다.
@@ -24,19 +27,26 @@ struct GymView: View {
         ScrollView {
             VStack(spacing: 12) {
                 header
-                if let season = SeasonRegistry.active(), let boss = season.boss {
-                    seasonBossSection(season: season, boss: boss)
-                }
-                WorldMapView(selected: $selectedRegion)
-                    .frame(height: 220)
+                // 시즌 보스의 진입점은 맵 위 하늘에 뜬 이벤트 섬이다. 섬이 있는 동안 월드가 위로 늘어나므로
+                // 맵 높이도 같은 비율로 키워 지상 지역이 평소와 같은 크기로 보이게 한다.
+                let season = SeasonRegistry.active()
+                let boss = season?.boss
+                let onIsland = eventSelected && boss != nil
+                WorldMapView(selected: $selectedRegion, island: boss?.island,
+                             islandSelected: $eventSelected, islandAvatar: boss?.lead)
+                    .frame(height: Self.mapHeight(hasIsland: boss != nil))
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
                     .overlay(
                         RoundedRectangle(cornerRadius: AppRadius.lg)
                             .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
                     )
-                gymLeaderSection
-                Divider()
-                categorySection
+                if onIsland, let season, let boss {
+                    seasonBossSection(season: season, boss: boss)
+                } else {
+                    gymLeaderSection
+                    Divider()
+                    categorySection
+                }
             }
             .padding(16)
         }
@@ -48,6 +58,13 @@ struct GymView: View {
         .sheet(item: $activeBattle) { req in
             GymBattleView(opponent: req.opponent)
         }
+    }
+
+    /// 맵 높이 — 평소 220. 이벤트 섬이 있으면 하늘 띠(`EventIsland.skyRows`)만큼 같은 비율로 늘린다.
+    nonisolated static func mapHeight(hasIsland: Bool) -> CGFloat {
+        let base: CGFloat = 220
+        guard hasIsland else { return base }
+        return (base * CGFloat(WorldMap.rows + EventIsland.skyRows) / CGFloat(WorldMap.rows)).rounded()
     }
 
     /// 맵과 카테고리 사이 — selected region의 관장 sprite + 진척도별 대사 + 도전 게이트.
@@ -587,8 +604,8 @@ struct GymBattleRequest: Identifiable {
 // MARK: - 시즌 보스 카드
 
 extension GymView {
-    /// 지역 선택기 위 시즌 카드 — 스프라이트(스킨+모자) + 말풍선 + tier 버튼 4개. tier는 3번 보상 일수로 열린다.
-    /// 월드맵에는 넣지 않는다(지형 데이터 편집이 비용 대비 과함). cf. docs/plans/seasonal-events.md §26
+    /// 시즌 보스 카드 — 스프라이트(스킨+모자) + 말풍선 + tier 버튼 4개. tier는 3번 보상 일수로 열린다.
+    /// 월드맵의 이벤트 섬을 고르면 지역 관장·카테고리 자리에 나온다. cf. docs/plans/seasonal-events.md §26
     @ViewBuilder
     func seasonBossSection(season: Season, boss: SeasonalBoss) -> some View {
         let now = Date()

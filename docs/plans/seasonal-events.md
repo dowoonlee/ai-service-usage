@@ -467,7 +467,20 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 
 ## 26. 배치·tier 오픈 (결정 ⑮)
 
-* **도장 탭 상단**, 지역 선택기 위에 시즌 카드 1장(스프라이트 + 말풍선 + tier 버튼 4개). 월드맵에는 넣지 않는다.
+* **진입점은 월드맵 하늘에 뜬 이벤트 섬**(2026-11-10 사용자 결정 — 애초 안은 "도장 탭 상단 카드, 월드맵에는
+  넣지 않는다"였다). 시즌 중엔 월드가 위로 12행 늘어나고(`EventIsland.skyRows`) 두 대륙 사이 하늘에 눈 섬이
+  뜬다. 섬을 누르면 카메라가 섬으로 줌인하고, 지역 관장·카테고리 자리에 시즌 카드(스프라이트 + 말풍선 + tier
+  버튼 4개)가 나온다. 지상 지역을 누르면 평소 화면으로 돌아간다.
+  * 섬은 `BadgeRegion`이 아니다(결정 ⑬ 유지) — `SeasonalBoss.island: EventIsland` 데이터이고, mapgen 지형
+    (`WorldMapData`)은 건드리지 않는다. 좌표계의 음수 row에 얹는 오버레이라 시즌이 끝나면 월드는 70×38로 돌아간다.
+  * "떠 있다"는 단서 셋: 가운데가 깊은 밑동 바위, 바다 위 그림자, 섬을 감싸고 흐르는 구름.
+  * 맵 높이도 같은 비율로 키운다(220 → 289). 지상 지역은 평소와 같은 크기로 보인다.
+  * 시즌 중엔 맵 전체에 눈이 내린다(오피스 창밖 눈과 같은 `WindowSnow`). 이 때문에 월드 뷰에서도 프레임이 돈다.
+  * 섬 위: 도장(`building_dojo`, 기존 미사용 에셋), 소나무, 오피스 데코로 만든 트리·눈사람·선물 상자. 줌인하면
+    Rudolph(흰 스킨 + 모자)가 도장 앞을 걷는다 — 흰 스킨이 눈밭에서 안 보여 도장 앞에 돌 광장을 깔고 크기를 키웠다.
+  * 섬은 고르지 않아도 거의 어두워지지 않고 이름표("겨울 관장")가 항상 붙는다 — 사전 공지가 없으니 맵에서
+    스스로 눈에 띄어야 한다.
+  * 내년 다른 시즌은 `EventIsland` 리터럴 하나(terrain 문자열·데코·건물)를 더 쓰면 된다.
 * **tier는 3번 보상 일수(`claimedGrants`의 `advent-2026-12-` 행 수)로 오픈**(제안값):
 
 | tier | 오픈 조건 | 격파 보상(인스턴스당 1회) |
@@ -519,6 +532,8 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 * `GymView.swift`: 시즌 보스 카드
 * `TrainerCard.swift`: `CardTitle.snowDeployer`
 * `Settings.swift`: `seasonalFlags: Set<String>` (2번 자동 칭호와 공유)
+* `WorldMap.swift`: `EventIsland`, `MapCamera.worldView/regionView(skyRows:)`·`islandView`
+* `WorldMapView.swift`: 섬 렌더(밑동·그림자·구름·눈)·선택·섬 아바타. `GymView`: `eventSelected`, `mapHeight`
 
 ## 29. 검증
 
@@ -574,13 +589,13 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 | T4 `feat(season)` 기반 #275 | `Season`/`SeasonRegistry`(KST), `ParticleStyle`, headwear 앵커, 시즌 대사, 오피스 창문 눈, 킬스위치 | 완료 |
 | T5 `feat(season)` 코스메틱 #276 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge`·오피스 데코 6종(트리·전구 줄·배너·리스·눈사람·선물 상자) | 완료 — 6종 모두 컨펌 완료(2026-11-10) |
 | T6 `feat(season)` 일일 보상 #277 | 서버 `_shared/season.ts`+`submit` 훅+퀴즈 힌트, 잔디 보상 마크, 12월 완주, 알림 | 완료 — 서버 배포는 나중에(사용자) |
-| T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공 | 완료 — snow 톤 컨펌 완료(ebf10a1) |
+| T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공, **월드맵 이벤트 섬 진입점** | 완료 — snow 톤 컨펌 완료(ebf10a1), 이벤트 섬 컨펌 대기 |
 | T3 액세서리 11종 도트 PNG #274 | 팩 미발견 → **직접 16×16 도트 제작 예외 허용(사용자)**, 결과물 컨펌 필수 | 완료 — 컨펌 완료(7affcd9) |
 | 5번 선물·새해 칭호 (이슈 없음) | `SeasonGift`/`SeasonGiftBox`, 패널 `SeasonGiftBanner`, `CardTitle.newYearFirstDay` | 완료 — 선물 합계(20,000 + 15장)·칭호 이름 사용자 확정 |
 
 프리뷰: `bash scripts/render-previews.sh` 후 `0-headwear-*`(195종 모자 앵커), `0-season-boss-skins`, `탭-*-12월`,
-`사무실-12월데코`(GIF — 트리·전구 줄 깜빡임과 벽 데코 배치).
+`사무실-12월데코`(GIF — 트리·전구 줄 깜빡임과 벽 데코 배치), `map-xmas-월드`·`map-xmas-섬`(이벤트 섬).
 main 반영: 2026-11-10 `a860732`(v0.19.4 이후)까지 **merge**(28c4be3). rebase 금지 — pre-push 훅이 첫 커밋
 `18e57e6`의 자손 여부로 막으므로 해시가 바뀌면 가드가 풀린다.
 
-테스트: `swift test` 532개(40 skip) + `deno test supabase/functions/_shared/season.test.ts`.
+테스트: `swift test` 538개(41 skip) + `deno test supabase/functions/_shared/season.test.ts`.

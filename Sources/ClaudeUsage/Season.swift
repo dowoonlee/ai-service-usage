@@ -176,6 +176,8 @@ struct SeasonalBoss: Equatable {
     let rewards: [BadgeTier: BossReward]
     /// production 격파 칭호.
     let titleReward: CardTitle?
+    /// 도장 월드맵의 진입점 — 하늘에 뜬 이벤트 섬. 이 섬을 고르면 보스 카드가 나온다.
+    let island: EventIsland
 }
 
 /// 날짜별 선물 한 개(KST 그날 하루만 열린다). 지급·dedup은 `SeasonGiftBox`.

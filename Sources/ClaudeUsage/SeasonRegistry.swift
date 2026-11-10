@@ -57,7 +57,8 @@ enum SeasonRegistry {
                     .staging: BossReward(coins: 6_000),
                     .production: BossReward(coins: 15_000, premiumTickets: 1),
                 ],
-                titleReward: .snowDeployer
+                titleReward: .snowDeployer,
+                island: .winter
             ),
             // 크리스마스 주간(2026년 기준 월~금) — 매일 하나, 갈수록 커진다.
             // 합계 코인 20,000 + 가챠권 15장 — 사용자 결정(§30). 테스트가 합계를 고정한다.

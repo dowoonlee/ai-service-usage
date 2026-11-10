@@ -111,10 +111,24 @@ final class ScenePreviews: SandboxedTestCase {
         try renderTab(ReportView(grassNow: PreviewDemoState.xmasNow), title: "탭-4-레포트-12월",
                       note: "12/18 고정. 불 켜진 셀 위 눈, 수령일 붉은 점, 18일 점선(도착 대기), 일요일 빈 칸")
         try renderTab(PartyView(), title: "탭-2-파티-12월", note: "맵 상점에 겨울밤(한정) 카드가 보이는지")
-        // 도장 탭 — 지역 선택기 위 겨울 관장 카드. 보상 15일이라 staging까지 열림, localhost는 격파 상태.
+        // 도장 탭 — 맵 위 하늘에 뜬 이벤트 섬이 겨울 관장의 진입점. 섬을 고르기 전엔 평소 지역 화면 그대로.
         Settings.shared.seasonalFlags.insert("boss:xmas-2026:localhost")
         try renderTab(GymView(), title: "탭-3-도장-12월",
-                      note: "겨울 관장 카드 — Rudolph(사슴+모자), 대사 3단계, tier 버튼(격파/열림/잠김)")
+                      note: "맵이 위로 늘어나고(220→289) 두 대륙 사이 하늘에 눈 섬 + 이름표. 지상 지역 크기는 평소와 같아야 한다")
+        // 섬을 고른 상태 — 지역 관장·카테고리 자리에 보스 카드. 보상 15일이라 staging까지 열림, localhost는 격파.
+        try renderTab(GymView(initialEventSelected: true), title: "탭-3-도장-12월-섬선택",
+                      note: "겨울 관장 카드 — Rudolph(사슴+모자), 대사 3단계, tier 버튼(격파/열림/잠김). 섬이 밝게 강조되는지")
+        // 맵만 — 월드 뷰와 섬 줌인. 밑동 바위·그림자·구름으로 "떠 있는 섬"이 읽히는지, 눈이 맵 전체에 내리는지.
+        let boss = SeasonRegistry.season(.xmas)!.boss!
+        for (title, zoomed) in [("map-xmas-월드", false), ("map-xmas-섬", true)] {
+            try PreviewRenderer.renderInWindow(
+                WorldMapView(selected: .constant(.coffee), island: boss.island,
+                             islandSelected: .constant(zoomed), islandAvatar: boss.lead, initiallyZoomed: zoomed),
+                size: CGSize(width: windowWidth, height: GymView.mapHeight(hasIsland: true)),
+                section: "월드맵 · 12월", title: title,
+                note: zoomed ? "섬 줌인 — 도장·트리·눈사람·소나무, 걷는 Rudolph, 미니맵에 섬과 뷰포트"
+                             : "월드 뷰 — 하늘 띠의 눈 섬, 바다 위 그림자, 구름, 이름표")
+        }
         try renderTab(ReportView(initialMode: .customize, grassNow: PreviewDemoState.grassNow),
                       title: "탭-4-레포트-꾸미기-12월",
                       note: "액세서리 11종(한정 3종 뱃지)·칭호 구매 가능 묶음에 12월 한정이 붉은 테두리로")

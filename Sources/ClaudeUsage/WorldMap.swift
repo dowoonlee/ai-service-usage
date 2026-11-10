@@ -194,6 +194,99 @@ enum WorldMap {
 
 // MARK: - 카메라
 
+/// 이벤트 섬 — 월드 위쪽 하늘 띠(row < 0)에 떠 있는 임시 지역. 시즌 보스의 진입점.
+///
+/// `WorldMapData`(mapgen 산출물, 손 수정 금지)는 건드리지 않는다. 섬은 그 좌표계의 **음수 row**에 얹는
+/// 오버레이라, 시즌이 끝나 섬이 사라지면 월드는 원래 70×38로 돌아간다. `BadgeRegion`이 아니다 —
+/// 뱃지·영토(Voronoi)·도로와 무관하고, 선택 상태도 `WorldMapView.islandSelected`로 따로 든다.
+struct EventIsland: Equatable {
+    struct Deco: Equatable {
+        let col: Int
+        let row: Int
+        /// 리소스 basename(`deco_pine`, `CHRISTMAS_TREE` …).
+        let image: String
+        /// 셀 단위 (폭, 높이). 밑동이 셀 아래변에 닿는다.
+        let width: CGFloat
+        let height: CGFloat
+    }
+
+    /// 섬이 있을 때 월드가 위로 늘어나는 행 수. 맵 뷰 높이도 같은 비율로 커진다(`GymView`).
+    static let skyRows = 12
+
+    /// 좌상단 셀. row는 음수.
+    let originCol: Int
+    let originRow: Int
+    /// 행별 terrain code. `.`은 빈칸. 코드는 `WorldMap.tileImageNames`와 같은 체계.
+    let terrain: [String]
+    /// 도장 건물이 서는 셀.
+    let town: WorldCell
+    let building: String
+    let decos: [Deco]
+    /// 맵 위 이름표.
+    let label: String
+
+    var cols: Int { terrain.map(\.count).max() ?? 0 }
+    var rows: Int { terrain.count }
+
+    /// 월드 좌표의 섬 terrain code. 섬 밖·빈칸은 0.
+    func code(col: Int, row: Int) -> Int {
+        let r = row - originRow, c = col - originCol
+        guard r >= 0, r < terrain.count else { return 0 }
+        let line = Array(terrain[r])
+        guard c >= 0, c < line.count else { return 0 }
+        return Int(String(line[c])) ?? 0
+    }
+
+    func contains(col: Int, row: Int) -> Bool { code(col: col, row: row) > 0 }
+
+    /// 섬 지면의 중심(카메라 타겟).
+    var center: CGPoint {
+        CGPoint(x: CGFloat(originCol) + CGFloat(cols) / 2, y: CGFloat(originRow) + CGFloat(rows) / 2)
+    }
+
+    /// 열(col)의 가장 아래 지면 row. 그 열에 지면이 없으면 nil — 섬 밑동(떠 있는 바위)을 그릴 기준.
+    func bottomRow(col: Int) -> Int? {
+        (0..<rows).reversed().map { originRow + $0 }.first { contains(col: col, row: $0) }
+    }
+
+    /// 밑동 바위 깊이(행). 가운데가 깊고 가장자리가 얕아 뒤집힌 산처럼 보인다.
+    func undersideDepth(col: Int) -> Int {
+        let t = (Double(col - originCol) + 0.5) / Double(max(1, cols))
+        return 1 + Int((3.0 * sin(.pi * t)).rounded())
+    }
+
+    /// 겨울 관장의 눈 섬 — 두 대륙 사이 바다 위 하늘. 설원(6)에 얼어붙은 연못(4), 도장 앞은 돌 광장(8).
+    /// 광장은 장식이 아니라 필요해서 있다: 흰 스킨의 보스가 눈밭 위를 걸으면 안 보인다.
+    static let winter = EventIsland(
+        originCol: 29, originRow: -10,
+        terrain: [
+            "....666666666....",
+            "..6666666666666..",
+            ".666666666666666.",
+            "66666666666666666",
+            "66644666888886666",
+            ".666666666666666.",
+            "...66666666666...",
+        ],
+        town: WorldCell(col: 39, row: -7),
+        building: "building_dojo",
+        decos: [
+            Deco(col: 34, row: -10, image: "deco_pine", width: 1.0, height: 2.0),
+            Deco(col: 40, row: -10, image: "deco_pine", width: 1.0, height: 2.0),
+            Deco(col: 31, row: -8, image: "deco_pine", width: 1.0, height: 2.0),
+            Deco(col: 44, row: -8, image: "deco_pine", width: 1.0, height: 2.0),
+            Deco(col: 30, row: -6, image: "deco_pine", width: 1.0, height: 2.0),
+            Deco(col: 45, row: -6, image: "deco_pine", width: 1.0, height: 2.0),
+            Deco(col: 33, row: -4, image: "deco_pine", width: 1.0, height: 2.0),
+            Deco(col: 36, row: -7, image: "CHRISTMAS_TREE", width: 1.0, height: 2.0),
+            Deco(col: 42, row: -7, image: "SNOWMAN", width: 1.1, height: 2.0),
+            Deco(col: 35, row: -6, image: "GIFT_BOXES", width: 0.9, height: 0.9),
+            Deco(col: 43, row: -5, image: "SNOWMAN", width: 1.1, height: 2.0),
+        ],
+        label: "겨울 관장"
+    )
+}
+
 /// 연속 좌표 카메라 — `center`는 월드 셀 좌표(연속), `zoom`은 화면 px / 셀. 셀은 항상 정사각.
 struct MapCamera: Equatable {
     var center: CGPoint
@@ -217,22 +310,33 @@ struct MapCamera: Equatable {
     }
 
     /// 월드 뷰 — 전체 월드가 뷰포트에 들어가도록 fit(두 대륙 다 보임), 중앙 정렬.
-    static func worldView(in size: CGSize) -> MapCamera {
+    /// `skyRows` > 0이면 월드가 위로(row -skyRows까지) 늘어난 것으로 본다 — 이벤트 섬이 떠 있는 하늘 띠.
+    static func worldView(in size: CGSize, skyRows: Int = 0) -> MapCamera {
+        let sky = CGFloat(skyRows)
         let zoom = min(size.width / CGFloat(WorldMap.cols),
-                       size.height / CGFloat(WorldMap.rows))
+                       size.height / (CGFloat(WorldMap.rows) + sky))
         return MapCamera(center: CGPoint(x: CGFloat(WorldMap.cols) / 2,
-                                         y: CGFloat(WorldMap.rows) / 2),
+                                         y: (CGFloat(WorldMap.rows) - sky) / 2),
                          zoom: zoom)
     }
 
     /// 지역 뷰 — 월드 뷰의 3×, 영토 중심을 향해 팬. 월드 밖이 보이지 않도록 클램프.
-    static func regionView(_ region: BadgeRegion, in size: CGSize) -> MapCamera {
-        let zoom = worldView(in: size).zoom * 3.0
-        var c = WorldMap.territoryCenter[region] ?? .zero
+    static func regionView(_ region: BadgeRegion, in size: CGSize, skyRows: Int = 0) -> MapCamera {
+        focusView(on: WorldMap.territoryCenter[region] ?? .zero, in: size, skyRows: skyRows)
+    }
+
+    /// 이벤트 섬 뷰 — 지역 뷰와 같은 배율로 섬 중심을 본다.
+    static func islandView(_ island: EventIsland, in size: CGSize) -> MapCamera {
+        focusView(on: island.center, in: size, skyRows: EventIsland.skyRows)
+    }
+
+    private static func focusView(on point: CGPoint, in size: CGSize, skyRows: Int) -> MapCamera {
+        let zoom = worldView(in: size, skyRows: skyRows).zoom * 3.0
+        var c = point
         let visW = size.width / zoom
         let visH = size.height / zoom
         c.x = min(max(c.x, visW / 2), CGFloat(WorldMap.cols) - visW / 2)
-        c.y = min(max(c.y, visH / 2), CGFloat(WorldMap.rows) - visH / 2)
+        c.y = min(max(c.y, -CGFloat(skyRows) + visH / 2), CGFloat(WorldMap.rows) - visH / 2)
         return MapCamera(center: c, zoom: zoom)
     }
 }

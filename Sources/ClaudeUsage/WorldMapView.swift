@@ -18,8 +18,30 @@ struct WorldMapView: View {
     /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
     @Environment(\.windowIsVisible) private var windowIsVisible
     @Binding var selected: BadgeRegion
+    /// 시즌 이벤트 섬 — nil이면 평소 월드(70×38). 있으면 월드가 위로 `EventIsland.skyRows`만큼 늘고
+    /// 그 하늘 띠에 섬이 뜬다. 섬은 region이 아니라서 선택 상태를 따로 든다.
+    var island: EventIsland? = nil
+    @Binding var islandSelected: Bool
+    /// 섬 지역 뷰에서 걸어다닐 보스 선봉(스킨·모자 포함). nil이면 아바타 없음.
+    var islandAvatar: SkinnedPet? = nil
     /// 호버된 region — nil이면 selected만 강조, non-nil이면 그 region도 강조.
     @State private var hovered: BadgeRegion?
+    @State private var islandHovered = false
+
+    /// `initiallyZoomed` — 지역 뷰로 시작(프리뷰용. 앱은 항상 월드 뷰에서 시작한다).
+    init(selected: Binding<BadgeRegion>, island: EventIsland? = nil,
+         islandSelected: Binding<Bool> = .constant(false), islandAvatar: SkinnedPet? = nil,
+         initiallyZoomed: Bool = false) {
+        self._selected = selected
+        self.island = island
+        self._islandSelected = islandSelected
+        self.islandAvatar = islandAvatar
+        self._mode = State(initialValue: initiallyZoomed ? .region : .world)
+    }
+
+    private var skyRows: Int { island == nil ? 0 : EventIsland.skyRows }
+    /// 섬이 사라진 뒤(시즌 종료)에도 바인딩이 true로 남아 있을 수 있어 섬 유무와 함께 본다.
+    private var onIsland: Bool { island != nil && islandSelected }
 
     /// 월드 뷰 ↔ 지역 뷰. selected와 독립 — 월드 뷰에서도 선택 region은 유지·강조된다.
     private enum Mode { case world, region }
@@ -36,13 +58,17 @@ struct WorldMapView: View {
         GeometryReader { geo in
             let size = geo.size
             // 지역 뷰에선 트레이너 아바타가 걸어다니므로 계속 프레임을 돌린다(전환 중에도).
+            // 섬이 있는 시즌엔 눈이 내리므로 월드 뷰에서도 프레임을 돌린다.
             TimelineView(.animation(minimumInterval: 1.0 / 30.0,
-                                    paused: !windowIsVisible || (!animating && mode != .region))) { timeline in
+                                    paused: !windowIsVisible
+                                        || (!animating && mode != .region && island == nil))) { timeline in
                 let cam = currentCamera(at: timeline.date, size: size)
                 ZStack {
                     MapTileCanvas(camera: cam, highlighted: highlightedRegions,
                                   townProgress: townProgresses, discovered: discoveredSet,
-                                  mastered: masteredRegions)
+                                  mastered: masteredRegions,
+                                  island: island, islandHighlighted: onIsland || islandHovered,
+                                  time: timeline.date.timeIntervalSinceReferenceDate)
                     inputLayer(cam: cam, size: size)
                     avatarCanvas(cam: cam, date: timeline.date, size: size)
                 }
@@ -63,7 +89,8 @@ struct WorldMapView: View {
 
     /// 밝게(dim 없이) 그릴 region — 선택 + 호버.
     private var highlightedRegions: Set<BadgeRegion> {
-        var s: Set<BadgeRegion> = [selected]
+        // 섬을 고른 동안엔 지상 지역은 전부 어둡게(호버만 밝게) — 선택이 하나로 읽히게.
+        var s: Set<BadgeRegion> = onIsland ? [] : [selected]
         if let hovered { s.insert(hovered) }
         return s
     }
@@ -105,11 +132,37 @@ struct WorldMapView: View {
     /// Canvas로 그린다(SwiftUI Image는 ImageRenderer 스냅샷과 상성 이슈).
     private func avatarCanvas(cam: MapCamera, date: Date, size: CGSize) -> some View {
         Canvas { context, sz in
-            guard cam.zoom > 14,
-                  let town = WorldMap.towns[selected],
+            guard cam.zoom > 14 else { return }
+            let t = date.timeIntervalSinceReferenceDate
+            if onIsland, let island {
+                // 섬에선 보스 선봉(스킨·모자)이 도장 앞 눈밭을 걷는다.
+                guard let pet = islandAvatar else { return }
+                let phase = CGFloat(sin(t * 0.8))
+                let wx = CGFloat(island.town.col) + 0.5 + phase * 1.6
+                let wy = CGFloat(island.town.row) + 1.45
+                let p = cam.screenPoint(ofWorld: CGPoint(x: wx, y: wy), in: sz)
+                // 지상 관장(1.05셀)보다 크게 — 흰 스킨이라 같은 크기론 광장 위에서도 잘 안 보인다. 발밑 그림자도 둔다.
+                let s = max(20, cam.zoom * 1.9)
+                context.fill(Path(ellipseIn: CGRect(x: p.x - s * 0.28, y: p.y - s * 0.09, width: s * 0.56, height: s * 0.16)),
+                             with: .color(.black.opacity(0.28)))
+                guard let img = PetSprite.composedImage(for: pet.kind, action: .walk, frameIndex: Int(t * 8) % 4,
+                                                        skin: pet.skin, headwear: pet.headwear) else { return }
+                let goingLeft = phase < 0
+                let flip = pet.kind.defaultFacingLeft ? !goingLeft : goingLeft
+                let rect = CGRect(x: p.x - s / 2, y: p.y - s, width: s, height: s)
+                context.drawLayer { layer in
+                    if flip {
+                        layer.translateBy(x: p.x, y: 0)
+                        layer.scaleBy(x: -1, y: 1)
+                        layer.translateBy(x: -p.x, y: 0)
+                    }
+                    layer.draw(context.resolve(Image(nsImage: img)), in: rect)
+                }
+                return
+            }
+            guard let town = WorldMap.towns[selected],
                   discoveredSet.contains(selected.rawValue) else { return }
             let kind = GymLeader.leader(for: selected).kind
-            let t = date.timeIntervalSinceReferenceDate
             let phase = CGFloat(sin(t * 0.8))            // -1…1 좌우 왕복
             let wx = CGFloat(town.col) + 0.5 + phase * 1.6
             let wy = CGFloat(town.row) + 1.45            // 마을 밑동 앞(도로변)
@@ -136,14 +189,15 @@ struct WorldMapView: View {
     /// 지역 뷰 우측 하단 미니맵 — 전체 월드 축소 + 현재 뷰포트 사각형.
     private func minimap(fullSize: CGSize) -> some View {
         let mmSize = CGSize(width: 96, height: 54)
-        let worldCam = MapCamera.worldView(in: mmSize)
-        let regionCam = MapCamera.regionView(selected, in: fullSize)
+        let worldCam = MapCamera.worldView(in: mmSize, skyRows: skyRows)
+        let regionCam = focusCamera(size: fullSize)
         let vis = regionCam.visibleCellRect(in: fullSize)
         let tl = worldCam.screenPoint(ofWorld: CGPoint(x: vis.minX, y: vis.minY), in: mmSize)
         let br = worldCam.screenPoint(ofWorld: CGPoint(x: vis.maxX, y: vis.maxY), in: mmSize)
         return ZStack(alignment: .topLeading) {
             MapTileCanvas(camera: worldCam, highlighted: Set(BadgeRegion.allCases),
-                          showBuildings: false, discovered: discoveredSet, mastered: masteredRegions)
+                          showBuildings: false, discovered: discoveredSet, mastered: masteredRegions,
+                          island: island, islandHighlighted: true)
             Rectangle()
                 .stroke(Color.white, lineWidth: 1)
                 .frame(width: max(4, br.x - tl.x), height: max(4, br.y - tl.y))
@@ -167,21 +221,41 @@ struct WorldMapView: View {
                 switch phase {
                 case .active(let p):
                     let w = cam.worldPoint(ofScreen: p, in: size)
-                    hovered = WorldMap.regionForCell(col: Int(floor(w.x)),
-                                                     row: Int(floor(w.y)))
+                    let col = Int(floor(w.x)), row = Int(floor(w.y))
+                    islandHovered = island?.contains(col: col, row: row) ?? false
+                    hovered = islandHovered ? nil : WorldMap.regionForCell(col: col, row: row)
                 case .ended:
                     hovered = nil
+                    islandHovered = false
                 }
             }
             .onTapGesture(coordinateSpace: .local) { p in
                 let w = cam.worldPoint(ofScreen: p, in: size)
-                let hit = WorldMap.regionForCell(col: Int(floor(w.x)), row: Int(floor(w.y)))
-                handleTap(hit, size: size)
+                let col = Int(floor(w.x)), row = Int(floor(w.y))
+                if island?.contains(col: col, row: row) == true {
+                    handleIslandTap(size: size)
+                } else {
+                    handleTap(WorldMap.regionForCell(col: col, row: row), size: size)
+                }
             }
+    }
+
+    /// 섬 클릭 → 섬 선택 + 섬 뷰로 줌인. 지상에서 올 땐 도로가 없으니 줌아웃했다 들어가는 arc.
+    private func handleIslandTap(size: CGSize) {
+        guard !(mode == .region && onIsland) else { return }
+        let fromRegion = mode == .region
+        islandSelected = true
+        go(.region, arc: fromRegion, size: size)
     }
 
     private func handleTap(_ region: BadgeRegion?, size: CGSize) {
         switch (mode, region) {
+        case (_, .some(let r)) where onIsland:
+            // 섬에서 지상 영토로 — 도로가 없으니 직선(arc)으로 내려간다.
+            let wasRegionMode = mode == .region
+            islandSelected = false
+            selected = r
+            go(.region, arc: wasRegionMode, size: size)
         case (.world, .some(let r)):
             // 월드 뷰에서 영토 클릭 → 선택 + 지역 뷰로 줌인.
             selected = r
@@ -227,9 +301,15 @@ struct WorldMapView: View {
 
     private func targetCamera(size: CGSize) -> MapCamera {
         switch mode {
-        case .world:  return .worldView(in: size)
-        case .region: return .regionView(selected, in: size)
+        case .world:  return .worldView(in: size, skyRows: skyRows)
+        case .region: return focusCamera(size: size)
         }
+    }
+
+    /// 지역 뷰의 타겟 — 섬을 골랐으면 섬, 아니면 선택 region.
+    private func focusCamera(size: CGSize) -> MapCamera {
+        if onIsland, let island { return .islandView(island, in: size) }
+        return .regionView(selected, in: size, skyRows: skyRows)
     }
 
     private func currentCamera(at now: Date, size: CGSize) -> MapCamera {
@@ -248,7 +328,7 @@ struct WorldMapView: View {
         if route.count > 1 {
             // 도로 따라 — route[0]=출발 마을 카메라부터 목적지까지 폴리라인 팬.
             // (go 시점엔 selected가 이미 목적지라 currentCamera를 쓰면 왔다갔다 하므로 route를 그대로 사용)
-            let wps = route.map { MapCamera.regionView($0, in: size) }
+            let wps = route.map { MapCamera.regionView($0, in: size, skyRows: skyRows) }
             tw = CameraTween(waypoints: wps, start: now, followRoute: true)
             tw.duration = 0.34 + Double(route.count - 1) * 0.14   // 경로 길수록 오래
         } else {
@@ -284,6 +364,11 @@ struct MapTileCanvas: View {
     var discovered: Set<String> = []
     /// 마스터(8/8)한 region(rawValue) — 테라포밍 색 오버레이 + 정복 왕관.
     var mastered: Set<String> = []
+    /// 시즌 이벤트 섬(하늘 띠에 뜬다). nil이면 그리지 않는다.
+    var island: EventIsland? = nil
+    var islandHighlighted: Bool = false
+    /// 구름 흐름·눈 낙하용 시각. 정지 렌더(미니맵)는 0.
+    var time: TimeInterval = 0
 
     var body: some View {
         Canvas { context, size in
@@ -341,7 +426,17 @@ struct MapTileCanvas: View {
                 }
             }
 
+            if let island {
+                drawIslandGround(island, in: &context, size: size)
+            }
             guard showBuildings else { return }
+            defer {
+                // 섬 위 구조물과 눈은 지상 건물·데코까지 다 그린 뒤 맨 위에.
+                if let island {
+                    drawIslandProps(island, in: &context, size: size)
+                    drawSnowfall(in: &context, size: size)
+                }
+            }
 
             // 다리 — vibe(본토)-guild(제도) 두 대륙을 잇는 바다 위 나무 판자.
             if !WorldMap.bridgeCells.isEmpty,
@@ -466,6 +561,128 @@ struct MapTileCanvas: View {
                                  anchor: .center)
                 }
             }
+        }
+    }
+}
+
+// MARK: - 이벤트 섬 렌더
+
+extension MapTileCanvas {
+    private func cellRect(col: CGFloat, row: CGFloat, size: CGSize) -> CGRect {
+        let sp = camera.screenPoint(ofWorld: CGPoint(x: col, y: row), in: size)
+        return CGRect(x: sp.x, y: sp.y, width: camera.zoom + 0.5, height: camera.zoom + 0.5)
+    }
+
+    /// 바다에 드리운 그림자 → 밑동 바위 → 지면 타일 → 섬을 감싼 구름. 지상 타일 다음, 도로·건물 전에 그린다.
+    fileprivate func drawIslandGround(_ island: EventIsland, in context: inout GraphicsContext, size: CGSize) {
+        let z = camera.zoom
+        // 그림자 — 섬 바로 아래 바다 위. 섬이 "떠 있다"는 유일한 깊이 단서라 넉넉히.
+        let shadowCenter = camera.screenPoint(
+            ofWorld: CGPoint(x: island.center.x, y: CGFloat(island.originRow + island.rows) + 6.2), in: size)
+        let sw = CGFloat(island.cols) * z * 0.86, sh = z * 2.3
+        context.fill(Path(ellipseIn: CGRect(x: shadowCenter.x - sw / 2, y: shadowCenter.y - sh / 2,
+                                            width: sw, height: sh)),
+                     with: .color(.black.opacity(0.17)))
+
+        // 밑동 — 열마다 가운데로 갈수록 깊어지는 바위. 아래로 갈수록 어둡게.
+        let rock = NSImage.mapTile(named: "tile_rock").map { context.resolve(Image(nsImage: $0)) }
+        for c in island.originCol..<(island.originCol + island.cols) {
+            guard let bottom = island.bottomRow(col: c) else { continue }
+            let depth = island.undersideDepth(col: c)
+            for d in 1...depth {
+                let rect = cellRect(col: CGFloat(c), row: CGFloat(bottom + d), size: size)
+                if let rock { context.draw(rock, in: rect) }
+                else { context.fill(Path(rect), with: .color(WorldMap.palette[8])) }
+                let shade = 0.22 + 0.5 * Double(d) / Double(depth + 1)
+                context.fill(Path(rect), with: .color(Color(red: 0.10, green: 0.12, blue: 0.22).opacity(shade)))
+            }
+        }
+
+        // 지면.
+        var tiles: [Int: GraphicsContext.ResolvedImage] = [:]
+        for r in 0..<island.rows {
+            for c in 0..<island.cols {
+                let col = island.originCol + c, row = island.originRow + r
+                let code = island.code(col: col, row: row)
+                guard code > 0 else { continue }
+                if tiles[code] == nil, let name = WorldMap.tileImageNames[code],
+                   let ns = NSImage.mapTile(named: name) {
+                    tiles[code] = context.resolve(Image(nsImage: ns))
+                }
+                let rect = cellRect(col: CGFloat(col), row: CGFloat(row), size: size)
+                if let img = tiles[code] { context.draw(img, in: rect) }
+                else { context.fill(Path(rect), with: .color(WorldMap.palette[code])) }
+                if !islandHighlighted {
+                    // 지상 region의 비선택 dim(0.45)보다 옅게 — 이벤트 섬은 고르지 않아도 눈에 띄어야 한다.
+                    context.fill(Path(rect), with: .color(.black.opacity(0.14)))
+                }
+            }
+        }
+
+        // 구름 — 섬 양옆과 밑동을 감싼다. 시간에 따라 좌우로 느리게 흐른다.
+        let puffs: [(dx: CGFloat, dy: CGFloat, w: CGFloat, h: CGFloat, speed: Double)] = [
+            (-2.2, 2.6, 5.0, 1.7, 0.21), (CGFloat(island.cols) - 2.6, 3.2, 5.6, 1.8, 0.17),
+            (1.5, CGFloat(island.rows) + 2.3, 4.4, 1.5, 0.26), (CGFloat(island.cols) - 6.0, CGFloat(island.rows) + 3.0, 5.2, 1.6, 0.19),
+            (-4.5, -0.6, 3.6, 1.2, 0.15), (CGFloat(island.cols) + 1.0, 0.2, 4.0, 1.3, 0.23),
+        ]
+        for (i, p) in puffs.enumerated() {
+            let drift = CGFloat(sin(time * p.speed + Double(i) * 1.7)) * 0.7
+            let center = camera.screenPoint(
+                ofWorld: CGPoint(x: CGFloat(island.originCol) + p.dx + p.w / 2 + drift,
+                                 y: CGFloat(island.originRow) + p.dy), in: size)
+            // 겹친 타원 3개로 뭉게구름 실루엣.
+            for (ox, oy, sx, sy) in [(-0.28, 0.12, 0.62, 0.72), (0.0, -0.10, 0.70, 1.0), (0.30, 0.14, 0.58, 0.68)] as [(CGFloat, CGFloat, CGFloat, CGFloat)] {
+                let w = p.w * z * sx, h = p.h * z * sy
+                context.fill(Path(ellipseIn: CGRect(x: center.x + ox * p.w * z - w / 2,
+                                                    y: center.y + oy * p.h * z - h / 2, width: w, height: h)),
+                             with: .color(.white.opacity(0.82)))
+            }
+        }
+    }
+
+    /// 섬 위 구조물 — 선택 글로우, 데코, 도장 건물, 이름표.
+    fileprivate func drawIslandProps(_ island: EventIsland, in context: inout GraphicsContext, size: CGSize) {
+        let z = camera.zoom
+        for d in island.decos.sorted(by: { $0.row < $1.row }) {
+            guard let ns = NSImage.mapTile(named: d.image) else { continue }
+            let w = d.width * z, h = d.height * z
+            let foot = camera.screenPoint(ofWorld: CGPoint(x: CGFloat(d.col) + 0.5, y: CGFloat(d.row) + 1), in: size)
+            context.draw(context.resolve(Image(nsImage: ns)),
+                         in: CGRect(x: foot.x - w / 2, y: foot.y - h, width: w, height: h))
+        }
+        let foot = camera.screenPoint(
+            ofWorld: CGPoint(x: CGFloat(island.town.col) + 0.5, y: CGFloat(island.town.row) + 0.95), in: size)
+        var topY = foot.y
+        if let ns = NSImage.mapTile(named: island.building) {
+            let bw = 1.6 * z
+            let bh = bw * ns.size.height / max(1, ns.size.width)
+            if islandHighlighted {
+                let gw = bw * 1.25, gh = bw * 0.42
+                context.fill(Path(ellipseIn: CGRect(x: foot.x - gw / 2, y: foot.y - gh * 0.5, width: gw, height: gh)),
+                             with: .color(.yellow.opacity(0.55)))
+            }
+            context.draw(context.resolve(Image(nsImage: ns)),
+                         in: CGRect(x: foot.x - bw / 2, y: foot.y - bh, width: bw, height: bh))
+            topY = foot.y - bh
+        }
+        // 이름표 — 월드 뷰에서도 "저기 뭔가 있다"가 읽혀야 진입점 구실을 한다.
+        let label = context.resolve(
+            Text("❄ \(island.label)").font(.system(size: 9, weight: .bold)).foregroundColor(.white))
+        let ts = label.measure(in: CGSize(width: 200, height: 50))
+        let bg = CGRect(x: foot.x - ts.width / 2 - 5, y: topY - ts.height - 6,
+                        width: ts.width + 10, height: ts.height + 3)
+        context.fill(Path(roundedRect: bg, cornerRadius: 5),
+                     with: .color(Color(red: 0.75, green: 0.16, blue: 0.16).opacity(0.92)))
+        context.draw(label, at: CGPoint(x: bg.midX, y: bg.midY), anchor: .center)
+    }
+
+    /// 맵 전체에 내리는 눈 — 화면 좌표. 오피스 창밖 눈과 같은 무상태 함수를 쓴다.
+    fileprivate func drawSnowfall(in context: inout GraphicsContext, size: CGSize) {
+        for f in WindowSnow.flakes(at: time * 0.45) {
+            let side = max(1, (f.size * 1.3).rounded())
+            let rect = CGRect(x: (f.x * size.width).rounded(), y: (f.y * size.height).rounded(),
+                              width: side, height: side)
+            context.fill(Path(rect), with: .color(.white.opacity(f.opacity * 0.9)))
         }
     }
 }
