@@ -191,8 +191,9 @@ newYear 풀은 별도 작성(연말 정산·새해 다짐 톤, 10줄).
 
 ## 8. 릴리스
 
-11월 하순 릴리스에 실어 보내고 날짜 게이트로 잠겨 있다가 12/1에 열린다. Sparkle 업데이트 지연을 감안해
-11월 넷째 주. 사전 공지 없음 — 2번(상점) 공지에 함께 적는다.
+**2026-11-16(월) 릴리스**(사용자 결정, 2026-11-10 — 애초 계획은 11월 넷째 주). 날짜 게이트로 잠겨 있다가 12/1에
+열린다. 앞당긴 덕에 Sparkle 업데이트 지연 여유가 2주로 늘고, 사용량 잔디(§17)가 12/1 전에 보름치 쌓인다.
+사전 공지 없음 — 2번(상점) 공지에 함께 적는다.
 
 ## 9. 미결
 
@@ -520,19 +521,22 @@ enum PetSkin { case snow }               // 런타임 리컬러 종류. 추가 �
 
 ---
 
-# 구현 상태 (2026-11-01, 브랜치 `feat/season-2026`, 미push)
+# 구현 상태 (2026-11-10, 브랜치 `feat/season-2026`, 미push — 릴리스 2026-11-16 예정)
 
 이슈: Feature #271 / T1 #272 · T2 #273 · T3 #274 · T4 #275 · T5 #276 · T6 #277 · T7 #278
 
 | 커밋 | 범위 | 상태 |
 |---|---|---|
 | T1 `refactor(report)` #272 | 리포트/꾸미기 분리, 칭호 3묶음 그리드, 공유 메뉴, `FlowLayout` | 완료 |
-| T2 `feat(report)` 잔디 #273 | `DailyUsageLedger`, `UsageGrassModel/View`, `PetTheme.grassLevels` | 완료 — **11월 중 배포 필수** |
+| T2 `feat(report)` 잔디 #273 | `DailyUsageLedger`, `UsageGrassModel/View`, `PetTheme.grassLevels` | 완료 — 11/16 릴리스로 12/1 전 보름치 적립 |
 | T4 `feat(season)` 기반 #275 | `Season`/`SeasonRegistry`(KST), `ParticleStyle`, headwear 앵커, 시즌 대사, 오피스 창문 눈, 킬스위치 | 완료 |
-| T5 `feat(season)` 코스메틱 #276 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge` | 완료 |
+| T5 `feat(season)` 코스메틱 #276 | 액세서리 3·snowfall·winterNight·칭호 2·`shopVisible`·`SeasonBadge`·오피스 트리 데코 | 완료 — **트리 스프라이트 컨펌 대기**(2261797) |
 | T6 `feat(season)` 일일 보상 #277 | 서버 `_shared/season.ts`+`submit` 훅+퀴즈 힌트, 잔디 보상 마크, 12월 완주, 알림 | 완료 — 서버 배포는 나중에(사용자) |
-| T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공 | 완료 — snow 톤 컨펌 대기 |
-| T3 액세서리 11종 도트 PNG #274 | 팩 미발견 → **직접 16×16 도트 제작 예외 허용(사용자)**, 결과물 컨펌 필수 | 시안 11종 제작, **컨펌 대기(미커밋)** |
+| T7 `feat(season)` 겨울 관장 #278 | `SeasonalBoss`, snow 스킨, `GymOpponent`, tier 오픈, 격파 보상, 눈길 배포 성공 | 완료 — snow 톤 컨펌 완료(ebf10a1) |
+| T3 액세서리 11종 도트 PNG #274 | 팩 미발견 → **직접 16×16 도트 제작 예외 허용(사용자)**, 결과물 컨펌 필수 | 완료 — 컨펌 완료(7affcd9) |
 
 프리뷰: `bash scripts/render-previews.sh` 후 `0-headwear-*`(195종 모자 앵커), `0-season-boss-skins`, `탭-*-12월`.
-테스트: `swift test` 497개 + `deno test supabase/functions/_shared/season.test.ts`.
+main 반영: 2026-11-10 `a860732`(v0.19.4 이후)까지 **merge**(28c4be3). rebase 금지 — pre-push 훅이 첫 커밋
+`18e57e6`의 자손 여부로 막으므로 해시가 바뀌면 가드가 풀린다.
+
+테스트: `swift test` 522개(39 skip) + `deno test supabase/functions/_shared/season.test.ts`.
