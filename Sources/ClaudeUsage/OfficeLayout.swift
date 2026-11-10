@@ -519,8 +519,9 @@ enum OfficeLayout {
                   size: CGSize(width: 16, height: 32), blockingWidth: 0, passing: .behind,
                   season: .xmas),
         // 눈사람은 키 큰 식물류처럼 뒤로, 선물 상자는 낮은 소품이라 앞으로 지나간다.
+        // 눈사람만 20×36 — 16×32로는 얼굴·목도리 디테일이 안 들어가 1.2배 키웠다(사용자 요청).
         DecorItem(kind: "SNOWMAN", name: "눈사람", category: .floor, price: 300,
-                  size: CGSize(width: 16, height: 32), blockingWidth: 10, passing: .behind,
+                  size: CGSize(width: 20, height: 36), blockingWidth: 12, passing: .behind,
                   season: .xmas),
         DecorItem(kind: "GIFT_BOXES", name: "선물 상자", category: .floor, price: 300,
                   size: CGSize(width: 16, height: 16), blockingWidth: 10, passing: .front,
