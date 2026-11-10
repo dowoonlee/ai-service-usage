@@ -170,8 +170,11 @@ final class SeasonalShopTests: SandboxedTestCase {
         XCTAssertEqual(gifts.map { [$0.month, $0.day] }, [[12, 21], [12, 22], [12, 23], [12, 24], [12, 25]])
         for (a, b) in zip(gifts, gifts.dropFirst()) {
             XCTAssertGreaterThan(b.coins, a.coins)
-            XCTAssertGreaterThanOrEqual(b.tickets, a.tickets)
+            XCTAssertGreaterThan(b.tickets, a.tickets)
         }
+        // 합계는 사용자 결정 — 코인 20,000 + 가챠권 15장.
+        XCTAssertEqual(gifts.reduce(0) { $0 + $1.coins }, 20_000)
+        XCTAssertEqual(gifts.reduce(0) { $0 + $1.tickets }, 15)
         // 선물 날은 전부 시즌 창 안이어야 열린다.
         let window = try XCTUnwrap(SeasonRegistry.season(.xmas)).window
         for g in gifts { XCTAssertTrue(window.contains(kst(2026, g.month, g.day))) }
@@ -192,18 +195,18 @@ final class SeasonalShopTests: SandboxedTestCase {
         XCTAssertFalse(p.isLast)
 
         XCTAssertEqual(SeasonGiftBox.open(now: day3), p)
-        XCTAssertEqual(s.coins - coins0, 800)
-        XCTAssertEqual(s.gachaTickets - tickets0, 1)
+        XCTAssertEqual(s.coins - coins0, 3_000)
+        XCTAssertEqual(s.gachaTickets - tickets0, 3)
         // 같은 날 다시 — 지급 없음.
         XCTAssertNil(SeasonGiftBox.pending(now: day3))
         XCTAssertNil(SeasonGiftBox.open(now: kst(2026, 12, 23, hour: 23)))
-        XCTAssertEqual(s.coins - coins0, 800)
+        XCTAssertEqual(s.coins - coins0, 3_000)
 
         // 놓친 날(21·22)은 소급되지 않는다 — 24일엔 24일 것만.
         let p4 = try XCTUnwrap(SeasonGiftBox.open(now: kst(2026, 12, 24)))
         XCTAssertEqual(p4.index, 4)
-        XCTAssertEqual(s.coins - coins0, 800 + 1_200)
-        XCTAssertEqual(s.gachaTickets - tickets0, 1 + 2)
+        XCTAssertEqual(s.coins - coins0, 3_000 + 5_000)
+        XCTAssertEqual(s.gachaTickets - tickets0, 3 + 4)
         XCTAssertEqual(s.seasonalFlags, ["gift:xmas-2026:12-23", "gift:xmas-2026:12-24"])
 
         // 마지막 날, 그리고 26일 0시에 끝.
@@ -258,6 +261,7 @@ final class SeasonalShopTests: SandboxedTestCase {
         XCTAssertFalse(CardTitle.unlocked(in: s).contains(.codedOnChristmas))    // 서로 섞이지 않는다
         XCTAssertEqual(CardTitle.newYearFirstDay.season, .newYear)
         XCTAssertNil(CardTitle.newYearFirstDay.purchasePrice)
+        XCTAssertEqual(CardTitle.newYearFirstDay.displayName, "새해 첫날에도 출근함")
         // 목록 노출: 연말연시 시즌 중이거나 이미 해금했으면.
         SeasonRegistry.override = .season(.xmas)
         XCTAssertFalse(s.shopVisible(CardTitle.newYearFirstDay, owned: false))

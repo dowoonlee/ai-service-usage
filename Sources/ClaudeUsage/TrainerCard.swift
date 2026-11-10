@@ -320,7 +320,7 @@ enum CardTitle: String, CaseIterable, Codable, Hashable {
         case .freezeViolator:        return "연말 배포 freeze 위반"
         case .decemberFinisher:      return "12월 완주"
         case .snowDeployer:          return "눈길 배포 성공"
-        case .newYearFirstDay:       return "작심삼일 1일차"
+        case .newYearFirstDay:       return "새해 첫날에도 출근함"
         }
     }
 
