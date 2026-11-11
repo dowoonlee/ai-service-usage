@@ -188,20 +188,6 @@ struct SeasonalBoss: Equatable {
     let island: EventIsland
 }
 
-/// 날짜별 선물 한 개(KST 그날 하루만 열린다). 지급·dedup은 `SeasonGiftBox`.
-struct SeasonGift: Equatable {
-    let month: Int
-    let day: Int
-    let coins: Int
-    /// 일반 가챠권. RP·프리미엄권은 서버가 검증하는 화폐라 로컬 선물에 넣지 않는다.
-    let tickets: Int
-
-    /// "코인 800 + 가챠권 1장" — 패널 배너 문구.
-    var summary: String {
-        tickets > 0 ? "코인 \(coins.formatted()) + 가챠권 \(tickets)장" : "코인 \(coins.formatted())"
-    }
-}
-
 /// 시즌 하나의 정의. 데이터만 들고 있고 로직은 없다.
 struct Season: Identifiable, Equatable {
     /// case 삭제 금지 — 저장된 rawValue가 깨진다. 폐지는 `SeasonRegistry.all`에서만 뺀다.
@@ -232,8 +218,6 @@ struct Season: Identifiable, Equatable {
     // ── 4번: 겨울 관장 ──
     let boss: SeasonalBoss?
 
-    // ── 날짜별 선물 (날짜순, 뒤로 갈수록 커진다) ──
-    var gifts: [SeasonGift] = []
 
     var id: String { kind.rawValue }
 

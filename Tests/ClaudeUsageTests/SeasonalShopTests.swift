@@ -171,90 +171,9 @@ final class SeasonalShopTests: SandboxedTestCase {
                                                    now: at(12, 2))["2026-12-01"], .received)
     }
 
-    // MARK: - 날짜별 선물 (12/21~25)
-
     private func kst(_ y: Int, _ m: Int, _ d: Int, hour: Int = 12) -> Date {
         var c = DateComponents(); c.year = y; c.month = m; c.day = d; c.hour = hour
         return Calendar.kst.date(from: c)!
-    }
-
-    /// "점점 큰 선물" — 날짜순으로 코인도 가챠권도 줄어들지 않고, 코인은 매일 늘어난다.
-    func testGiftsGrowDayByDayAndCoverChristmasWeek() throws {
-        let gifts = try XCTUnwrap(SeasonRegistry.season(.xmas)).gifts
-        XCTAssertEqual(gifts.map { [$0.month, $0.day] }, [[12, 21], [12, 22], [12, 23], [12, 24], [12, 25]])
-        for (a, b) in zip(gifts, gifts.dropFirst()) {
-            XCTAssertGreaterThan(b.coins, a.coins)
-            XCTAssertGreaterThan(b.tickets, a.tickets)
-        }
-        // 합계는 사용자 결정 — 코인 20,000 + 가챠권 15장.
-        XCTAssertEqual(gifts.reduce(0) { $0 + $1.coins }, 20_000)
-        XCTAssertEqual(gifts.reduce(0) { $0 + $1.tickets }, 15)
-        // 선물 날은 전부 시즌 창 안이어야 열린다.
-        let window = try XCTUnwrap(SeasonRegistry.season(.xmas)).window
-        for g in gifts { XCTAssertTrue(window.contains(kst(2026, g.month, g.day))) }
-        XCTAssertTrue(try XCTUnwrap(SeasonRegistry.season(.newYear)).gifts.isEmpty)
-    }
-
-    func testGiftOpensOncePerDayAndCreditsCoinsAndTickets() throws {
-        let s = Settings.shared
-        SeasonRegistry.override = nil            // 날짜로 판정
-        XCTAssertNil(SeasonGiftBox.pending(now: kst(2026, 12, 20)))
-        XCTAssertNil(SeasonGiftBox.open(now: kst(2026, 12, 20)))
-
-        let coins0 = s.coins, tickets0 = s.gachaTickets
-        let day3 = kst(2026, 12, 23)
-        let p = try XCTUnwrap(SeasonGiftBox.pending(now: day3))
-        XCTAssertEqual([p.index, p.total], [3, 5])
-        XCTAssertEqual(p.flag, "gift:xmas-2026:12-23")
-        XCTAssertFalse(p.isLast)
-
-        XCTAssertEqual(SeasonGiftBox.open(now: day3), p)
-        XCTAssertEqual(s.coins - coins0, 3_000)
-        XCTAssertEqual(s.gachaTickets - tickets0, 3)
-        // 같은 날 다시 — 지급 없음.
-        XCTAssertNil(SeasonGiftBox.pending(now: day3))
-        XCTAssertNil(SeasonGiftBox.open(now: kst(2026, 12, 23, hour: 23)))
-        XCTAssertEqual(s.coins - coins0, 3_000)
-
-        // 놓친 날(21·22)은 소급되지 않는다 — 24일엔 24일 것만.
-        let p4 = try XCTUnwrap(SeasonGiftBox.open(now: kst(2026, 12, 24)))
-        XCTAssertEqual(p4.index, 4)
-        XCTAssertEqual(s.coins - coins0, 3_000 + 5_000)
-        XCTAssertEqual(s.gachaTickets - tickets0, 3 + 4)
-        XCTAssertEqual(s.seasonalFlags, ["gift:xmas-2026:12-23", "gift:xmas-2026:12-24"])
-
-        // 마지막 날, 그리고 26일 0시에 끝.
-        XCTAssertEqual(SeasonGiftBox.pending(now: kst(2026, 12, 25, hour: 23))?.isLast, true)
-        XCTAssertNil(SeasonGiftBox.pending(now: kst(2026, 12, 26, hour: 0)))
-        // 내년엔 키가 달라 다시 받는다.
-        XCTAssertEqual(SeasonGiftBox.pending(now: kst(2027, 12, 23))?.flag, "gift:xmas-2027:12-23")
-    }
-
-    /// 날짜 경계는 KST — 서울 12/21 00:00은 UTC로 아직 12/20이다.
-    func testGiftDayBoundaryIsKST() {
-        SeasonRegistry.override = nil
-        XCTAssertNil(SeasonGiftBox.pending(now: kst(2026, 12, 20, hour: 23)))
-        XCTAssertEqual(SeasonGiftBox.pending(now: kst(2026, 12, 21, hour: 0))?.index, 1)
-    }
-
-    /// 시즌이 꺼지면(설정 off·킬스위치) 선물도 없다 — 판정이 `SeasonRegistry.active()` 하나라서.
-    func testGiftFollowsSeasonSwitches() {
-        let s = Settings.shared
-        SeasonRegistry.override = nil
-        let day = kst(2026, 12, 22)
-        XCTAssertNotNil(SeasonGiftBox.pending(now: day))
-        s.seasonalEffectsEnabled = false
-        XCTAssertNil(SeasonGiftBox.pending(now: day))
-        s.seasonalEffectsEnabled = true
-        s.disabledSeasons = ["xmas"]
-        XCTAssertNil(SeasonGiftBox.pending(now: day))
-        XCTAssertNil(SeasonGiftBox.open(now: day))
-        XCTAssertTrue(s.seasonalFlags.isEmpty)
-    }
-
-    func testGiftSummaryCopy() {
-        XCTAssertEqual(SeasonGift(month: 12, day: 21, coins: 300, tickets: 0).summary, "코인 300")
-        XCTAssertEqual(SeasonGift(month: 12, day: 25, coins: 2_500, tickets: 5).summary, "코인 2,500 + 가챠권 5장")
     }
 
     // MARK: - 새해 칭호

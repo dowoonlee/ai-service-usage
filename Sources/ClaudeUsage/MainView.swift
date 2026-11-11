@@ -229,46 +229,6 @@ fileprivate func sectionHeader(
     .buttonStyle(.plain)
 }
 
-/// 시즌 선물 배너 — 열기 전엔 "오늘의 선물 (n/5)" + 열기 버튼, 연 뒤엔 받은 내용 + 닫기.
-/// 상태를 갖지 않는다(프리뷰가 두 모습을 그대로 구울 수 있게). `action`은 열기 또는 닫기.
-struct SeasonGiftBanner: View {
-    let gift: SeasonGiftBox.Pending
-    let opened: Bool
-    let action: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 6) {
-            if let img = OfficeLayout.officeImage("GIFT_BOXES") {
-                Image(nsImage: img).interpolation(.none).resizable()
-                    .frame(width: 20, height: 20)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(opened ? "\(gift.gift.summary)을 받았어요" : "오늘의 선물 (\(gift.index)/\(gift.total))")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(opened
-                     ? (gift.isLast ? "올해 선물은 여기까지예요." : "내일 선물은 더 커요.")
-                     : (gift.isLast ? "마지막 선물이에요. 오늘 안에 열어야 해요."
-                                    : "12/25까지 매일 하나씩, 갈수록 커져요."))
-                    .font(.system(size: 9)).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            if opened {
-                Button(action: action) {
-                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold))
-                }
-                .buttonStyle(.plain).foregroundStyle(.secondary)
-            } else {
-                Button("열기", action: action)
-                    .font(.system(size: 10, weight: .semibold))
-                    .controlSize(.small)
-            }
-        }
-        .padding(8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.red.opacity(0.14)))
-    }
-}
-
 struct MainView: View {
     /// 퀴즈/운세 배지 dot의 "오늘" 판정용 KST 캘린더 — 두 콘텐츠 모두 서버가 KST 자정에
     /// 갱신되므로(DailyQuizVM/DailyFortuneVM의 todayString과 동일 기준), 로컬 캘린더로
@@ -294,8 +254,6 @@ struct MainView: View {
 
     /// 첫 소개 배너를 닫았는지. 신규 설치 전용이라 @AppStorage 로컬 플래그로 충분(서버 백업 불필요).
     @AppStorage("intro.dismissed") private var introDismissed = false
-    /// 방금 연 시즌 선물 — 결과 문구를 닫기 전까지 보여 준다. 저장하지 않는다(재실행하면 이미 받은 상태라 배너 없음).
-    @State private var openedGift: SeasonGiftBox.Pending?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -304,13 +262,6 @@ struct MainView: View {
             // Claude/Cursor 중 하나라도 연결되면 자동으로 사라지므로 기존 사용자에겐 노출되지 않는다.
             if !introDismissed, vm.claudeNeedsLogin, vm.cursorNeedsSetup {
                 introBanner
-            }
-            // 시즌 선물(12/21~25) — 오늘 것을 아직 안 열었거나, 방금 열어 결과를 보는 중일 때만.
-            // vm.activeSeason을 읽어 시즌 경계·설정 변경 때 다시 그려지게 한다.
-            if let opened = openedGift {
-                SeasonGiftBanner(gift: opened, opened: true) { openedGift = nil }
-            } else if vm.activeSeason != nil, let pending = SeasonGiftBox.pending(settings: settings) {
-                SeasonGiftBanner(gift: pending, opened: false) { openedGift = SeasonGiftBox.open() }
             }
             Divider().opacity(0.3)
             ClaudeSection(vm: vm, onLogin: onLogin)

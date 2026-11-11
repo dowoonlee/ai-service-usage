@@ -83,16 +83,7 @@ enum SeasonRegistry {
                 ],
                 titleReward: .snowDeployer,
                 island: .winter
-            ),
-            // 크리스마스 주간(2026년 기준 월~금) — 매일 하나, 갈수록 커진다.
-            // 합계 코인 20,000 + 가챠권 15장 — 사용자 결정(§30). 테스트가 합계를 고정한다.
-            gifts: [
-                SeasonGift(month: 12, day: 21, coins: 1_000, tickets: 1),
-                SeasonGift(month: 12, day: 22, coins: 2_000, tickets: 2),
-                SeasonGift(month: 12, day: 23, coins: 3_000, tickets: 3),
-                SeasonGift(month: 12, day: 24, coins: 5_000, tickets: 4),
-                SeasonGift(month: 12, day: 25, coins: 9_000, tickets: 5),
-            ]
+            )
         ),
         Season(
             kind: .newYear, displayName: "연말연시",
