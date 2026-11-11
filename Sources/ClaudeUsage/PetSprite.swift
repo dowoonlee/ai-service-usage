@@ -1399,6 +1399,13 @@ enum PetSprite {
         .orangeFruit: HeadAnchor(x: 0.46, top: 0.59),// 몸통 꼭대기 — 잎이 더 높다
     ]
 
+    /// 알파 스캔 결과에 더하는 보정(셀 정규화, 반전 전). 고정 앵커와 달리 프레임을 따라간다 — 머리를 숙이는 프레임이
+    /// 있는 종에 쓴다. 사슴은 가는 뿔 끝이 꼭대기라 모자가 뿔에 얹히고, 흰 스킨(Rudolph)은 눈밭에서 뿔이 안 보여
+    /// 모자가 공중에 떠 보였다 — 뿔 높이의 절반쯤 내리고 뿔 뒤(머리 쪽)로 민다.
+    nonisolated static let headAnchorAdjust: [PetKind: (dx: CGFloat, dTop: CGFloat)] = [
+        .deer: (dx: 0.05, dTop: 0.115),
+    ]
+
     /// (kind, action, frameIndex)별 캐시. 알파 스캔은 첫 1회뿐이라 30Hz 메뉴바에서도 비용이 없다.
     /// 전부 투명한 프레임(없어야 하지만)은 nil. 수동 앵커가 있으면 프레임과 무관하게 그 값.
     static func headAnchor(for kind: PetKind, action: PetController.Action, frameIndex: Int) -> HeadAnchor? {
@@ -1408,7 +1415,10 @@ enum PetSprite {
         let idx = frameIndex % f.count
         let key = "\(kind.rawValue)/\(action)/\(idx)" as NSString
         if let cached = anchorCache.object(forKey: key) { return cached.anchor }
-        let anchor = scanHeadAnchor(f[idx], facesLeft: kind.defaultFacingLeft)
+        var anchor = scanHeadAnchor(f[idx], facesLeft: kind.defaultFacingLeft)
+        if let adj = headAnchorAdjust[kind], let a = anchor {
+            anchor = HeadAnchor(x: a.x + adj.dx, top: a.top + adj.dTop)
+        }
         anchorCache.setObject(AnchorBox(anchor), forKey: key)
         return anchor
     }
