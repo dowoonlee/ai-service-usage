@@ -81,6 +81,18 @@ export function adventCompleteRewardFor(year: number, receivedCount: number): Da
   };
 }
 
+/**
+ * 오늘의 운세 프롬프트에 붙일 시기 힌트 — 새해 첫 사흘(KST 1/1~1/3)만. 그 밖이면 null.
+ * 형식·분량은 평소 그대로 두고 한 문장만 새해로 잇게 한다. 릴리스 없이 서버만 바꾸는 항목.
+ */
+export function fortuneSeasonHint(now: Date): string | null {
+  const { year, month, day } = kstDate(now);
+  if (month === 1 && day <= 3) {
+    return `오늘은 ${year}년 1월 ${day}일, 새해 첫 사흘 중 하루입니다. 오늘 하루의 이야기를 평소대로 쓰되, 그중 한 문장은 올해 개발을 어떻게 시작할지로 이어 주세요. "새해 복", "희망찬", "새로운 시작", "도약" 같은 덕담 표현은 쓰지 마세요.`;
+  }
+  return null;
+}
+
 /** 데일리 퀴즈 생성 프롬프트에 붙일 시즌 힌트. 시즌 밖이면 null. 릴리스 없이 서버만 바꾸는 항목. */
 export function quizSeasonHint(now: Date): string | null {
   const { month, day } = kstDate(now);

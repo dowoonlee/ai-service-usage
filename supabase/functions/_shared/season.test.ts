@@ -15,6 +15,7 @@ import {
   adventDailyPrefix,
   adventDailyRewardFor,
   kstDate,
+  fortuneSeasonHint,
   quizSeasonHint,
 } from "./season.ts";
 
@@ -60,4 +61,13 @@ Deno.test("퀴즈 시즌 힌트 — 11/16~12/25만", () => {
   assertEquals(typeof quizSeasonHint(utc(2026, 11, 20)), "string");
   assertEquals(typeof quizSeasonHint(utc(2026, 12, 10)), "string");
   assertEquals(quizSeasonHint(utc(2026, 12, 25, 15, 0)), null, "12/26 KST");
+});
+
+Deno.test("운세 시기 힌트 — KST 1/1~1/3만", () => {
+  assertEquals(fortuneSeasonHint(utc(2026, 12, 31, 14, 59)), null, "12/31 KST 23:59");
+  assertEquals(typeof fortuneSeasonHint(utc(2026, 12, 31, 15, 0)), "string", "1/1 KST 0시");
+  assertEquals(fortuneSeasonHint(utc(2026, 12, 31, 15, 0))?.includes("2027년 1월 1일"), true);
+  assertEquals(typeof fortuneSeasonHint(utc(2027, 1, 3, 14, 59)), "string", "1/3 KST 23:59");
+  assertEquals(fortuneSeasonHint(utc(2027, 1, 3, 15, 0)), null, "1/4 KST");
+  assertEquals(fortuneSeasonHint(utc(2026, 12, 25)), null);
 });

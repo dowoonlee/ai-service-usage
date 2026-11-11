@@ -17,6 +17,7 @@ import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { MODEL_LABEL, generateFortune } from "./claude.ts";
+import { fortuneSeasonHint } from "../_shared/season.ts";
 
 interface FortunePayload {
   date: string;        // "YYYY-MM-DD"
@@ -147,6 +148,7 @@ Deno.serve(async (req: Request) => {
       baseUrl: Deno.env.get("ANTHROPIC_BASE_URL") || undefined,
       workspaceId: Deno.env.get("ANTHROPIC_WORKSPACE_ID") || undefined,
       recentTexts,
+      seasonHint: fortuneSeasonHint(new Date()),
     });
     fortuneText = gen.text;
     // 본문은 남기지 않는다 — 모델·종료 사유·토큰 수만.
