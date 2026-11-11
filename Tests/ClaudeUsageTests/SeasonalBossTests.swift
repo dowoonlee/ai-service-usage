@@ -78,15 +78,15 @@ final class SeasonalBossTests: SandboxedTestCase {
         XCTAssertEqual(boss.openTiers(usage: U(days: 17, vp: 0), now: late), [.localhost, .dev, .staging])
         XCTAssertEqual(boss.openTiers(usage: U(days: 18, vp: 0), now: late), BadgeTier.allCases)
         // VP만으로 — 늦게 시작해 일수가 모자라도 몰아 쓰면 열린다.
-        XCTAssertEqual(boss.openTiers(usage: U(days: 1, vp: 399), now: late), [.localhost])
-        XCTAssertEqual(boss.openTiers(usage: U(days: 1, vp: 400), now: late), [.localhost, .dev])
-        XCTAssertEqual(boss.openTiers(usage: U(days: 1, vp: 800), now: late), [.localhost, .dev, .staging])
-        XCTAssertEqual(boss.openTiers(usage: U(days: 3, vp: 1_200), now: late), BadgeTier.allCases)
+        XCTAssertEqual(boss.openTiers(usage: U(days: 1, vp: 999), now: late), [.localhost])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 1, vp: 1_000), now: late), [.localhost, .dev])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 1, vp: 2_000), now: late), [.localhost, .dev, .staging])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 3, vp: 3_000), now: late), BadgeTier.allCases)
         // 한쪽씩 다른 tier를 열 수도 있다.
-        XCTAssertEqual(boss.openTiers(usage: U(days: 6, vp: 800), now: late), [.localhost, .dev, .staging])
+        XCTAssertEqual(boss.openTiers(usage: U(days: 6, vp: 2_000), now: late), [.localhost, .dev, .staging])
         // 둘 다 모자라면 양쪽 기준을 알려 준다.
-        XCTAssertEqual(boss.lock(tier: .production, usage: U(days: 17, vp: 1_199), now: late),
-                       .usage(have: U(days: 17, vp: 1_199), needDays: 18, needVP: 1_200))
+        XCTAssertEqual(boss.lock(tier: .production, usage: U(days: 17, vp: 2_999), now: late),
+                       .usage(have: U(days: 17, vp: 2_999), needDays: 18, needVP: 3_000))
         XCTAssertNil(boss.lock(tier: .localhost, usage: U(days: 0, vp: 0), now: kst(2026, 11, 16)))
         // 날짜도 참여량도 모자라면 날짜를 먼저 알린다.
         XCTAssertEqual(boss.lock(tier: .production, usage: U(days: 2, vp: 10), now: kst(2026, 11, 20)),
@@ -106,7 +106,7 @@ final class SeasonalBossTests: SandboxedTestCase {
     }
 
     /// 오픈일은 낮은 tier부터 순서대로이고 전부 보스 기간 안이다. 기준도 tier 순으로 커진다.
-    /// 매일 쓰면 오픈일에 일수 조건이 이미 차 있고, 12/20에 시작해도 VP로 production에 닿을 수 있다(월 2,000 VP 플랜 기준).
+    /// 매일 쓰면 오픈일에 일수 조건이 이미 차 있다(저가 플랜의 경로).
     func testTierOpenDatesAreOrderedInsideWindowAndReachable() {
         var prev: Date?
         for tier in BadgeTier.allCases {
@@ -122,7 +122,9 @@ final class SeasonalBossTests: SandboxedTestCase {
             XCTAssertLessThan(boss.tierThresholds[a]!, boss.tierThresholds[b]!)
             XCTAssertLessThan(boss.tierUsageVP[a]!, boss.tierUsageVP[b]!)
         }
-        XCTAssertLessThanOrEqual(boss.tierUsageVP[.production]!, 2_000, "Pro 한 달 최대 VP 안이어야 저가 플랜도 VP로 닿는다")
+        // VP 기준은 실측(11/11 랭킹 사용자 하루 130~1,270 VP)으로 올린 사용자 확정값. production 3,000은 Pro의 한 달
+        // 최대(2,000)를 넘는다 — Free·Pro는 VP가 아니라 일수(위 루프가 보장)로 연다. 값을 바꾸면 공지 문구도 바꿀 것.
+        XCTAssertEqual(BadgeTier.allCases.map { boss.tierUsageVP[$0]! }, [0, 1_000, 2_000, 3_000])
     }
 
     func testStageMapping() {
