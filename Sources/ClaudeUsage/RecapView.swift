@@ -3,8 +3,7 @@ import AppKit
 
 // 연말 리캡 — 설정의 "2026 리캡" 섹션에서 여는 스토리 창.
 //
-// 문구(펫 내레이션)는 연말에 활성 유저들의 대표 펫을 보고 조건별 풀로 만들 예정이라
-// 대사창은 비워 두고, 장면 제목에는 숫자 라벨만 둔다.
+// 펫 내레이션은 창을 열 때 읽은 기록에 맞춰 표시한다.
 
 @MainActor
 final class RecapWindowController: NSWindowController, SingleWindowPresenting {
@@ -151,11 +150,12 @@ struct RecapStoryView: View {
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(RecapPalette.gold)
             }
-            // 대사 자리 — 연말에 대표 펫별 문구 풀로 채운다.
-            Text("…")
+            Text(player.scene.narration(player.facts))
                 .font(.system(size: 16, weight: .medium, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.35))
-            Spacer(minLength: 0)
+                .foregroundStyle(.white)
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(height: 150, alignment: .top)

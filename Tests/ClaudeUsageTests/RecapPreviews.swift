@@ -2,7 +2,7 @@ import XCTest
 import SwiftUI
 @testable import ClaudeUsage
 
-/// 연말 리캡 장면 — 공개 전까지 앱에서 숨겨져 있어 눈으로 확인할 길이 이것뿐이다.
+/// 연말 리캡 장면과 내레이션의 시각 검수.
 /// 장면마다 연출이 무르익은 시점 하나를 고정해 찍는다(그리는 중 생기는 파티클은 빠짐).
 ///
 ///   bash scripts/render-previews.sh recap
@@ -53,6 +53,22 @@ final class RecapPreviews: SandboxedTestCase {
                 RecapStoryView(player: player), size: size,
                 section: "리캡", title: "\(i + 1). \(scene.id)",
                 note: moments[scene.id] == nil ? "연출 이식 전 자리(숫자 장면)" : "t=\(moments[scene.id]!)s")
+        }
+    }
+
+    func testRenderEmptyHistoryNarration() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        let facts = RecapFacts(usage: .compute(claude: [], codex: [], cursor: [], now: Date()),
+                               game: .gather(events: []))
+        let player = RecapPlayer(facts: facts, scenes: RecapScenes.all)
+        for (index, scene) in player.scenes.enumerated() {
+            player.go(index)
+            player.freeze(at: 5)
+            try PreviewRenderer.renderInWindow(
+                RecapStoryView(player: player),
+                size: CGSize(width: RecapCanvasSize.width * RecapCanvasSize.scale,
+                             height: RecapCanvasSize.height * RecapCanvasSize.scale),
+                section: "리캡", title: "신규 사용자. \(scene.id)", note: "빈 기록에서도 내레이션 표시")
         }
     }
 }
