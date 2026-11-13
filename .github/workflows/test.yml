@@ -60,3 +60,5 @@ jobs:
         run: docker pull postgres:17.6-alpine
       - name: Session and mastery transaction tests
         run: bash scripts/test-manual-arena-db.sh
+      - name: Recap cache ownership and concurrent generation
+        run: bash scripts/test-recap-db.sh

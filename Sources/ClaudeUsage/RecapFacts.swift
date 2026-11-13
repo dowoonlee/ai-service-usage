@@ -230,17 +230,22 @@ struct RecapGameFacts {
 }
 
 struct RecapFacts {
+    static let year = 2026
     var usage: RecapUsageFacts
     var game: RecapGameFacts
 
     /// 로컬 저장소 전체를 읽는다. JSONL 전체 스캔이라 창을 열 때 한 번만 부를 것.
     @MainActor
     static func load(now: Date = Date()) -> RecapFacts {
+        let calendar = Calendar.current
+        let start = calendar.date(from: DateComponents(year: year, month: 1, day: 1))!
+        let end = calendar.date(from: DateComponents(year: year + 1, month: 1, day: 1))!
+        func inYear(_ date: Date) -> Bool { date >= start && date < end && date <= now }
         let usage = RecapUsageFacts.compute(
-            claude: SnapshotStore.claude.loadRecent(limit: 200_000),
-            codex: SnapshotStore.codex.loadRecent(limit: 200_000),
-            cursor: SnapshotStore.cursorEvents.loadRecent(limit: 200_000),
-            now: now)
+            claude: SnapshotStore.claude.loadRecent(limit: 200_000).filter { inYear($0.takenAt) },
+            codex: SnapshotStore.codex.loadRecent(limit: 200_000).filter { inYear($0.takenAt) },
+            cursor: SnapshotStore.cursorEvents.loadRecent(limit: 200_000).filter { inYear($0.timestamp) },
+            now: min(now, end.addingTimeInterval(-1)))
         return RecapFacts(usage: usage, game: .gather())
     }
 }

@@ -71,4 +71,50 @@ final class RecapPreviews: SandboxedTestCase {
                 section: "리캡", title: "신규 사용자. \(scene.id)", note: "빈 기록에서도 내레이션 표시")
         }
     }
+
+    func testRenderClaudeNarration() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        guard let path = ProcessInfo.processInfo.environment["RECAP_CLAUDE_SAMPLES"] else {
+            throw XCTSkip("실제 Claude E2E 샘플 미지정")
+        }
+        struct Sample: Decodable { let persona: String; let lines: [String: String] }
+        let samples = try JSONDecoder().decode([String: Sample].self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        for (kind, sample) in samples.sorted(by: { $0.key < $1.key }) {
+            var facts = demoFacts()
+            facts.game.narrator = PetSelection(kind: try XCTUnwrap(PetKind(rawValue: kind)), variant: 0)
+            let player = RecapPlayer(facts: facts, scenes: RecapScenes.all)
+            for (index, scene) in player.scenes.enumerated() {
+                player.go(index)
+                player.freeze(at: 6)
+                try PreviewRenderer.renderInWindow(
+                    RecapStoryView(player: player, generatedNarration: sample.lines),
+                    size: CGSize(width: RecapCanvasSize.width * RecapCanvasSize.scale,
+                                 height: RecapCanvasSize.height * RecapCanvasSize.scale),
+                    section: "Claude 리캡", title: "\(kind)-\(scene.id)", note: sample.persona)
+            }
+        }
+    }
+
+    func testRenderNarrationLoadingAndSavedStates() async throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        let size = CGSize(width: 480, height: 772)
+        let facts = demoFacts()
+        try PreviewRenderer.renderInWindow(RecapExperienceView(facts: facts), size: size,
+            section: "Claude 리캡", title: "미등록 안내", note: "기본 대사와 랭킹 등록 안내")
+        Settings.shared.rankingDeviceID = "preview-account"
+        XCTAssertTrue(Keychain.saveRankingHmacKey("preview-key"))
+        let loading = RecapNarrationLoader(request: { _, _, _, _, _ in
+            try await Task.sleep(nanoseconds: 30_000_000_000)
+            return .init(status: .pending, row: nil, retryAfter: 3)
+        })
+        try PreviewRenderer.renderInWindow(RecapExperienceView(facts: facts, loader: loading), size: size,
+            section: "Claude 리캡", title: "첫 생성 대기", note: "대기 중 안내와 창 크기")
+        let row = RecapNarrationRow(year: 2026, petKind: facts.game.narrator.kind.rawValue,
+            generatedAt: Date(), persona: "절제되고 은밀한 닌자 개구리",
+            lines: Dictionary(uniqueKeysWithValues: RecapNarration.sceneIDs.map { ($0, "쉿, 기록 속 기척을 따라 조용히 걸어보겠다. 준비됐나…개굴.") }))
+        let saved = RecapNarrationLoader(request: { _, _, _, _, _ in .init(status: .ready, row: row, retryAfter: nil) })
+        await saved.load(facts: facts)
+        try PreviewRenderer.renderInWindow(RecapExperienceView(facts: facts, loader: saved), size: size,
+            section: "Claude 리캡", title: "저장된 대사", note: "생성 시점 안내 footer")
+    }
 }

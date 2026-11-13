@@ -2077,6 +2077,29 @@ actor RankingAPI {
         return resp.row
     }
 
+    // MARK: - 리캡 내레이션 (Claude 생성 + 영구 캐시)
+
+    private struct RecapNarrationPayload: Encodable {
+        let deviceId: String
+        let petKind: String
+        let summaryJson: String
+        let ts: Int64
+        let year: Int
+    }
+    private struct RecapNarrationRequest: Encodable {
+        let payload: RecapNarrationPayload
+        let signature: String
+    }
+
+    func requestRecapNarration(deviceId: String, hmacKeyBase64: String, year: Int,
+                               petKind: String, summaryJson: String) async throws -> RecapNarrationResponse {
+        let payload = RecapNarrationPayload(deviceId: deviceId, petKind: petKind,
+            summaryJson: summaryJson, ts: Int64(Date().timeIntervalSince1970), year: year)
+        let signature = try Self.signEncodable(payload, keyBase64: hmacKeyBase64)
+        // 서버는 생성 작업을 백그라운드로 넘겨 즉시 pending을 반환한다.
+        return try await post(path: "recap-narration", body: RecapNarrationRequest(payload: payload, signature: signature))
+    }
+
     // MARK: - 오늘의 AI 뉴스 퀴즈 (daily-quiz)
 
     /// 전역 1세트/일. 문제·보기만 내려오고 정답은 서버에만 — 채점도 서버가 한다.
