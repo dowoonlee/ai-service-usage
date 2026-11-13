@@ -13,7 +13,7 @@ enum RecapCanvasSize {
     static let scale: CGFloat = 2
 }
 
-/// 장면 하나. 문구(대사)는 연말에 조건별 풀로 채울 예정이라 지금은 kicker/title(숫자 라벨)만 있다.
+/// 장면 하나. 제목과 별도로 기록에 맞는 내레이션을 표시한다.
 struct RecapScene {
     let id: String
     let duration: Double
@@ -24,6 +24,10 @@ struct RecapScene {
     /// 제목 숫자 카운트업 시간.
     var countDuration: Double = 1.2
     let draw: (RecapPainter, Double) -> Void
+
+    func narration(_ facts: RecapFacts) -> String {
+        RecapNarration.text(for: id, facts: facts)
+    }
 }
 
 struct RecapParticle {
