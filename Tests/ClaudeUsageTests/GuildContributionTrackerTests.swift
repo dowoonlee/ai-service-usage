@@ -102,4 +102,43 @@ final class GuildContributionTrackerTests: SandboxedTestCase {
         XCTAssertEqual(s.guildContributionSyncMonth, "2026-12")
         XCTAssertEqual(s.guildContributionSyncSeenVP, 50)
     }
+
+    @MainActor
+    func testServerTotalBackfillsPastMonthsWithoutDoubleCounting() {
+        let s = Settings.shared
+        // v0.19.4에서 11월분 2,300만 적립된 상태.
+        T.record(myMonthlyVP: 2_300, now: seoul(2026, 11, 9))
+        XCTAssertEqual(s.guildContributionTotal, 2_300)
+
+        // 서버가 가입 이후 누적 30,000(11월 2,500 포함)을 내려줌 → 더하지 않고 끌어올린다.
+        T.record(myMonthlyVP: 2_500, serverTotal: 30_000, now: seoul(2026, 11, 12))
+        XCTAssertEqual(s.guildContributionTotal, 30_000)
+        XCTAssertEqual(s.guildContributionSyncSeenVP, 2_500)
+
+        // 이후 월간 증가분과 서버 누적이 같이 늘어도 한 번만 반영된다.
+        T.record(myMonthlyVP: 2_900, serverTotal: 30_400, now: seoul(2026, 11, 20))
+        XCTAssertEqual(s.guildContributionTotal, 30_400)
+    }
+
+    @MainActor
+    func testServerTotalNeverLowersLocalTotal() {
+        let s = Settings.shared
+        // 이전 길드에서 쌓은 분이 로컬에 있고, 새 길드의 서버 누적은 그보다 작다.
+        T.record(myMonthlyVP: 5_000, now: seoul(2026, 11, 9))
+        T.record(myMonthlyVP: 5_000, serverTotal: 800, now: seoul(2026, 11, 10))
+        XCTAssertEqual(s.guildContributionTotal, 5_000)
+        // 로컬이 앞서 있는 동안에도 월간 증가분은 계속 쌓인다.
+        T.record(myMonthlyVP: 5_200, serverTotal: 1_000, now: seoul(2026, 11, 11))
+        XCTAssertEqual(s.guildContributionTotal, 5_200)
+    }
+
+    @MainActor
+    func testServerTotalAloneBackfillsWhenMonthlyUnchanged() {
+        let s = Settings.shared
+        T.record(myMonthlyVP: 120, now: seoul(2026, 11, 9))
+        // 월간 값은 그대로인데 서버 누적 필드가 새로 생긴 경우(서버 배포 직후).
+        T.record(myMonthlyVP: 120, serverTotal: 9_000, now: seoul(2026, 11, 9))
+        XCTAssertEqual(s.guildContributionTotal, 9_000)
+        XCTAssertEqual(BadgeCategory.guildContribution.currentValue(s), 9_000)
+    }
 }

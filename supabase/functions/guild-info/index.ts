@@ -216,6 +216,17 @@ Deno.serve(async (req: Request) => {
   // 받은 방명록 (M2) — 최근 N개만. 전체는 방문 화면(guild-visit)이 보여준다.
   const guestbook = await fetchGuestbook(db, guild.id, GUESTBOOK_INFO_LIMIT, deviceId);
 
+  // 도장 Guild·Contribution — 내가 이 길드에 가입한 뒤 쌓은 누적 VP(본인 행만).
+  // 클라이언트는 로컬 누적과 max를 취해 v0.19.4 이전 달의 기여를 소급한다.
+  // 조회 실패·행 없음(shadow_banned 등)은 null — 클라이언트가 기존 월간 적립만으로 동작한다.
+  const { data: contribRow, error: contribErr } = await db
+    .from("guild_member_contribution_vp")
+    .select("contribution_vp")
+    .eq("device_id", deviceId)
+    .maybeSingle();
+  if (contribErr) console.error("guild info contribution fetch failed", contribErr);
+  const myContributionTotal = contribRow ? Number(contribRow.contribution_vp) || 0 : null;
+
   return jsonResponse({
     guild: {
       id: guild.id,
@@ -248,5 +259,6 @@ Deno.serve(async (req: Request) => {
     guestbookDeleteWindowSec: GUESTBOOK_DELETE_WINDOW_SEC,
     // 집주인 답글 작성 가능 여부 (GitHub 게이트) — 실제 차단은 guild-guestbook의 403.
     guestbookCanInteract: !boardInteractionBlocked(user),
+    myContributionTotal,
   });
 });

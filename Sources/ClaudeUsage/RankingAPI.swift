@@ -713,6 +713,9 @@ actor RankingAPI {
         let guestbookDeleteWindowSec: Int?
         /// 집주인 답글 작성 가능(GitHub 게이트). 구버전 서버는 nil → true로 취급.
         let guestbookCanInteract: Bool?
+        /// 내가 현재 길드에 가입한 뒤 쌓은 누적 VP — 도장 기여 지표 소급용. 구버전 서버·조회 실패는 nil.
+        /// 기본값을 둬서 방문/프리뷰용 조립 지점이 인자를 넘기지 않아도 된다.
+        var myContributionTotal: Int? = nil
     }
 
     /// 방명록 답글 한 줄 (M3) — 1단, 작성 시점 스냅샷.
