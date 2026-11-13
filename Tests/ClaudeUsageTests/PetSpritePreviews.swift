@@ -91,6 +91,67 @@ final class PetSpritePreviews: SandboxedTestCase {
         }
     }
 
+    /// 시즌 머리 장식 앵커 검수 — 195종 전부 walk 첫 프레임 + 달리기 중간 프레임에 산타 모자를
+    /// `PetSprite.headAnchor`(알파 스캔) 위치에 얹어 본다. 모자가 머리에 붙어 있는지는 기계로 판정 못
+    /// 한다(날개·뿔·꼬리가 머리보다 높은 종이 있다). 떠 있거나 등에 얹힌 종은 앵커 밴드를 조정할 대상.
+    ///
+    ///   AIUSAGE_SEASON 없이도 돈다 — 모자 리소스를 직접 지정하므로.
+    func testRenderHeadwearAudit() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        guard let hat = PetSprite.image(named: "santa_hat") else { throw XCTSkip("santa_hat.png 없음") }
+
+        let kinds = PetKind.allCases
+        let chunkSize = 24
+        let chunks = stride(from: 0, to: kinds.count, by: chunkSize).map {
+            Array(kinds[$0..<min($0 + chunkSize, kinds.count)])
+        }
+        for (index, chunk) in chunks.enumerated() {
+            let rows: [(label: String, images: [NSImage])] = chunk.map { kind in
+                var picked: [NSImage] = []
+                let walk = PetSprite.frames(for: kind, action: .walk)
+                let run = PetSprite.frames(for: kind, action: .run)
+                if !walk.isEmpty, let img = PetSprite.composedImage(for: kind, action: .walk, frameIndex: 0,
+                                                                    skin: nil, headwear: "santa_hat") {
+                    picked.append(img)
+                }
+                if !run.isEmpty, let img = PetSprite.composedImage(for: kind, action: .run, frameIndex: run.count / 2,
+                                                                   skin: nil, headwear: "santa_hat") {
+                    picked.append(img)
+                }
+                return ("\(kind.rawValue)", picked)
+            }
+            let sheet = PreviewRenderer.contactSheet(
+                rows: rows, cell: CGSize(width: 56, height: 56), labelWidth: 170)
+            try PreviewRenderer.writeImage(
+                sheet,
+                section: "펫 스프라이트",
+                title: "0-headwear-\(index + 1)",
+                note: "산타 모자를 alpha-scan 앵커(가장 위 불투명 행 + 셀 높이 1/6 밴드의 x 평균)에 얹은 "
+                    + "\(index + 1)번째 묶음. 모자가 공중에 뜨거나 등·날개에 얹힌 종은 앵커 밴드 조정 대상. "
+                    + "WalkingCat·메뉴바가 같은 앵커를 쓴다.")
+        }
+    }
+
+    /// 북극 원정대 — 시즌 보스 팀 5종의 원본 ↔ snow 스킨(+모자). 리컬러 품질은 기계로 못 잡는다:
+    /// 흰색에서 형체가 뭉개지는 종은 픽셀을 손보지 말고 다른 common 펫으로 교체한다(§25).
+    func testRenderSeasonBossSkins() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        guard let boss = SeasonRegistry.season(.xmas)?.boss else { throw XCTSkip("xmas 보스 없음") }
+        let rows: [(label: String, images: [NSImage])] = ([boss.lead] + boss.supports).map { sp in
+            var imgs: [NSImage] = []
+            for action in [PetController.Action.sit, .walk, .run] {
+                if let orig = PetSprite.image(for: sp.kind, action: action, frameIndex: 0) { imgs.append(orig) }
+                if let skinned = PetSprite.composedImage(for: sp.kind, action: action, frameIndex: 0,
+                                                         skin: sp.skin, headwear: sp.headwear) { imgs.append(skinned) }
+            }
+            return ("\(sp.displayName ?? sp.kind.rawValue) (\(sp.kind.rawValue))", imgs)
+        }
+        let sheet = PreviewRenderer.contactSheet(rows: rows, cell: CGSize(width: 64, height: 64), labelWidth: 190)
+        try PreviewRenderer.writeImage(
+            sheet, section: "펫 스프라이트", title: "0-season-boss-skins",
+            note: "열마다 원본/스킨 쌍(sit·walk·run). snow 리컬러가 외곽선을 살린 채 흰색으로 읽히는지, 모자 위치.")
+    }
+
     /// Mythic 5종의 특수 모션. 일반 펫엔 없는 strip이라 셀 크기가 종마다 제각각이고,
     /// 실제로 프레임 수가 어긋난 채 커밋된 적이 있어 따로 크게 본다.
     func testRenderMythicSpecialMotions() throws {

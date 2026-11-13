@@ -178,17 +178,23 @@ extension GymLeader {
     /// production이 불가능해진다. 균일 EP로 두고, 보스의 "격"은 production 선봉의 레인보우(궁극기+크리+연출)로
     /// 표현한다. 완전 로컬 — 서버 의존 0.
     func team(tier: BadgeTier) -> BattleTeam {
+        Self.team(lead: kind, supports: Self.supportKinds(region), tier: tier)
+    }
+
+    /// 선봉 + 서포터를 tier 목표 EP에 맞춘 팀. 지역 관장과 시즌 보스(`SeasonalBoss`)가 같은 솔버를 쓰므로
+    /// "같은 tier면 같은 난이도"가 보장된다.
+    static func team(lead leadKind: PetKind, supports: [PetKind], tier: BadgeTier) -> BattleTeam {
         // production 관장(선봉)만 레인보우 — 궁극기 게이지·컷인·크리(스탯 벽 아닌 "보스 엣지").
         let leadVariant = (tier == .production) ? BattleEngine.rainbowVariant : 0
         // 팀 시너지(collMult)는 kind 구성으로만 정해짐(강화·이로치 무관) → 목표 EP를 그만큼 낮춰 강화를
         // 역산(상쇄). 관장 팀은 **테마대로 한 컬렉션에 몰아 시너지를 살리고**(언데드/데몬 gym 등), 밸런스는
         // 강화 레벨에서 맞춘다. (풀시너지 팀은 오히려 common으로도 production까지 도달 가능 — 시너지가
         // 데미지 비율을 올려주므로.) 타입 시너지(대표 스탯 1개)는 상쇄 안 하고 "테마 시그니처"로 남긴다.
-        let kinds = [kind] + Self.supportKinds(region)
+        let kinds = [leadKind] + supports
         let collMult = TeamSynergy.bonus(for: kinds.map { BattlePetSnapshot(kind: $0) }).collectionMult
-        let target = Self.targetEP(tier) / collMult
-        let lead = Self.snapshot(kind, variant: leadVariant, targetEP: target)
-        let mooks = Self.supportKinds(region).map { Self.snapshot($0, variant: 0, targetEP: target) }
+        let target = targetEP(tier) / collMult
+        let lead = snapshot(leadKind, variant: leadVariant, targetEP: target)
+        let mooks = supports.map { snapshot($0, variant: 0, targetEP: target) }
         return BattleTeam([lead] + mooks)
     }
 

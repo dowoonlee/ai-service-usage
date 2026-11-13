@@ -176,6 +176,29 @@ final class Settings: ObservableObject {
         didSet { AppEnv.defaults.set(weatherLocation.rawValue, forKey: Keys.weatherLocation) }
     }
 
+    // MARK: - 시즌 이벤트 (cf. docs/plans/seasonal-events.md)
+
+    /// 시즌 연출(12월 눈·모자 등) 일괄 on/off. 기본 ON. 시즌별 토글은 두지 않는다.
+    @Published var seasonalEffectsEnabled: Bool {
+        didSet { AppEnv.defaults.set(seasonalEffectsEnabled, forKey: Keys.seasonalEffectsEnabled) }
+    }
+    /// 운영 킬스위치 — `sync` 응답의 `disabledSeasons`(Season.Kind rawValue). 배포 후 버그 시 릴리스 없이 끈다.
+    @Published var disabledSeasons: Set<String> {
+        didSet { persist(disabledSeasons, forKey: Keys.disabledSeasons) }
+    }
+    /// 시즌 1회성 사실 기록 — 자동 칭호 조건(`codedOn:2026-12-25`), 보스 격파 dedup(`boss:xmas-2026:dev`) 등.
+    /// 연도가 붙은 키라 내년에 다시 받을 수 있다. 지우지 않는다(칭호 해금 근거).
+    @Published var seasonalFlags: Set<String> {
+        didSet { persist(seasonalFlags, forKey: Keys.seasonalFlags) }
+    }
+
+    /// 상점 노출 판정 — 상시 아이템은 항상, 시즌 아이템은 활성 시즌 일치 또는 이미 보유 시.
+    /// 상점 4곳(액세서리·이펙트·테마·칭호)과 오피스 데코가 전부 이 함수를 거친다 — 각자 if를 심지 않는다.
+    func shopVisible<T: SeasonalItem>(_ item: T, owned: Bool) -> Bool {
+        guard let s = item.season else { return true }
+        return owned || SeasonRegistry.active()?.kind == s
+    }
+
     // MARK: - Gacha (M2)
 
     /// 가챠 화폐 잔액. CoinLedger가 사용량 기반으로 적립.
@@ -389,6 +412,12 @@ final class Settings: ObservableObject {
     /// 사용량 스트릭 판정 기준일 — 마지막으로 usage가 인정된 날. 같은 날 재발동 방지 + 연속성 판정.
     @Published var usageStreakLastDay: Date? {
         didSet { AppEnv.defaults.set(usageStreakLastDay, forKey: Keys.usageStreakLastDay) }
+    }
+    /// 일별 VP 누적 — 리포트 탭 사용량 잔디의 농도. 키는 KST `yyyy-MM-dd`(서버 보상·퀴즈와 같은 날짜 경계),
+    /// 값은 그날 `UsageEvent`의 VP 환산 합(소수). `DailyUsageLedger`가 쓰고 90일만 보관한다.
+    /// 랭킹 제출 단위와 같은 VP라 "보드 순위 = 이번 달 잔디의 합"이 성립한다. 과거 소급 없음.
+    @Published var dailyVP: [String: Double] {
+        didSet { persist(dailyVP, forKey: Keys.dailyVP) }
     }
     // ── 클라우드 제도 신규 카운터 (gym-expansion.md §5.5) ──
     /// Guild·Contribution — 길드 기여 VP 누적. 적립은 `GuildContributionTracker`만 한다.
@@ -889,6 +918,9 @@ final class Settings: ObservableObject {
         self.bigDropThreshold = max(0.10, min(0.80, storedBigDrop))
         self.weatherEffectEnabled = (d.object(forKey: Keys.weatherEffectEnabled) as? Bool) ?? true
         self.weatherLocation = (d.string(forKey: Keys.weatherLocation).flatMap { WeatherLocation(rawValue: $0) }) ?? .utower
+        self.seasonalEffectsEnabled = (d.object(forKey: Keys.seasonalEffectsEnabled) as? Bool) ?? true
+        self.disabledSeasons = (d.data(forKey: Keys.disabledSeasons).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        self.seasonalFlags = (d.data(forKey: Keys.seasonalFlags).flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
 
         // Gacha 필드 로드
         // 마이그레이션 판정용으로 legacy 키 존재 여부를 init 안에서 미리 캡처.
@@ -1071,6 +1103,8 @@ final class Settings: ObservableObject {
         self.ownedTitles = (titlesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         let themesData = d.data(forKey: Keys.ownedThemes)
         self.ownedThemes = (themesData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
+        let dailyVPData = d.data(forKey: Keys.dailyVP)
+        self.dailyVP = (dailyVPData.flatMap { try? JSONDecoder().decode([String: Double].self, from: $0) }) ?? [:]
         let invCollapsedData = d.data(forKey: Keys.gachaInventoryCollapsed)
         self.gachaInventoryCollapsed = (invCollapsedData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) }) ?? []
         self.showGitHubLoginInCard = (d.object(forKey: Keys.showGitHubLoginInCard) as? Bool) ?? false
@@ -1806,6 +1840,10 @@ final class Settings: ObservableObject {
         // 날씨 이펙트
         static let weatherEffectEnabled = "settings.weatherEffectEnabled"
         static let weatherLocation      = "settings.weatherLocation"
+        // 시즌 이벤트
+        static let seasonalEffectsEnabled = "settings.seasonalEffectsEnabled"
+        static let disabledSeasons        = "settings.disabledSeasons"
+        static let seasonalFlags          = "settings.seasonalFlags"
         // Gacha (M2)
         static let coins                       = "settings.coins"
         static let gachaTickets                = "settings.gachaTickets"
@@ -1914,6 +1952,7 @@ final class Settings: ObservableObject {
         static let heartbeatLastActiveAt       = "settings.heartbeatLastActiveAt"
         static let nightOwlSecondsAccumulated  = "settings.nightOwlSecondsAccumulated"
         static let usageStreak                 = "settings.usageStreak"
+        static let dailyVP                     = "settings.dailyVP"
         static let usageStreakLastDay          = "settings.usageStreakLastDay"
         static let clearedBadges               = "settings.clearedBadges"
         static let masteredRegions             = "settings.masteredRegions"

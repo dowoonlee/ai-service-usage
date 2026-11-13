@@ -44,6 +44,8 @@ final class ShardLedger {
         let attemptIndex = o.prestigeAttempts + 1                     // 이번이 몇 번째 시도인지
         let pity = attemptIndex >= PetOwnership.prestigePityCeiling   // 천장 도달 → 확정
         let success = pity || Double.random(in: 0..<1) < PetOwnership.prestigeSuccessChance
+        RecapLog.record(RecapEvent(at: Date(), kind: .prestige, pet: kind.rawValue,
+                                   result: success ? "success" : "failure"))
 
         if success {
             o.unlockedVariants.insert(PetOwnership.prestigeVariant)

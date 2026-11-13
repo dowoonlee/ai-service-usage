@@ -27,12 +27,38 @@ struct ReportView: View {
     /// 미리보기에서 카드 폭. 컨테이너(480) 안에 패딩 포함.
     private static let previewWidth: CGFloat = 440
 
+    /// 카드 아래 두 모드. 탭을 열면 항상 `report` — 카드는 3초 보고, 꾸미기는 한 달에 한 번이라
+    /// 편집기(6섹션, 칭호 66개)가 기본 화면의 70%를 차지하던 것을 접는다. 상태는 저장하지 않는다.
+    enum Mode: String, CaseIterable, Identifiable {
+        case report, customize
+        var id: String { rawValue }
+        var displayName: String {
+            switch self {
+            case .report:    return "리포트"
+            case .customize: return "꾸미기"
+            }
+        }
+    }
+    @State private var mode: Mode = .report
+
+    /// 잔디의 "오늘". 프리뷰가 월 중순을 고정해 넘긴다 — 1일에 찍으면 칸이 하나뿐이라 검토할 게 없다.
+    private let grassNow: Date
+
+    /// `initialMode`/`grassNow`는 프리뷰 렌더용 — 앱은 항상 기본값(리포트, 지금)으로 연다.
+    init(initialMode: Mode = .report, grassNow: Date = SeasonClock.now()) {
+        _mode = State(initialValue: initialMode)
+        self.grassNow = grassNow
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 cardPreview
-                customizationGroups
-                shareSection
+                modeBar
+                switch mode {
+                case .report:    reportPane
+                case .customize: customizationGroups
+                }
             }
             .padding(16)
         }
@@ -89,6 +115,50 @@ struct ReportView: View {
         Binding(
             get: { settings.trainerCard.effectiveAccessoryTransform },
             set: { settings.trainerCard.accessoryTransform = $0 }
+        )
+    }
+
+    // MARK: - Mode bar (세그먼트 + 공유 메뉴)
+
+    /// 카드 바로 아래 한 줄 — 왼쪽 모드 세그먼트, 오른쪽 공유 메뉴. 두 모드 공통이라 카드와
+    /// 함께 항상 보이고, 편집 중에도 카드가 위에 남는다(시트 방식은 그 경험이 깨져 기각).
+    private var modeBar: some View {
+        HStack(spacing: 8) {
+            Picker("", selection: $mode) {
+                ForEach(Mode.allCases) { m in
+                    Text(m.displayName).tag(m)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 160)
+            Spacer()
+            shareMenu
+        }
+    }
+
+    // MARK: - Report pane
+
+    /// 리포트 모드 — 이번 달 활동 잔디. 농도 색은 Claude 차트에 적용된 맵 테마를 따른다
+    /// (메뉴바 기본 피드와 같은 해석 — 세 차트 중 첫 번째).
+    private var reportPane: some View {
+        let theme = settings.themeClaudeOverride
+            ?? PetTheme.defaultFor(settings.petClaudeParty.first?.kind ?? .fox)
+        let season = SeasonRegistry.active(now: grassNow)
+        return UsageGrassView(
+            model: UsageGrassModel.build(dailyVP: settings.dailyVP, now: grassNow),
+            theme: theme,
+            streak: settings.usageStreak,
+            rewardMarks: UsageGrassModel.rewardMarks(season: season, dailyVP: settings.dailyVP,
+                                                     claimedGrants: settings.claimedGrants, now: grassNow),
+            // "보상 N/24"는 보상 월(12월)에만 — 시즌이 11/16에 켜져도 11월엔 받을 보상이 없어 0/24가 뜻 없이 보인다.
+            rewardDayCount: season.flatMap { s in
+                Calendar.kst.component(.month, from: grassNow) == s.rewardMonth ? s.rewardDays?.count : nil
+            },
+            decoration: season?.grassDecoration,
+            rewardNote: season?.rewardDays != nil
+                ? "12/1~24 · AI를 쓴 날마다 +50 코인, 24일엔 +300 · 20일 채우면 칭호 \"12월 완주\". 보상은 1시간 안에 도착. 랭킹 참여 시 수령."
+                : nil
         )
     }
 
@@ -299,16 +369,38 @@ struct ReportView: View {
 
     // MARK: - Title
 
+    /// 칭호 66개를 한 줄 가로 스크롤로 두면 끝까지 넘기는 사람이 없다 — 보유 / 구매 가능 / 잠김 세 묶음의
+    /// 줄바꿈 그리드로 전부 한눈에. 각 묶음 안에선 enum 정의 순서 유지(filter는 stable).
     private var titleRow: some View {
         let unlocked = CardTitle.unlocked(in: settings)
-        // 보유(unlocked) 칭호를 먼저, 잠긴 것을 뒤로 — 사용자가 즉시 사용 가능한 옵션부터 노출.
-        // 각 그룹 내에선 enum 정의 순서 유지(filter는 stable).
-        let ordered = CardTitle.allCases.filter { unlocked.contains($0) }
-                    + CardTitle.allCases.filter { !unlocked.contains($0) }
-        return ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(ordered, id: \.self) { t in
-                    titleCell(t, available: unlocked.contains(t))
+        // 시즌 한정 칭호는 시즌 중이거나 이미 해금됐을 때만 목록에 — 시즌 밖 "잠김" 목록에 두면 영영 못 받는
+        // 칭호처럼 보인다.
+        let visible = CardTitle.allCases.filter { settings.shopVisible($0, owned: unlocked.contains($0)) }
+        let owned = visible.filter { unlocked.contains($0) }
+        let purchasable = visible.filter { !unlocked.contains($0) && $0.purchasePrice != nil }
+        let locked = visible.filter { !unlocked.contains($0) && $0.purchasePrice == nil }
+        return VStack(alignment: .leading, spacing: 8) {
+            titleGroup("보유 \(owned.count)", owned, unlocked: unlocked)
+            if !purchasable.isEmpty {
+                titleGroup("구매 가능 \(purchasable.count)", purchasable, unlocked: unlocked)
+            }
+            if !locked.isEmpty {
+                titleGroup("잠김 \(locked.count) · 호버하면 해금 조건", locked, unlocked: unlocked)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func titleGroup(_ label: String, _ titles: [CardTitle], unlocked: Set<CardTitle>) -> some View {
+        if !titles.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(label)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                FlowLayout(spacing: 6) {
+                    ForEach(titles, id: \.self) { t in
+                        titleCell(t, available: unlocked.contains(t))
+                    }
                 }
             }
         }
@@ -336,7 +428,8 @@ struct ReportView: View {
                     )
                 )
                 .overlay(
-                    Capsule().stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                    Capsule().stroke(isSelected ? Color.accentColor
+                                     : (t.season != nil ? SeasonBadge.color : Color.clear), lineWidth: 1.5)
                 )
                 .foregroundStyle(available ? .primary : .secondary)
         }
@@ -383,13 +476,14 @@ struct ReportView: View {
 
     // MARK: - Accessory
 
+    /// 액세서리는 줄바꿈 그리드 — 시즌 한정이 붙으면 11종이라 가로 스크롤로는 뒤가 안 보인다.
     private var accessoryRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                accessoryChoice(nil)
-                ForEach(CardAccessory.allCases, id: \.self) { acc in
-                    accessoryChoice(acc)
-                }
+        FlowLayout(spacing: 6) {
+            accessoryChoice(nil)
+            ForEach(CardAccessory.allCases.filter {
+                settings.shopVisible($0, owned: settings.ownedAccessories.contains($0.rawValue))
+            }, id: \.self) { acc in
+                accessoryChoice(acc)
             }
         }
     }
@@ -435,8 +529,12 @@ struct ReportView: View {
                 }
                 .overlay(
                     RoundedRectangle(cornerRadius: AppRadius.sm)
-                        .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                        .stroke(isSelected ? Color.accentColor
+                                : (acc?.season != nil ? SeasonBadge.color : Color.clear), lineWidth: isSelected ? 2 : 1)
                 )
+                .overlay(alignment: .topLeading) {
+                    if acc?.season != nil { SeasonBadge().offset(x: 5, y: 5) }
+                }
                 Text(acc?.displayName ?? "없음")
                     .font(.system(size: 8))
                     .lineLimit(1)
@@ -505,40 +603,43 @@ struct ReportView: View {
         }
     }
 
-    // MARK: - Share section (Phase D에서 채움)
+    // MARK: - Share menu (Phase D에서 채움)
 
-    private var shareSection: some View {
-        HStack(spacing: 8) {
+    /// 내보내기 5종을 메뉴 하나로 — 버튼 5개가 한 줄을 차지했지만 실제로 자주 쓰는 건 한둘이다.
+    private var shareMenu: some View {
+        Menu {
             Button {
                 copyCardToPasteboard()
             } label: {
-                Label("클립보드 복사", systemImage: "doc.on.doc")
+                Label("클립보드에 복사", systemImage: "doc.on.doc")
             }
             Button {
                 saveCardToFile()
             } label: {
-                Label("이미지로 저장", systemImage: "square.and.arrow.down")
+                Label("이미지로 저장…", systemImage: "square.and.arrow.down")
             }
             Button {
                 shareCard()
             } label: {
-                Label("공유...", systemImage: "square.and.arrow.up")
+                Label("공유…", systemImage: "square.and.arrow.up")
             }
-            Divider().frame(height: 16)
+            Divider()
             // 움직이는 GIF — avatar walk 사이클을 애니메이션으로 내보낸다.
             Button {
                 saveGIFToFile()
             } label: {
-                Label("GIF 저장", systemImage: "square.and.arrow.down.on.square")
+                Label("GIF 저장…", systemImage: "square.and.arrow.down.on.square")
             }
             Button {
                 shareGIF()
             } label: {
-                Label("GIF 공유", systemImage: "square.and.arrow.up.on.square")
+                Label("GIF 공유…", systemImage: "square.and.arrow.up.on.square")
             }
-            Spacer()
+        } label: {
+            Label("공유", systemImage: "square.and.arrow.up")
         }
-        .padding(.top, 8)
+        .menuStyle(.borderlessButton)
+        .fixedSize()
     }
 
     // MARK: - Trainer name fallback chain

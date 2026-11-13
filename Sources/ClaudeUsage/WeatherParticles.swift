@@ -7,13 +7,20 @@ import AppKit
 /// 파티클은 정규화 좌표(0...1)로 보관하고 렌더 시 plot 크기를 곱한다 → 패널 리사이즈에 무관.
 /// `clear`면 상위(MainView)에서 아예 렌더하지 않으므로 여기선 rain/snow/thunder만 다룬다.
 struct WeatherParticles: View {
-    let condition: WeatherCondition
-    /// 강수/강설량 기반 강도(0...1). 파티클 밀도를 비례 — 1.0이 최대 밀도(비 40 / 눈 26).
-    var intensity: Double = 1.0
+    let style: ParticleStyle
+
+    /// 실제 날씨용 — 시즌 ambient는 `ParticleStyle`을 직접 넘긴다. clear면 상위가 렌더하지 않는다.
+    init(condition: WeatherCondition, intensity: Double = 1.0) {
+        self.style = ParticleStyle.weather(condition, intensity: intensity) ?? .snow.with(intensity: 0)
+    }
+
+    init(style: ParticleStyle) {
+        self.style = style
+    }
 
     var body: some View {
         GeometryReader { geo in
-            ParticleField(condition: condition, intensity: intensity, size: geo.size)
+            ParticleField(style: style, size: geo.size)
         }
         .allowsHitTesting(false)
     }
@@ -36,60 +43,41 @@ private struct Particle: Identifiable {
 private struct ParticleField: View {
     /// 창이 안 보이면 프레임 루프를 멈춘다 (WindowVisibility.swift).
     @Environment(\.windowIsVisible) private var windowIsVisible
-    let condition: WeatherCondition
+    let style: ParticleStyle
     let size: CGSize
 
-    private var isSnow: Bool { condition == .snow }
-    private var hasThunder: Bool { condition == .thunder }
+    private var isSnow: Bool { style.spins }
+    private var hasThunder: Bool { style.thunder }
 
     private let particles: [Particle]
-    private let spriteName: String
+    private var spriteName: String { style.sprite }
     /// 스프라이트 원본 픽셀 크기 (interpolation(.none) 확대 기준).
-    private let spritePixel: CGSize
+    private var spritePixel: CGSize { style.pixel }
 
-    init(condition: WeatherCondition, intensity: Double, size: CGSize) {
-        self.condition = condition
+    init(style: ParticleStyle, size: CGSize) {
+        self.style = style
         self.size = size
 
-        let snow = (condition == .snow)
-        self.spriteName = snow ? "snowflake" : "raindrop"
-        self.spritePixel = snow ? CGSize(width: 9, height: 9) : CGSize(width: 3, height: 7)
-
-        // 파티클 수 — 강도(0...1)에 비례. 최대 밀도는 눈 26 / 비 40 (강도 1.0 기준).
-        // 강도는 WeatherAPI에서 강수/강설량을 정규화한 값이며 0.25 하한이 보장된다.
-        let maxCount = snow ? 26 : 40
-        let clamped = Swift.max(0, Swift.min(1, intensity))
-        let count = Swift.max(1, Int((Double(maxCount) * clamped).rounded()))
+        // 파티클 수 — 강도(0...1)에 비례. 최대 밀도는 스타일이 정한다(눈 26 / 비 40, 강도 1.0 기준).
+        // 날씨 강도는 WeatherAPI가 강수량을 정규화한 값(0.25 하한), 시즌 ambient는 고정값.
+        let clamped = Swift.max(0, Swift.min(1, style.intensity))
+        let count = Swift.max(1, Int((Double(style.maxCount) * clamped).rounded()))
         var built: [Particle] = []
         built.reserveCapacity(count)
+        let sways = style.sway.upperBound > 0
         for i in 0..<count {
-            if snow {
-                built.append(Particle(
-                    id: i,
-                    x: Double.random(in: 0...1),
-                    speed: Double.random(in: 0.067...0.134),     // 천천히 (기존 대비 ~33% 감속)
-                    phase: Double.random(in: 0...1),
-                    scale: Double.random(in: 0.8...1.5),
-                    opacity: Double.random(in: 0.6...0.95),
-                    swayAmp: Double.random(in: 0.02...0.06),
-                    swayFreq: Double.random(in: 0.6...1.4),
-                    swayPhase: Double.random(in: 0...(2 * .pi)),
-                    drift: 0
-                ))
-            } else {
-                built.append(Particle(
-                    id: i,
-                    x: Double.random(in: -0.1...1.0),
-                    speed: Double.random(in: 0.35...0.55),        // 빠르게 (기존 대비 절반 감속)
-                    phase: Double.random(in: 0...1),
-                    scale: Double.random(in: 0.9...1.4),
-                    opacity: Double.random(in: 0.45...0.8),
-                    swayAmp: 0,
-                    swayFreq: 0,
-                    swayPhase: 0,
-                    drift: Double.random(in: 0.06...0.14)         // 살짝 사선
-                ))
-            }
+            built.append(Particle(
+                id: i,
+                x: Double.random(in: (style.drift.upperBound > 0 ? -0.1 : 0)...1.0),
+                speed: Double.random(in: style.speed),
+                phase: Double.random(in: 0...1),
+                scale: Double.random(in: style.scale),
+                opacity: Double.random(in: style.opacity),
+                swayAmp: sways ? Double.random(in: style.sway) : 0,
+                swayFreq: sways ? Double.random(in: 0.6...1.4) : 0,
+                swayPhase: sways ? Double.random(in: 0...(2 * .pi)) : 0,
+                drift: style.drift.upperBound > 0 ? Double.random(in: style.drift) : 0
+            ))
         }
         self.particles = built
     }

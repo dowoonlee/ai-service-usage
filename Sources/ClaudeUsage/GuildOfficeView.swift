@@ -615,8 +615,18 @@ struct GuildOfficeView: View {
             if let slot = OfficeLayout.decorSlot(id: placed.slotId),
                let item = OfficeLayout.decorItem(kind: placed.itemKind) {
                 let isPreview = previewDecor?.slot == placed.slotId
-                itemView(imageName: item.imageName, drawKind: nil, size: item.size,
-                         anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                Group {
+                    if item.animationFrames.isEmpty {
+                        itemView(imageName: item.imageName, drawKind: nil, size: item.size,
+                                 anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                    } else {
+                        // 깜빡이는 데코(트리 전구) — PC 모니터와 같은 0.5초 박자로 프레임 교체.
+                        TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
+                            itemView(imageName: item.imageName(at: ctx.date), drawKind: nil, size: item.size,
+                                     anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                        }
+                    }
+                }
                     .opacity(isPreview ? 0.75 : 1)   // 미리보기는 반투명 — 아직 결제 전임이 보이게
                     .help(placed.donorNickname.map { "\(item.name) — \($0) 기부" } ?? item.name)
                     .zIndex(decorZ(slot: slot, item: item))
@@ -1153,7 +1163,7 @@ private struct OfficeShopSheet: View {
 
     @ViewBuilder
     private var decorTab: some View {
-        ForEach(OfficeLayout.decorCatalog) { item in
+        ForEach(OfficeLayout.decorCatalog.filter { settings.shopVisible($0, owned: false) }) { item in
             let freeSlot = firstFreeSlot(category: item.category)
             let affordable = settings.coins >= item.price
             let selected = pendingDecor?.item.kind == item.kind
@@ -1674,22 +1684,117 @@ private struct CodeDrawnFurniture: View {
     private var window: some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
+            let snowing = SeasonRegistry.active()?.officeWindowParticles == true
+            let frameColor = Color(red: 0.45, green: 0.35, blue: 0.25)
             ZStack {
+                // 눈 오는 시즌엔 창밖을 밤으로 — 맑은 하늘색 위의 흰 눈송이는 대비가 없어 안 보였다.
                 RoundedRectangle(cornerRadius: 1)
-                    .fill(LinearGradient(colors: [Color(red: 0.55, green: 0.75, blue: 0.95),
-                                                  Color(red: 0.75, green: 0.88, blue: 0.98)],
-                                         startPoint: .top, endPoint: .bottom))
+                    .fill(LinearGradient(
+                        colors: snowing
+                            ? [Color(red: 0.05, green: 0.07, blue: 0.17), Color(red: 0.13, green: 0.17, blue: 0.33)]
+                            : [Color(red: 0.55, green: 0.75, blue: 0.95), Color(red: 0.75, green: 0.88, blue: 0.98)],
+                        startPoint: .top, endPoint: .bottom))
+                if snowing {
+                    // 시즌 — 창밖에 눈이 쏟아진다. 창틀보다 먼저 그려 눈이 창살 뒤로 지나가게 한다.
+                    TimelineView(.animation(minimumInterval: 1.0 / 15)) { ctx in
+                        Canvas { g, size in
+                            WindowSnow.draw(in: &g, size: size, time: ctx.date.timeIntervalSinceReferenceDate)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 1))
+                } else {
+                    // 구름 한 점
+                    Capsule().fill(Color.white.opacity(0.8))
+                        .frame(width: w * 0.3, height: h * 0.15)
+                        .position(x: w * 0.35, y: h * 0.3)
+                }
                 RoundedRectangle(cornerRadius: 1)
-                    .strokeBorder(Color(red: 0.45, green: 0.35, blue: 0.25), lineWidth: 1.5)
-                Rectangle().fill(Color(red: 0.45, green: 0.35, blue: 0.25))
+                    .strokeBorder(frameColor, lineWidth: 1.5)
+                Rectangle().fill(frameColor)
                     .frame(width: 1.5)
-                Rectangle().fill(Color(red: 0.45, green: 0.35, blue: 0.25))
+                Rectangle().fill(frameColor)
                     .frame(height: 1.5)
-                // 구름 한 점
-                Capsule().fill(Color.white.opacity(0.8))
-                    .frame(width: w * 0.3, height: h * 0.15)
-                    .position(x: w * 0.35, y: h * 0.3)
             }
         }
     }
+}
+
+/// 오피스 창밖 눈 — 에셋 없이 사각 눈송이를 세 겹(먼 것은 작고 느리고 흐리게, 가까운 것은 크고 빠르게)으로
+/// 내리고, 창 아래에 쌓인 눈과 밤하늘의 달을 둔다. 위치는 시각의 순수 함수라 상태가 없고 프리뷰·테스트에서 재현된다.
+enum WindowSnow {
+    struct Flake: Equatable {
+        let x: Double       // 0...1 (창 폭 기준)
+        let y: Double       // 0...1 (창 높이 기준)
+        let size: Double    // 씬 픽셀 단위
+        let opacity: Double
+    }
+
+    /// 겹별 (개수, 한 번 떨어지는 데 걸리는 초, 크기, 불투명도). 합계 46개 — 26×20px 창이 꽉 차 보이는 양.
+    static let layers: [(count: Int, fallSeconds: Double, size: Double, opacity: Double)] = [
+        (20, 3.6, 1.0, 0.55),
+        (16, 2.4, 1.5, 0.85),
+        (10, 1.5, 2.0, 1.0),
+    ]
+    static var flakeCount: Int { layers.reduce(0) { $0 + $1.count } }
+
+    /// 0..<1 고정 난수 — 눈송이마다 열·위상·흔들림이 다르되 매 프레임 같은 값.
+    private static func hash(_ a: Int, _ b: Int) -> Double {
+        var v = UInt64(truncatingIfNeeded: a &* 73_856_093 ^ b &* 19_349_663) &+ 0x9E37_79B9_7F4A_7C15
+        v = (v ^ (v >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        v = (v ^ (v >> 27)) &* 0x94D0_49BB_1331_11EB
+        v ^= v >> 31
+        return Double(v % 10_000) / 10_000
+    }
+
+    static func flakes(at time: Double) -> [Flake] {
+        var out: [Flake] = []
+        out.reserveCapacity(flakeCount)
+        for (li, layer) in layers.enumerated() {
+            for i in 0..<layer.count {
+                let speed = (0.8 + 0.4 * hash(li, i &* 3 + 1)) / layer.fallSeconds
+                // 위에서 아래로: 창 위(-0.1)에서 들어와 아래(1.1)로 빠진다.
+                let p = (time * speed + hash(li, i &* 3)).truncatingRemainder(dividingBy: 1)
+                let phase = p < 0 ? p + 1 : p
+                // 바람에 비스듬히 + 좌우 흔들림. 가까운 겹일수록 더 밀린다.
+                let drift = 0.10 * Double(li + 1) * phase
+                let sway = 0.03 * sin(time * (1.2 + hash(li, i &* 3 + 2)) + Double(i))
+                let x0 = (Double(i) + hash(li, i &* 7 + 5)) / Double(layer.count)
+                var x = (x0 + drift + sway).truncatingRemainder(dividingBy: 1)
+                if x < 0 { x += 1 }
+                out.append(Flake(x: x, y: -0.1 + 1.2 * phase, size: layer.size, opacity: layer.opacity))
+            }
+        }
+        return out
+    }
+
+    static func draw(in g: inout GraphicsContext, size: CGSize, time: Double) {
+        let unit = size.width / 26          // 창은 씬 26px 폭 — 1 unit = 씬 1픽셀
+        // 달 — 오른쪽 위 칸. 눈송이보다 먼저 그려 눈이 달 앞을 지나간다.
+        let moon = CGRect(x: (size.width * 0.70).rounded(), y: (size.height * 0.14).rounded(),
+                          width: (3 * unit).rounded(), height: (3 * unit).rounded())
+        g.fill(Path(ellipseIn: moon.insetBy(dx: -unit, dy: -unit)),
+               with: .color(Color(red: 1.0, green: 0.95, blue: 0.75).opacity(0.18)))
+        g.fill(Path(ellipseIn: moon), with: .color(Color(red: 1.0, green: 0.95, blue: 0.78)))
+        for f in flakes(at: time) {
+            let side = max(1, (f.size * unit).rounded())
+            // 픽셀 격자에 맞춰 찍는다 — 반 픽셀에 걸치면 도트가 뭉개진다.
+            let rect = CGRect(x: (f.x * size.width).rounded(), y: (f.y * size.height).rounded(),
+                              width: side, height: side)
+            g.fill(Path(rect), with: .color(.white.opacity(f.opacity)))
+        }
+        // 창턱에 쌓인 눈 — 가운데가 살짝 높은 둔덕.
+        let base = size.height - 2 * unit
+        var drift = Path()
+        drift.move(to: CGPoint(x: 0, y: size.height))
+        drift.addLine(to: CGPoint(x: 0, y: base + unit))
+        for step in 0...13 {
+            let fx = Double(step) / 13
+            let bump = sin(fx * .pi * 3) * 0.5 + sin(fx * .pi) * 0.8
+            drift.addLine(to: CGPoint(x: fx * size.width, y: (base - bump * unit).rounded()))
+        }
+        drift.addLine(to: CGPoint(x: size.width, y: size.height))
+        drift.closeSubpath()
+        g.fill(drift, with: .color(.white.opacity(0.95)))
+    }
+
 }

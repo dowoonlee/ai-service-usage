@@ -1770,6 +1770,8 @@ actor RankingAPI {
         /// 기한이 지나면 서버가 이미 기본 테넌트로 강등해 응답하므로, 클라는 이 값으로
         /// "왜 강등됐는지"를 안내하고 재인증 진입점을 띄우는 역할만 한다.
         let reverifyDueAt: Date?
+        /// 운영 킬스위치 — 끌 시즌의 `Season.Kind` rawValue 목록. 구버전 서버는 필드가 없어 nil.
+        let disabledSeasons: [String]?
     }
 
     /// 열려 있는 화면(`want`)의 데이터 + 배지를 한 번에. 화면별 폴링을 이 호출 하나로 대체한다.

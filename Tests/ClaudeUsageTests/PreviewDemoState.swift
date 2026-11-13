@@ -13,6 +13,12 @@ import SwiftUI
 @MainActor
 enum PreviewDemoState {
 
+    /// 잔디 프리뷰의 고정 "오늘" — 2026-11-18 12:00 KST. 월 중순이라 농도·빈 날·미래 칸이 한 화면에 다 나온다.
+    static let grassNow: Date = {
+        var c = DateComponents(); c.year = 2026; c.month = 11; c.day = 18; c.hour = 12
+        return Calendar.kst.date(from: c)!
+    }()
+
     /// 중반 진행도의 트레이너. 프리뷰 스위트는 setUp에서 이걸 호출한다.
     static func seed() {
         let s = Settings.shared
@@ -30,6 +36,39 @@ enum PreviewDemoState {
         seedCollections()
         seedParty()
         seedCosmetics()
+        seedDailyVP(now: grassNow)
+    }
+
+    /// 12월 시즌 프리뷰의 고정 "오늘" — 2026-12-18 12:00 KST. 보상 구간(1~24) 안, 완주 전.
+    static let xmasNow: Date = {
+        var c = DateComponents(); c.year = 2026; c.month = 12; c.day = 18; c.hour = 12
+        return Calendar.kst.date(from: c)!
+    }()
+
+    /// 12월 보상 수령 상태 — 1~17일 중 일요일(6·13)만 빠지고 18일은 도착 대기(VP는 있고 grant 없음).
+    static func seedXmasRewards(now: Date = xmasNow) {
+        var grants: Set<String> = []
+        for day in 1...17 where day != 6 && day != 13 {
+            grants.insert(String(format: "advent-2026-12-%02d", day))
+        }
+        Settings.shared.claimedGrants = grants
+    }
+
+    /// 리포트 탭 잔디 — 이번 달(KST) 1일부터 오늘까지 결정적인 값으로 채운다. 빈 날(주말 느낌)과
+    /// 농도 4단계가 한 화면에 다 나오게. 지난달 끝자락도 조금 넣어 사분위 기준(최근 30일)에 섞인다.
+    static func seedDailyVP(now: Date = Date()) {
+        let cal = Calendar.kst
+        var map: [String: Double] = [:]
+        for offset in 0..<40 {
+            guard let d = cal.date(byAdding: .day, value: -offset, to: now) else { continue }
+            let weekday = cal.component(.weekday, from: d)
+            // 일요일은 쉼, 토요일은 절반 — 결정적 패턴(offset 기반)으로 매번 같은 그림.
+            let base = Double((offset * 37) % 700 + 120)
+            let v = weekday == 1 ? 0 : (weekday == 7 ? base * 0.4 : base)
+            map[UsageGrassModel.dayKey(d)] = v
+        }
+        Settings.shared.dailyVP = map
+        Settings.shared.usageStreak = 6
     }
 
     /// 등급별로 고르게 섞은 보유 펫. variant는 0~4를 흩어서 이로치·프레스티지 표시도 함께 본다.

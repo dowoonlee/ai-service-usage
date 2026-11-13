@@ -67,6 +67,7 @@ struct PetEffectOverlay: View {
                 if effects.contains(.heart) { heartParticles }
                 if effects.contains(.star) { starParticles }
                 if effects.contains(.petal) { petalParticles }
+                if effects.contains(.snowfall) { snowfallParticles }
             }
         }
         .allowsHitTesting(false)
@@ -467,6 +468,28 @@ struct PetEffectOverlay: View {
     /// 꽃잎 (좌우로 더 크게 흔들리며).
     private var petalParticles: some View {
         riser(Ellipse(), color: Color(red: 1, green: 0.72, blue: 0.85), count: 5, sway: 0.5)
+    }
+
+    /// 눈내림 — 머리 위에서 발밑으로 내려앉는 흰 점. `riser`의 하강 버전. 시즌 ambient 눈(패널 전체)과
+    /// 구분되도록 펫 몸 폭 안에서만 내린다.
+    private var snowfallParticles: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            ZStack {
+                ForEach(0..<6, id: \.self) { i in
+                    let phase = (t * 0.45 + Double(i) / 6).truncatingRemainder(dividingBy: 1.0)
+                    let dx = sin((phase * 2 + Double(i) * 0.7) * .pi) * petHeight * 0.22
+                    let top = footY - petHeight * 1.25
+                    let y = top + CGFloat(phase) * petHeight * 1.25
+                    let sz = petHeight * (0.10 + 0.05 * Double(i % 2))
+                    Rectangle()
+                        .fill(Color.white)
+                        .frame(width: sz, height: sz)
+                        .opacity(phase < 0.1 ? phase * 9 : (1 - phase) * 0.95)
+                        .position(x: center.x + dx, y: y)
+                }
+            }
+        }
     }
 
     /// 떠오르는 입자 공통 — 모양/색/개수/흔들림만 바꿔 재사용. 이동과 무관하게 항상 은은히.

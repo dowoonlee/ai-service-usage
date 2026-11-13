@@ -40,6 +40,16 @@ struct SettingsView: View {
                 Text("선택한 위치의 현재 날씨가 비·눈·뇌우면 패널에 파티클이 내립니다.")
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
+                Toggle("시즌 연출 (겨울 눈·모자 등)", isOn: $settings.seasonalEffectsEnabled)
+                Text("시즌 중 펫 머리 장식, 패널 가랑눈, 시즌 대사를 켭니다. 실제 날씨 효과가 꺼져 있으면 눈도 내리지 않습니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+            Section("2026 리캡") {
+                Button("2026 리캡 보기") { RecapWindowController.shared.present() }
+                Text("올해 사용량과 가챠·도장·아레나 기록을 한 편으로 돌아봅니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
             }
             Section("시작") {
                 Toggle("로그인 시 자동 시작", isOn: Binding(

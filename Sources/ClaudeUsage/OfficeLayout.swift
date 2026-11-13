@@ -452,7 +452,7 @@ enum OfficeLayout {
 
     /// 구매 가능 데코 카탈로그 — kind = 서버 item_kind = 리소스 basename.
     /// 가격은 기획 §2 (소품 300 / 중형 500 / 대형 1,000).
-    struct DecorItem: Identifiable {
+    struct DecorItem: Identifiable, SeasonalItem {
         let kind: String
         let name: String
         let category: DecorCategory
@@ -460,8 +460,19 @@ enum OfficeLayout {
         let size: CGSize
         let blockingWidth: CGFloat   // passing == .avoid인 바닥 데코의 충돌 폭
         let passing: PetPassing      // 벽 데코는 펫 동선 밖이라 무의미 (behind로 통일)
+        /// 시즌 한정 데코 — 상점 노출만 시즌 중. 서버엔 kind 문자열로 저장되므로 카탈로그 항목은 삭제 금지.
+        var season: Season.Kind? = nil
+        /// 깜빡이는 데코의 프레임(리소스 basename, 0.5초 간격 순환). 비어 있으면 `imageName` 한 장짜리 정지 그림.
+        /// 첫 프레임은 `imageName`과 같게 둔다 — 상점 썸네일과 씬의 첫 모습이 일치하도록.
+        var animationFrames: [String] = []
         var id: String { kind }
         var imageName: String { kind }
+        /// 주어진 시각에 그릴 리소스. PC 모니터(`PC_FRONT_ON_n`)와 같은 0.5초 박자.
+        func imageName(at date: Date) -> String {
+            guard !animationFrames.isEmpty else { return imageName }
+            let tick = Int((date.timeIntervalSinceReferenceDate * 2).rounded(.down))
+            return animationFrames[((tick % animationFrames.count) + animationFrames.count) % animationFrames.count]
+        }
     }
 
     static let decorCatalog: [DecorItem] = [
@@ -487,6 +498,34 @@ enum OfficeLayout {
                   size: CGSize(width: 16, height: 16), blockingWidth: 10, passing: .front),
         DecorItem(kind: "COFFEE_TABLE", name: "커피 테이블", category: .floor, price: 500,
                   size: CGSize(width: 32, height: 32), blockingWidth: 24, passing: .avoid),
+        // ── 12월 한정 (season: .xmas) — 상점 노출만 시즌 중, 배치된 트리는 시즌이 끝나도 남는다. 항목 삭제 금지.
+        // 이 kind를 모르는 구버전 클라는 decorItem(kind:)가 nil이라 그 슬롯을 그리지 않고 넘어간다.
+        DecorItem(kind: "CHRISTMAS_TREE", name: "크리스마스 트리", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 10, passing: .behind,
+                  season: .xmas,
+                  // 전구 15개가 3그룹으로 돌아가며 켜짐/보통/꺼짐, 별은 2번째 프레임에 밝아진다.
+                  animationFrames: ["CHRISTMAS_TREE", "CHRISTMAS_TREE_2", "CHRISTMAS_TREE_3"]),
+        // 벽 — 그림은 32×32 칸의 위쪽 절반에만 있다(아래는 투명). 벽 슬롯 baseline에 맞추면 천장 가까이 걸린다.
+        DecorItem(kind: "XMAS_LIGHTS", name: "전구 줄", category: .wall, price: 500,
+                  size: CGSize(width: 32, height: 32), blockingWidth: 0, passing: .behind,
+                  season: .xmas,
+                  animationFrames: ["XMAS_LIGHTS", "XMAS_LIGHTS_2", "XMAS_LIGHTS_3"]),
+        DecorItem(kind: "XMAS_BANNER", name: "Merry Xmas 배너", category: .wall, price: 500,
+                  size: CGSize(width: 32, height: 32), blockingWidth: 0, passing: .behind,
+                  season: .xmas),
+        // 리스는 16px 폭 — 32px짜리 전구 줄·배너 사이 남는 벽 칸에 들어간다. 이 셋은 정지 그림
+        // (트리·전구 줄이 이미 깜빡여서 더 움직이면 산만하다).
+        DecorItem(kind: "XMAS_WREATH", name: "리스", category: .wall, price: 500,
+                  size: CGSize(width: 16, height: 32), blockingWidth: 0, passing: .behind,
+                  season: .xmas),
+        // 눈사람은 키 큰 식물류처럼 뒤로, 선물 상자는 낮은 소품이라 앞으로 지나간다.
+        // 눈사람만 20×36 — 16×32로는 얼굴·목도리 디테일이 안 들어가 1.2배 키웠다(사용자 요청).
+        DecorItem(kind: "SNOWMAN", name: "눈사람", category: .floor, price: 300,
+                  size: CGSize(width: 20, height: 36), blockingWidth: 12, passing: .behind,
+                  season: .xmas),
+        DecorItem(kind: "GIFT_BOXES", name: "선물 상자", category: .floor, price: 300,
+                  size: CGSize(width: 16, height: 16), blockingWidth: 10, passing: .front,
+                  season: .xmas),
     ]
 
     static func decorItem(kind: String) -> DecorItem? {

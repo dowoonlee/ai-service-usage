@@ -532,6 +532,7 @@ enum BadgeRegistry {
             let id = BadgeID(category: cat, tier: tier)
             if s.clearedBadges.contains(id.key) { continue }
             s.clearedBadges.insert(id.key)
+            RecapLog.record(RecapEvent(at: Date(), kind: .gymBadge, detail: id.key))
             if !s.creditedBadgeRewards.contains(id.key) {
                 CoinLedger.shared.creditBonus(tier.coinReward, reason: "badge.\(id.key)")
                 s.creditedBadgeRewards.insert(id.key)

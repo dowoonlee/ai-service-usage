@@ -17,6 +17,7 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
     case heart       // 하트
     case star        // 별
     case petal       // 꽃잎
+    case snowfall    // 눈내림 — 12월 한정(season: .xmas), 머리 위에서 발밑으로
     // 신규 — 궤적류 (이동 시 뒤로 흐름)
     case stardust    // 별가루
     case flame       // 불꽃
@@ -34,6 +35,7 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .heart:     return "하트"
         case .star:      return "별"
         case .petal:     return "꽃잎"
+        case .snowfall:  return "눈내림"
         case .stardust:  return "별가루"
         case .flame:     return "불꽃"
         case .flag:      return "깃발"
@@ -50,6 +52,7 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .aura:      return 1500
         case .rainbow:   return 2000
         case .heart, .star, .petal: return 400
+        case .snowfall:             return 400   // 한정이지만 파티클류와 같은 가격
         case .stardust, .flame:     return 700
         // 길드 정체성을 두르는 아이템이라 궤적류 중 상위. rainbow(2000) 아래로 둔다.
         case .flag:      return 1200
@@ -67,6 +70,7 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .heart:     return "heart.fill"
         case .star:      return "star.fill"
         case .petal:     return "leaf.fill"
+        case .snowfall:  return "snowflake"
         case .stardust:  return "wand.and.stars"
         case .flame:     return "flame.fill"
         case .flag:      return "flag.fill"
@@ -79,7 +83,17 @@ enum EffectKind: String, CaseIterable, Identifiable, Codable {
         case .glow, .aura:                          return .light
         case .trail, .rainbow, .stardust, .flame,
              .flag:                                 return .trail
-        case .footsteps, .heart, .star, .petal:     return .particle
+        case .footsteps, .heart, .star, .petal,
+             .snowfall:                             return .particle
+        }
+    }
+}
+
+extension EffectKind: SeasonalItem {
+    var season: Season.Kind? {
+        switch self {
+        case .snowfall: return .xmas
+        default: return nil
         }
     }
 }

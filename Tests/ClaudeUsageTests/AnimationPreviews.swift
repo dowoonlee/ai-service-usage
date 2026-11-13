@@ -95,17 +95,21 @@ final class AnimationPreviews: SandboxedTestCase {
             let pct: Double = $0 < 20 ? Double($0) * 4 : max(5, 80 - Double($0 - 20) * 7)
             return (Date(timeIntervalSince1970: 1_800_000_000 + Double($0) * 300), pct)
         }
-        let cases: [(String, PetKind, Int)] = [
-            ("여우-기본", .fox, 0),
-            ("전사-이로치", .warrior, 2),
-            ("슬라임-프레스티지", .slime, PetOwnership.prestigeVariant),
+        let cases: [(String, PetKind, Int, String?)] = [
+            ("여우-기본", .fox, 0, nil),
+            ("전사-이로치", .warrior, 2, nil),
+            ("슬라임-프레스티지", .slime, PetOwnership.prestigeVariant, nil),
+            // 시즌 머리 장식 — 반전·구르기 변환 안에서 모자가 머리에 붙어 다니는지.
+            ("여우-산타모자", .fox, 0, "santa_hat"),
+            ("박쥐-산타모자", .bat, 0, "santa_hat"),
         ]
-        for (title, kind, variant) in cases {
+        for (title, kind, variant, headwear) in cases {
             let renderer = MenuBarRenderer()
             let start = Date(timeIntervalSince1970: 1_800_000_000)
             renderer.reset(now: start)
             let feed = MenuBarRenderer.Feed(pct: 62, history: history, kind: kind,
-                                            variant: variant, theme: PetTheme.defaultFor(kind))
+                                            variant: variant, theme: PetTheme.defaultFor(kind),
+                                            headwear: headwear)
             // 30Hz로 3초 — 걷기 한 바퀴와 방향 전환이 들어갈 정도의 길이.
             //
             // render는 보이는 것이 안 바뀐 틱에 nil을 준다(렌더 키로 재합성을 건너뛴다). 그 틱을
@@ -174,6 +178,49 @@ final class AnimationPreviews: SandboxedTestCase {
             frameCount: 55, frameInterval: 0.1,
             section: "애니 · 길드", title: "사무실-배회",
             note: "펫이 가구를 통과하지 않는지, 벽에 끼지 않는지, 걷는 방향과 그림 방향이 맞는지.")
+    }
+
+    /// 12월 한정 데코 — 트리·전구 줄은 0.5초마다 프레임이 바뀐다. 정지 그림으론 깜빡임도, 벽 색 위에서
+    /// 전구가 묻히는지도 알 수 없다. 벽 슬롯 1·2·3은 35px 간격이라 32px 폭 데코 셋이 한 줄로 이어진다.
+    /// 흰 눈사람이 밝은 바닥에서 읽히는지도 여기서 본다.
+    func testRenderGuildOfficeXmasDecor() throws {
+        _ = try PreviewRenderer.requireOutputDir()
+        SeasonRegistry.override = .season(.xmas)
+        defer { SeasonRegistry.override = Override.none }
+
+        let base = PreviewDemoState.guildInfo()
+        let decor = [
+            RankingAPI.GuildFurnitureItem(slotId: 1, itemKind: "XMAS_LIGHTS", donorNickname: "kimcoder"),
+            RankingAPI.GuildFurnitureItem(slotId: 2, itemKind: "XMAS_BANNER", donorNickname: "vibewolf"),
+            RankingAPI.GuildFurnitureItem(slotId: 3, itemKind: "XMAS_LIGHTS", donorNickname: "nightowl"),
+            RankingAPI.GuildFurnitureItem(slotId: 6, itemKind: "CHRISTMAS_TREE", donorNickname: "dowoon"),
+            RankingAPI.GuildFurnitureItem(slotId: 0, itemKind: "XMAS_WREATH", donorNickname: "kimcoder"),
+            RankingAPI.GuildFurnitureItem(slotId: 4, itemKind: "XMAS_WREATH", donorNickname: "kimcoder"),
+            RankingAPI.GuildFurnitureItem(slotId: 5, itemKind: "SNOWMAN", donorNickname: "vibewolf"),
+            RankingAPI.GuildFurnitureItem(slotId: 8, itemKind: "GIFT_BOXES", donorNickname: "nightowl"),
+            RankingAPI.GuildFurnitureItem(slotId: 9, itemKind: "SNOWMAN", donorNickname: "dowoon"),
+        ]
+        let info = RankingAPI.GuildInfoResponse(
+            guild: base.guild, members: base.members, furniture: decor,
+            sentInvites: base.sentInvites, joinRequests: base.joinRequests, guestbook: base.guestbook,
+            guestbookDeleteWindowSec: base.guestbookDeleteWindowSec,
+            guestbookCanInteract: base.guestbookCanInteract)
+        let view = GuildOfficeView(
+            info: info,
+            rearrangeMode: .constant(false),
+            previewFloorTheme: .constant(nil),
+            previewWallTheme: .constant(nil),
+            onSaveStudio: { _ in }, onSetLogoPos: { _, _ in },
+            onPlaceDecor: { _, _ in }, onRemoveDecor: { _ in }, onApplyTheme: {},
+            purchaseSheetOpen: .constant(false))
+
+        // 0.25초 간격 24프레임 = 6초 — 0.5초 박자의 3프레임 순환이 네 바퀴 돈다.
+        try PreviewRenderer.renderAnimated(
+            view, size: CGSize(width: 560, height: 400),
+            frameCount: 24, frameInterval: 0.25,
+            section: "애니 · 길드", title: "사무실-12월데코",
+            note: "12월 데코 6종으로 슬롯 10칸을 채운 모습 — 트리·눈사람·선물 상자(바닥), 전구 줄·배너·리스(벽). "
+                + "전구가 돌아가며 켜지는지, 벽·바닥 색에 묻히지 않는지, 벽 데코가 한 줄로 이어지는지.")
     }
 
     // MARK: - RP 이펙트

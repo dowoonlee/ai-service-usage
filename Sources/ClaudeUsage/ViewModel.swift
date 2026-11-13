@@ -67,6 +67,39 @@ final class ViewModel: ObservableObject {
     /// 설정(위치/토글) 변경 구독 — 변경 즉시 날씨를 다시 가져온다.
     private var weatherCancellables = Set<AnyCancellable>()
 
+    // 시즌 이벤트 — 지금 활성인 시즌. 폴링 tick마다 + 창 경계 시각에 + 설정 변경 시 재계산.
+    // 소비자(MainView·메뉴바·WalkingCat)는 이 값의 필드만 읽는다. cf. docs/plans/seasonal-events.md
+    @Published var activeSeason: Season? = nil
+    private var seasonBoundaryTask: Task<Void, Never>?
+
+    /// 메인 패널 파티클 — 실제 강수가 우선, 없으면 시즌 ambient(가랑눈). 날씨 효과 설정이 꺼져 있으면
+    /// 둘 다 없음(파티클 자체를 거부한 사용자). nil이면 상위가 렌더하지 않는다.
+    var ambientStyle: ParticleStyle? {
+        guard Settings.shared.weatherEffectEnabled else { return nil }
+        if let real = ParticleStyle.weather(weather, intensity: weatherIntensity) { return real }
+        return activeSeason?.ambient
+    }
+
+    /// WalkingCat 날씨 대사 풀 조건 — 시즌 눈이 내리면 `.snow` 대사가 나온다.
+    var effectiveWeather: WeatherCondition {
+        weather != .clear ? weather : (ambientStyle?.quoteCondition ?? .clear)
+    }
+
+    /// 활성 시즌 재계산 + 다음 창 경계(KST 00:00)에 1회 깨어나는 타이머. 0시 정각에 모자가 씌워지고 벗겨진다.
+    func refreshSeason(now: Date = SeasonClock.now()) {
+        let next = SeasonRegistry.active(now: now)
+        if next != activeSeason { activeSeason = next }
+        seasonBoundaryTask?.cancel()
+        guard let boundary = SeasonRegistry.nextBoundary(after: now) else { return }
+        // 하루 상한 — 경계가 멀면 매일 한 번 다시 계산(시계·타임존 변경에 대비).
+        let delay = min(boundary.timeIntervalSince(now) + 1, 86_400)
+        seasonBoundaryTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(1, delay) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.refreshSeason()
+        }
+    }
+
     // 펫이 외치는 휴식 권유 말풍선. nil이면 표시 안 함.
     // 최근 1시간 동안 거의 쉬지 않고 사용 중이고, 마지막 표시로부터 1시간 이상 지났을 때 설정됨.
     @Published var wellnessNudge: String?
@@ -200,6 +233,8 @@ final class ViewModel: ObservableObject {
         UsageEventBus.shared.register(CoinLedger.shared)
         UsageEventBus.shared.register(VPLedger.shared)
         UsageEventBus.shared.register(StreakLedger.shared)
+        UsageEventBus.shared.register(DailyUsageLedger.shared)
+        UsageEventBus.shared.register(SeasonFlagLedger.shared)
 
         let d = AppEnv.defaults
         self.claudeCollapsed = d.bool(forKey: "section.claude.collapsed")
@@ -238,6 +273,17 @@ final class ViewModel: ObservableObject {
             Task { @MainActor in await self?.refreshWeather(force: true) }
         }
         .store(in: &weatherCancellables)
+
+        // 시즌 토글·운영 킬스위치 변경 → 즉시 재계산.
+        Publishers.Merge(
+            Settings.shared.$seasonalEffectsEnabled.dropFirst().map { _ in () },
+            Settings.shared.$disabledSeasons.dropFirst().map { _ in () }
+        )
+        .sink { [weak self] in
+            Task { @MainActor in self?.refreshSeason() }
+        }
+        .store(in: &weatherCancellables)
+        refreshSeason()
 
         // 레포트에서 트레이너 카드(아바타·배경·칭호·프레임)를 바꾸면 서버 프로필을 즉시 push —
         // 코인 delta 없이 profileJson만 갱신해 랭킹 대시보드가 다음 코인 적립 cycle을 기다리지 않게.
@@ -397,6 +443,7 @@ final class ViewModel: ObservableObject {
                 // (visibility gate) panel/menu bar 모두 안 보이면 refresh 스킵.
                 // (sleep gate) macOS sleep 동안에도 스킵 — 깨자마자 폭주 방지.
                 let active = self.shouldPollNow()
+                self.refreshSeason()
                 if active {
                     self.updateGymCountersOnCycleStart(sleepSec: lastSleptSec)
                     await self.refreshClaude()
@@ -1013,6 +1060,11 @@ final class ViewModel: ObservableObject {
             lastSyncAt = Date()
             // 재인증 요구 상태 — 서버가 요구를 해제하면 필드가 사라지므로 nil도 그대로 반영한다.
             s.tenantReverifyDueAt = resp.reverifyDueAt
+            // 시즌 킬스위치 — 서버 목록이 곧 진실(필드 없음=구버전 서버=건드리지 않음).
+            if let off = resp.disabledSeasons {
+                let set = Set(off)
+                if s.disabledSeasons != set { s.disabledSeasons = set }
+            }
 
             // 게시판 창이 열려 있으면 카운트는 .boardSeen이 0으로 유지한다 — 덮어쓰지 않는다.
             if !PollGate.boardViewIsOpen {

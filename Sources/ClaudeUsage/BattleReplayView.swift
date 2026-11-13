@@ -18,15 +18,19 @@ struct BattleReplayView<Extra: View>: View {
     let serverMaxHpA: [PetKind: Int]?
     let serverMaxHpB: [PetKind: Int]?
     let resultExtra: () -> Extra
+    /// 렌더 전용 스킨·머리 장식(시즌 보스 팀). `BattlePetSnapshot`에는 넣지 않는다 — 서버 파리티·HMAC 페이로드.
+    let skins: [PetKind: SkinnedPet]
 
     init(aSnaps: [BattlePetSnapshot], bSnaps: [BattlePetSnapshot], result: BattleResult,
          serverMaxHpA: [PetKind: Int]? = nil, serverMaxHpB: [PetKind: Int]? = nil,
+         skins: [PetKind: SkinnedPet] = [:],
          @ViewBuilder resultExtra: @escaping () -> Extra) {
         self.aSnaps = aSnaps
         self.bSnaps = bSnaps
         self.result = result
         self.serverMaxHpA = serverMaxHpA
         self.serverMaxHpB = serverMaxHpB
+        self.skins = skins
         self.resultExtra = resultExtra
     }
 
@@ -669,7 +673,10 @@ struct BattleReplayView<Extra: View>: View {
     // MARK: 공용 (아레나와 동일 — 렌더 헬퍼)
 
     @ViewBuilder private func thumb(_ kind: PetKind, h: CGFloat) -> some View {
-        if let img = PetSprite.frames(for: kind, action: .walk).first ?? PetSprite.frames(for: kind, action: .sit).first {
+        if let sp = skins[kind],
+           let img = PetSprite.composedImage(for: kind, action: .walk, frameIndex: 0, skin: sp.skin, headwear: sp.headwear) {
+            Image(nsImage: img).resizable().interpolation(.none).aspectRatio(contentMode: .fit).frame(height: h)
+        } else if let img = PetSprite.frames(for: kind, action: .walk).first ?? PetSprite.frames(for: kind, action: .sit).first {
             Image(nsImage: img).resizable().interpolation(.none).aspectRatio(contentMode: .fit).frame(height: h)
         } else {
             Image(systemName: "pawprint").font(.system(size: h * 0.7)).foregroundStyle(.secondary)

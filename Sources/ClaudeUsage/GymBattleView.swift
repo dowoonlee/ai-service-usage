@@ -9,8 +9,14 @@ import SwiftUI
 // 결과 확정 → 재생). 재도전은 무제한(연습), 보상은 최초 획득 1회(creditedBadgeRewards dedup).
 @MainActor
 struct GymBattleView: View {
-    let region: BadgeRegion
-    let tier: BadgeTier
+    /// 상대 — 지역 관장 또는 시즌 보스. 승리 처리·팀·대사·스킨은 전부 이쪽이 안다.
+    let opponent: GymOpponent
+
+    init(opponent: GymOpponent) { self.opponent = opponent }
+    /// 지역 관장 호환 생성자.
+    init(region: BadgeRegion, tier: BadgeTier) { self.opponent = .region(region, tier) }
+
+    private var tier: BadgeTier { opponent.tier }
 
     @ObservedObject private var settings = Settings.shared
     @Environment(\.dismiss) private var dismiss
@@ -20,11 +26,11 @@ struct GymBattleView: View {
     @State private var bSnaps: [BattlePetSnapshot] = []
     @State private var didWin = false
     @State private var rewardCoins = 0
+    @State private var rewardTickets = 0
     @State private var attempt = 0
     /// 서버에서 로드한 내 강화 레벨(kind→level). 랭킹 미등록/로드 실패 시 빈 딕셔너리(=강화 0).
     @State private var enhanceLevels: [PetKind: Int] = [:]
 
-    private var leader: GymLeader { GymLeader.leader(for: region) }
     private var owned: [PetKind] { PetKind.allCases.filter { settings.ownedPets[$0] != nil } }
 
     var body: some View {
@@ -32,7 +38,7 @@ struct GymBattleView: View {
             VStack(spacing: 12) {
                 header
                 if let r = result {
-                    BattleReplayView(aSnaps: aSnaps, bSnaps: bSnaps, result: r) {
+                    BattleReplayView(aSnaps: aSnaps, bSnaps: bSnaps, result: r, skins: opponent.skins) {
                         outcomeCard
                     }
                     .id(attempt)   // 재도전 시 완전 리셋(새 재생)
@@ -66,12 +72,16 @@ struct GymBattleView: View {
         HStack(spacing: 10) {
             leaderSprite
             VStack(alignment: .leading, spacing: 2) {
-                Text(leader.name)
+                Text(opponent.name)
                     .font(.system(size: 13, weight: .bold))
                 HStack(spacing: 6) {
-                    PixelIconView(icon: region.pixelIcon, color: .secondary)
-                        .frame(width: 12, height: 12)
-                    Text("\(region.displayName) · \(tier.displayName) 도장전")
+                    if let region = opponent.region {
+                        PixelIconView(icon: region.pixelIcon, color: .secondary)
+                            .frame(width: 12, height: 12)
+                    } else {
+                        Image(systemName: "snowflake").font(.system(size: 10)).foregroundStyle(.secondary)
+                    }
+                    Text(opponent.subtitle)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
@@ -85,13 +95,15 @@ struct GymBattleView: View {
     }
 
     private var leaderSprite: some View {
-        let extraScale: CGFloat = (leader.kind == .kingHuman) ? 1.4 : 1.0
+        let lead = opponent.lead
+        let extraScale: CGFloat = (lead.kind == .kingHuman) ? 1.4 : 1.0
         return ZStack {
-            if let img = PetSprite.image(for: leader.kind, action: .scan, frameIndex: 0) {
+            if let img = PetSprite.composedImage(for: lead.kind, action: .scan, frameIndex: 0,
+                                                 skin: lead.skin, headwear: lead.headwear) {
                 Image(nsImage: img)
                     .resizable().interpolation(.none).scaledToFit()
                     .frame(width: 40, height: 40)
-                    .scaleEffect(x: leader.kind.defaultFacingLeft ? -extraScale : extraScale, y: extraScale)
+                    .scaleEffect(x: lead.kind.defaultFacingLeft ? -extraScale : extraScale, y: extraScale)
             }
         }
         .frame(width: 48, height: 48)
@@ -103,17 +115,15 @@ struct GymBattleView: View {
     private var outcomeCard: some View {
         if didWin {
             VStack(spacing: 4) {
-                Text(rewardCoins > 0
-                     ? "🏅 \(region.displayName) · \(tier.displayName) 도장 획득!"
-                     : "승리 — 이미 획득한 도장")
+                Text(opponent.winHeadline(.init(coins: rewardCoins, premiumTickets: rewardTickets)))
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(.green)
-                if rewardCoins > 0 {
-                    Text("🪙 +\(rewardCoins)")
+                if rewardCoins > 0 || rewardTickets > 0 {
+                    Text("🪙 +\(rewardCoins.formatted())" + (rewardTickets > 0 ? " · 프리미엄 가챠권 +\(rewardTickets)" : ""))
                         .font(.system(size: 12, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.orange)
                 }
-                Text(leader.dialogue(stage: 3))
+                Text(opponent.dialogue(stage: 3))
                     .font(.system(size: 10)).italic()
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -122,10 +132,10 @@ struct GymBattleView: View {
             .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.green.opacity(0.10)))
         } else {
             VStack(spacing: 4) {
-                Text("패배… 관장을 이겨야 도장을 얻습니다")
+                Text(opponent.loseText)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.red)
-                Text(leader.dialogue(stage: 0))
+                Text(opponent.dialogue(stage: 0))
                     .font(.system(size: 10)).italic()
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -177,16 +187,19 @@ struct GymBattleView: View {
         let a = kinds.map { BattlePetSnapshot(kind: $0,
                                               variant: settings.ownedPets[$0]?.unlockedVariants.max() ?? 0,
                                               enhanceLevel: enhanceLevels[$0] ?? 0) }
-        let bTeam = leader.team(tier: tier)
+        let bTeam = opponent.team()
         aSnaps = a
         bSnaps = bTeam.members
         let r = BattleEngine.simulate(teamA: BattleTeam(a), teamB: bTeam, seed: .random(in: 1...UInt64.max))
         if r.winner == .a {
             didWin = true
-            rewardCoins = BadgeRegistry.defeatLeader(region: region, tier: tier)
+            let o = opponent.onWin()
+            rewardCoins = o.coins
+            rewardTickets = o.premiumTickets
         } else {
             didWin = false
             rewardCoins = 0
+            rewardTickets = 0
         }
         result = r
     }

@@ -70,6 +70,10 @@ struct WalkingCat: View {
     var mood: PetMood = .neutral
     /// 현재 날씨 — `.quote`에서 날씨 공통대사를 섞는 데 사용. clear면 종 전용만.
     var weather: WeatherCondition = .clear
+    /// 시즌 머리 장식 리소스명(산타 모자 등). nil이면 없음. `SeasonRegistry`가 준 값을 그대로 받는다.
+    var headwear: String? = nil
+    /// 시즌 대사 풀. 비어 있지 않으면 `.quote`에서 30% 확률로 먼저 뽑는다.
+    var seasonQuotes: [String] = []
     var displayHeight: CGFloat = 18
 
     /// 실제 렌더 높이 — Mythic 펫은 spec.sizeScale(기본 1.5)배 크게 (sprite + 오라가 함께 커진다).
@@ -102,6 +106,7 @@ struct WalkingCat: View {
         ctrl.petKind = kind
         // 날씨도 동일 패턴으로 sync — `.quote`에서 날씨 공통대사 노출 여부 결정.
         ctrl.currentWeather = weather
+        ctrl.seasonQuotes = seasonQuotes
         // bigDropDescent는 O(n) 스캔 + 배열 map — body가 30Hz로 도므로 1번만 계산해
         // sprite()에 전달. 이전엔 speedMultiplier 결정 + sprite 모션 결정으로 2회 호출됐음.
         let descent = bigDropDescent(at: ctrl.x)
@@ -237,6 +242,26 @@ struct WalkingCat: View {
                     x: pos.x + jx,
                     y: pos.y - h / 2 + jy - jumpY
                 )
+
+            // 시즌 머리 장식 — 프레임 알파 스캔으로 찾은 머리 위에 얹는다. sprite가 반전되면 앵커 x도 거울상.
+            // 구르는 중(rollAngle != 0)엔 숨긴다 — 펫 중심 기준 회전을 따라가는 것보다 잠깐 벗는 게 자연스럽다.
+            if let headwear, rollAngle == 0,
+               let hat = PetSprite.image(named: headwear),
+               let anchor = PetSprite.headAnchor(for: kind, action: ctrl.action, frameIndex: ctrl.frameIndex) {
+                let flipped = kind.defaultFacingLeft == ctrl.facingRight
+                // 반전 전 셀 좌표로 배치한 뒤, 반전이면 x만 거울상.
+                let lay = PetSprite.headwearLayout(cellWidth: w, cellHeight: h, anchor: anchor,
+                                                   hatSize: hat.size, facesLeft: kind.defaultFacingLeft)
+                let cx = flipped ? (w - lay.centerX) : lay.centerX
+                let cellTopY = pos.y - h + jy - jumpY
+                Image(nsImage: hat)
+                    .resizable()
+                    .interpolation(.none)
+                    .frame(width: lay.width, height: lay.height)
+                    .scaleEffect(x: flipped ? -1 : 1, y: 1, anchor: .center)
+                    .position(x: pos.x + jx - w / 2 + cx, y: cellTopY + lay.top + lay.height / 2)
+                    .allowsHitTesting(false)
+            }
 
             // 굴러 떨어지는 중(descent > 0)일 때만 우측에 비명 말풍선.
             // 펫의 rotationEffect와 무관하게 upright 유지하려고 sibling으로 배치.
@@ -637,6 +662,9 @@ final class PetController: ObservableObject {
     var petKind: PetKind = .fox
     // 현재 날씨 (body에서 sync, @Published 아님). clear가 아니면 `.quote`에서 날씨 공통대사를 섞는다.
     var currentWeather: WeatherCondition = .clear
+    /// 시즌 대사 풀(WalkingCat이 매 render sync). 비어 있으면 시즌 없음.
+    var seasonQuotes: [String] = []
+    private static let seasonQuoteChance = 0.30
     /// 비/눈/뇌우일 때 `.quote`가 종 전용 대신 날씨 공통대사를 낼 확률.
     private static let weatherQuoteChance = 0.45
 
@@ -757,6 +785,10 @@ final class PetController: ObservableObject {
     /// `.quote` 진입 시 대사 선택. 비/눈/뇌우면 `weatherQuoteChance` 확률로 날씨 공통대사,
     /// 그 외(또는 날씨 풀 없음)는 종 전용 대사.
     private func quoteForContext() -> String {
+        if !seasonQuotes.isEmpty, Double.random(in: 0...1) < Self.seasonQuoteChance,
+           let sq = seasonQuotes.randomElement() {
+            return sq
+        }
         if currentWeather != .clear,
            Double.random(in: 0...1) < Self.weatherQuoteChance,
            let wq = Quotes.randomWeather(for: currentWeather) {

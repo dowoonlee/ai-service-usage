@@ -44,6 +44,8 @@ export interface GenerateOptions {
   workspaceId?: string;
   /** 이 사용자의 최근 운세 본문(최신순). 구조·소재·어미 반복을 피하게 하는 유일한 수단 — 모델은 어제 쓴 글을 모른다. */
   recentTexts?: string[];
+  /** 시기 힌트(새해 첫 사흘 등, `_shared/season.ts`의 `fortuneSeasonHint`). 없으면 평소 프롬프트 그대로. */
+  seasonHint?: string | null;
 }
 
 export function buildSystemPrompt(): string {
@@ -68,7 +70,7 @@ export async function generateFortune(
   opts: GenerateOptions = {},
 ): Promise<FortuneGeneration> {
   const style = styleGuideFor(saju, daily);
-  const userPrompt = buildUserPrompt(saju, daily, style, opts.recentTexts ?? []);
+  const userPrompt = buildUserPrompt(saju, daily, style, opts.recentTexts ?? [], opts.seasonHint ?? null);
   const base = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
 
   const headers: Record<string, string> = {
@@ -129,6 +131,7 @@ export function buildUserPrompt(
   daily: Record<string, unknown>,
   style: FortuneStyleGuide,
   recentTexts: string[] = [],
+  seasonHint: string | null = null,
 ): string {
   const year = pillarName(saju.year);
   const month = pillarName(saju.month);
@@ -152,6 +155,7 @@ export function buildUserPrompt(
     `[형식] ${style.format}`,
     `[소재 힌트] ${style.theme}`,
   ];
+  if (seasonHint) lines.push(`[시기] ${seasonHint}`);
   const recent = recentTexts
     .filter((t) => typeof t === "string" && t.trim().length > 0)
     .slice(0, MAX_RECENT)

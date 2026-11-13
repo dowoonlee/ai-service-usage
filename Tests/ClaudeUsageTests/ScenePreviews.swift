@@ -97,7 +97,56 @@ final class ScenePreviews: SandboxedTestCase {
     }
 
     func testRenderReportTab() throws {
-        try renderTab(ReportView(), title: "탭-4-레포트", note: "트레이너 카드 + 꾸미기 상점")
+        try renderTab(ReportView(grassNow: PreviewDemoState.grassNow), title: "탭-4-레포트",
+                      note: "트레이너 카드 + 리포트 모드(이번 달 잔디, 11/18 고정)")
+    }
+
+    /// 12월 시즌 강제 — 상점에 한정 아이템("한정" 뱃지)이 보이는지. 파티 탭(맵 상점)과 꾸미기 모드.
+    func testRenderSeasonXmasShops() throws {
+        SeasonRegistry.override = .season(.xmas)
+        defer { SeasonRegistry.override = Override.none }
+        // 리포트 모드 — 잔디에 눈 장식·보상 마크(수령 점·대기 점선)·"보상 N/24"·안내문.
+        PreviewDemoState.seedDailyVP(now: PreviewDemoState.xmasNow)
+        PreviewDemoState.seedXmasRewards()
+        try renderTab(ReportView(grassNow: PreviewDemoState.xmasNow), title: "탭-4-레포트-12월",
+                      note: "12/18 고정. 불 켜진 셀 위 눈, 수령일 붉은 점, 18일 점선(도착 대기), 일요일 빈 칸")
+        try renderTab(PartyView(), title: "탭-2-파티-12월", note: "맵 상점에 겨울밤(한정) 카드가 보이는지")
+        // 도장 탭 — 맵 위 하늘에 뜬 이벤트 섬이 겨울 관장의 진입점. 섬을 고르기 전엔 평소 지역 화면 그대로.
+        Settings.shared.seasonalFlags.insert("boss:xmas-2026:localhost")
+        try renderTab(GymView(eventNow: PreviewDemoState.xmasNow), title: "탭-3-도장-12월",
+                      note: "맵이 위로 늘어나고(220→289) 두 대륙 사이 하늘에 눈 섬 + 이름표. 지상 지역 크기는 평소와 같아야 한다")
+        // 섬을 고른 상태 — 지역 관장·카테고리 자리에 보스 카드. 12/18이면 오픈일은 다 지났고 사용 일수도 충분해 전부 열림.
+        try renderTab(GymView(initialEventSelected: true, eventNow: PreviewDemoState.xmasNow),
+                      title: "탭-3-도장-12월-섬선택",
+                      note: "겨울 관장 카드 — Rudolph(사슴+모자), tier 4개 전부 열림(localhost는 격파). 섬이 밝게 강조되는지")
+        // 11/25 — 보스는 열렸고 시즌 연출은 아직. dev까지 열리고 staging·production은 오픈일 대기.
+        let nov25 = Calendar.kst.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 12))!
+        try renderTab(GymView(initialEventSelected: true, eventNow: nov25), title: "탭-3-도장-11월25일-섬선택",
+                      note: "tier 잠금 문구 — 날짜가 안 된 tier는 '11/30 오픈'·'12/7 오픈'. 사용 일수는 11/16부터 센다")
+        // 12/18인데 늦게 시작해 사흘·150 VP뿐 — 날짜는 다 지났고 참여량이 모자란 잠금 문구("6일 또는 1,000VP").
+        Settings.shared.dailyVP = ["2026-12-16": 40, "2026-12-17": 60, "2026-12-18": 50]
+        try renderTab(GymView(initialEventSelected: true, eventNow: PreviewDemoState.xmasNow),
+                      title: "탭-3-도장-12월-참여부족",
+                      note: "오픈일은 지났지만 사용 일수·VP가 둘 다 모자란 tier — 버튼에 두 기준이 잘리지 않고 들어가는지")
+        // 맵만 — 월드 뷰와 섬 줌인. 밑동 바위·그림자·구름으로 "떠 있는 섬"이 읽히는지, 눈이 맵 전체에 내리는지.
+        let boss = SeasonRegistry.season(.xmas)!.boss!
+        for (title, zoomed) in [("map-xmas-월드", false), ("map-xmas-섬", true)] {
+            try PreviewRenderer.renderInWindow(
+                WorldMapView(selected: .constant(.coffee), island: boss.island,
+                             islandSelected: .constant(zoomed), islandAvatar: boss.lead, initiallyZoomed: zoomed),
+                size: CGSize(width: windowWidth, height: GymView.mapHeight(hasIsland: true)),
+                section: "월드맵 · 12월", title: title,
+                note: zoomed ? "섬 줌인 — 도장·트리·눈사람·소나무, 걷는 Rudolph, 미니맵에 섬과 뷰포트"
+                             : "월드 뷰 — 하늘 띠의 눈 섬, 바다 위 그림자, 구름, 이름표")
+        }
+        try renderTab(ReportView(initialMode: .customize, grassNow: PreviewDemoState.grassNow),
+                      title: "탭-4-레포트-꾸미기-12월",
+                      note: "액세서리 11종(한정 3종 뱃지)·칭호 구매 가능 묶음에 12월 한정이 붉은 테두리로")
+    }
+
+    func testRenderReportCustomizeMode() throws {
+        try renderTab(ReportView(initialMode: .customize), title: "탭-4-레포트-꾸미기",
+                      note: "꾸미기 모드 — 칭호 세 묶음 그리드·액세서리 줄바꿈이 잘리지 않는지")
     }
 
     func testRenderArenaTab() throws {

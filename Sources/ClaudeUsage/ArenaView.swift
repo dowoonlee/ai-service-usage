@@ -505,6 +505,8 @@ struct ArenaView: View {
                 pvpDailyUsed = resp.dailyUsed
                 pvpDailyLimit = resp.dailyLimit
                 if resp.winner == "me" { pvpWins += 1 } else if resp.winner == "opp" { pvpLosses += 1 }
+                RecapLog.record(RecapEvent(at: Date(), kind: .arenaRanked, result: resp.winner,
+                                           value: resp.ratingDelta))
                 // 승리 코인(로컬 경제) — 서버 금액을 로컬 원장에 크레딧(명명된 진입점, #166).
                 if resp.coinReward > 0 { CoinLedger.shared.creditBattleWin(resp.coinReward, winner: resp.winner) }
                 await loadRankedState()   // 랭킹·전적 갱신(새 매치 반영)

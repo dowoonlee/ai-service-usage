@@ -110,14 +110,26 @@ final class NotificationManager {
     // pvp 시즌 보상은 별도 grant 트랙을 만들지 않고 범용 pendingGrant + 이 grantKey prefix로 구분한다
     // (#166 결정) — 적립·dedup은 범용 경로가 정상 처리하고, 전용 트랙 분리는 실익 없이 복잡도만 늘린다.
     func rewardGrantEarned(currency: String, amount: Int, grantKey: String = "") {
+        let copy = Self.grantCopy(currency: currency, amount: amount, grantKey: grantKey)
+        send(title: copy.title, body: copy.body)
+    }
+
+    /// grant 알림 문구 — grantKey 접두로 분기. 순수 함수라 테스트 가능.
+    ///   pvp-season-* : 아레나 시즌 / advent-<y>-12-<DD> : 12월 일일 보상 / advent-<y>-complete : 12월 완주
+    nonisolated static func grantCopy(currency: String, amount: Int, grantKey: String) -> (title: String, body: String) {
         let unit = currency == "rp" ? "RP" : "코인"
         if grantKey.hasPrefix("pvp-season") {
-            send(title: "🏆 아레나 시즌 보상",
-                 body: "지난 시즌 순위 보상 +\(amount) \(unit)이 적립되었습니다!")
-        } else {
-            send(title: "🎁 보상 도착",
-                 body: "+\(amount) \(unit)이 적립되었습니다!")
+            return ("🏆 아레나 시즌 보상", "지난 시즌 순위 보상 +\(amount) \(unit)이 적립되었습니다!")
         }
+        if grantKey.hasPrefix("advent-") {
+            if grantKey.hasSuffix("-complete") {
+                return ("🎄 12월 완주", "20일을 채웠습니다. +\(amount) \(unit) · 칭호 \"12월 완주\" 해금")
+            }
+            if let day = grantKey.split(separator: "-").last.flatMap({ Int($0) }) {
+                return ("🎄 12월 \(day)일 보상", "오늘도 썼군요. +\(amount) \(unit)이 적립되었습니다.")
+            }
+        }
+        return ("🎁 보상 도착", "+\(amount) \(unit)이 적립되었습니다!")
     }
 
     /// 개인 순위 정산 RP 알림 — 주간(월요일)·월간(1일) claim 성공 시 각 1회.

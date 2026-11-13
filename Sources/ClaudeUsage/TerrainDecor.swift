@@ -17,6 +17,7 @@ enum TerrainMotif {
     case petal       // 꽃잎 (벚꽃)
     case rain        // 빗줄기 (뇌우)
     case bubble      // 기포 (독성 늪)
+    case bulb        // 전구 (겨울밤 — 빨강·노랑·초록 점이 줄에 매달림)
 }
 
 extension PetTheme {
@@ -34,6 +35,7 @@ extension PetTheme {
         case .sakura:       return .petal
         case .storm:        return .rain
         case .toxic:        return .bubble
+        case .winterNight:  return .bulb
         }
     }
 }
@@ -74,6 +76,7 @@ struct TerrainDecor: View {
         case .petal:            spacing = 15
         case .rain:             spacing = 9
         case .bubble:           spacing = 15
+        case .bulb:             spacing = 12
         case .wave, .dune:      spacing = 1   // 연속 곡선 — 개수 무관
         }
 
@@ -98,6 +101,7 @@ struct TerrainDecor: View {
             case .petal:     drawPetal(ctx, x: x, baseY: baseY, i: i)
             case .rain:      drawRain(ctx, x: x, baseY: baseY, i: i)
             case .bubble:    drawBubble(ctx, x: x, baseY: baseY, i: i)
+            case .bulb:      drawBulb(ctx, x: x, baseY: baseY, i: i)
             case .wave, .dune: break // 위에서 처리됨
             }
         }
@@ -175,6 +179,23 @@ struct TerrainDecor: View {
         let y = baseY - h(i, 4) * band
         let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
         ctx.stroke(Path(ellipseIn: rect), with: .color(theme.lineColor.opacity(0.40 + 0.35 * h(i, 5))), lineWidth: 0.8)
+    }
+
+    // 전구: 바닥 위 줄에 매달린 작은 원 — 빨강·노랑·초록이 번갈아. 겨울밤 전용.
+    private func drawBulb(_ ctx: GraphicsContext, x: CGFloat, baseY: CGFloat, i: Int) {
+        let colors: [Color] = [
+            Color(hue: 0.00, saturation: 0.80, brightness: 0.95),
+            Color(hue: 0.14, saturation: 0.85, brightness: 0.98),
+            Color(hue: 0.36, saturation: 0.75, brightness: 0.85),
+        ]
+        let r = 1.2 + 0.6 * h(i, 2)
+        let y = baseY - band * 0.55 - h(i, 4) * 2
+        var wire = Path()
+        wire.move(to: CGPoint(x: x - 6, y: y - r - 1.5))
+        wire.addQuadCurve(to: CGPoint(x: x + 6, y: y - r - 1.5), control: CGPoint(x: x, y: y - r + 0.5))
+        ctx.stroke(wire, with: .color(.white.opacity(0.18)), lineWidth: 0.7)
+        let rect = CGRect(x: x - r, y: y - r, width: r * 2, height: r * 2)
+        ctx.fill(Path(ellipseIn: rect), with: .color(colors[i % colors.count].opacity(0.55 + 0.35 * h(i, 5))))
     }
 
     // 물결: 바닥을 따라 흐르는 sin 가로선 2줄.

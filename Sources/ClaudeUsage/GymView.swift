@@ -9,14 +9,22 @@ import SwiftUI
 struct GymView: View {
     @ObservedObject var settings: Settings = .shared
     @State private var selectedRegion: BadgeRegion = .coffee
+    /// 시즌 이벤트 섬을 골랐는지. 섬은 `BadgeRegion`이 아니라 따로 든다 — 고르면 관장·카테고리 자리에 보스 카드가 온다.
+    @State private var eventSelected = false
     /// 호버된 뱃지 ID (BadgeID.key). nil이면 tooltip 숨김.
     @State private var hoveredKey: String?
     /// 진행 중인 관장 배틀(sheet 트리거). nil이면 배틀 창 닫힘.
     @State private var activeBattle: GymBattleRequest?
 
-    init(settings: Settings? = nil, initialRegion: BadgeRegion = .coffee) {
+    /// 시즌 보스 판정의 "지금" — 프리뷰가 날짜를 고정할 때만 넣는다. 앱은 nil(실제 시각).
+    private let eventNow: Date?
+
+    init(settings: Settings? = nil, initialRegion: BadgeRegion = .coffee, initialEventSelected: Bool = false,
+         eventNow: Date? = nil) {
+        self.eventNow = eventNow
         self.settings = settings ?? .shared
         self._selectedRegion = State(initialValue: initialRegion)
+        self._eventSelected = State(initialValue: initialEventSelected)
     }
 
     // 설명이 추가된 업적 카드도 최소 560×640 창에서 모두 접근할 수 있도록 전체 페이지를 스크롤한다.
@@ -24,16 +32,29 @@ struct GymView: View {
         ScrollView {
             VStack(spacing: 12) {
                 header
-                WorldMapView(selected: $selectedRegion)
-                    .frame(height: 220)
+                // 시즌 보스의 진입점은 맵 위 하늘에 뜬 이벤트 섬이다. 섬이 있는 동안 월드가 위로 늘어나므로
+                // 맵 높이도 같은 비율로 키워 지상 지역이 평소와 같은 크기로 보이게 한다.
+                // 보스는 자기 창(`SeasonalBoss.window`)을 따른다. 맵 눈은 시즌 연출이 켜졌을 때.
+                let event = SeasonRegistry.activeBoss(now: eventNow ?? SeasonClock.now())
+                let season = event?.season
+                let boss = event?.boss
+                let onIsland = eventSelected && boss != nil
+                WorldMapView(selected: $selectedRegion, island: boss?.island,
+                             islandSelected: $eventSelected, islandAvatar: boss?.lead,
+                             snowing: SeasonRegistry.active()?.ambient != nil)
+                    .frame(height: Self.mapHeight(hasIsland: boss != nil))
                     .clipShape(RoundedRectangle(cornerRadius: AppRadius.lg))
                     .overlay(
                         RoundedRectangle(cornerRadius: AppRadius.lg)
                             .stroke(Color.secondary.opacity(0.25), lineWidth: 0.5)
                     )
-                gymLeaderSection
-                Divider()
-                categorySection
+                if onIsland, let season, let boss {
+                    seasonBossSection(season: season, boss: boss)
+                } else {
+                    gymLeaderSection
+                    Divider()
+                    categorySection
+                }
             }
             .padding(16)
         }
@@ -43,8 +64,15 @@ struct GymView: View {
             }
         }
         .sheet(item: $activeBattle) { req in
-            GymBattleView(region: req.region, tier: req.tier)
+            GymBattleView(opponent: req.opponent)
         }
+    }
+
+    /// 맵 높이 — 평소 220. 이벤트 섬이 있으면 하늘 띠(`EventIsland.skyRows`)만큼 같은 비율로 늘린다.
+    nonisolated static func mapHeight(hasIsland: Bool) -> CGFloat {
+        let base: CGFloat = 220
+        guard hasIsland else { return base }
+        return (base * CGFloat(WorldMap.rows + EventIsland.skyRows) / CGFloat(WorldMap.rows)).rounded()
     }
 
     /// 맵과 카테고리 사이 — selected region의 관장 sprite + 진척도별 대사 + 도전 게이트.
@@ -575,9 +603,113 @@ struct BadgeTierTooltip: View {
 
 /// 관장 배틀 sheet 트리거 — region + 도전 tier. id는 조합 키(같은 조합이면 동일 sheet).
 struct GymBattleRequest: Identifiable {
-    let region: BadgeRegion
-    let tier: BadgeTier
-    var id: String { "\(region.rawValue).\(tier.rawValue)" }
+    let opponent: GymOpponent
+    var id: String { opponent.id }
+    init(opponent: GymOpponent) { self.opponent = opponent }
+    init(region: BadgeRegion, tier: BadgeTier) { self.opponent = .region(region, tier) }
+}
+
+// MARK: - 시즌 보스 카드
+
+extension GymView {
+    /// 시즌 보스 카드 — 스프라이트(스킨+모자) + 말풍선 + tier 버튼 4개. tier는 3번 보상 일수로 열린다.
+    /// 월드맵의 이벤트 섬을 고르면 지역 관장·카테고리 자리에 나온다. cf. docs/plans/seasonal-events.md §26
+    @ViewBuilder
+    func seasonBossSection(season: Season, boss: SeasonalBoss) -> some View {
+        let now = eventNow ?? SeasonClock.now()
+        let usage = boss.usage(dailyVP: settings.dailyVP, now: now)
+        let days = usage.days
+        let productionCleared = boss.isCleared(tier: .production, season: season, now: now, settings: settings)
+        let stage = SeasonalBoss.stage(usageDays: days, productionCleared: productionCleared)
+        VStack(spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                ZStack {
+                    if let img = PetSprite.composedImage(for: boss.lead.kind, action: .scan, frameIndex: 0,
+                                                         skin: boss.lead.skin, headwear: boss.lead.headwear) {
+                        Image(nsImage: img)
+                            .resizable().interpolation(.none).scaledToFit()
+                            .frame(width: 52, height: 52)
+                            .scaleEffect(x: boss.lead.kind.defaultFacingLeft ? -1 : 1, y: 1)
+                    }
+                }
+                .frame(width: 64, height: 64)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "snowflake").font(.system(size: 9)).foregroundStyle(.cyan)
+                        Text("\(season.displayName) 관장 · \(boss.name)")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(boss.title)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                        if productionCleared {
+                            Text("VICTORY").font(.system(size: 9, weight: .bold)).foregroundStyle(.yellow)
+                        }
+                    }
+                    Text(boss.dialogue(stage: stage))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.black)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, 16).padding(.trailing, 10).padding(.vertical, 6)
+                        .background(SpeechBubble(tailWidth: 8, tailHeight: 6, cornerRadius: AppRadius.lg).fill(Color.white))
+                        .overlay(SpeechBubble(tailWidth: 8, tailHeight: 6, cornerRadius: AppRadius.lg)
+                            .stroke(Color.black.opacity(0.4), lineWidth: 0.8))
+                }
+            }
+            HStack(spacing: 6) {
+                ForEach(BadgeTier.allCases, id: \.self) { tier in
+                    bossTierButton(season: season, boss: boss, tier: tier,
+                                   lock: boss.lock(tier: tier, usage: usage, now: now),
+                                   cleared: boss.isCleared(tier: tier, season: season, now: now, settings: settings))
+                }
+            }
+            Text("사용 \(usage.days)일 · \(usage.vp.formatted()) VP · 오픈일이 지나고 사용 일수나 누적 VP 중 하나를 채우면 다음 tier가 열립니다. 보상은 tier당 1회.")
+                .fixedSize(horizontal: false, vertical: true)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: AppRadius.lg)
+                .fill(Color(hue: 0.64, saturation: 0.45, brightness: 0.22).opacity(0.35))
+        )
+        .overlay(RoundedRectangle(cornerRadius: AppRadius.lg).stroke(Color.cyan.opacity(0.35), lineWidth: 0.8))
+    }
+
+    private func bossTierButton(season: Season, boss: SeasonalBoss, tier: BadgeTier,
+                                lock: SeasonalBoss.TierLock?, cleared: Bool) -> some View {
+        let reward = boss.rewards[tier]
+        let isOpen = lock == nil
+        // 잠김 사유 — 날짜가 안 됐으면 날짜를, 날짜는 됐는데 일수가 모자라면 일수를 보여 준다.
+        let lockText: String = {
+            switch lock {
+            case .date(let m, let d): return "\(m)/\(d) 오픈"
+            case .usage(_, let needDays, let needVP): return "\(needDays)일 또는 \(needVP.formatted())VP"
+            case nil: return ""
+            }
+        }()
+        return Button {
+            activeBattle = GymBattleRequest(opponent: .boss(season, boss, tier))
+        } label: {
+            VStack(spacing: 2) {
+                HStack(spacing: 3) {
+                    Image(systemName: cleared ? "checkmark.seal.fill" : (isOpen ? "flame.fill" : "lock.fill"))
+                        .font(.system(size: 9))
+                    Text(tier.displayName).font(.system(size: 10, weight: .bold))
+                }
+                Text(isOpen
+                     ? (cleared ? "격파" : "🪙\(reward?.coins.formatted() ?? "0")" + ((reward?.premiumTickets ?? 0) > 0 ? " +가챠권" : ""))
+                     : lockText)
+                    .font(.system(size: 8, design: .monospaced))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(cleared ? .green : Self.strokeColor(for: tier))
+        .disabled(!isOpen)
+    }
 }
 
 // MARK: - Color hex helper

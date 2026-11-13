@@ -1264,6 +1264,221 @@ enum PetSprite {
         return f[frameIndex % f.count]
     }
 
+    // MARK: - 스킨 (시즌 보스 리컬러) + 머리 장식 합성
+
+    nonisolated(unsafe) private static let skinCache = NSCache<NSString, NSImage>()
+    nonisolated(unsafe) private static let skinContext = CIContext(options: nil)
+
+    /// 스킨을 입힌 프레임. `skin == nil`이면 원본. (kind, action, frame, skin) 캐시.
+    static func image(for kind: PetKind, action: PetController.Action, frameIndex: Int, skin: PetSkin?) -> NSImage? {
+        guard let skin else { return image(for: kind, action: action, frameIndex: frameIndex) }
+        let f = frames(for: kind, action: action)
+        guard !f.isEmpty else { return nil }
+        let idx = frameIndex % f.count
+        let key = "\(kind.rawValue)/\(action)/\(idx)/skin:\(skin.rawValue)" as NSString
+        if let cached = skinCache.object(forKey: key) { return cached }
+        let out = applySkin(f[idx], skin)
+        skinCache.setObject(out, forKey: key)
+        return out
+    }
+
+    /// 리컬러 필터. 외곽선(어두운 픽셀)은 어둡게 남아 도트 느낌이 유지된다.
+    static func applySkin(_ image: NSImage, _ skin: PetSkin) -> NSImage {
+        guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+              let cg = bitmap.cgImage else { return image }
+        var ci = CIImage(cgImage: cg)
+        switch skin {
+        case .snow:
+            // 단색화 뒤 톤 커브로 중간톤을 흰색까지 끌어올린다. 밝기/대비 조절(1·2차 프리뷰)은 몸통이 회색에
+            // 머물거나 외곽선이 같이 날아갔다 — 커브는 0(외곽선)은 0에 고정하고 0.25부터 급하게 올려
+            // 어두운 선은 남기고 몸통만 희게 만든다.
+            ci = ci.applyingFilter("CIColorMonochrome", parameters: [
+                kCIInputColorKey: CIColor(red: 0.94, green: 0.97, blue: 1.0),
+                kCIInputIntensityKey: 1.0,
+            ])
+            .applyingFilter("CIToneCurve", parameters: [
+                "inputPoint0": CIVector(x: 0.00, y: 0.00),
+                "inputPoint1": CIVector(x: 0.22, y: 0.62),
+                "inputPoint2": CIVector(x: 0.45, y: 0.90),
+                "inputPoint3": CIVector(x: 0.70, y: 0.97),
+                "inputPoint4": CIVector(x: 1.00, y: 1.00),
+            ])
+        }
+        guard let out = skinContext.createCGImage(ci, from: ci.extent) else { return image }
+        return NSImage(cgImage: out, size: image.size)
+    }
+
+    /// 스킨 + 머리 장식을 한 장에 합성(위로 모자 높이만큼 여유). 도장 카드·배틀 시트·재생 썸네일 공용.
+    /// WalkingCat·메뉴바와 같은 배치식(높이 42%, 상단이 머리 위로 20% 넘침).
+    static func composedImage(for kind: PetKind, action: PetController.Action, frameIndex: Int,
+                              skin: PetSkin?, headwear: String?) -> NSImage? {
+        guard let frame = image(for: kind, action: action, frameIndex: frameIndex, skin: skin) else { return nil }
+        guard let headwear, let hat = image(named: headwear),
+              let anchor = headAnchor(for: kind, action: action, frameIndex: frameIndex) else { return frame }
+        let key = "\(kind.rawValue)/\(action)/\(frameIndex % max(1, frames(for: kind, action: action).count))/skin:\(skin?.rawValue ?? "-")/hat:\(headwear)" as NSString
+        if let cached = skinCache.object(forKey: key) { return cached }
+        let w = frame.size.width, h = frame.size.height
+        let lay = headwearLayout(cellWidth: w, cellHeight: h, anchor: anchor, hatSize: hat.size,
+                                 facesLeft: kind.defaultFacingLeft)
+        let headroom = max(0, -lay.top)
+        let out = NSImage(size: NSSize(width: w, height: h + headroom))
+        out.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .none
+        frame.draw(in: NSRect(x: 0, y: 0, width: w, height: h), from: .zero, operation: .sourceOver, fraction: 1)
+        // y-up 변환: 캔버스 높이 = h + headroom, 셀 상단은 y = h 가 아니라 h + headroom - 0 … 셀을 바닥(0)에 두었으므로
+        // 셀 좌표 top(아래로 양수) → y = h - top - height.
+        hat.draw(in: NSRect(x: lay.centerX - lay.width / 2, y: h - lay.top - lay.height,
+                            width: lay.width, height: lay.height),
+                 from: .zero, operation: .sourceOver, fraction: 1)
+        out.unlockFocus()
+        skinCache.setObject(out, forKey: key)
+        return out
+    }
+
+    // MARK: - 머리 장식 배치 (공용)
+
+    /// 머리 장식의 위치·크기 — 스프라이트 셀 좌표(원점 좌상단, y 아래로), **반전 전** 기준.
+    /// WalkingCat·메뉴바·합성 이미지가 전부 이 값을 써서 세 곳이 어긋나지 않는다.
+    struct HeadwearLayout: Equatable {
+        let centerX: CGFloat
+        let top: CGFloat
+        let width: CGFloat
+        let height: CGFloat
+    }
+
+    /// 배치 규칙(사용자 검수로 조정됨):
+    ///   * 높이 = 셀 높이의 42%.
+    ///   * 세로: 모자 바닥이 머리 꼭대기보다 `height × 0.35`만큼 아래 — 머리에 "눌러쓴" 느낌. (처음 0.20은 떠 보였다.)
+    ///   * 가로: 상단 밴드 x 중심에서 **바라보는 방향으로 셀 폭의 10%** 전진 — 옆모습 동물은 가장 높은 곳이
+    ///     등·귀라 중심을 그대로 쓰면 모자가 뒤통수에 얹힌다.
+    nonisolated static func headwearLayout(cellWidth w: CGFloat, cellHeight h: CGFloat,
+                                           anchor: HeadAnchor, hatSize: CGSize,
+                                           facesLeft: Bool) -> HeadwearLayout {
+        let height = h * 0.42
+        let width = height * (hatSize.width / max(1, hatSize.height))
+        let forward: CGFloat = (facesLeft ? -1 : 1) * w * 0.10
+        let headTop = anchor.top * h
+        return HeadwearLayout(centerX: anchor.x * w + forward,
+                              top: headTop + height * 0.35 - height,
+                              width: width, height: height)
+    }
+
+    // MARK: - 머리 앵커 (시즌 headwear)
+
+    /// 프레임 안에서 "머리"의 위치 — 셀 기준 정규화(0...1). `x`는 머리 x 중심, `top`은 가장 위 불투명 행.
+    /// 195종의 cellSize·여백이 전부 달라 셀 상단 고정은 작은 펫에서 모자가 공중에 뜬다 — 알파를 직접 스캔한다.
+    struct HeadAnchor: Equatable {
+        let x: CGFloat
+        let top: CGFloat
+    }
+
+    private final class AnchorBox { let anchor: HeadAnchor?; init(_ a: HeadAnchor?) { anchor = a } }
+    nonisolated(unsafe) private static let anchorCache = NSCache<NSString, AnchorBox>()
+
+    /// 알파 스캔으로는 못 잡는 종의 수동 앵커(셀 정규화, 반전 전). 날개·잎이 머리보다 높은 종 — 검수 시트에서
+    /// 사용자가 지목한 것만 넣는다. `headwearLayout`의 전진 10%가 더해지므로, 원하는 중심에서 바라보는 방향의
+    /// **반대쪽으로 0.10** 적어 둔다(박쥐·파랑새·무는 전부 왼쪽을 봄 → +0.10).
+    nonisolated static let headAnchorOverrides: [PetKind: HeadAnchor] = [
+        .bat:      HeadAnchor(x: 0.60, top: 0.13),   // 머리 x 0.50 — 날개 끝이 더 높아 자동 규칙이 날개를 잡는다
+        .blueBird: HeadAnchor(x: 0.79, top: 0.28),   // 머리 x 0.69 — 부리가 앞으로 길어 중심이 부리로 쏠린다
+        .radish:   HeadAnchor(x: 0.60, top: 0.32),   // 몸통 꼭대기 — 잎 끝(0.13)에 얹으면 공중에 뜬다
+        .bear:     HeadAnchor(x: 0.35, top: 0.24),   // 머리 x 0.25 — 걷기 프레임은 등과 머리 높이가 비슷해 앞쪽 규칙이 안 걸린다
+        .snail:    HeadAnchor(x: 0.34, top: 0.50),   // 눈 위 — 껍데기가 가장 높아 자동 규칙이 껍데기를 잡는다
+        // 오른쪽을 보는 종은 −0.10.
+        .snipCrab: HeadAnchor(x: 0.46, top: 0.50),   // 눈자루 사이 — 들어 올린 집게가 더 높다
+        .hermie:   HeadAnchor(x: 0.59, top: 0.75),   // 머리(눈) — 소라 껍데기가 더 높다
+        .kingHuman: HeadAnchor(x: 0.30, top: 0.31),  // 왕관 위 — 가로로 긴 셀에 방패가 앞쪽이라 앞쪽 규칙이 방패를 잡는다
+        // 사용자 지목 2차 (시트 2·3·6)
+        .turtle:   HeadAnchor(x: 0.60, top: 0.15),   // 등딱지 꼭대기 가시 사이 (왼쪽 봄)
+        .dwarfF:   HeadAnchor(x: 0.40, top: 0.29),   // 머리카락 위
+        .elfF:     HeadAnchor(x: 0.40, top: 0.50),   // 머리카락 위 — 셀 위 절반이 비어 있다
+        .angel:    HeadAnchor(x: 0.46, top: 0.19),   // 후광 위
+        .imp:      HeadAnchor(x: 0.40, top: 0.31),   // 뿔 사이
+        .tinySlug: HeadAnchor(x: 0.46, top: 0.19),   // 눈자루 위
+        .orc:      HeadAnchor(x: 0.43, top: 0.19),   // 뿔 사이 — 가로로 긴 셀에 창이 앞쪽
+        .orangeFruit: HeadAnchor(x: 0.46, top: 0.59),// 몸통 꼭대기 — 잎이 더 높다
+    ]
+
+    /// 알파 스캔 결과에 더하는 보정(셀 정규화, 반전 전). 고정 앵커와 달리 프레임을 따라간다 — 머리를 숙이는 프레임이
+    /// 있는 종에 쓴다. 사슴은 가는 뿔 끝이 꼭대기라 모자가 뿔에 얹히고, 흰 스킨(Rudolph)은 눈밭에서 뿔이 안 보여
+    /// 모자가 공중에 떠 보였다 — 뿔 높이의 절반쯤 내리고 뿔 뒤(머리 쪽)로 민다.
+    nonisolated static let headAnchorAdjust: [PetKind: (dx: CGFloat, dTop: CGFloat)] = [
+        .deer: (dx: 0.05, dTop: 0.115),
+    ]
+
+    /// (kind, action, frameIndex)별 캐시. 알파 스캔은 첫 1회뿐이라 30Hz 메뉴바에서도 비용이 없다.
+    /// 전부 투명한 프레임(없어야 하지만)은 nil. 수동 앵커가 있으면 프레임과 무관하게 그 값.
+    static func headAnchor(for kind: PetKind, action: PetController.Action, frameIndex: Int) -> HeadAnchor? {
+        if let fixed = headAnchorOverrides[kind] { return fixed }
+        let f = frames(for: kind, action: action)
+        guard !f.isEmpty else { return nil }
+        let idx = frameIndex % f.count
+        let key = "\(kind.rawValue)/\(action)/\(idx)" as NSString
+        if let cached = anchorCache.object(forKey: key) { return cached.anchor }
+        var anchor = scanHeadAnchor(f[idx], facesLeft: kind.defaultFacingLeft)
+        if let adj = headAnchorAdjust[kind], let a = anchor {
+            anchor = HeadAnchor(x: a.x + adj.dx, top: a.top + adj.dTop)
+        }
+        anchorCache.setObject(AnchorBox(anchor), forKey: key)
+        return anchor
+    }
+
+    /// 가장 위 불투명 행을 찾고, 그 행부터 셀 높이의 1/6 구간에 있는 불투명 픽셀의 x 평균을 머리 중심으로 본다.
+    /// (몸통 전체 평균을 쓰면 꼬리·날개가 중심을 끌어가 모자가 등에 얹힌다.)
+    ///
+    /// 옆모습인데 **등이 머리보다 높은** 종(곰·멧돼지)은 전체 꼭대기가 등이라 모자가 등에 얹혔다(검수 시트).
+    /// 그래서 **가로로 긴(폭 > 높이×1.3) 옆모습**에 한해 바라보는 방향 앞쪽 30% 폭의 꼭대기를 따로 재고,
+    /// 그게 전체 꼭대기보다 셀 높이의 12% 이상 낮으면 앞쪽을 머리로 본다. 세로로 긴 정면 캐릭터·로봇은
+    /// 앞쪽 구간이 팔이나 어깨라 이 규칙을 끄고 기존 중심 규칙을 쓴다(miniBot이 어깨에 쓰는 사고).
+    static func scanHeadAnchor(_ image: NSImage, facesLeft: Bool = false, alphaThreshold: UInt8 = 64) -> HeadAnchor? {
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        let w = cg.width, h = cg.height
+        guard w > 0, h > 0 else { return nil }
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        // 비트맵 컨텍스트의 메모리 첫 행이 이미지의 **맨 위**다(좌표계는 y-up이지만 저장은 top-down).
+        func alpha(_ x: Int, _ yFromTop: Int) -> UInt8 { pixels[(yFromTop * w + x) * 4 + 3] }
+        var topRow: Int? = nil
+        outer: for y in 0..<h {
+            for x in 0..<w where alpha(x, y) >= alphaThreshold { topRow = y; break outer }
+        }
+        guard let top = topRow else { return nil }
+        let band = Swift.max(2, h / 6)
+        func centroid(top: Int, xRange: Range<Int>) -> HeadAnchor? {
+            var sumX = 0, n = 0
+            for y in top..<Swift.min(h, top + band) {
+                for x in xRange where alpha(x, y) >= alphaThreshold { sumX += x; n += 1 }
+            }
+            guard n > 0 else { return nil }
+            return HeadAnchor(x: (CGFloat(sumX) / CGFloat(n) + 0.5) / CGFloat(w), top: CGFloat(top) / CGFloat(h))
+        }
+        // 불투명 영역의 가로·세로 범위 → 가로로 긴 옆모습만 앞쪽 규칙.
+        var minX = w, maxX = -1, bottom = top
+        for y in 0..<h {
+            for x in 0..<w where alpha(x, y) >= alphaThreshold {
+                minX = Swift.min(minX, x); maxX = Swift.max(maxX, x); bottom = y
+            }
+        }
+        guard maxX >= minX else { return nil }
+        let span = maxX - minX + 1
+        let tall = bottom - top + 1
+        guard Double(span) > Double(tall) * 1.3 else { return centroid(top: top, xRange: 0..<w) }
+        let frontW = Swift.max(1, Int((Double(span) * 0.30).rounded()))
+        let front: Range<Int> = facesLeft ? minX..<(minX + frontW) : (maxX - frontW + 1)..<(maxX + 1)
+        var frontTop: Int? = nil
+        outerFront: for y in 0..<h {
+            for x in front where alpha(x, y) >= alphaThreshold { frontTop = y; break outerFront }
+        }
+        if let ft = frontTop, ft - top >= Swift.max(2, Int(Double(h) * 0.12)),
+           let a = centroid(top: ft, xRange: front) {
+            return a
+        }
+        return centroid(top: top, xRange: 0..<w)
+    }
+
     /// 단일 PNG 로딩 (sprite strip이 아닌 일반 이미지 — 예: 가챠 알). 캐시됨.
     static func image(named name: String) -> NSImage? {
         let key = name as NSString

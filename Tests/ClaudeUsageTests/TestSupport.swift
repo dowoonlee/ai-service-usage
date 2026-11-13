@@ -17,9 +17,15 @@ class SandboxedTestCase: XCTestCase {
             XCTFail("샌드박스가 아님 — 실제 UserDefaults/Keychain을 건드릴 위험이 있어 중단한다")
             return
         }
-        await MainActor.run { Settings.resetForTesting() }
+        await MainActor.run {
+            Settings.resetForTesting()
+            SeasonRegistry.override = Override.none   // 테스트는 날짜·환경변수와 무관하게 "시즌 없음"에서 시작
+        }
     }
 }
+
+/// `SeasonRegistry.override` 축약 — 테스트 파일마다 `SeasonRegistry.Override.none`을 쓰지 않게.
+typealias Override = SeasonRegistry.Override
 
 // MARK: - 픽스처
 

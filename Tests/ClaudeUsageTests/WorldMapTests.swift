@@ -115,4 +115,90 @@ final class WorldMapTests: XCTestCase {
         XCTAssertGreaterThan(mid.zoom, a.zoom)
         XCTAssertLessThan(mid.zoom, b.zoom)
     }
+
+    // MARK: - 이벤트 섬 (시즌 보스 진입점)
+
+    /// 섬은 mapgen 지형 밖 하늘 띠(row < 0)에만 있어야 한다 — 지상 셀과 겹치면 영토 lookup과 충돌한다.
+    func testEventIslandLivesInSkyBandOnly() {
+        let island = EventIsland.winter
+        var cells = 0
+        for r in 0..<island.rows {
+            for c in 0..<island.cols {
+                let col = island.originCol + c, row = island.originRow + r
+                guard island.contains(col: col, row: row) else { continue }
+                cells += 1
+                XCTAssertLessThan(row, 0)
+                XCTAssertGreaterThanOrEqual(row, -EventIsland.skyRows)
+                XCTAssertTrue(col >= 0 && col < WorldMap.cols)
+                XCTAssertNotNil(WorldMap.tileImageNames[island.code(col: col, row: row)])
+            }
+        }
+        XCTAssertGreaterThan(cells, 60, "지역 하나로 읽힐 만큼은 커야 한다")
+        XCTAssertFalse(island.contains(col: island.originCol - 1, row: island.originRow))
+        XCTAssertFalse(island.contains(col: 20, row: 20))                      // 지상
+        XCTAssertNil(WorldMap.regionForCell(col: island.town.col, row: island.town.row))
+        XCTAssertTrue(island.contains(col: island.town.col, row: island.town.row))
+        for d in island.decos {
+            XCTAssertTrue(island.contains(col: d.col, row: d.row), "\(d.image) (\(d.col),\(d.row))가 섬 밖")
+            XCTAssertNotNil(NSImage.mapTile(named: d.image), "\(d.image) 리소스 없음")
+        }
+        XCTAssertNotNil(NSImage.mapTile(named: island.building))
+    }
+
+    /// 흰 스킨 보스가 걷는 도장 앞 줄은 눈(6)이 아니어야 보인다.
+    func testEventIslandBossWalksOnPlazaNotSnow() {
+        let island = EventIsland.winter
+        let walkRow = Int(floor(Double(island.town.row) + 1.45))
+        for col in (island.town.col - 1)...(island.town.col + 2) {
+            let code = island.code(col: col, row: walkRow)
+            XCTAssertTrue(code > 0 && code != 6, "(\(col),\(walkRow)) code=\(code)")
+        }
+    }
+
+    /// 밑동 바위는 하늘 띠 안에서 끝나거나 지상 land와 겹치지 않아야 한다.
+    func testEventIslandUndersideDoesNotCoverLand() {
+        let island = EventIsland.winter
+        for c in island.originCol..<(island.originCol + island.cols) {
+            guard let bottom = island.bottomRow(col: c) else { continue }
+            let depth = island.undersideDepth(col: c)
+            XCTAssertTrue((1...4).contains(depth))
+            for d in 1...depth {
+                XCTAssertEqual(WorldMap.code(col: c, row: bottom + d), 0, "밑동이 (\(c),\(bottom + d)) 지상을 덮음")
+            }
+        }
+    }
+
+    /// 섬이 있을 때 맵을 키우는 이유: 지상 지역이 평소보다 작아지면 안 된다. 그리고 월드 뷰에 섬 전체가 들어온다.
+    func testSkyBandKeepsGroundScaleAndShowsWholeIsland() {
+        let width: CGFloat = 528
+        let base = MapCamera.worldView(in: CGSize(width: width, height: GymView.mapHeight(hasIsland: false)))
+        let size = CGSize(width: width, height: GymView.mapHeight(hasIsland: true))
+        let cam = MapCamera.worldView(in: size, skyRows: EventIsland.skyRows)
+        XCTAssertGreaterThanOrEqual(cam.zoom, base.zoom - 0.05)
+        let vis = cam.visibleCellRect(in: size)
+        let island = EventIsland.winter
+        XCTAssertLessThanOrEqual(vis.minY, CGFloat(island.originRow))
+        XCTAssertLessThanOrEqual(vis.minX, CGFloat(island.originCol))
+        XCTAssertGreaterThanOrEqual(vis.maxX, CGFloat(island.originCol + island.cols))
+        XCTAssertGreaterThanOrEqual(vis.maxY, CGFloat(WorldMap.rows) - 0.01)
+        // 평소(섬 없음)엔 기본값 그대로 — 기존 카메라 계약이 안 바뀐다.
+        XCTAssertEqual(GymView.mapHeight(hasIsland: false), 220)
+        XCTAssertEqual(MapCamera.worldView(in: size), MapCamera.worldView(in: size, skyRows: 0))
+    }
+
+    func testIslandViewCentersIslandWithinExtendedWorld() {
+        let size = CGSize(width: 528, height: GymView.mapHeight(hasIsland: true))
+        let island = EventIsland.winter
+        let cam = MapCamera.islandView(island, in: size)
+        XCTAssertEqual(cam.zoom, MapCamera.worldView(in: size, skyRows: EventIsland.skyRows).zoom * 3, accuracy: 0.001)
+        let vis = cam.visibleCellRect(in: size)
+        XCTAssertGreaterThanOrEqual(vis.minY, -CGFloat(EventIsland.skyRows) - 0.01)
+        XCTAssertTrue(vis.contains(CGPoint(x: CGFloat(island.town.col) + 0.5, y: CGFloat(island.town.row) + 0.5)))
+        // 지상 지역 뷰는 하늘 띠가 있어도 월드 밖으로 나가지 않는다.
+        for region in BadgeRegion.allCases {
+            let v = MapCamera.regionView(region, in: size, skyRows: EventIsland.skyRows).visibleCellRect(in: size)
+            XCTAssertGreaterThanOrEqual(v.minY, -CGFloat(EventIsland.skyRows) - 0.01)
+            XCTAssertLessThanOrEqual(v.maxY, CGFloat(WorldMap.rows) + 0.01)
+        }
+    }
 }

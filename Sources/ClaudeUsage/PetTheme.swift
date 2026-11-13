@@ -2,7 +2,7 @@ import SwiftUI
 
 // 차트 라인 아래(=펫이 서 있는 땅) 영역을 채우는 자연 테마.
 // 다크모드 고정 톤: 채도 낮추고 brightness 중간 → 두 모드에서 모두 자연스럽게 보임.
-enum PetTheme: String, CaseIterable, Identifiable, Codable {
+enum PetTheme: String, CaseIterable, Identifiable, Codable, SeasonalItem {
     case grassland   // 잔디밭 (밝은 풀색)
     case field       // 들판 (말린 풀, 황록)
     case wilderness  // 황야 (마른 흙, 황갈)
@@ -15,6 +15,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
     case sakura      // 벚꽃 (봄 — 사용량↑ 분홍 개화가 위에서, 동적)
     case storm       // 뇌우 (폭풍 — 사용량↑ 먹구름이 위에서, 동적)
     case toxic       // 독성 늪 (toxic — 사용량↑ 형광 녹 독이 아래에서, 동적)
+    case winterNight // 겨울밤 (12월 한정 — 짙은 남색 하늘, 사용량↑ 위에서 전구 금색이 켜진다, 동적)
 
     var id: String { rawValue }
 
@@ -32,6 +33,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .sakura:      return "벚꽃"
         case .storm:       return "뇌우"
         case .toxic:       return "독성 늪"
+        case .winterNight: return "겨울밤"
         }
     }
 
@@ -50,6 +52,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .sakura:       return Color(hue: 0.95, saturation: 0.22, brightness: 0.62)
         case .storm:        return Color(hue: 0.62, saturation: 0.15, brightness: 0.42)
         case .toxic:        return Color(hue: 0.25, saturation: 0.30, brightness: 0.35)
+        case .winterNight:  return Color(hue: 0.64, saturation: 0.55, brightness: 0.30)
         }
     }
     // 아래쪽(x축 쪽) 색
@@ -67,6 +70,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .sakura:       return Color(hue: 0.96, saturation: 0.38, brightness: 0.50)
         case .storm:        return Color(hue: 0.62, saturation: 0.12, brightness: 0.30)
         case .toxic:        return Color(hue: 0.22, saturation: 0.45, brightness: 0.30)
+        case .winterNight:  return Color(hue: 0.66, saturation: 0.60, brightness: 0.18)
         }
     }
     // 라인 색: bottomColor 보다 진하고 채도 높여서 가독성 확보
@@ -84,6 +88,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .sakura:       return Color(hue: 0.95, saturation: 0.55, brightness: 0.72)
         case .storm:        return Color(hue: 0.60, saturation: 0.22, brightness: 0.62)
         case .toxic:        return Color(hue: 0.25, saturation: 0.85, brightness: 0.78)
+        case .winterNight:  return Color(hue: 0.12, saturation: 0.80, brightness: 0.95)   // 전구 금색
         }
     }
 
@@ -171,6 +176,12 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
                 .init(color: topColor.opacity(0.12), location: 0),
                 .init(color: bottomColor.opacity(0.32), location: 1),
             ]
+        // 겨울밤(동적) — 기본: 짙은 남색 밤하늘. 전구는 dynamicStops 가 위에서 켜진다.
+        case .winterNight:
+            return [
+                .init(color: topColor.opacity(0.16), location: 0),
+                .init(color: bottomColor.opacity(0.36), location: 1),
+            ]
         }
     }
 
@@ -179,7 +190,7 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
     var isDynamic: Bool {
         switch self {
         case .snowMountain, .volcano, .sea, .desert,
-             .aurora, .sakura, .storm, .toxic: return true
+             .aurora, .sakura, .storm, .toxic, .winterNight: return true
         default: return false
         }
     }
@@ -193,6 +204,15 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
         case .grassland, .field, .wilderness, .space: return 0
         case .sea, .snowMountain, .desert, .volcano:  return 1200
         case .aurora, .sakura, .storm, .toxic:        return 2000
+        case .winterNight:                            return 2000   // 한정, 프리미엄 동적과 같은 가격
+        }
+    }
+
+    /// 시즌 한정 테마 — 상점 노출만 시즌 중. 보유하면 영구.
+    var season: Season.Kind? {
+        switch self {
+        case .winterNight: return .xmas
+        default: return nil
         }
     }
 
@@ -253,6 +273,10 @@ enum PetTheme: String, CaseIterable, Identifiable, Codable {
             return edgeFillStops(level: level, fromTop: false,
                 edge: Color(hue: 0.25, saturation: 0.90, brightness: 0.92).opacity(0.40 + 0.38 * level),
                 inner: Color(hue: 0.28, saturation: 0.78, brightness: 0.70).opacity(0.34 + 0.28 * level))
+        case .winterNight: // 전구: 위에서 따뜻한 금색이 켜져 내려온다.
+            return edgeFillStops(level: level, fromTop: true,
+                edge: Color(hue: 0.12, saturation: 0.75, brightness: 0.98).opacity(0.35 + 0.40 * level),
+                inner: Color(hue: 0.09, saturation: 0.70, brightness: 0.80).opacity(0.28 + 0.30 * level))
         default:
             return baseStops
         }

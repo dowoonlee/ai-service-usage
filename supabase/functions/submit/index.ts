@@ -17,6 +17,7 @@
 import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
+import { adventCompleteRewardFor, adventDailyPrefix, adventDailyRewardFor, kstDate } from "../_shared/season.ts";
 import { isValidUUID } from "../_shared/validation.ts";
 import { evaluateCap } from "../_shared/caps.ts";
 
@@ -243,6 +244,44 @@ Deno.serve(async (req: Request) => {
     }
   } else if (Object.keys(updates).length > 0) {
     await db.from("users").update(updates).eq("device_id", p.deviceId);
+  }
+
+  // 시즌 일일 보상(12월) — accepted submit = "그날 AI를 썼다". 한 문장 INSERT, UNIQUE(device_id, grant_key)가
+  // 하루 1회를 보장한다(중복은 23505로 떨어지고 무시). shadow_banned는 제외. 실패해도 submit 응답은 정상 —
+  // 보상은 부가 기능이라 본 경로를 막지 않는다. cf. docs/plans/seasonal-events.md §18
+  if (acceptedFlag && accepted > 0 && user.status !== "shadow_banned") {
+    const daily = adventDailyRewardFor(new Date());
+    if (daily) {
+      const { error: grantErr } = await db.from("reward_grants").insert({
+        device_id: p.deviceId,
+        currency: "coin",
+        amount: daily.amount,
+        reason: daily.reason,
+        grant_key: daily.grantKey,
+      });
+      if (!grantErr) {
+        // 새로 들어간 날만 완주 판정 — 해당 연도 일일 행 수가 임계값에 **도달한** submit에서 1회.
+        const { year } = kstDate(new Date());
+        const { count } = await db
+          .from("reward_grants")
+          .select("id", { count: "exact", head: true })
+          .eq("device_id", p.deviceId)
+          .like("grant_key", `${adventDailyPrefix(year)}%`);
+        const complete = adventCompleteRewardFor(year, count ?? 0);
+        if (complete) {
+          const { error: cErr } = await db.from("reward_grants").insert({
+            device_id: p.deviceId,
+            currency: "coin",
+            amount: complete.amount,
+            reason: complete.reason,
+            grant_key: complete.grantKey,
+          });
+          if (cErr && cErr.code !== "23505") console.error("advent complete grant insert failed", cErr);
+        }
+      } else if (grantErr.code !== "23505") {
+        console.error("advent daily grant insert failed", grantErr);
+      }
+    }
   }
 
   // 캡 적용이 누적되면 abuse_flags에 기록 — 운영자가 수동 검토. 단발성 truncate는 무시.
