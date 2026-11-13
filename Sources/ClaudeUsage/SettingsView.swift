@@ -45,6 +45,12 @@ struct SettingsView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
             }
+            Section("2026 리캡") {
+                Button("2026 리캡 보기") { RecapWindowController.shared.present() }
+                Text("올해 사용량과 가챠·도장·아레나 기록을 한 편으로 돌아봅니다.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
             Section("시작") {
                 Toggle("로그인 시 자동 시작", isOn: Binding(
                     get: { settings.launchAtLogin },
@@ -980,11 +986,6 @@ private struct CreditsView: View {
 
     /// 커피 버튼 탭 — 처음이면 1회 보상(5,000 coin · 2,000 RP) 지급 후 답례 문구, 이후엔 인사만.
     private func tapCoffee() {
-        // 공개 전 리캡 미리보기 — 소유자가 Option+클릭할 때만. 그 외엔 평소 커피 동작 그대로.
-        if NSEvent.modifierFlags.contains(.option), RecapGate.canPreview {
-            RecapWindowController.shared.present()
-            return
-        }
         coffeeJustGranted = !settings.hasReceivedCoffeeReward
         if coffeeJustGranted {
             settings.hasReceivedCoffeeReward = true

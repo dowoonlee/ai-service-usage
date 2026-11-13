@@ -1,20 +1,10 @@
 import SwiftUI
 import AppKit
 
-// 연말 리캡 — 공개 전까지 숨겨 둔 스토리 창.
+// 연말 리캡 — 설정의 "2026 리캡" 섹션에서 여는 스토리 창.
 //
 // 문구(펫 내레이션)는 연말에 활성 유저들의 대표 펫을 보고 조건별 풀로 만들 예정이라
 // 대사창은 비워 두고, 장면 제목에는 숫자 라벨만 둔다.
-
-/// 공개 전 미리보기 게이트. 커피 버튼을 Option+클릭했을 때만 본다.
-enum RecapGate {
-    static let ownerLogin = "dowoonlee"
-
-    @MainActor static var canPreview: Bool {
-        if ProcessInfo.processInfo.environment["AIUSAGE_RECAP"] == "1" { return true }
-        return Settings.shared.githubLogin?.lowercased() == ownerLogin
-    }
-}
 
 @MainActor
 final class RecapWindowController: NSWindowController, SingleWindowPresenting {
