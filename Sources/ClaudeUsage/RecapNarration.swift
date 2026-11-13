@@ -3,6 +3,8 @@ import Foundation
 /// 저장된 사실만으로 고르는 펫의 대사. 서버 요청이나 이벤트 로그 수집을 기다리지 않는다.
 /// 게임 수치는 누적값이므로 올해에 한정된 성과라고 단정하지 않는다.
 enum RecapNarration {
+    static let sceneIDs = ["boot", "yearline", "gauges", "vs", "cursor", "grass", "golden",
+                           "gacha", "partner", "gym", "arena", "life", "ending"]
     static func text(for sceneID: String, facts: RecapFacts) -> String {
         let u = facts.usage
         let g = facts.game

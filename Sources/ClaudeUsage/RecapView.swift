@@ -18,12 +18,61 @@ final class RecapWindowController: NSWindowController, SingleWindowPresenting {
 
     /// 열 때마다 사실을 새로 읽는다 — JSONL 전체 스캔이라 창 안에서 반복 호출하지 않는다.
     func present() {
-        let host = NSHostingController(rootView: RecapStoryView(facts: RecapFacts.load()))
+        let host = NSHostingController(rootView: RecapExperienceView(facts: RecapFacts.load()))
         window?.contentViewController = host
         window?.setContentSize(NSSize(width: RecapCanvasSize.width * RecapCanvasSize.scale,
-                                      height: RecapCanvasSize.height * RecapCanvasSize.scale))
+                                      height: RecapCanvasSize.height * RecapCanvasSize.scale + 52))
         window?.center()
         bringToFront()
+    }
+}
+
+struct RecapExperienceView: View {
+    let facts: RecapFacts
+    @StateObject private var loader: RecapNarrationLoader
+    @State private var retryID = 0
+
+    init(facts: RecapFacts, loader: RecapNarrationLoader? = nil) {
+        self.facts = facts
+        _loader = StateObject(wrappedValue: loader ?? RecapNarrationLoader())
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            switch loader.state {
+            case .loading:
+                VStack(spacing: 18) {
+                    ProgressView().controlSize(.large)
+                    Text("\(facts.game.narrator.kind.displayName)이 이야기를 준비하고 있어요")
+                        .font(.headline)
+                    Text("사용 기록 요약으로 Claude가 대사를 만듭니다.\n한 번 만든 이야기는 저장해서 다시 보여드려요.")
+                        .font(.callout).multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: RecapCanvasSize.width * RecapCanvasSize.scale,
+                       height: RecapCanvasSize.height * RecapCanvasSize.scale + 52)
+            case .ready(let row):
+                RecapStoryView(facts: facts, generatedNarration: row.lines)
+                Text("\(row.generatedAt.formatted(date: .abbreviated, time: .omitted))에 만든 이야기 · 대사는 생성 당시 기록 기준")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .frame(height: 52)
+                    .help(row.persona)
+            case .fallback(let message):
+                RecapStoryView(facts: facts)
+                HStack {
+                    Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button("다시 시도") { retryID += 1 }
+                        .font(.system(size: 11))
+                }
+                .padding(.horizontal, 12).frame(height: 52)
+            }
+        }
+        .frame(width: RecapCanvasSize.width * RecapCanvasSize.scale,
+               height: RecapCanvasSize.height * RecapCanvasSize.scale + 52)
+        .background(RecapPalette.night[0])
+        .preferredColorScheme(.dark)
+        .task(id: retryID) { await loader.load(facts: facts) }
     }
 }
 
@@ -32,17 +81,20 @@ struct RecapStoryView: View {
     @State private var pressStart: Date?
     @State private var holdTask: Task<Void, Never>?
     @FocusState private var focused: Bool
+    private let generatedNarration: [String: String]
 
     private static let holdToPause: TimeInterval = 0.22
 
-    init(facts: RecapFacts) {
+    init(facts: RecapFacts, generatedNarration: [String: String] = [:]) {
+        self.generatedNarration = generatedNarration
         let p = RecapPlayer(facts: facts, scenes: RecapScenes.all)
         p.go(0)
         _player = State(initialValue: p)
     }
 
     /// 이미 준비된 플레이어로 띄운다 — 프리뷰에서 장면·시점을 고정해 찍을 때.
-    init(player: RecapPlayer) {
+    init(player: RecapPlayer, generatedNarration: [String: String] = [:]) {
+        self.generatedNarration = generatedNarration
         _player = State(initialValue: player)
     }
 
@@ -150,7 +202,7 @@ struct RecapStoryView: View {
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundStyle(RecapPalette.gold)
             }
-            Text(player.scene.narration(player.facts))
+            Text(generatedNarration[player.scene.id] ?? player.scene.narration(player.facts))
                 .font(.system(size: 16, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white)
                 .lineSpacing(4)

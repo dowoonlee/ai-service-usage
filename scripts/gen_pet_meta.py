@@ -9,7 +9,7 @@ Gacha.pool / PetCollection.members 에 하드코딩할 뿐 서버엔 없다. 이
 
 모든 PetKind 가 정확히 하나의 rarity·collection 에 속하는지 검증하고, 불일치 시 비-0 종료한다.
 """
-import re, sys, os
+import re, sys, os, json
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "Sources", "ClaudeUsage")
@@ -156,6 +156,17 @@ def main():
     def ts_pair_map(d):
         return "{\n" + "".join(f'  {k}: ["{v[0]}", "{v[1]}"],\n' for k, v in sorted(d.items())) + "}"
 
+    # 리캡의 성격 근거도 클라이언트 도감과 같은 원본에서 만든다. 요청자가 성격 지시를 주입하지 않는다.
+    descriptions = {k: json.loads(v) for k, v in re.findall(
+        r'\.(\w+):\s*("(?:[^"\\]|\\.)*")', read("PetDescriptions.swift"))}
+    if set(descriptions) != set(kinds):
+        raise ValueError("PetDescriptions must cover every PetKind")
+    names = {k: json.loads(v) for k, v in re.findall(
+        r'case \.(\w+):(?:(?!case \.).)*?displayName: ("(?:[^"\\]|\\.)*")',
+        ps.split("var def: PetDefinition", 1)[1].split("var displayName", 1)[0], re.S)}
+    if set(names) != set(kinds):
+        raise ValueError("PetDefinition names must cover every PetKind")
+
     with open(OUT, "w", encoding="utf-8") as f:
         f.write(
             "// AUTO-GENERATED — Swift 소스(Gacha.pool · PetCollection.members · PetSkills.uniqueTable/풀)에서 파싱. 직접 편집 금지.\n"
@@ -169,6 +180,9 @@ def main():
             f"// 타입은 battleTypeOf 파생·power/rider는 상수(pvp_policy). 드리프트는 PARITYBASE 골든이 잠금.\n"
             f"export const GENERIC_SKILL: Record<string,[string,string]> = {ts_pair_map(kind_generic)};\n\n"
             f"export const TYPE_SKILL: Record<string,[string,string]> = {ts_pair_map(kind_ts)};\n"
+            "\n// 도감의 종별 성격/설정 — Recap Claude 프롬프트의 신뢰된 입력.\n"
+            f"export const PET_DESCRIPTION: Record<string,string> = {json.dumps(descriptions, ensure_ascii=False, indent=2, sort_keys=True)};\n"
+            f"export const PET_NAME: Record<string,string> = {json.dumps(names, ensure_ascii=False, indent=2, sort_keys=True)};\n"
         )
     print(f"생성 완료: {OUT} ({len(kinds)} kinds, {len(kind_unique)} unique, base {len(kind_generic)})")
 
