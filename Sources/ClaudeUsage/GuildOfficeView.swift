@@ -1194,7 +1194,13 @@ private struct OfficeShopSheet: View {
         ForEach(OfficeLayout.furnitureCatalog.filter { $0.mount == mount }) { kind in
             let affordable = settings.coins >= kind.price
             let selected = pendingFurniture?.id == kind.id
+            let buyable = affordable && canBuyFurniture
             shopRow(selected: selected, dimmed: !affordable && !selected) {
+                // 첫 클릭 = 미리보기, 선택된 행을 다시 클릭 = 구매 (행 전체가 구매 버튼).
+                if selected {
+                    if buyable { onBuyFurniture(kind) }
+                    return
+                }
                 pendingFurniture = kind
                 onPreviewFurniture(kind)
             } content: {
@@ -1204,7 +1210,11 @@ private struct OfficeShopSheet: View {
                     badge("문구", color: .blue)
                 }
                 Spacer()
-                priceTag(kind.price, affordable: affordable)
+                if selected {
+                    buyTag(kind.price, enabled: buyable)
+                } else {
+                    priceTag(kind.price, affordable: affordable)
+                }
             }
         }
         if let pending = pendingFurniture {
@@ -1230,6 +1240,13 @@ private struct OfficeShopSheet: View {
             let selected = pendingDecor?.item.kind == item.kind
             shopRow(selected: selected,
                     dimmed: (freeSlot == nil || !affordable) && !selected) {
+                // 선택된 행을 다시 클릭 = 구매 (가구 탭과 동일).
+                if selected, let pending = pendingDecor {
+                    guard affordable else { return }
+                    pendingDecor = nil
+                    onBuyDecor(pending.slot, pending.item)
+                    return
+                }
                 guard let slot = freeSlot else { return }
                 pendingDecor = (slot: slot, item: item)
                 onPreviewDecor((slot: slot, kind: item.kind))
@@ -1245,7 +1262,9 @@ private struct OfficeShopSheet: View {
                 badge(item.category == .wall ? "벽" : "바닥",
                       color: item.category == .wall ? .pink : .orange)
                 Spacer()
-                if freeSlot == nil {
+                if selected {
+                    buyTag(item.price, enabled: affordable)
+                } else if freeSlot == nil {
                     Text("자리 없음").font(.system(size: 9)).foregroundStyle(.secondary)
                 } else {
                     priceTag(item.price, affordable: affordable)
@@ -1371,7 +1390,7 @@ private struct OfficeShopSheet: View {
         VStack(spacing: 6) {
             Divider()
             HStack(spacing: 6) {
-                Text("미리보기 중").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("미리보기 중 · 한 번 더 누르면 구매").font(.system(size: 10)).foregroundStyle(.secondary)
                 Spacer()
                 Button("취소", action: cancel)
                     .font(.system(size: 11)).controlSize(.small)
@@ -1392,6 +1411,17 @@ private struct OfficeShopSheet: View {
         Text(text).font(.system(size: 8, weight: .semibold))
             .padding(.horizontal, 3).padding(.vertical, 1)
             .background(Capsule().fill(color.opacity(0.2)))
+    }
+
+    /// 선택된 행의 가격 자리 — 행을 다시 누르면 결제된다는 표시.
+    private func buyTag(_ price: Int, enabled: Bool) -> some View {
+        HStack(spacing: 3) {
+            CoinIcon(size: 11)
+            Text("\(price) 구매").font(.system(size: 11, weight: .semibold))
+        }
+        .padding(.horizontal, 6).padding(.vertical, 2)
+        .foregroundStyle(.white)
+        .background(Capsule().fill(enabled ? Color.accentColor : Color.gray.opacity(0.5)))
     }
 
     private func priceTag(_ price: Int, affordable: Bool) -> some View {
