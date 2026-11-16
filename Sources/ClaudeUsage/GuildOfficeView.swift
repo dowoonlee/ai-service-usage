@@ -1157,16 +1157,65 @@ private struct OfficeShopSheet: View {
             .labelsHidden()
             .controlSize(.small)
             .onChange(of: tab) { _ in clearPending() }
-            switch tab {
-            case .floorFurniture: furnitureRows(mount: .floor)
-            case .wallFurniture: furnitureRows(mount: .wall)
-            case .decor: decorTab
-            case .theme: themeTab
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    switch tab {
+                    case .floorFurniture: furnitureRows(mount: .floor)
+                    case .wallFurniture: furnitureRows(mount: .wall)
+                    case .decor: decorTab
+                    case .theme: themeTab
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            pendingBar
             footer
         }
         .padding(12)
-        .frame(width: 260)
+        // 높이 고정 — 항목 선택으로 확인 바가 생길 때 popover 창이 커지면, 늘어난 영역(= 구매 버튼)의
+        // 클릭이 창을 통과해 뒤의 앱으로 넘어가는 일이 있었다. 창 크기는 열릴 때 한 번만 정해지게 한다.
+        .frame(width: 260, height: 450)
+    }
+
+    /// 구매 확인 바 — 목록(ScrollView) 밖 하단 고정. 나타나도 목록만 줄고 창 크기는 그대로.
+    @ViewBuilder
+    private var pendingBar: some View {
+        switch tab {
+        case .floorFurniture, .wallFurniture:
+            if let pending = pendingFurniture {
+                confirmBar(price: pending.price, available: canBuyFurniture) {
+                    pendingFurniture = nil
+                    onPreviewFurniture(nil)
+                } buy: {
+                    onBuyFurniture(pending)
+                }
+                Button("보관함으로 구매 (\(pending.price) 코인)") { onBuyStoredFurniture(pending) }
+                    .font(.system(size: 10)).controlSize(.small)
+                    .disabled(settings.coins < pending.price || inventoryCount >= OfficeStudioState.inventoryLimit)
+            }
+        case .decor:
+            if let pending = pendingDecor {
+                confirmBar(price: pending.item.price) {
+                    pendingDecor = nil
+                    onPreviewDecor(nil)
+                } buy: {
+                    let slot = pending.slot
+                    let item = pending.item
+                    pendingDecor = nil
+                    onBuyDecor(slot, item)
+                }
+            }
+        case .theme:
+            let purchaseCount = (previewFloorTheme != nil ? 1 : 0) + (previewWallTheme != nil ? 1 : 0)
+            if purchaseCount > 0 {
+                confirmBar(price: OfficeLayout.themePrice * purchaseCount) {
+                    previewFloorTheme = nil
+                    previewWallTheme = nil
+                } buy: {
+                    onApplyTheme()
+                }
+            }
+        }
     }
 
     /// 탭 전환 시 미결제 선택 원복 — 씬 미리보기도 함께 해제.
@@ -1217,17 +1266,6 @@ private struct OfficeShopSheet: View {
                 }
             }
         }
-        if let pending = pendingFurniture {
-            confirmBar(price: pending.price, available: canBuyFurniture) {
-                pendingFurniture = nil
-                onPreviewFurniture(nil)
-            } buy: {
-                onBuyFurniture(pending)
-            }
-            Button("보관함으로 구매 (\(pending.price) 코인)") { onBuyStoredFurniture(pending) }
-                .font(.system(size: 10)).controlSize(.small)
-                .disabled(settings.coins < pending.price || inventoryCount >= OfficeStudioState.inventoryLimit)
-        }
     }
 
     // MARK: 장식 탭 (멤버 누구나 — 기부 모델, 빈 슬롯 자동 선택)
@@ -1269,17 +1307,6 @@ private struct OfficeShopSheet: View {
                 } else {
                     priceTag(item.price, affordable: affordable)
                 }
-            }
-        }
-        if let pending = pendingDecor {
-            confirmBar(price: pending.item.price) {
-                pendingDecor = nil
-                onPreviewDecor(nil)
-            } buy: {
-                let slot = pending.slot
-                let item = pending.item
-                pendingDecor = nil
-                onBuyDecor(slot, item)
             }
         }
         // 배치된 장식 관리 — 제거는 기부자 본인 또는 길드장.
@@ -1355,15 +1382,7 @@ private struct OfficeShopSheet: View {
                 .help(i == 0 ? "기본 벽지 미리보기" : "벽지 틴트 \(i) 미리보기")
             }
         }
-        let purchaseCount = (previewFloorTheme != nil ? 1 : 0) + (previewWallTheme != nil ? 1 : 0)
-        if purchaseCount > 0 {
-            confirmBar(price: OfficeLayout.themePrice * purchaseCount) {
-                previewFloorTheme = nil
-                previewWallTheme = nil
-            } buy: {
-                onApplyTheme()
-            }
-        } else {
+        if previewFloorTheme == nil && previewWallTheme == nil {
             Text("스와치를 누르면 씬에 미리보기가 적용됩니다 (항목당 \(OfficeLayout.themePrice)코인)")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1390,7 +1409,7 @@ private struct OfficeShopSheet: View {
         VStack(spacing: 6) {
             Divider()
             HStack(spacing: 6) {
-                Text("미리보기 중 · 한 번 더 누르면 구매").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("미리보기 중").font(.system(size: 10)).foregroundStyle(.secondary)
                 Spacer()
                 Button("취소", action: cancel)
                     .font(.system(size: 11)).controlSize(.small)
