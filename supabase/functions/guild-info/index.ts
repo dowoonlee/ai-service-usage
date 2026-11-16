@@ -140,7 +140,7 @@ Deno.serve(async (req: Request) => {
   // P2b 데코 — 기부자 명판용 닉네임 embed (purchased_by FK → users. 탈퇴 시 SET NULL → null).
   const { data: furnitureRows } = await db
     .from("guild_furniture")
-    .select("slot_id, item_kind, purchased_at, users(nickname)")
+    .select("slot_id, item_kind, purchased_at, position_x, position_y, position_version, users(nickname)")
     .eq("guild_id", guild.id);
 
   // 길드장에게만 — 보낸 대기중 초대(취소 UI용). 피초대자 닉네임 embed.
@@ -251,6 +251,7 @@ Deno.serve(async (req: Request) => {
     furniture: (furnitureRows ?? []).map((f) => ({
       slotId: f.slot_id,
       itemKind: f.item_kind,
+      x: f.position_x, y: f.position_y, positionVersion: f.position_version,
       donorNickname: (f.users as unknown as { nickname: string } | null)?.nickname ?? null,
     })),
     sentInvites,   // 길드장만 채워짐 (그 외 빈 배열)

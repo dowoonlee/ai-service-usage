@@ -62,3 +62,5 @@ jobs:
         run: bash scripts/test-manual-arena-db.sh
       - name: Recap cache ownership and concurrent generation
         run: bash scripts/test-recap-db.sh
+      - name: Decor positions and concurrent movement
+        run: bash scripts/test-decor-db.sh

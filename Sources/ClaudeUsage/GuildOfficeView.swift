@@ -34,6 +34,7 @@ struct GuildOfficeView: View {
     let onApplyTheme: () -> Void
     /// 방문객 — 남의 사무실에 놀러온 내 대표 펫 (`GuildVisitView`). nil이면 멤버만 그린다.
     var guest: OfficeSimulation.Guest? = nil
+    var onMoveDecor: ((RankingAPI.GuildFurnitureItem, CGPoint) async throws -> RankingAPI.GuildDecorPosition)? = nil
 
     @StateObject private var sim = OfficeSimulation()
     @State private var popoverPetID: String?
@@ -52,6 +53,8 @@ struct GuildOfficeView: View {
     @State private var photoMessage: String?
     /// 현재 드래그 중인 가구 인스턴스 uid (하이라이트용).
     @State private var draggingUid: Int?
+    @State private var draftDecor: [RankingAPI.GuildFurnitureItem]?
+    @State private var decorDragOrigin: RankingAPI.GuildFurnitureItem?
     /// 로고 드래그 작업 사본 — nil이면 서버 값. 드롭 후 서버 값이 따라오면 해제된다.
     @State private var draftLogoPos: CGPoint?
     @State private var draggingLogo = false
@@ -97,7 +100,7 @@ struct GuildOfficeView: View {
     private var renderPlacements: [OfficeLayout.FurniturePlacement] {
         pendingPurchase.map { placements + [$0] } ?? placements
     }
-    private var placedDecor: [RankingAPI.GuildFurnitureItem] { info.furniture }
+    private var placedDecor: [RankingAPI.GuildFurnitureItem] { draftDecor ?? info.furniture }
     /// 렌더용 데코 — 미리보기 중이면 해당 슬롯을 미리보기 아이템으로 치환.
     /// 시뮬레이션(충돌)은 실제 배치(placedDecor) 기준 유지 — 결제 전 동선 변경 방지.
     private var effectiveDecor: [RankingAPI.GuildFurnitureItem] {
@@ -143,6 +146,8 @@ struct GuildOfficeView: View {
                 Text(message).font(.system(size: 10)).foregroundStyle(.secondary)
             }
             if canEdit {
+                Text("가구와 장식을 드래그해 이동하세요.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
                 OfficeStudioPanel(state: studio, canUndo: !history.undo.isEmpty, canRedo: !history.redo.isEmpty,
                                   tab: $studioTab, onAction: studioAction)
                     .disabled(savingFurniture)
@@ -269,6 +274,8 @@ struct GuildOfficeView: View {
             draftExpectedRevision = nil
             draftBaseStudio = nil
             draggingUid = nil
+            draftDecor = nil
+            decorDragOrigin = nil
             pendingPurchase = nil
             editingTextUid = nil
             // 진입 시에는 유지 — 컨트롤 행 "가구 구매" 버튼이 재배치 진입과 동시에 연다.
@@ -293,7 +300,7 @@ struct GuildOfficeView: View {
             background(scale: scale).zIndex(-3000)
             guildLogoPlaque(scale: scale, editing: editing).zIndex(editing ? 3600 : -2900)
             furnitureLayer(scale: scale, editing: editing)
-            decorLayer(scale: scale)
+            decorLayer(scale: scale, editing: editing && onMoveDecor != nil)
             petLayer(scale: scale, showBubbles: showBubbles, pets: pets).allowsHitTesting(!editing && !photoMode)
         }
         .frame(width: scene.width * scale, height: scene.height * scale)
@@ -337,7 +344,7 @@ struct GuildOfficeView: View {
 
     private func reconfigureSim() {
         sim.configure(members: info.members, assignments: assignments, placements: placements,
-                      decor: placedDecor.map { (slotId: $0.slotId, kind: $0.itemKind) },
+                      decor: placedDecor.map(\.placement),
                       guest: guest)
     }
 
@@ -514,7 +521,7 @@ struct GuildOfficeView: View {
         }
             .sorted().joined(separator: ",")
             + "|furniture:" + OfficeLayout.serializePlacements(placements)
-            + "|decor:" + placedDecor.map { "\($0.slotId):\($0.itemKind)" }.sorted().joined(separator: ",")
+            + "|decor:" + placedDecor.map { $0.placement.signature }.sorted().joined(separator: ",")
             + "|guest:" + (guest.map { "\($0.name):\($0.kind.rawValue):\($0.variant)" } ?? "")
     }
 
@@ -610,34 +617,83 @@ struct GuildOfficeView: View {
     // MARK: - 데코 (배치된 기부 아이템 — 항상 표시, 호버 시 기부자 명판)
 
     @ViewBuilder
-    private func decorLayer(scale: CGFloat) -> some View {
+    private func decorLayer(scale: CGFloat, editing: Bool) -> some View {
         ForEach(effectiveDecor, id: \.slotId) { placed in
-            if let slot = OfficeLayout.decorSlot(id: placed.slotId),
-               let item = OfficeLayout.decorItem(kind: placed.itemKind) {
+            if let item = OfficeLayout.decorItem(kind: placed.itemKind) {
                 let isPreview = previewDecor?.slot == placed.slotId
+                let position = placed.placement.resolvedPosition
+                let movable = editing && !isPreview
                 Group {
                     if item.animationFrames.isEmpty {
-                        itemView(imageName: item.imageName, drawKind: nil, size: item.size,
-                                 anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                        decorArt(item.imageName)
                     } else {
-                        // 깜빡이는 데코(트리 전구) — PC 모니터와 같은 0.5초 박자로 프레임 교체.
                         TimelineView(.periodic(from: .now, by: 0.5)) { ctx in
-                            itemView(imageName: item.imageName(at: ctx.date), drawKind: nil, size: item.size,
-                                     anchorX: slot.anchorX, baselineY: slot.baselineY, scale: scale)
+                            decorArt(item.imageName(at: ctx.date))
                         }
                     }
                 }
-                    .opacity(isPreview ? 0.75 : 1)   // 미리보기는 반투명 — 아직 결제 전임이 보이게
+                    .frame(width: item.size.width * scale, height: item.size.height * scale)
+                    .contentShape(Rectangle())
+                    .overlay {
+                        if movable {
+                            Rectangle().strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3]))
+                                .foregroundStyle(decorDragOrigin?.slotId == placed.slotId ? Color.orange : Color.accentColor)
+                        }
+                    }
+                    // .position 이전에 붙여 장식의 실제 크기만 드래그 히트 영역으로 쓴다.
+                    .gesture(decorDrag(placed, scale: scale), including: movable ? .all : .none)
+                    .position(x: position.x * scale, y: (position.y - item.size.height / 2) * scale)
+                    .opacity(isPreview ? 0.75 : 1)
                     .help(placed.donorNickname.map { "\(item.name) — \($0) 기부" } ?? item.name)
-                    .zIndex(decorZ(slot: slot, item: item))
+                    .zIndex(movable ? 4000 + Double(position.y) + (decorDragOrigin?.slotId == placed.slotId ? 500 : 0)
+                        : decorZ(position: position, item: item))
             }
         }
     }
 
+    @ViewBuilder
+    private func decorArt(_ name: String) -> some View {
+        if let image = OfficeLayout.officeImage(name) {
+            Image(nsImage: image).interpolation(.none).resizable()
+        }
+    }
+
+    private func decorDrag(_ placed: RankingAPI.GuildFurnitureItem, scale: CGFloat) -> some Gesture {
+        DragGesture(coordinateSpace: .named("officeScene"))
+            .onChanged { value in
+                guard !savingFurniture, onMoveDecor != nil else { return }
+                if decorDragOrigin == nil { decorDragOrigin = placed }
+                guard let origin = decorDragOrigin, origin.slotId == placed.slotId else { return }
+                let start = origin.placement.resolvedPosition
+                let next = OfficeLayout.clampDecorPosition(kind: placed.itemKind,
+                    position: CGPoint(x: start.x + value.translation.width / scale,
+                                      y: start.y + value.translation.height / scale))
+                let candidate = OfficeLayout.DecorPlacement(slotId: placed.slotId, kind: placed.itemKind, position: next)
+                guard !OfficeLayout.decorPlacementCollides(candidate, furniture: placements, decor: placedDecor.map(\.placement)) else { return }
+                var draft = placedDecor
+                guard let i = draft.firstIndex(where: { $0.slotId == placed.slotId }) else { return }
+                draft[i].x = Int(next.x); draft[i].y = Int(next.y)
+                draftDecor = draft
+            }
+            .onEnded { _ in
+                guard let origin = decorDragOrigin else { return }
+                decorDragOrigin = nil
+                guard let moved = draftDecor?.first(where: { $0.slotId == origin.slotId }),
+                      moved.placement.resolvedPosition != origin.placement.resolvedPosition,
+                      let save = onMoveDecor else { draftDecor = nil; return }
+                savingFurniture = true
+                Task { @MainActor in
+                    defer { draftDecor = nil; savingFurniture = false }
+                    do { _ = try await save(origin, moved.placement.resolvedPosition) }
+                    catch { furnitureAlert = .failure(error.localizedDescription) }
+                }
+            }
+    }
+
     /// 데코 zIndex — 벽은 배경 바로 위, 바닥은 통행 특성별 (furnitureZ와 동일 규칙).
-    private func decorZ(slot: OfficeLayout.DecorSlot, item: OfficeLayout.DecorItem) -> Double {
-        guard slot.category == .floor else { return -2500 }
-        let baseline = Double(slot.baselineY)
+    private func decorZ(position: CGPoint, item: OfficeLayout.DecorItem) -> Double {
+        guard item.category == .floor else { return -2500 }
+        let baseline = Double(position.y)
         switch item.passing {
         case .front: return baseline - 1000
         case .avoid, .through: return baseline
@@ -785,9 +841,14 @@ struct GuildOfficeView: View {
                 guard !OfficeLayout.placementCollides(uid: placement.uid, kind: placement.kind,
                                                       x: snapped.x, lane: snapped.lane,
                                                       wallY: snapped.wallY, others: working) else { return }
-                working[idx].x = snapped.x
-                working[idx].lane = snapped.lane
-                working[idx].wallY = snapped.wallY
+                var candidate = working[idx]
+                candidate.x = snapped.x
+                candidate.lane = snapped.lane
+                candidate.wallY = snapped.wallY
+                guard !placedDecor.contains(where: {
+                    OfficeLayout.decorPlacementCollides($0.placement, furniture: [candidate], decor: [])
+                }) else { return }
+                working[idx] = candidate
                 draftPlacements = working
             }
             .onEnded { _ in
@@ -1596,6 +1657,14 @@ enum GuildOfficeDemo {
                         fflush(stdout)
                         previewFloor = nil
                         previewWall = nil
+                    },
+                    onMoveDecor: { item, position in
+                        let saved = RankingAPI.GuildDecorPosition(x: Int(position.x), y: Int(position.y), version: UUID().uuidString)
+                        if let i = decorItems.firstIndex(where: { $0.slotId == item.slotId }) {
+                            decorItems[i].x = saved.x; decorItems[i].y = saved.y
+                            decorItems[i].positionVersion = saved.version
+                        }
+                        return saved
                     },
                     purchaseSheetOpen: $purchaseOpen
                 )

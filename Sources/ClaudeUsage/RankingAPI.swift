@@ -591,6 +591,12 @@ actor RankingAPI {
     struct GuildOfficeResponse: Decodable, Sendable {
         let ok: Bool
         let slot: Int?
+        var position: GuildDecorPosition? = nil
+    }
+    struct GuildDecorPosition: Codable, Sendable {
+        let x: Int
+        let y: Int
+        let version: String
     }
 
     struct GuildInfoPayload: Encodable {
@@ -657,11 +663,19 @@ actor RankingAPI {
         let memberCount: Int
     }
     /// P2b 데코 — P1 서버는 항상 빈 배열이지만 응답 형태를 미리 고정.
-    struct GuildFurnitureItem: Decodable, Sendable {
+    struct GuildFurnitureItem: Decodable, Sendable, Equatable {
         let slotId: Int
         let itemKind: String
         /// 기부자 명판 — 탈퇴(FK SET NULL)·구버전 서버는 nil.
         let donorNickname: String?
+        var x: Int? = nil
+        var y: Int? = nil
+        var positionVersion: String? = nil
+
+        var placement: OfficeLayout.DecorPlacement {
+            .init(slotId: slotId, kind: itemKind,
+                  position: x.flatMap { x in y.map { CGPoint(x: x, y: $0) } })
+        }
     }
     /// 길드장이 보낸 대기중 초대 (guild-info sentInvites — 길드장에게만 채워짐).
     struct GuildSentInvite: Decodable, Sendable, Identifiable {
@@ -702,7 +716,7 @@ actor RankingAPI {
     struct GuildInfoResponse: Decodable, Sendable {
         var guild: GuildInfo
         let members: [GuildMember]
-        let furniture: [GuildFurnitureItem]
+        var furniture: [GuildFurnitureItem]
         /// 길드장이 보낸 대기중 초대. 구버전 서버는 키가 없어 nil → 빈 배열로 취급.
         let sentInvites: [GuildSentInvite]?
         /// 길드장이 받은 대기중 가입신청. 구버전 서버는 키가 없어 nil → 빈 배열로 취급.
@@ -961,6 +975,8 @@ actor RankingAPI {
                 case "furniture_inventory_conflict": return "보유 가구가 변경되었습니다. 최신 사무실을 확인한 뒤 다시 시도해 주세요."
                 case "furniture_conflict": return "다른 멤버나 기기에서 가구 배치가 변경되었습니다. 최신 배치를 확인한 뒤 다시 시도해 주세요."
                 case "slot_taken":          return "방금 다른 멤버가 그 자리에 앉았습니다."
+                case "decor_changed", "decor_not_found": return "다른 멤버가 장식을 변경했습니다. 새로고침 후 다시 이동해 주세요."
+                case "invalid_decor_position", "invalid_decor_kind": return "장식을 놓을 수 없는 위치입니다."
                 case "not_in_guild":        return "길드에 소속되어 있지 않습니다."
                 case "invalid_code":        return "초대 코드가 올바르지 않습니다."
                 case "not_leader":          return "길드장만 할 수 있는 작업입니다."
@@ -1580,6 +1596,15 @@ actor RankingAPI {
                      hmacKeyBase64: String) async throws -> GuildOfficeResponse {
         try await officeAction(deviceId: deviceId, action: "remove_decor", item: "", slot: slot,
                                hmacKeyBase64: hmacKeyBase64)
+    }
+
+    func moveDecor(deviceId: String, slot: Int, position: GuildDecorPosition,
+                   hmacKeyBase64: String) async throws -> GuildDecorPosition {
+        let data = try JSONEncoder().encode(position)
+        let response = try await officeAction(deviceId: deviceId, action: "move_decor",
+            item: String(decoding: data, as: UTF8.self), slot: slot, hmacKeyBase64: hmacKeyBase64)
+        guard let saved = response.position else { throw RankingError.decoding("Missing decor position") }
+        return saved
     }
 
     /// 인테리어 테마 변경 (길드장 전용). kind = "floor"(0..8) | "wall"(0..3).
@@ -2427,6 +2452,7 @@ actor RankingAPI {
     private static let domainErrorCodes: Set<String> = [
         // 길드
         "already_in_guild", "name_taken", "invalid_guild_name", "slot_taken",
+        "decor_changed", "decor_not_found", "invalid_decor_position", "invalid_decor_kind",
         "not_in_guild", "invalid_code", "not_leader", "target_not_in_guild",
         "cannot_kick_self", "guild_not_found", "furniture_conflict", "furniture_inventory_conflict", "invalid_layout",
         // 초대
