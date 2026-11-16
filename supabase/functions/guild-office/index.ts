@@ -4,6 +4,7 @@
 //   place_decor  — 데코 슬롯(0..9)에 아이템 배치/교체 구매 (멤버 누구나 — 기부 모델).
 //                  코인은 클라 로컬 경제라 서버는 기록만 (생성권과 동일 원칙, 기획 §2).
 //   remove_decor — 데코 제거 (멤버 누구나 — 꾸미기 권한을 멤버 전체로 열면서 기부자/길드장 제한 해제).
+//   move_decor   — 기존 데코의 좌표만 저장. item은 {x,y,version} JSON 문자열. 구매 정보/코인은 유지.
 //   set_theme    — 인테리어 테마 (멤버 누구나). item="floor"|"wall", slot=테마 index.
 //
 // payload(서명 대상, flat — 액션 무관 고정 형태): { action, deviceId, item, slot, ts }
@@ -13,6 +14,7 @@ import { jsonResponse, errorResponse, handleOptions } from "../_shared/cors.ts";
 import { getDb } from "../_shared/db.ts";
 import { verifyHmac } from "../_shared/hmac.ts";
 import { isValidUUID } from "../_shared/validation.ts";
+import { parseDecorMove } from "../_shared/decor_position.ts";
 import {
   OFFICE_SLOT_COUNT,
   DECOR_SLOT_COUNT,
@@ -20,7 +22,7 @@ import {
   WALL_THEME_MAX,
 } from "../_shared/guild_policy.ts";
 
-type OfficeAction = "set_spot" | "place_decor" | "remove_decor" | "set_theme";
+type OfficeAction = "set_spot" | "place_decor" | "remove_decor" | "set_theme" | "move_decor";
 
 interface OfficePayload {
   action: OfficeAction;
@@ -52,11 +54,11 @@ Deno.serve(async (req: Request) => {
   if (!isValidUUID(p.deviceId)) return errorResponse(400, "invalid_device_id");
   if (
     p.action !== "set_spot" && p.action !== "place_decor" &&
-    p.action !== "remove_decor" && p.action !== "set_theme"
+    p.action !== "remove_decor" && p.action !== "set_theme" && p.action !== "move_decor"
   ) {
     return errorResponse(400, "invalid_action");
   }
-  if (typeof p.item !== "string" || p.item.length > 40) {
+  if (typeof p.item !== "string" || p.item.length > (p.action === "move_decor" ? 160 : 40)) {
     return errorResponse(400, "invalid_item");
   }
   if (typeof p.slot !== "number" || !Number.isInteger(p.slot)) {
@@ -67,6 +69,7 @@ Deno.serve(async (req: Request) => {
     switch (p.action) {
       case "set_spot": return p.slot >= -1 && p.slot < OFFICE_SLOT_COUNT;
       case "place_decor":
+      case "move_decor":
       case "remove_decor": return p.slot >= 0 && p.slot < DECOR_SLOT_COUNT;
       case "set_theme":
         return p.item === "floor"
@@ -84,7 +87,9 @@ Deno.serve(async (req: Request) => {
   if (typeof body.signature !== "string" || body.signature.length !== 64) {
     return errorResponse(400, "invalid_signature");
   }
-  if (typeof p.ts !== "number") return errorResponse(400, "invalid_ts");
+  if (typeof p.ts !== "number" || !Number.isSafeInteger(p.ts)) return errorResponse(400, "invalid_ts");
+  const move = p.action === "move_decor" ? parseDecorMove(p.item) : null;
+  if (p.action === "move_decor" && !move) return errorResponse(400, "invalid_decor_position");
 
   const nowSec = Math.floor(Date.now() / 1000);
   if (Math.abs(nowSec - p.ts) > MAX_CLOCK_SKEW_SEC) {
@@ -118,6 +123,20 @@ Deno.serve(async (req: Request) => {
   const guildId = membership.guild_id;
 
   switch (p.action) {
+    case "move_decor": {
+      const { data, error } = await db.rpc("move_guild_decor", {
+        p_device: deviceId, p_guild: guildId, p_slot: p.slot,
+        p_version: move!.version, p_x: move!.x, p_y: move!.y,
+      });
+      if (error) {
+        if (error.message === "decor_changed" || error.message === "decor_not_found") return errorResponse(409, error.message);
+        if (error.message === "not_in_guild") return errorResponse(403, "not_in_guild");
+        if (error.message === "invalid_decor_position" || error.message === "invalid_decor_kind") return errorResponse(400, error.message);
+        console.error("guild decor move failed", error.code);
+        return errorResponse(500, "office_failed");
+      }
+      return jsonResponse({ ok: true, position: data });
+    }
     case "set_spot": {
       const newSlot = p.slot === -1 ? null : p.slot;
       const { error: updErr } = await db

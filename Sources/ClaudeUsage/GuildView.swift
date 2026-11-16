@@ -664,6 +664,7 @@ struct GuildView: View {
                 onApplyTheme: {
                     performApplyThemePreview()
                 },
+                onMoveDecor: { item, position in try await performMoveDecor(item, to: position) },
                 purchaseSheetOpen: $purchaseSheetOpen
             )
             HStack(spacing: 8) {
@@ -1125,7 +1126,25 @@ struct GuildView: View {
         }
     }
 
-    /// 데코 기부 구매 (P2b) — 코인 선검증 → 서버 place_decor → 성공 후 차감 (생성권 원칙).
+    /// 기존 장식의 좌표만 저장한다. 구매·코인 차감 경로와 분리한다.
+    private func performMoveDecor(_ item: RankingAPI.GuildFurnitureItem, to point: CGPoint) async throws -> RankingAPI.GuildDecorPosition {
+        guard let guildID = info?.guild.id, let version = item.positionVersion else {
+            throw RankingAPI.RankingError.guildConflict("decor_changed")
+        }
+        do {
+            let result = try await RankingAPI.shared.moveDecor(deviceId: settings.rankingDeviceID,
+                slot: item.slotId, position: .init(x: Int(point.x), y: Int(point.y), version: version),
+                hmacKeyBase64: Keychain.loadRankingHmacKey() ?? "")
+            if info?.guild.id == guildID, let index = info?.furniture.firstIndex(where: { $0.slotId == item.slotId }) {
+                info?.furniture[index].x = result.x
+                info?.furniture[index].y = result.y
+                info?.furniture[index].positionVersion = result.version
+            }
+            return result
+        } catch { refresh(); throw error }
+    }
+
+    /// 데코 기부 구매 — 서버 성공 후에만 코인을 차감한다.
     private func performPlaceDecor(slot: Int, item: OfficeLayout.DecorItem) {
         guard settings.coins >= item.price else {
             error = "코인이 부족합니다 (\(item.price) 필요)."

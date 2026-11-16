@@ -155,7 +155,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: furnitureRows } = await db
     .from("guild_furniture")
-    .select("slot_id, item_kind, users(nickname)")
+    .select("slot_id, item_kind, position_x, position_y, position_version, users(nickname)")
     .eq("guild_id", guild.id);
 
   // 방명록 (M2) — 최근 N개 + 작성 정책. 자기 길드에는 못 쓴다(열람·삭제만).
@@ -185,6 +185,7 @@ Deno.serve(async (req: Request) => {
     furniture: (furnitureRows ?? []).map((f) => ({
       slotId: f.slot_id,
       itemKind: f.item_kind,
+      x: f.position_x, y: f.position_y, positionVersion: f.position_version,
       donorNickname: (f.users as unknown as { nickname: string } | null)?.nickname ?? null,
     })),
     guestbook,

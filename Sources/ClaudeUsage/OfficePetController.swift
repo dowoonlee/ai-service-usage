@@ -234,13 +234,13 @@ final class OfficeSimulation: ObservableObject {
     func configure(members: [RankingAPI.GuildMember],
                    assignments: [String: Int],
                    placements: [OfficeLayout.FurniturePlacement],
-                   decor: [(slotId: Int, kind: String)] = [],
+                   decor: [OfficeLayout.DecorPlacement] = [],
                    guest: Guest? = nil) {
         let key = members.map {
             "\($0.nickname):\(assignments[$0.nickname] ?? -1):\($0.isTopContributor):\($0.monthlyVP > 0)"
         }.sorted().joined(separator: ",")
             + "|furniture:" + OfficeLayout.serializePlacements(placements)
-            + "|decor:" + decor.map { "\($0.slotId):\($0.kind)" }.sorted().joined(separator: ",")
+            + "|decor:" + decor.map(\.signature).sorted().joined(separator: ",")
             + "|guest:" + (guest.map { "\($0.name):\($0.kind.rawValue):\($0.variant)" } ?? "")
         guard key != configuredKey else { return }
         configuredKey = key

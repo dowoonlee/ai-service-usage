@@ -532,6 +532,51 @@ enum OfficeLayout {
         decorCatalog.first { $0.kind == kind }
     }
 
+    struct DecorPlacement: Equatable {
+        let slotId: Int
+        let kind: String
+        var position: CGPoint? = nil
+        var resolvedPosition: CGPoint {
+            if let position { return position }
+            guard let slot = decorSlot(id: slotId) else { return .zero }
+            return CGPoint(x: slot.anchorX, y: slot.baselineY)
+        }
+        var signature: String { "\(slotId):\(kind):\(resolvedPosition.x):\(resolvedPosition.y)" }
+    }
+
+    /// Coordinates use the artwork's bottom baseline, preserving the mouse grab offset during dragging.
+    static func clampDecorPosition(kind: String, position: CGPoint) -> CGPoint {
+        guard let item = decorItem(kind: kind) else { return position }
+        let x = min(max(position.x, item.size.width / 2), sceneSize.width - item.size.width / 2)
+        let y: CGFloat
+        if item.category == .wall {
+            y = min(max(position.y, item.size.height), wallBottom)
+        } else {
+            y = lanes.min(by: { abs($0 - position.y) < abs($1 - position.y) }) ?? lanes[2]
+        }
+        return CGPoint(x: x.rounded(), y: y.rounded())
+    }
+
+    static func decorPlacementCollides(_ candidate: DecorPlacement, furniture: [FurniturePlacement],
+                                       decor: [DecorPlacement]) -> Bool {
+        guard let item = decorItem(kind: candidate.kind) else { return false }
+        let p = candidate.resolvedPosition
+        let wall = item.category == .wall
+        func overlaps(x: CGFloat, y: CGFloat, size: CGSize) -> Bool {
+            guard abs(p.x - x) < (item.size.width + size.width) / 2 else { return false }
+            if !wall { return abs(p.y - y) < 0.5 }
+            return abs((p.y - item.size.height / 2) - (y - size.height / 2)) < (item.size.height + size.height) / 2
+        }
+        return furniture.contains { f in
+            guard (f.lane == wallLane) == wall, let k = furnitureKind(id: f.kind) else { return false }
+            return overlaps(x: f.x, y: baselineY(for: f, in: furniture), size: k.collisionSize)
+        } || decor.contains { other in
+            guard other.slotId != candidate.slotId, let k = decorItem(kind: other.kind),
+                  (k.category == .wall) == wall else { return false }
+            return overlaps(x: other.resolvedPosition.x, y: other.resolvedPosition.y, size: k.size)
+        }
+    }
+
     /// 통행 특성별 충돌 밴드 — baseline 주변 낮은 띠, 펫 "발" 기준 판정 (몸통 겹침 허용).
     /// avoid = 전 구간(피해감), front = 뒤쪽 밴드(앞으로만 지나가게), behind = 앞쪽 밴드
     /// (뒤로만), through/벽/마운트된 소품 = 없음.
@@ -547,7 +592,7 @@ enum OfficeLayout {
 
     /// 가구·바닥 데코의 충돌 사각형 목록 — 펫 A* 경로탐색이 우회할 영역.
     static func collisionRects(placements: [FurniturePlacement],
-                               decor: [(slotId: Int, kind: String)]) -> [CGRect] {
+                               decor: [DecorPlacement]) -> [CGRect] {
         var rects: [CGRect] = []
         for p in placements {
             guard p.lane != wallLane, let kind = furnitureKind(id: p.kind),
@@ -558,10 +603,9 @@ enum OfficeLayout {
             rects.append(band)
         }
         for entry in decor {
-            guard let slot = decorSlot(id: entry.slotId), slot.category == .floor,
-                  let item = decorItem(kind: entry.kind),
-                  let band = passingBand(passing: item.passing, x: slot.anchorX,
-                                         baselineY: slot.baselineY,
+            guard let item = decorItem(kind: entry.kind), item.category == .floor,
+                  let band = passingBand(passing: item.passing, x: entry.resolvedPosition.x,
+                                         baselineY: entry.resolvedPosition.y,
                                          width: item.blockingWidth) else { continue }
             rects.append(band)
         }
