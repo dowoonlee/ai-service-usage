@@ -458,6 +458,8 @@ final class ViewModel: ObservableObject {
                     BadgeRegistry.evaluate()
                     await self.submitRankingIfNeeded()
                     await self.checkPodiumRewardIfNeeded()
+                    // 등록 후에 연결한 GitHub을 서버 계정에 반영(#293). 맞춰진 뒤엔 호출 없음.
+                    await GitHubServerLink.reconcileIfNeeded()
                     await self.runSync()
                 } else if self.shouldCheckClaimsWhileIdle() {
                     // 패널·메뉴바가 모두 숨겨져 있어도 미수령 보상은 소진해야 한다. claim이 활성

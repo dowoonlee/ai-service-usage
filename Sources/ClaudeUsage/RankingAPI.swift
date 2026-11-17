@@ -236,6 +236,20 @@ actor RankingAPI {
     struct RenameNicknameResponse: Decodable {
         let nickname: String
     }
+    /// link-github 서명 대상. 토큰까지 서명에 넣어 요청 가로채기 후 토큰 바꿔치기를 막는다.
+    struct LinkGitHubPayload: Encodable {
+        let deviceId: String
+        let githubToken: String
+        let ts: Int64
+    }
+    struct LinkGitHubRequest: Encodable {
+        let payload: LinkGitHubPayload
+        let signature: String
+    }
+    struct LinkGitHubResponse: Decodable, Sendable {
+        let githubLogin: String
+        let githubUserId: Int
+    }
     struct SetPodiumMessageRequest: Encodable {
         let payload: SetPodiumMessagePayload
         let signature: String
@@ -933,6 +947,10 @@ actor RankingAPI {
         case rateLimited(retryAfterSec: Int)
         /// 게시판 쓰기 게이트 — GitHub 미연동 계정의 작성/좋아요/댓글 시도(403 `github_required`).
         case githubRequired
+        /// link-github 409 — 이 GitHub 계정이 이미 다른 랭킹 계정에 연결돼 있음.
+        case githubLinkedElsewhere
+        /// link-github 401 — 서버가 GitHub 토큰을 검증하지 못함(만료·폐기).
+        case githubTokenRejected
         /// 길드 관련 서버 거부 — 서버 error 코드 그대로 (already_in_guild / name_taken /
         /// slot_taken / not_in_guild / invalid_code / not_leader / …). 호출 측이 코드로 분기.
         case guildConflict(String)
@@ -964,6 +982,10 @@ actor RankingAPI {
                 return "다음 글 작성까지 \(r)초 남았습니다."
             case .githubRequired:
                 return "게시판 작성·좋아요는 GitHub 인증 후 가능합니다. 설정에서 GitHub 계정을 연결하세요."
+            case .githubLinkedElsewhere:
+                return "이 GitHub 계정은 이미 다른 랭킹 계정에 연결돼 있습니다. 그 계정을 쓰려면 ‘GitHub으로 계정 복구’를 이용하세요."
+            case .githubTokenRejected:
+                return "GitHub 인증이 만료됐습니다. 연결 해제 후 다시 연결해 주세요."
             case .guildConflict(let code):
                 switch code {
                 case "already_in_guild":    return "이미 길드에 소속되어 있습니다."
@@ -1947,6 +1969,18 @@ actor RankingAPI {
     }
 
     /// 429 응답 body 디코딩용. Swift는 generic 함수 내부 nested struct 불가 → outer scope에 둠.
+    /// 등록된 랭킹 계정에 GitHub 계정을 연결(#293). 서버가 토큰을 GitHub API로 직접 검증해
+    /// login/id를 확정한다 — 등록 후에 GitHub을 연결한 계정이 서버에 그 사실을 전하는 유일한 경로.
+    /// 같은 계정이면 멱등. 다른 랭킹 계정에 이미 묶인 GitHub이면 `.githubLinkedElsewhere`.
+    func linkGitHub(deviceId: String, githubToken: String,
+                    hmacKeyBase64: String) async throws -> LinkGitHubResponse {
+        let payload = LinkGitHubPayload(deviceId: deviceId, githubToken: githubToken,
+                                        ts: Int64(Date().timeIntervalSince1970))
+        let sig = try Self.signLinkGitHub(payload: payload, keyBase64: hmacKeyBase64)
+        let req = LinkGitHubRequest(payload: payload, signature: sig)
+        return try await post(path: "link-github", body: req)
+    }
+
     private struct RateLimitedBody: Decodable { let retryAfterSec: Int? }
 
     // MARK: - HMAC
@@ -1969,6 +2003,11 @@ actor RankingAPI {
 
     /// RenameNicknamePayload 서명. 동일 알고리즘 — 사용자 입력 한글이 서명 대상이 되는 점은 podium과 같다.
     static func signRename(payload: RenameNicknamePayload, keyBase64: String) throws -> String {
+        try signEncodable(payload, keyBase64: keyBase64)
+    }
+
+    /// LinkGitHubPayload 서명. 동일 알고리즘.
+    static func signLinkGitHub(payload: LinkGitHubPayload, keyBase64: String) throws -> String {
         try signEncodable(payload, keyBase64: keyBase64)
     }
 
@@ -2504,6 +2543,15 @@ actor RankingAPI {
             // "차단된 계정" 문구가 뜨면 원인을 오해하게 되므로 반드시 여기서 먼저 잡는다.
             if errCode == "github_required" {
                 throw RankingError.githubRequired
+            }
+            // link-github 전용 — 전역 409→닉네임중복 오매핑 방지. 401 코드는 peek/recover도 같은
+            // 문자열을 쓰므로 경로로 한정한다(그쪽 기존 에러 표시는 건드리지 않는다).
+            if errCode == "github_linked_elsewhere" {
+                throw RankingError.githubLinkedElsewhere
+            }
+            if errCode == "github_verification_failed",
+               response.url?.lastPathComponent == "link-github" {
+                throw RankingError.githubTokenRejected
             }
             if errCode == "join_cooldown" {
                 let until = body.until.flatMap {

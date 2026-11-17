@@ -60,6 +60,13 @@ Deno.test("rename-nickname payload 서명 — Swift 골든과 일치", async () 
     "4af94ac15377cc5860cf11bd581ce5c35a2a69058d8aa18a8d9fc852e136ef2d");
 });
 
+Deno.test("link-github payload 서명 — Swift 골든과 일치", async () => {
+  // 토큰이 서명 대상에 들어간다 — 형식만 닮은 가짜 값(실제 토큰 아님).
+  assertEquals(
+    await sign({ deviceId: DEVICE, githubToken: "gho_parity_fixture_not_a_real_token_0123", ts: 1800000000 }),
+    "18611cea27f0f46777dbbaab068278e806883ddbc19511170534b4b7fd120585");
+});
+
 Deno.test("canonical 문자열 자체 — Swift JSONEncoder 출력과 바이트 동일", () => {
   // 서명만 비교하면 두 구현이 **둘 다** 같은 방식으로 틀렸을 때를 못 잡고, 실패해도 어디가
   // 어긋났는지 안 보인다. 중간 산물을 직접 고정한다.

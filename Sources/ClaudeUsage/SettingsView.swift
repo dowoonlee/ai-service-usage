@@ -139,6 +139,9 @@ private struct GitHubLinkView: View {
     }
     @State private var state: FlowState = .idle
     @State private var pollTask: Task<Void, Never>?
+    /// 서버 랭킹 계정 반영(link-github) 실패 사유 — 연결됨 화면 하단에 표시.
+    @State private var serverLinkError: String?
+    @State private var serverLinking = false
 
     var body: some View {
         if !GitHubAuth.isConfigured {
@@ -160,7 +163,29 @@ private struct GitHubLinkView: View {
                 Spacer()
                 Button("연결 해제") {
                     settings.disconnectGitHub()
+                    serverLinkError = nil
                     state = .idle
+                }
+            }
+            // 랭킹 등록 계정인데 서버가 아직 이 GitHub 연결을 모르는 상태(#293) — 게시판 쓰기가
+            // 잠겨 있으므로 숨기지 않고 보여 주고, 직접 재시도할 수 있게 한다.
+            if GitHubServerLink.needsLink(registered: settings.rankingRegistered,
+                                          deviceID: settings.rankingDeviceID,
+                                          localUserID: settings.githubUserID,
+                                          serverLinkedUserID: settings.githubServerLinkedUserID),
+               RankingAPI.isConfigured {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("랭킹 계정에 아직 반영되지 않았습니다 — 게시판 작성이 잠겨 있습니다.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.system(size: 11)).foregroundStyle(.orange)
+                    if let serverLinkError {
+                        Text(serverLinkError)
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Button(serverLinking ? "반영 중…" : "랭킹 계정에 반영") { linkToServer() }
+                        .controlSize(.small)
+                        .disabled(serverLinking)
                 }
             }
             Text("머지된 기여 PR마다 \(CoinLedger.coinPerContributorPR) 코인 + \(RankPointLedger.rpPerContributorPR) RP 자동 적립.")
@@ -226,6 +251,14 @@ private struct GitHubLinkView: View {
         }
     }
 
+    private func linkToServer() {
+        serverLinking = true
+        Task { @MainActor in
+            serverLinkError = await GitHubServerLink.reconcileIfNeeded(force: true)
+            serverLinking = false
+        }
+    }
+
     private func startFlow() {
         state = .requesting
         pollTask?.cancel()
@@ -248,6 +281,9 @@ private struct GitHubLinkView: View {
                 // 사용자 식별 3개 필드 + 사주 "생년월일" 한 번에 반영. SSOT 헬퍼 경유.
                 settings.persistGitHubUser(user)
                 state = .idle
+                // 이미 랭킹에 등록된 계정이면 서버에도 연결을 알린다 — 안 그러면 게시판 게이트가
+                // 풀리지 않는다(#293). 미등록이면 no-op이고, 등록 때 register가 함께 보낸다.
+                serverLinkError = await GitHubServerLink.reconcileIfNeeded(force: true)
                 // 연결 직후 첫 sync — 과거 PR 일괄 보너스 트리거.
                 await ContributorBonus.shared.sync()
             } catch is CancellationError {
@@ -658,6 +694,8 @@ private struct RankingSectionView: View {
                 settings.rankingBaselineCoins = currentTotal
                 settings.rankingLastSubmittedTotal = 0
                 settings.rankingUsesZeroBaseline = true
+                // register가 방금 보낸 GitHub id가 곧 서버 값 — 따로 link-github를 부를 필요 없다.
+                settings.githubServerLinkedUserID = settings.githubUserID
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
                 state = .idle
@@ -779,6 +817,8 @@ private struct RankingSectionView: View {
                 if let backup = resp.profileJson?.backup {
                     settings.applyBackup(backup)
                 }
+                // 서버가 이 토큰의 GitHub id로 계정을 찾아 준 것이므로 서버 값과 이미 일치한다.
+                settings.githubServerLinkedUserID = settings.githubUserID
                 state = .idle
                 showRecoveryEntry = false
             } catch is CancellationError {
