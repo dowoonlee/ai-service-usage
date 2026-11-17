@@ -50,6 +50,15 @@ final class HMACParityTests: XCTestCase {
                        "4af94ac15377cc5860cf11bd581ce5c35a2a69058d8aa18a8d9fc852e136ef2d")
     }
 
+    func testLinkGitHubPayloadSignature() throws {
+        // 토큰이 서명 대상에 들어간다 — 형식만 닮은 가짜 값(실제 토큰 아님).
+        let payload = RankingAPI.LinkGitHubPayload(
+            deviceId: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+            githubToken: "gho_parity_fixture_not_a_real_token_0123", ts: 1_800_000_000)
+        XCTAssertEqual(try RankingAPI.signLinkGitHub(payload: payload, keyBase64: Self.key),
+                       "18611cea27f0f46777dbbaab068278e806883ddbc19511170534b4b7fd120585")
+    }
+
     func testPodiumPayloadSignatureWithNonASCII() throws {
         let payload = RankingAPI.SetPodiumMessagePayload(
             deviceId: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",

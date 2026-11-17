@@ -627,6 +627,13 @@ final class Settings: ObservableObject {
     @Published var githubUserID: Int? {
         didSet { AppEnv.defaults.set(githubUserID, forKey: Keys.githubUserID) }
     }
+    /// 서버 랭킹 계정(`users.github_user_id`)에 반영된 것으로 확인된 GitHub user id.
+    /// `githubUserID`와 다르면(=nil 포함) 서버가 연결 사실을 모른다는 뜻 → `GitHubServerLink`가
+    /// link-github로 맞춘다(#293). 플래그가 아니라 id를 저장해 계정을 바꿔 연결한 경우도 같은
+    /// 비교 하나로 잡힌다.
+    @Published var githubServerLinkedUserID: Int? {
+        didSet { AppEnv.defaults.set(githubServerLinkedUserID, forKey: Keys.githubServerLinkedUserID) }
+    }
     /// GitHub 계정 생성 시각(ISO 8601 UTC). "오늘의 개발 운세" 의 사주 "생년월일" 로 사용.
     /// 한번 받아 두면 변하지 않음 — 토큰 갱신 때마다 다시 fetch 하지 않음.
     @Published var githubCreatedAt: String? {
@@ -972,6 +979,7 @@ final class Settings: ObservableObject {
 
         self.githubLogin = d.string(forKey: Keys.githubLogin)
         self.githubUserID = (d.object(forKey: Keys.githubUserID) as? Int)
+        self.githubServerLinkedUserID = (d.object(forKey: Keys.githubServerLinkedUserID) as? Int)
         self.githubCreatedAt = d.string(forKey: Keys.githubCreatedAt)
         let creditedData = d.data(forKey: Keys.creditedPRNumbers)
         self.creditedPRNumbers = (creditedData.flatMap { try? JSONDecoder().decode(Set<Int>.self, from: $0) }) ?? []
@@ -1680,6 +1688,8 @@ final class Settings: ObservableObject {
         rankingRegistered = false
         rankingPrivacyAccepted = false
         rankingUsesZeroBaseline = false
+        // 서버 계정이 사라졌으니 "서버에 반영됨" 표시도 무효 — 재등록 후 다시 맞춘다.
+        githubServerLinkedUserID = nil
         // 길드 멤버십은 서버 CASCADE로 함께 사라짐 — 표시 캐시도 클리어.
         // guildPermits(생성권)는 로컬 구매 재화라 유지.
         guildID = ""
@@ -1912,6 +1922,7 @@ final class Settings: ObservableObject {
         // GitHub 기여자 보너스
         static let githubLogin                 = "settings.githubLogin"
         static let githubUserID                = "settings.githubUserID"
+        static let githubServerLinkedUserID    = "settings.githubServerLinkedUserID"
         static let creditedPRNumbers           = "settings.creditedPRNumbers"
         // 랭킹 (글로벌 보드)
         static let rankingEnabled              = "settings.rankingEnabled"
