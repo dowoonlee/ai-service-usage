@@ -124,14 +124,21 @@ struct ArenaView: View {
         }
         .onAppear {
             if teamKinds.isEmpty {
-                // 저장된 빈자리는 유지한다. 삭제한 팀원을 화면 재진입 때 자동 보충하지 않는다.
-                let seed = Array(settings.battleTeam.filter { settings.ownedPets[$0] != nil }.prefix(5))
+                // 사용자가 직접 뺀 빈자리는 유지한다(화면 재진입 때 자동 보충하지 않음). 직접 뺀 적이
+                // 없는 5칸 미만 팀(레거시 3마리 팀, 펫이 늘어나는 신규 사용자)은 종전대로 보충한다.
+                var seed = Array(settings.battleTeam.filter { settings.ownedPets[$0] != nil }.prefix(5))
+                if seed.count < 5 && !settings.battleTeamKeepsEmptySlots {
+                    seed.append(contentsOf: owned.filter { !seed.contains($0) }.shuffled().prefix(5 - seed.count))
+                }
                 teamKinds = seed.isEmpty ? Array(owned.shuffled().prefix(5)) : seed
             }
             if enhanceKind == nil { enhanceKind = owned.first }
             recentEnhanced = settings.recentEnhancedPets
         }
-        .onChange(of: teamKinds) { _, new in settings.battleTeam = new }  // 편성 변경 즉시 영속
+        .onChange(of: teamKinds) { _, new in
+            settings.battleTeam = new   // 편성 변경 즉시 영속
+            if new.count >= 5 { settings.battleTeamKeepsEmptySlots = false }
+        }
         .sheet(isPresented: $showTypeHelp) { typeHelpSheet }
         .sheet(isPresented: $showAllEnhanceTargets) { allEnhanceTargetsSheet }
         .sheet(isPresented: $showManualBattle) {
@@ -531,13 +538,22 @@ struct ArenaView: View {
             }
         } label: {
             VStack(spacing: compact ? 2 : 3) {
-                thumb(kind, h: compact ? 26 : 30)
-                Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 8)).lineLimit(1)
-                OwnedManualMasteryBadge(kind: kind)
-                typeBadge(kind.battleType)
-                HStack(spacing: 3) {
-                    Text("Σ\(s.total)").font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
-                    if level > 0 { Text("+\(level)").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.orange) }
+                thumb(kind, h: compact ? 24 : 30)
+                if compact {
+                    // 강화소는 창 최소 높이(640) 안에 '강화 시도' 버튼까지 들어와야 해서 이름·강화 수치만 둔다.
+                    HStack(spacing: 2) {
+                        Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 8)).lineLimit(1)
+                        Text("+\(level)").font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.orange).fixedSize()
+                    }.padding(.horizontal, 3)
+                } else {
+                    Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 8)).lineLimit(1)
+                    OwnedManualMasteryBadge(kind: kind)
+                    typeBadge(kind.battleType)
+                    HStack(spacing: 3) {
+                        Text("Σ\(s.total)").font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
+                        if level > 0 { Text("+\(level)").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.orange) }
+                    }
                 }
             }
             .frame(width: compact ? 64 : 74).padding(.vertical, compact ? 4 : 6)
@@ -573,7 +589,7 @@ struct ArenaView: View {
                 Image(systemName: "plus").font(.system(size: 18)).foregroundStyle(.secondary)
                 Text("추가").font(.system(size: 8)).foregroundStyle(.secondary)
             }
-            .frame(width: mode == .enhance ? 64 : 74, height: mode == .enhance ? 64 : 68)
+            .frame(width: mode == .enhance ? 64 : 74, height: mode == .enhance ? 44 : 68)
             .background(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [3])))
         }.buttonStyle(.plain).accessibilityLabel("배틀 팀원 추가")
     }
@@ -591,6 +607,7 @@ struct ArenaView: View {
     private func removeSlot(_ slot: Int) {
         guard teamKinds.count > 1, slot < teamKinds.count else { return }
         teamKinds.remove(at: slot); result = nil
+        settings.battleTeamKeepsEmptySlots = true
     }
 
     // 순서 재정렬 — teamKinds 순서 = 선봉 순서(slot 0 = 선봉). 인접 스왑 / 선봉으로 이동.
