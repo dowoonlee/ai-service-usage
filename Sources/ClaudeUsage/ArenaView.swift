@@ -58,9 +58,9 @@ struct ArenaView: View {
     @State private var enhancePop: CGFloat = 1
     @State private var enhanceBright: Double = 0
     @State private var enhanceTask: Task<Void, Never>?
-    // 대상 선택: 정렬 / 검색 / 최근 강화
+    // 대상 선택: 검색 / 전체 보기 / 최근 강화
     @State private var enhanceSearch = ""
-    @State private var enhanceSort: TargetSort = .recent
+    @State private var showAllEnhanceTargets = false
     @State private var recentEnhanced: [PetKind] = []
 
     // 랭크전 (서버 authoritative)
@@ -89,10 +89,6 @@ struct ArenaView: View {
     }
     enum EnhancePhase: Equatable { case idle, charging, result(EnhanceOutcome) }
     struct EnhanceLine: Identifiable { let id = UUID(); let text: String; let color: Color }
-    enum TargetSort: String, CaseIterable, Identifiable {
-        case recent = "최근", dex = "도감", rarity = "희귀도", name = "이름"
-        var id: String { rawValue }
-    }
     /// 팀 슬롯 편성 팝오버 대상 (id = 슬롯 인덱스; teamKinds.count면 새 슬롯 추가).
     struct SlotSel: Identifiable { let id: Int }
 
@@ -128,19 +124,16 @@ struct ArenaView: View {
         }
         .onAppear {
             if teamKinds.isEmpty {
-                // 저장된 배틀 팀(순서 유지) 복원 — 소유 중인 kind만, 최대 5. 5칸 미만(미설정·레거시 3마리
-                // 팀)이면 소유 펫 중 미포함분을 랜덤으로 채워 5마리로(부족하면 전부). 최초 1회만 —
-                // onChange가 즉시 저장해 이후 고정(매번 랜덤 아님).
-                var seed = Array(settings.battleTeam.filter { settings.ownedPets[$0] != nil }.prefix(5))
-                if seed.count < 5 {
-                    seed.append(contentsOf: owned.filter { !seed.contains($0) }.shuffled().prefix(5 - seed.count))
-                }
-                teamKinds = seed
+                // 저장된 빈자리는 유지한다. 삭제한 팀원을 화면 재진입 때 자동 보충하지 않는다.
+                let seed = Array(settings.battleTeam.filter { settings.ownedPets[$0] != nil }.prefix(5))
+                teamKinds = seed.isEmpty ? Array(owned.shuffled().prefix(5)) : seed
             }
             if enhanceKind == nil { enhanceKind = owned.first }
+            recentEnhanced = settings.recentEnhancedPets
         }
         .onChange(of: teamKinds) { _, new in settings.battleTeam = new }  // 편성 변경 즉시 영속
         .sheet(isPresented: $showTypeHelp) { typeHelpSheet }
+        .sheet(isPresented: $showAllEnhanceTargets) { allEnhanceTargetsSheet }
         .sheet(isPresented: $showManualBattle) {
             ManualBattleView(session: manualSession, team: manualTeam, opponent: manualOpponent)
         }
@@ -257,11 +250,15 @@ struct ArenaView: View {
 
     // MARK: 연습전
 
-    // 팀 편성 UI — 연습전·랭크전 공유.
+    // 팀 편성 UI — 연습전·랭크전·강화소 공유. 강화소의 카드 탭은 강화 대상만 선택한다.
     @ViewBuilder private var teamEditor: some View {
         HStack {
-            Text("내 배틀 팀").font(.system(size: 12, weight: .semibold))
-            Text("(탭해서 편성)").font(.system(size: 9)).foregroundStyle(.tertiary)
+            Text("내 배틀 팀")
+                .font(.system(size: mode == .enhance ? 9 : 12, weight: .semibold))
+                .foregroundStyle(mode == .enhance ? .secondary : .primary)
+            if mode != .enhance {
+                Text("(탭해서 편성)").font(.system(size: 9)).foregroundStyle(.tertiary)
+            }
             Spacer()
             // 팀 시너지 — 종류별 픽셀 아이콘(Tuxemon). 호버하면 효과 툴팁(팝오버).
             HStack(spacing: 5) {
@@ -275,7 +272,7 @@ struct ArenaView: View {
                     synergyBadge("syn_bond", noneSynergyTip, $noneTipShown, grayed: true)
                 }
             }
-            if !settings.partyPresets.isEmpty {
+            if mode != .enhance && !settings.partyPresets.isEmpty {
                 Menu {
                     ForEach(settings.partyPresets) { preset in
                         Button(preset.name.isEmpty ? "파티" : preset.name) { importParty(preset) }
@@ -284,9 +281,11 @@ struct ArenaView: View {
                     Label("파티에서", systemImage: "square.and.arrow.down").font(.system(size: 10))
                 }.menuStyle(.borderlessButton).fixedSize().foregroundStyle(.tint)
             }
-            Button { teamKinds = Array(owned.shuffled().prefix(5)); result = nil } label: {
-                Label("팀 새로 뽑기", systemImage: "shuffle").font(.system(size: 10))
-            }.buttonStyle(.plain).foregroundStyle(.tint)
+            if mode != .enhance {
+                Button { teamKinds = Array(owned.shuffled().prefix(5)); result = nil } label: {
+                    Label("팀 새로 뽑기", systemImage: "shuffle").font(.system(size: 10))
+                }.buttonStyle(.plain).foregroundStyle(.tint)
+            }
         }
         HStack(spacing: 8) {
             ForEach(Array(teamKinds.enumerated()), id: \.offset) { idx, kind in petCard(kind, slot: idx) }
@@ -521,9 +520,18 @@ struct ArenaView: View {
         // 강화소에서 올린 강화 레벨(서버 SSOT)+보유 이로치를 반영해 배틀에 실제로 쓰일 스탯을 미리 보여준다.
         let level = serverLevels[kind] ?? 0
         let s = PetBattleStats.compute(kind: kind, variant: battleVariant(kind), enhanceLevel: level, progressUnits: 0)
-        return Button { editingSlot = SlotSel(id: slot) } label: {
-            VStack(spacing: 3) {
-                thumb(kind, h: 30)
+        let compact = mode == .enhance
+        let selectedForEnhance = mode == .enhance && enhanceKind == kind
+        return Button {
+            if mode == .enhance {
+                guard enhancePhase == .idle else { return }
+                enhanceKind = kind
+            } else {
+                editingSlot = SlotSel(id: slot)
+            }
+        } label: {
+            VStack(spacing: compact ? 2 : 3) {
+                thumb(kind, h: compact ? 26 : 30)
                 Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 8)).lineLimit(1)
                 OwnedManualMasteryBadge(kind: kind)
                 typeBadge(kind.battleType)
@@ -532,8 +540,11 @@ struct ArenaView: View {
                     if level > 0 { Text("+\(level)").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.orange) }
                 }
             }
-            .frame(width: 74).padding(.vertical, 6)
-            .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.08)))
+            .frame(width: compact ? 64 : 74).padding(.vertical, compact ? 4 : 6)
+            .background(RoundedRectangle(cornerRadius: AppRadius.md)
+                .fill(selectedForEnhance ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.08)))
+            .overlay(RoundedRectangle(cornerRadius: AppRadius.md)
+                .strokeBorder(selectedForEnhance ? Color.orange : .clear, lineWidth: 1.5))
             .overlay(alignment: .topLeading) {
                 if slot == 0 && teamKinds.count > 1 {
                     Text("선봉").font(.system(size: 7, weight: .bold)).foregroundStyle(.white)
@@ -547,10 +558,13 @@ struct ArenaView: View {
                     Button { removeSlot(slot) } label: {
                         Image(systemName: "xmark.circle.fill").font(.system(size: 12))
                             .foregroundStyle(.secondary).background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
-                    }.buttonStyle(.plain).offset(x: 4, y: -4)
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel("\(PetMetaStore.shared.displayName(for: kind)) 팀에서 삭제")
+                        .offset(x: 4, y: -4)
                 }
             }
         }.buttonStyle(.plain)
+            .help(mode == .enhance ? "강화 대상으로 선택" : "팀원 교체 및 순서 변경")
     }
 
     private var addSlotCard: some View {
@@ -559,9 +573,9 @@ struct ArenaView: View {
                 Image(systemName: "plus").font(.system(size: 18)).foregroundStyle(.secondary)
                 Text("추가").font(.system(size: 8)).foregroundStyle(.secondary)
             }
-            .frame(width: 74, height: 68)
+            .frame(width: mode == .enhance ? 64 : 74, height: mode == .enhance ? 64 : 68)
             .background(RoundedRectangle(cornerRadius: AppRadius.md).strokeBorder(Color.secondary.opacity(0.3), style: StrokeStyle(lineWidth: 1, dash: [3])))
-        }.buttonStyle(.plain)
+        }.buttonStyle(.plain).accessibilityLabel("배틀 팀원 추가")
     }
 
     // 파티 프리셋 → 배틀 팀 가져오기 (소유·유니크·최대 5마리).
@@ -845,9 +859,7 @@ struct ArenaView: View {
                 HStack(spacing: 6) {
                     Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 12, weight: .semibold))
                     typeBadge(kind.battleType)
-                    Text(rarity.displayName).font(.system(size: 8, weight: .bold))
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Capsule().fill(rarity.color.opacity(0.2))).foregroundStyle(rarity.color)
+                    rarityBadge(rarity)
                     Text("강화 +\(level)").font(.system(size: 13, weight: .bold)).foregroundStyle(.orange)
                         .contentTransition(.numericText())
                         .animation(.spring(response: 0.3, dampingFraction: 0.5), value: level)
@@ -855,6 +867,13 @@ struct ArenaView: View {
                 statRow(stats)
             }
             .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: 8) {
+                teamEditor
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .disabled(enhancePhase != .idle)
+            .popover(item: $editingSlot, arrowEdge: .bottom) { sel in teamSlotPicker(slot: sel.id) }
 
             targetPicker(current: kind)
 
@@ -947,7 +966,7 @@ struct ArenaView: View {
         }
     }
 
-    // 강화 대상 선택 (#2) — 정렬·검색·최근 강화 + 아이콘 스크롤(각 펫의 현재 로컬 강화 레벨 표시)
+    // 강화 대상 선택 — 검색·강화 높은순 목록 + 타입별 전체 보기
     private func targetPicker(current: PetKind) -> some View {
         let list = sortedTargets()
         return VStack(alignment: .leading, spacing: 4) {
@@ -956,62 +975,175 @@ struct ArenaView: View {
                 Spacer()
                 TextField("검색", text: $enhanceSearch)
                     .textFieldStyle(.roundedBorder).font(.system(size: 10)).frame(width: 84)
-                Picker("", selection: $enhanceSort) {
-                    ForEach(TargetSort.allCases) { Text($0.rawValue).tag($0) }
-                }.pickerStyle(.menu).labelsHidden().frame(width: 78)
+                Button { showAllEnhanceTargets = true } label: {
+                    Label("전체 보기", systemImage: "square.grid.2x2")
+                        .font(.system(size: 10))
+                }
+                .buttonStyle(.bordered)
+                .disabled(enhancePhase != .idle)
             }
             if list.isEmpty {
                 Text("검색 결과 없음").font(.system(size: 10)).foregroundStyle(.secondary).padding(.vertical, 8)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
+                EnhanceTargetScrollView {
                     HStack(spacing: 6) {
                         ForEach(list, id: \.self) { k in
                             Button { if enhancePhase == .idle { enhanceKind = k } } label: {
                                 VStack(spacing: 1) {
-                                    thumb(k, h: 26)
-                                    Text("+\(serverLevels[k] ?? 0)").font(.system(size: 7, design: .monospaced)).foregroundStyle(.orange)
+                                    thumb(k, h: 28)
+                                    Text("+\(serverLevels[k] ?? 0)").font(.system(size: 8, design: .monospaced)).foregroundStyle(.orange)
                                 }
-                                .frame(width: 42, height: 46)
+                                .frame(width: 48, height: 52)
                                 .background(RoundedRectangle(cornerRadius: 6).fill(k == current ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.06)))
                                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(k == current ? Color.orange : .clear, lineWidth: 1.5))
                             }.buttonStyle(.plain).disabled(enhancePhase != .idle)
                         }
                     }.padding(.horizontal, 1)
-                }.frame(height: 52)
+                }.frame(height: 68)
             }
         }
     }
 
-    private func dexIndex(_ k: PetKind) -> Int { PetKind.allCases.firstIndex(of: k) ?? 0 }
-    private func rarityRank(_ k: PetKind) -> Int {
-        guard let r = PetKind.rarityFor(k) else { return -1 }
-        return Rarity.allCases.firstIndex(of: r) ?? 0
+    private var recentEnhanceTargets: [PetKind] {
+        Array(recentEnhanced.filter { settings.ownedPets[$0] != nil }.prefix(8))
     }
 
     private func sortedTargets() -> [PetKind] {
-        let q = enhanceSearch.trimmingCharacters(in: .whitespaces).lowercased()
-        var list = owned
-        if !q.isEmpty {
-            list = list.filter { PetMetaStore.shared.displayName(for: $0).lowercased().contains(q) }
+        let list = targetsByEnhancement(owned)
+        let q = enhanceSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return q.isEmpty ? list : list.filter {
+            PetMetaStore.shared.displayName(for: $0).localizedCaseInsensitiveContains(q)
         }
-        switch enhanceSort {
-        case .recent:
-            let recent = recentEnhanced.filter { list.contains($0) }
-            let recentSet = Set(recent)
-            let rest = list.filter { !recentSet.contains($0) }.sorted { dexIndex($0) < dexIndex($1) }
-            return recent + rest
-        case .dex:
-            return list.sorted { dexIndex($0) < dexIndex($1) }
-        case .rarity:
-            return list.sorted { a, b in
-                let ra = rarityRank(a), rb = rarityRank(b)
-                return ra != rb ? ra > rb : dexIndex(a) < dexIndex(b)
+    }
+
+    private var allEnhanceTargetsSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("강화 대상 전체 보기").font(.headline)
+                    Text("보유 캐릭터 \(owned.count)종 · 카테고리별 강화 높은순")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("닫기") { showAllEnhanceTargets = false }
+                    .keyboardShortcut(.cancelAction)
+            }.padding(16)
+            Divider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("최근 강화한 대상", systemImage: "clock.arrow.circlepath")
+                                .font(.system(size: 11, weight: .semibold))
+                                .padding(.horizontal, 8).padding(.vertical, 3)
+                                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+                            Spacer()
+                            Text("\(recentEnhanceTargets.count)/8 · 강화 높은순")
+                                .font(.system(size: 10)).foregroundStyle(.secondary)
+                        }
+                        if recentEnhanceTargets.isEmpty {
+                            Text("아직 최근 강화한 대상이 없습니다.")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                                .padding(.vertical, 12)
+                        } else {
+                            enhanceTargetGrid(recentEnhanceTargets, showsType: true)
+                        }
+                    }
+                    Divider()
+                    // 최근 목록에 있는 캐릭터도 각 타입의 전체 목록에 그대로 포함한다.
+                    ForEach(BattleType.allCases, id: \.self) { type in
+                        let targets = owned.filter { $0.battleType == type }
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 6) {
+                                typeBadge(type, fontSize: 11)
+                                Text("\(targets.count)")
+                                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                            }
+                            if targets.isEmpty {
+                                Text("보유 캐릭터가 없습니다.")
+                                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                            } else {
+                                enhanceTargetGrid(targets)
+                            }
+                        }
+                    }
+                }.padding(16)
             }
-        case .name:
-            return list.sorted {
-                PetMetaStore.shared.displayName(for: $0)
-                    .localizedCompare(PetMetaStore.shared.displayName(for: $1)) == .orderedAscending
+        }
+        .frame(width: 520, height: 560)
+    }
+
+    /// 같은 강화 레벨이면 입력 순서를 유지한다(최근 목록은 최근순, 타입별 목록은 도감순).
+    private func targetsByEnhancement(_ targets: [PetKind]) -> [PetKind] {
+        targets.enumerated().sorted { lhs, rhs in
+            let leftLevel = serverLevels[lhs.element] ?? 0
+            let rightLevel = serverLevels[rhs.element] ?? 0
+            return leftLevel == rightLevel ? lhs.offset < rhs.offset : leftLevel > rightLevel
+        }.map(\.element)
+    }
+
+    private func enhanceTargetGrid(_ targets: [PetKind], showsType: Bool = false) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: 8), count: 4), spacing: 8) {
+            ForEach(targetsByEnhancement(targets), id: \.self) { kind in
+                let name = PetMetaStore.shared.displayName(for: kind)
+                let level = serverLevels[kind] ?? 0
+                let rarity = PetKind.rarityFor(kind) ?? .common
+                // 강화소 중앙 카드와 같은 기준(기본 variant·서버 강화 레벨)으로 표시한다.
+                let stats = PetBattleStats.compute(kind: kind, variant: 0, enhanceLevel: level, progressUnits: 0)
+                let selected = kind == enhanceKind
+                Button {
+                    guard enhancePhase == .idle else { return }
+                    enhanceKind = kind
+                    showAllEnhanceTargets = false
+                } label: {
+                    VStack(spacing: 4) {
+                        thumb(kind, h: 28)
+                        if showsType {
+                            Text(name).font(.system(size: 9, weight: .semibold))
+                                .lineLimit(1).minimumScaleFactor(0.8)
+                                .padding(.horizontal, 4)
+                        }
+                        HStack(spacing: 3) {
+                            if showsType {
+                                typeBadge(kind.battleType, fontSize: 7)
+                            } else {
+                                Text(name).font(.system(size: 9, weight: .semibold))
+                                    .lineLimit(1).minimumScaleFactor(0.8)
+                            }
+                            rarityBadge(rarity, fontSize: showsType ? 7 : 8).fixedSize()
+                            Text("+\(level)")
+                                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(.orange).fixedSize()
+                        }
+                        .padding(.horizontal, 4)
+                        HStack(spacing: 3) {
+                            compactTargetStat("heart.fill", .red, stats.hp).help("HP")
+                            compactTargetStat("bolt.fill", .orange, stats.atk).help("공격력")
+                            compactTargetStat("shield.fill", .blue, stats.def).help("방어력")
+                            compactTargetStat("hare.fill", .green, stats.spd).help("속도")
+                        }
+                        .padding(.horizontal, 3)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 8)
+                        .fill(selected ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.06)))
+                    .overlay(RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(selected ? Color.orange : .clear, lineWidth: 1.5))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(enhancePhase != .idle)
+                .help(name)
+                .accessibilityLabel("\(name), \(kind.battleType.displayName), \(rarity.displayName), 강화 +\(level), HP \(stats.hp), 공격력 \(stats.atk), 방어력 \(stats.def), 속도 \(stats.spd)\(selected ? ", 선택됨" : "")")
             }
+        }
+    }
+
+    private func compactTargetStat(_ symbol: String, _ color: Color, _ value: Int) -> some View {
+        HStack(spacing: 1) {
+            Image(systemName: symbol).font(.system(size: 7)).foregroundStyle(color)
+            Text("\(value)").font(.system(size: 8, weight: .semibold, design: .monospaced))
+                .lineLimit(1).minimumScaleFactor(0.75)
         }
     }
 
@@ -1147,10 +1279,6 @@ struct ArenaView: View {
     private func attemptEnhance(_ kind: PetKind, safe: Bool, useProtect: Bool, useGuarantee: Bool) {
         guard enhancePhase == .idle, canServerEnhance,
               let hmac = Keychain.loadRankingHmacKey() else { return }
-        // 최근 강화 목록 갱신 (맨 앞으로)
-        recentEnhanced.removeAll { $0 == kind }
-        recentEnhanced.insert(kind, at: 0)
-        if recentEnhanced.count > 12 { recentEnhanced.removeLast(recentEnhanced.count - 12) }
         enhanceStateError = nil
         enhanceTask?.cancel()
         enhanceTask = Task { @MainActor in
@@ -1170,6 +1298,9 @@ struct ArenaView: View {
                 return
             }
             guard let outcome = EnhanceOutcome(rawValue: res.outcome) else { enhancePhase = .idle; return }
+            // 네트워크 오류·서버 거절은 제외하고, 실제 강화 결과를 받은 대상만 기록한다.
+            settings.recordEnhancedPet(kind)
+            recentEnhanced = settings.recentEnhancedPets
             try? await Task.sleep(for: .milliseconds(350))   // 최소 차지 연출 유지
             if Task.isCancelled { return }
             enhancePulse = false; enhanceBright = 0
@@ -1250,9 +1381,15 @@ struct ArenaView: View {
         }
     }
 
-    private func typeBadge(_ t: BattleType) -> some View {
-        Text(t.displayName).font(.system(size: 8, weight: .semibold))
+    private func rarityBadge(_ rarity: Rarity, fontSize: CGFloat = 8) -> some View {
+        Text(rarity.displayName).font(.system(size: fontSize, weight: .bold))
             .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(Capsule().fill(rarity.color.opacity(0.2))).foregroundStyle(rarity.color)
+    }
+
+    private func typeBadge(_ t: BattleType, fontSize: CGFloat = 8) -> some View {
+        Text(t.displayName).font(.system(size: fontSize, weight: .semibold))
+            .padding(.horizontal, fontSize > 8 ? 8 : 5).padding(.vertical, fontSize > 8 ? 3 : 1)
             .background(Capsule().fill(typeColor(t).opacity(0.2))).foregroundStyle(typeColor(t))
     }
     private func typeDot(_ t: BattleType) -> some View {

@@ -611,6 +611,18 @@ final class Settings: ObservableObject {
         }
         set { persist(newValue, forKey: Keys.battleTeam) }
     }
+    /// 최근 강화한 서로 다른 캐릭터 최대 20종. 계정별 로컬 기록이며 최신 항목이 먼저 온다.
+    var recentEnhancedPets: [PetKind] {
+        (AppEnv.defaults.stringArray(forKey: "arena.recentEnhancedPets.\(rankingDeviceID)") ?? [])
+            .compactMap { PetKind(rawValue: $0) }
+    }
+
+    func recordEnhancedPet(_ kind: PetKind) {
+        let recent = [kind] + recentEnhancedPets.filter { $0 != kind }
+        AppEnv.defaults.set(Array(recent.prefix(20)).map(\.rawValue),
+                            forKey: "arena.recentEnhancedPets.\(rankingDeviceID)")
+    }
+
     /// 카드를 공유 이미지로 export할 때 GitHub login을 노출할지. 기본 false (privacy first) —
     /// GitHub 연결한 사용자가 명시적 opt-in해야 카드에 username 박힘.
     @Published var showGitHubLoginInCard: Bool {
