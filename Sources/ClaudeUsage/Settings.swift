@@ -611,6 +611,26 @@ final class Settings: ObservableObject {
         }
         set { persist(newValue, forKey: Keys.battleTeam) }
     }
+    /// 최근 강화한 서로 다른 캐릭터 최대 20종. 계정별 로컬 기록이며 최신 항목이 먼저 온다.
+    var recentEnhancedPets: [PetKind] {
+        (AppEnv.defaults.stringArray(forKey: recentEnhancedPetsKey) ?? [])
+            .compactMap { PetKind(rawValue: $0) }
+    }
+    private var recentEnhancedPetsKey: String { "\(Keys.recentEnhancedPetsPrefix).\(rankingDeviceID)" }
+
+    func recordEnhancedPet(_ kind: PetKind) {
+        let recent = [kind] + recentEnhancedPets.filter { $0 != kind }
+        AppEnv.defaults.set(Array(recent.prefix(20)).map(\.rawValue), forKey: recentEnhancedPetsKey)
+    }
+
+    /// 사용자가 배틀 팀에서 팀원을 직접 뺐는지. true면 화면 재진입 때 빈자리를 자동 보충하지 않는다.
+    /// false(기본)면 5칸 미만 팀을 보충한다 — 레거시 3마리 팀과, 펫이 늘어나는 신규 사용자용.
+    /// 팀이 다시 5마리가 되면 ArenaView가 false로 되돌린다.
+    var battleTeamKeepsEmptySlots: Bool {
+        get { AppEnv.defaults.bool(forKey: Keys.battleTeamKeepsEmptySlots) }
+        set { AppEnv.defaults.set(newValue, forKey: Keys.battleTeamKeepsEmptySlots) }
+    }
+
     /// 카드를 공유 이미지로 export할 때 GitHub login을 노출할지. 기본 false (privacy first) —
     /// GitHub 연결한 사용자가 명시적 opt-in해야 카드에 username 박힘.
     @Published var showGitHubLoginInCard: Bool {
@@ -1878,6 +1898,8 @@ final class Settings: ObservableObject {
         // 파티 프리셋 (라이브러리 + 소스별 할당).
         static let partyPresets                = "settings.partyPresets"
         static let battleTeam                  = "settings.battleTeam"
+        static let battleTeamKeepsEmptySlots   = "settings.battleTeamKeepsEmptySlots"
+        static let recentEnhancedPetsPrefix    = "arena.recentEnhancedPets"
         static let claudePresetID              = "settings.claudePresetID"
         static let cursorPresetID              = "settings.cursorPresetID"
         static let codexPresetID               = "settings.codexPresetID"
