@@ -15,6 +15,7 @@ struct GuildVisitView: View {
     let guildId: String
     /// 응답이 오기 전 헤더에 보여줄 이름 (리더보드 행이 알고 있던 값).
     let guildName: String
+    var guestbookFirst = false
     /// 프리뷰/테스트용 — 주입되면 네트워크를 타지 않는다.
     var preloaded: RankingAPI.GuildVisitResponse? = nil
 
@@ -55,10 +56,11 @@ struct GuildVisitView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if let response {
                         header(response.guild)
+                        if guestbookFirst { guestbookSection(response) }
                         officeSection(response)
                         membersSection(response)
                         Divider()
-                        guestbookSection(response)
+                        if !guestbookFirst { guestbookSection(response) }
                     } else if let error {
                         Text(error).font(.system(size: 11)).foregroundStyle(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)

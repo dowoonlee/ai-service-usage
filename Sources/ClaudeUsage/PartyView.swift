@@ -407,13 +407,6 @@ struct PartyView: View {
                 Text("차트가 크게 움직일 때 펫이 얼마나 자주 반응할지.")
                     .font(.system(size: 10)).foregroundStyle(.secondary)
             }
-            if settings.showMenuBar {
-                Picker("메뉴바에 표시할 펫", selection: $settings.menuBarPetSource) {
-                    ForEach(MenuBarPetSource.allCases) { src in
-                        Text(src.displayName).tag(src)
-                    }
-                }
-            }
         }
     }
 

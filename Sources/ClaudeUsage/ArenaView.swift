@@ -83,7 +83,16 @@ struct ArenaView: View {
 
     struct RankedResult { let winner: String; let ratingDelta: Int; let coinReward: Int; let opponentNickname: String }
 
-    enum Mode: String, CaseIterable, Identifiable {
+    enum Destination { case arena, enhance, team, history }
+    @State private var historyStatus = "전적을 확인하고 있습니다…"
+    let destination: Destination
+    init(destination: Destination = .arena, initialPet: PetKind? = nil) {
+        _enhanceKind = State(initialValue: initialPet)
+        self.destination = destination
+        _mode = State(initialValue: destination == .enhance ? .enhance : .practice)
+    }
+
+    enum Mode: String, Identifiable {
         case practice = "연습전", ranked = "랭크전", enhance = "강화소"
         var id: String { rawValue }
     }
@@ -102,14 +111,29 @@ struct ArenaView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                header
-                if owned.isEmpty {
+                if destination == .arena { header }
+                if destination == .history {
+                    if canServerEnhance {
+                        if history.isEmpty {
+                            Text(historyStatus)
+                            Button("다시 확인") { Task { await loadHistory() } }
+                        } else {
+                            rankedHistoryView
+                            if result != nil { battleArena }
+                        }
+                    } else if needsKeyRecovery { keyRecoveryGate }
+                    else { rankedGate }
+                } else if owned.isEmpty {
                     emptyGate
                     Button("대여 팀으로 수동 전투 배우기") { openManualBattle() }
                         .buttonStyle(.borderedProminent)
+                } else if destination == .enhance {
+                    enhanceSection
+                } else if destination == .team {
+                    VStack(alignment: .leading, spacing: 10) { teamEditor }.popover(item: $editingSlot) { slot in teamSlotPicker(slot: slot.id) }
                 } else {
                     Picker("", selection: $mode) {
-                        ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+                        ForEach([Mode.practice, .ranked]) { Text($0.rawValue).tag($0) }
                     }
                     .pickerStyle(.segmented).labelsHidden()
                     .onChange(of: mode) { _, _ in result = nil; rankedResult = nil; rankedError = nil }
@@ -123,6 +147,7 @@ struct ArenaView: View {
             .padding(16)
         }
         .onAppear {
+            guard destination != .history else { return }
             if teamKinds.isEmpty {
                 // 사용자가 직접 뺀 빈자리는 유지한다(화면 재진입 때 자동 보충하지 않음). 직접 뺀 적이
                 // 없는 5칸 미만 팀(레거시 3마리 팀, 펫이 늘어나는 신규 사용자)은 종전대로 보충한다.
@@ -144,7 +169,18 @@ struct ArenaView: View {
         .sheet(isPresented: $showManualBattle) {
             ManualBattleView(session: manualSession, team: manualTeam, opponent: manualOpponent)
         }
-        .task { await loadEnhanceState() }   // 서버에서 강화 레벨·가용 VP 로드(등록 사용자)
+        .onReceive(NotificationCenter.default.publisher(for: .trainerAccountReady)) { note in
+            guard let origin = note.object as? NSWindow, origin === GachaWindowController.shared.window else { return }
+            Task {
+                if destination == .history { await loadHistory(); return }
+                await loadEnhanceState()
+                if mode == .ranked { await loadRankedState() }
+            }
+        }
+        .task {
+            if destination == .history { await loadHistory() }
+            else { await loadEnhanceState() }
+        }   // 서버에서 강화 레벨·가용 VP 로드(등록 사용자)
         .task(id: mode) { if mode == .ranked { await loadRankedState() } }   // 랭크전 진입 시 랭킹·전적
         .onDisappear { enhanceTask?.cancel(); rankedTask?.cancel() }
     }
@@ -160,7 +196,7 @@ struct ArenaView: View {
                     Label("타입 상성", systemImage: "hexagon").font(.system(size: 10))
                 }.buttonStyle(.plain).foregroundStyle(.tint)
             }
-            Text("내 팀을 직접 지휘하거나 자동 전투를 관전하세요. 랭크전과 강화소도 이곳에서 이용할 수 있습니다.")
+            Text("내 팀을 직접 지휘하거나 자동 전투를 관전하세요. 랭크전에 도전해 레이팅을 올릴 수 있습니다.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
         }
     }
@@ -250,7 +286,7 @@ struct ArenaView: View {
         VStack(spacing: 8) {
             Image(systemName: "pawprint.circle").font(.system(size: 34)).foregroundStyle(.secondary)
             Text("배틀에 쓸 펫이 없습니다.").font(.system(size: 12))
-            Text("상점 탭에서 가챠를 돌려 펫을 모으세요.").font(.system(size: 10)).foregroundStyle(.secondary)
+            Button("펫 뽑기 열기") { GachaWindowController.shared.present(tab: .shop) }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 40)
     }
@@ -311,7 +347,6 @@ struct ArenaView: View {
             }.buttonStyle(.borderedProminent)
             Text("기술·교체·방어를 직접 선택하세요. 레인보우는 궁극기 두 갈래를 선택할 수 있습니다.")
                 .font(.caption2).foregroundStyle(.secondary)
-            OwnedManualAchievementShelf(preview: manualSession.archive.achievementPreview)
             Button { fight() } label: {
                 Text("⚔️ 자동 관전 연습전").font(.system(size: 13, weight: .semibold))
                     .frame(maxWidth: .infinity).padding(.vertical, 9)
@@ -335,6 +370,7 @@ struct ArenaView: View {
     private var rankedGate: some View {
         VStack(spacing: 8) {
             Image(systemName: "trophy.circle").font(.system(size: 34)).foregroundStyle(.secondary)
+            if RankingAPI.isConfigured { AccountSettingsButton() }
             Text("랭크전은 랭킹 참여자 전용입니다.").font(.system(size: 12))
             Text("승패는 서버가 확정(조작 방지)하고 레이팅이 오릅니다. 설정에서 랭킹을 켜세요.")
                 .font(.system(size: 10)).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -418,6 +454,17 @@ struct ArenaView: View {
             }
             .padding(6)
             .background(RoundedRectangle(cornerRadius: AppRadius.md).fill(Color.secondary.opacity(0.06)))
+        }
+    }
+
+    private func loadHistory() async {
+        guard canServerEnhance, let key = Keychain.loadRankingHmacKey() else { return }
+        do {
+            let response = try await RankingAPI.shared.fetchPvpHistory(deviceId: settings.rankingDeviceID, hmacKeyBase64: key)
+            history = response.matches
+            historyStatus = "아직 랭크전 전적이 없습니다."
+        } catch {
+            historyStatus = error.friendlyDescription
         }
     }
 
@@ -548,7 +595,6 @@ struct ArenaView: View {
                     }.padding(.horizontal, 3)
                 } else {
                     Text(PetMetaStore.shared.displayName(for: kind)).font(.system(size: 8)).lineLimit(1)
-                    OwnedManualMasteryBadge(kind: kind)
                     typeBadge(kind.battleType)
                     HStack(spacing: 3) {
                         Text("Σ\(s.total)").font(.system(size: 8, design: .monospaced)).foregroundStyle(.secondary)
@@ -832,6 +878,7 @@ struct ArenaView: View {
     private var enhanceGate: some View {
         VStack(spacing: 8) {
             Image(systemName: "hammer.circle").font(.system(size: 34)).foregroundStyle(.secondary)
+            if RankingAPI.isConfigured { AccountSettingsButton() }
             Text("VP 강화는 랭킹 참여자 전용입니다.").font(.system(size: 12))
             Text("강화 레벨·VP는 서버가 관리(조작 방지)합니다. 설정에서 랭킹을 켜세요.")
                 .font(.system(size: 10)).foregroundStyle(.secondary).multilineTextAlignment(.center)

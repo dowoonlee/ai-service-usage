@@ -98,6 +98,14 @@ struct BoardView: View {
                 startClockTick()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .trainerAccountReady)) { note in
+            guard let origin = note.object as? NSWindow, origin === BoardWindowController.shared.window,
+                  rankingActive else { return }
+            PollGate.boardViewIsOpen = true
+            NotificationCenter.default.post(name: .boardSeen, object: nil)
+            refresh()
+            startClockTick()
+        }
         // 주기 갱신은 sync가 밀어준다 — 자체 폴링 루프 없음.
         .onReceive(NotificationCenter.default.publisher(for: .boardSynced)) { note in
             guard rankingActive, let resp = note.object as? RankingAPI.BoardResponse else { return }

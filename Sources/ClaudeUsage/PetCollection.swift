@@ -2,9 +2,7 @@ import SwiftUI
 
 /// 펫 75종을 의미 단위로 묶는 컬렉션 (도감의 "셋 보너스" 단위).
 ///
-/// 한 컬렉션의 모든 base 펫(variant 0)을 보유하면 "컴플리트" — 1회성 코인 보너스 + 도감
-/// 업적 섹션에 영구 등재. 기존 rarity 섹션 레이아웃은 그대로 두고, 도감 하단에 별도
-/// 업적 섹션으로만 노출 (기존 동선 보존).
+/// 한 컬렉션의 모든 기본 펫을 모으면 일회성 코인 보너스를 지급하고 내 기록의 훈장에 등재한다.
 ///
 /// 각 컬렉션의 정체성은 dev 컬쳐 밈 — `displayName`이 코드네임, `subtitle`이 한 줄 농담.
 /// 톤은 기존 `BadgeRegistry`의 region/category(Coffee/Vibe/Cron/Repo, Standup/Heartbeat 등)와

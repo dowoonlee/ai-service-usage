@@ -1,39 +1,19 @@
 import AppKit
 import SwiftUI
 
-/// 가챠 + 도감 창. SettingsView "수집" 섹션의 "열기" 버튼으로 띄움.
-///
-/// 결과 표시는 `ResultPhase` enum 기반:
-///   - `.idle`: 결과 없음
-///   - `.egg` / `.cracking`: 알 부화 단계 (M4.3에서 자산 + 인터랙션 추가 예정)
-///   - `.hatched`: 최종 펫 공개
-/// 현재는 `performPull` 직후 즉시 `.hatched`로 진입. egg/cracking 단계 사이에 탭/애니메이션을
-/// 끼워넣는 것이 M4.3의 작업.
+/// 펫 상점과 트레이너 메뉴.
 struct GachaView: View {
-    /// 창이 안 보이면 연출 프레임 루프를 멈춘다 (WindowVisibility.swift).
-    @Environment(\.windowIsVisible) private var windowIsVisible
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var settings = Settings.shared
     @State private var phase: ResultPhase = .idle
     @State private var errorMessage: String?
-    @State private var eggTapCount: Int = 0
-    @State private var eggShakeAngle: Double = 0
-    /// `.revealing` 시작 시각. TimelineView가 elapsed 기반 시각 효과 계산에 사용.
-    @State private var revealStartedAt: Date?
-    /// `.cracking` 시작 시각. crack 라인이 trim으로 점진 그려지는 데 사용.
-    @State private var crackStartedAt: Date?
-    /// 임계 도달 후 Task spawn race 방지. 부화 시퀀스가 한 번만 commit하도록 가드.
-    @State private var hatchInProgress: Bool = false
-    /// 10연차 결과 그리드에서 지금까지 공개된 칸 수. 0부터 한 칸씩 "다다다닥" 늘어난다.
-    @State private var revealedCount: Int = 0
-    /// 순차 공개 타이머 Task — 재진입 시 취소용.
-    @State private var revealTask: Task<Void, Never>?
-    /// 10연차 진행 확인 alert 트리거. 버튼 클릭 시 즉시 진행 대신 이 값을 set → yes/no 확인.
-    @State private var confirmingMultiPull: Bool = false
-    @State private var confirmingPremiumPull: Bool = false
-    /// 진행 중인 가챠가 프리미엄(sudo pull)인지 — egg/revealing 연출을 진홍·금 테마로 차별화.
-    @State private var pullIsPremium: Bool = false
-    /// 상점/도장/레포트/랭킹/길드 탭. 첫 진입 .shop, 가챠 hatch 중에는 잠금.
-    @State private var selectedTab: Tab = .shop
+    @State private var confirmation: DrawConfirmation?
+    @State private var hatchStep = 0
+    @ObservedObject var navigation = TrainerNavigation()
+    @State private var dexSelection: PetSelection?
+    @State private var dexPreviewRequest = 0
+    @State private var resultIndex = 0
+    @State private var enhanceTarget: PetKind?
     /// 도감 이름 검색어 (부분일치, 대소문자 무시). 비어있으면 필터 안 함.
     @State private var dexSearch: String = ""
     /// 도감 보유 상태 필터.
@@ -53,95 +33,120 @@ struct GachaView: View {
     }
 
     enum Tab: String, CaseIterable, Identifiable {
-        case shop, party, gym, report, ranking, guild, arena
-        var id: String { rawValue }
-        var displayName: String {
-            switch self {
-            case .shop:    return "상점"
-            case .party:   return "파티"
-            case .gym:     return "도장"
-            case .report:  return "레포트"
-            case .ranking: return "랭킹"
-            case .guild:   return "길드"
-            case .arena:   return "아레나"
-            }
+        case home = "트레이너 메뉴"
+        case dex = "펫 도감", party = "차트 파티", shop = "펫 뽑기", enhance = "펫 강화"
+        case gym = "도장", arena = "아레나", team = "배틀 팀", history = "랭크전 전적"
+        case ranking = "사용량 랭킹", guild = "길드"
+        case guestbook = "길드 방명록"
+        case report = "트레이너 카드 · 리포트", achievements = "훈장", recap = "연간 리캡"
+        var id: Self { self }
+        @MainActor static var groups: [(title: String, icon: String, tabs: [Self])] {
+            let battles: [Self] = [.gym, .arena, .team, .history]
+            return [
+                ("내 펫", "pawprint", [.dex, .party, .shop, .enhance]),
+                ("전투", "shield", battles),
+                ("커뮤니티", "bubble.left.and.bubble.right", [.ranking, .guild]),
+                ("내 기록", "book.closed", [.report, .achievements, .recap])
+            ]
         }
     }
-
-    /// 알을 깨는 데 필요한 탭 수.
-    private static let eggTapsRequired: Int = 6
-    /// cracking → revealing 사이 머무는 시간.
-    private static let crackingDuration: TimeInterval = 1.0
-    /// revealing 단계 전체 시간 (flash + silhouette + fadeIn 합).
-    private static let revealDuration: TimeInterval = 2.2
-    /// hatched/revealing 단계 sprite의 y offset (영역 center 기준).
-    /// 두 view가 sprite를 같은 위치에 그려야 cross-fade 시 점프가 없다.
-    private static let spriteRestY: CGFloat = -38
-    /// 10연차 placeholder 연출 길이. 전용 에셋 도입 시 이 값/`multiRollingView`만 교체하면 된다.
-    private static let multiRevealDuration: TimeInterval = 2.0
-    /// 결과 그리드 칸 사이 공개 간격(초). 짧을수록 "다다다닥" 빨라진다.
-    private static let multiRevealStagger: TimeInterval = 0.065
 
     enum ResultPhase {
         case idle
-        case egg(GachaPull)
-        case cracking(GachaPull)
-        case revealing(GachaPull)  // 암전 + flash + 실루엣 + fade in
-        case hatched(GachaPull)
-        case preview(PetKind, Int) // 인벤토리에서 클릭한 보유 펫 미리보기
-        case multiRolling([GachaPull])       // 10연차 연출 재생 중 (commit 전)
-        case multiHatched([MultiPullResult]) // 10연차 결과 그리드
+        case tray(id: UUID, premium: Bool, results: [MultiPullResult])
+    }
+
+    private struct DrawConfirmation: Identifiable {
+        let premium: Bool
+        let multiple: Bool
+        let cost: String
+        let id = UUID()
+    }
+
+    private var isOpening: Bool {
+        if case .tray(_, _, let results) = phase {
+            return hatchStep < HatchTray.finalStep(count: results.count)
+        }
+        return false
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Picker("", selection: $selectedTab) {
-                ForEach(Tab.allCases) { t in
-                    // 길드 탭 — 내 길드에 안 본 방명록이 있으면 점. 랭킹 탭 — 내가 남긴 방명록에 안 본
-                    // 답글이 있으면 점(길드 스코프 → 그 길드 놀러가기 버튼으로 이어진다).
-                    // 세그먼트에는 뷰 배지를 못 얹어 글자로.
-                    Text(tabHasDot(t) ? "\(t.displayName) •" : t.displayName)
-                        .tag(t)
+        GeometryReader { geometry in
+            let wide = geometry.size.width >= 760
+            HStack(spacing: 0) {
+                if navigation.tab == .home {
+                    TrainerMenu(selected: .home, sidebar: false, status: menuStatus, open: open)
+                } else {
+                    if wide {
+                        TrainerMenu(selected: navigation.tab, sidebar: true, status: menuStatus, open: open)
+                            .frame(width: 188)
+                        Divider()
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            if !wide {
+                                Button { navigation.tab = .home } label: { Label("메뉴", systemImage: "sidebar.left") }
+                            }
+                            Text(navigation.tab.rawValue).font(.headline)
+                            Spacer()
+                        }.padding(10)
+                        Divider()
+                        destinationContent
+                    }
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .disabled(isHatchingMidAction)
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 8)
-
-            ZStack {
-                switch selectedTab {
-                case .shop:    shopTab.transition(.opacity)
-                case .party:   PartyView().transition(.opacity)
-                case .gym:     GymView().transition(.opacity)
-                case .report:  ReportView().transition(.opacity)
-                case .ranking: RankingView().transition(.opacity)
-                case .guild:   GuildView().transition(.opacity)
-                case .arena:   ArenaView().transition(.opacity)
-                }
-            }
-            .animation(.easeInOut(duration: 0.18), value: selectedTab)
         }
-        // 560×640은 이제 **최소치**다 — 창이 resizable이라 늘린 만큼 콘텐츠도 함께 커져야
-        // 여백만 생기지 않는다. 각 탭이 최상위 ScrollView라 남는 높이는 자연히 흡수된다.
-        //
-        // alignment: .top — 콘텐츠가 높이를 다 못 채우는 탭에서 picker+콘텐츠가 세로 중앙으로
-        // 밀려 picker 위 공백이 탭마다 달라지던 문제를 막는다(도장만 Spacer로 꽉 차 공백이 없었음).
-        // 이제 모든 탭에서 picker는 상단 고정, 위 공백은 아래 picker의 .padding(.top)으로 일관.
-        .frame(minWidth: 560, maxWidth: .infinity,
-               minHeight: 640, maxHeight: .infinity, alignment: .top)
-        .onReceive(NotificationCenter.default.publisher(for: .gachaSwitchTab)) { notif in
-            if let tab = notif.object as? Tab { selectedTab = tab }
+        .frame(minWidth: 560, minHeight: 640)
+    }
+
+    private func menuStatus(_ tab: Tab) -> String? {
+        if tab == .guild && settings.hasUnseenGuestbook { return "새 방명록" }
+        return nil
+    }
+
+    private func open(_ tab: Tab) {
+        switch tab {
+        case .recap: RecapWindowController.shared.present()
+        default:
+            if tab == .enhance { enhanceTarget = nil }
+            navigation.tab = tab
         }
     }
 
-    private func tabHasDot(_ tab: Tab) -> Bool {
-        switch tab {
-        case .guild:   return settings.hasUnseenGuestbook
-        case .ranking: return settings.hasUnseenGuestbookReplies
-        default:       return false
+    @ViewBuilder private var destinationContent: some View {
+        switch navigation.tab {
+        case .home, .dex:
+            ScrollViewReader { reader in
+                ScrollView {
+                    VStack {
+                        if let pet = dexSelection {
+                            PetPreviewView(kind: pet.kind, variant: pet.variant, settings: settings)
+                                .id(pet).frame(minHeight: 180)
+                            HStack {
+                                PetPlacementMenu(pet: pet, open: open)
+                                Button("이 펫 강화") {
+                                    enhanceTarget = pet.kind
+                                    navigation.tab = .enhance
+                                }
+                            }
+                        }
+                        inventorySection
+                    }.padding(16).id("dexStart")
+                }.onChange(of: dexPreviewRequest) { _, _ in reader.scrollTo("dexStart", anchor: .top) }
+            }
+        case .shop: shopTab
+        case .party: PartyView()
+        case .gym: GymView()
+        case .arena: ArenaView()
+        case .enhance: ArenaView(destination: .enhance, initialPet: enhanceTarget)
+        case .team: ArenaView(destination: .team)
+        case .history: ArenaView(destination: .history)
+        case .report: ReportView()
+        case .ranking: RankingView()
+        case .guild: GuildView()
+        case .guestbook: GuildView(guestbookFirst: true)
+        case .achievements: TrainerHonorsView()
+        case .recap: EmptyView()
         }
     }
 
@@ -151,58 +156,23 @@ struct GachaView: View {
                 header
                 Divider()
                 resultArea
-                Divider()
-                inventorySection
             }
             .padding(20)
         }
-        .alert("pull ×10", isPresented: $confirmingMultiPull) {
-            Button("진행") { pull10() }
-            Button("취소", role: .cancel) {}
-        } message: {
-            Text(multiPullConfirmMessage)
-        }
-        .alert("sudo pull", isPresented: $confirmingPremiumPull) {
-            Button("진행") { pullPremium() }
-            Button("취소", role: .cancel) {}
-        } message: {
-            Text(premiumPullConfirmMessage)
-        }
-    }
-
-    /// 프리미엄 가챠 확인 alert 메시지 — 가챠권 보유 시 1장 사용, 없으면 RP로 즉시 1장 구매.
-    private var premiumPullConfirmMessage: String {
-        let cost = settings.premiumTickets > 0
-            ? "프리미엄 가챠권 1장"
-            : "RP \(RankPointLedger.premiumTicketCostRP)"
-        return "Mythic · Legendary만 나오는 프리미엄 풀에서 1회 뽑습니다.\n비용: \(cost)\n현재 잔액: RP \(settings.rp) · 프리미엄 가챠권 \(settings.premiumTickets)장"
-    }
-
-    /// 10연차 확인 alert 메시지 — 차감될 가챠권/코인 + 현재 잔액을 명시.
-    private var multiPullConfirmMessage: String {
-        let (used, coin) = Gacha.multiPullCost(tickets: settings.gachaTickets)
-        var parts: [String] = []
-        if used > 0 { parts.append("가챠권 \(used)장") }
-        if coin > 0 { parts.append("\(coin)코인") }
-        if parts.isEmpty { parts.append("무료") }
-        let cost = parts.joined(separator: " + ")
-        return "10회를 한 번에 뽑습니다.\n비용: \(cost)\n현재 잔액: \(settings.coins)코인 · 가챠권 \(settings.gachaTickets)장"
-    }
-
-    /// 가챠 hatch 시퀀스(cracking/revealing)는 펫 commit 전이라 picker 잠금.
-    /// idle/egg/hatched/preview 단계는 다른 탭 봐도 OK.
-    /// (`hatchInProgress`는 .hatched 진입 후 reset 안 되어 picker 영구 잠금 버그가 있어 — phase만 검사)
-    private var isHatchingMidAction: Bool {
-        switch phase {
-        case .cracking, .revealing, .multiRolling: return true
-        default: return false
+        .alert(item: $confirmation) { request in
+            let name = request.premium ? "프리미엄" : "일반"
+            let count = request.multiple ? Gacha.multiPullCount : 1
+            return Alert(title: Text("\(name) \(count)회 뽑기"),
+                         message: Text("사용할 재화  ·  \(request.cost)"),
+                         primaryButton: .default(Text("\(count)회 뽑기")) { draw(request) },
+                         secondaryButton: .cancel(Text("취소")))
         }
     }
 
     // MARK: - Header (잔액 + 뽑기 버튼)
 
     private var header: some View {
-        HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             // 잔액 묶음 — fixedSize로 묶어 가로 공간이 부족해도 숫자가 글자별 세로 줄바꿈되지 않게.
             HStack(spacing: 12) {
                 HStack(spacing: 4) {
@@ -251,585 +221,137 @@ struct GachaView: View {
                 }
             }
             .fixedSize()
-            Spacer(minLength: 8)
-            HStack(spacing: 8) {
-                Button(action: pull) {
-                    VStack(spacing: 1) {
-                        Text("git pull").font(.system(size: 12, weight: .bold, design: .monospaced))
-                        Text(settings.gachaTickets > 0 ? "🎟 무료" : "\(Gacha.pullCost)코인")
-                            .font(.system(size: 9, design: .monospaced))
-                    }
-                    .frame(minWidth: 58)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!canPull)
-
-                Button(action: { confirmingMultiPull = true }) {
-                    VStack(spacing: 1) {
-                        Text("pull ×10").font(.system(size: 12, weight: .bold, design: .monospaced))
-                        Text(multiPullCostLabel)
-                            .font(.system(size: 9, design: .monospaced))
-                    }
-                    .frame(minWidth: 64)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canPull10)
-
-                Button(action: { confirmingPremiumPull = true }) {
-                    VStack(spacing: 1) {
-                        Text("sudo pull").font(.system(size: 12, weight: .bold, design: .monospaced))
-                        Text(settings.premiumTickets > 0 ? "🎟 보유" : "RP\(RankPointLedger.premiumTicketCostRP)")
-                            .font(.system(size: 9, design: .monospaced))
-                    }
-                    .frame(minWidth: 64)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Rarity.mythic.color)
-                .disabled(!canPullPremium)
+            HStack(spacing: 12) {
+                drawTicket(premium: false)
+                drawTicket(premium: true)
             }
-            .fixedSize()
         }
     }
 
-    private var canPull: Bool {
-        !isPullInProgress && (settings.gachaTickets > 0 || settings.coins >= Gacha.pullCost)
+    private func price(premium: Bool, multiple: Bool) -> (label: String, affordable: Bool) {
+        let tickets: Int
+        let amount: Int
+        if premium && multiple {
+            (tickets, amount) = Gacha.premiumMultiCost(tickets: settings.premiumTickets)
+        } else if multiple {
+            (tickets, amount) = Gacha.multiPullCost(tickets: settings.gachaTickets)
+        } else {
+            tickets = min(1, max(0, premium ? settings.premiumTickets : settings.gachaTickets))
+            amount = tickets == 1 ? 0 : (premium ? RankPointLedger.premiumTicketCostRP : Gacha.pullCost)
+        }
+        var parts: [String] = []
+        if tickets > 0 { parts.append("\(premium ? "프리미엄권" : "일반권") \(tickets)장") }
+        if amount > 0 { parts.append("\(amount.formatted()) \(premium ? "RP" : "코인")") }
+        return (parts.joined(separator: " + "), amount <= (premium ? settings.rp : settings.coins))
     }
 
-    /// 10연차 가능 여부 — 티켓 우선 차감 후 남는 코인 비용을 감당할 수 있으면 OK.
-    private var canPull10: Bool {
-        !isPullInProgress && Gacha.multiPullCost(tickets: settings.gachaTickets).coinCost <= settings.coins
-    }
-
-    /// 프리미엄 가챠 가능 여부 — 프리미엄 가챠권 보유 또는 RP로 1장 살 수 있으면 OK.
-    private var canPullPremium: Bool {
-        !isPullInProgress &&
-            (settings.premiumTickets > 0 || settings.rp >= RankPointLedger.premiumTicketCostRP)
-    }
-
-    /// 10연차 버튼 비용 라벨. 티켓 소모분 + 코인 분담을 짧게 표기.
-    private var multiPullCostLabel: String {
-        let (used, coin) = Gacha.multiPullCost(tickets: settings.gachaTickets)
-        if used > 0 && coin > 0 { return "🎟️\(used)+\(coin)" }
-        if used > 0 && coin == 0 { return "🎟️\(used) 무료" }
-        return "\(coin)코인"
-    }
-
-    /// 가챠 부화 시퀀스가 시작된 후 commit 직전까지의 phase 집합. 이 동안엔 새 가챠 진입을
-    /// 막아야 한다 — 안 막으면 빠른 더블 클릭이 `pull()`을 두 번 호출해서 잔액만 두 번
-    /// 차감되고 첫 결과는 `phase = .egg(pull2)`로 덮어쓰여 commit 안 되고 사라짐.
-    private var isPullInProgress: Bool {
-        switch phase {
-        case .egg, .cracking, .revealing, .multiRolling:    return true
-        case .idle, .hatched, .preview, .multiHatched:      return false
+    private func drawTicket(premium: Bool) -> some View {
+        let title = premium ? "프리미엄 뽑기권" : "일반 뽑기권"
+        let single = price(premium: premium, multiple: false)
+        let multi = price(premium: premium, multiple: true)
+        let ink = HatchTray.ink(premium)
+        return ZStack(alignment: .topTrailing) {
+            Button {
+                let request = DrawConfirmation(premium: premium, multiple: false, cost: single.label)
+                if premium { confirmation = request } else { draw(request) }
+            } label: {
+                HStack(spacing: 12) {
+                    HatchEgg(premium: premium, step: 0, pixel: 2)
+                    VStack(spacing: 3) {
+                        ForEach(0..<7, id: \.self) { _ in
+                            Rectangle().fill(HatchTray.accent(premium).opacity(0.55)).frame(width: 2, height: 3)
+                        }
+                    }
+                    .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(title).font(.caption.bold())
+                        Text("1회 뽑기").font(.headline)
+                        Text(single.label).font(.caption.monospacedDigit())
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(12)
+                .foregroundStyle(.white)
+                .background(ink, in: DrawTicketShape())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(title) 1회 뽑기, \(single.label)")
+            .disabled(isOpening || !single.affordable)
+            .padding(.top, 11)
+            Button {
+                confirmation = DrawConfirmation(premium: premium, multiple: true, cost: multi.label)
+            } label: {
+                Text("10회 뽑기").font(.caption.bold())
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .foregroundStyle(ink)
+                    .background(HatchTray.accent(premium), in: RoundedRectangle(cornerRadius: 3))
+            }
+            .buttonStyle(.plain)
+            .disabled(isOpening || !multi.affordable)
+            .accessibilityLabel("\(title) 10회 뽑기, \(multi.label)")
+            .help(multi.label)
+            .padding(.trailing, 7)
         }
     }
 
-    private func pull() {
-        // Button.disabled가 1차 가드. 진입 가드는 키보드 단축키·접근성 등 우회 경로
-        // 대비한 2차 방어선.
-        guard !isPullInProgress else { return }
-        pullIsPremium = false
-
-        let useTicket = settings.gachaTickets > 0
+    private func draw(_ request: DrawConfirmation) {
+        guard !isOpening else { return }
         do {
-            // 잔액 차감 + 결과 결정만. 보유 상태는 hatched 진입 시점에 commit().
-            let result = try Gacha.roll(useTicket: useTicket)
-            phase = .egg(result)
-            eggTapCount = 0
-            eggShakeAngle = 0
-            hatchInProgress = false
-            errorMessage = nil
-        } catch {
-            errorMessage = error.friendlyDescription
-            phase = .idle
-        }
-    }
-
-    /// 프리미엄 가챠 — `[mythic+legendary]` 제한 풀 1뽑. 가챠권 보유 시 1장 소비, 없으면 RP로 즉시
-    /// 1장 구매(원스텝) 후 소비. 단일 `pull`과 동일하게 결과는 egg 애니메이션 → hatched 시점 commit.
-    private func pullPremium() {
-        guard !isPullInProgress else { return }
-        pullIsPremium = true   // 연출 차별용
-        // 가챠권이 없으면 RP로 1장 구매 (실패 = RP 부족).
-        if settings.premiumTickets <= 0 {
-            guard RankPointLedger.shared.purchasePremiumTicket() else {
-                errorMessage = "RP가 부족합니다 (\(RankPointLedger.premiumTicketCostRP) 필요)"
+            let current = price(premium: request.premium, multiple: request.multiple)
+            guard current.label == request.cost else {
+                errorMessage = "보유 재화가 바뀌었습니다. 비용을 다시 확인해 주세요."
+                phase = .idle
                 return
             }
-        }
-        do {
-            let result = try Gacha.rollPremium()
-            phase = .egg(result)
-            eggTapCount = 0
-            eggShakeAngle = 0
-            hatchInProgress = false
-            errorMessage = nil
-        } catch {
-            errorMessage = error.friendlyDescription
-            phase = .idle
-        }
-    }
-
-    /// 10연차 진행. 단일 `pull`과 달리 탭 없이 자동 재생 — `rollMulti`로 선차감 + 10개 결정 후
-    /// placeholder 연출(`multiRevealDuration`) 재생, 완료 시점에 `commitMulti`로 일괄 반영한다.
-    /// 전용 에셋이 들어오면 `multiRollingView`/`multiRevealDuration`만 교체하면 된다.
-    private func pull10() {
-        guard !isPullInProgress else { return }
-        do {
-            let pulls = try Gacha.rollMulti()
-            phase = .multiRolling(pulls)
-            errorMessage = nil
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: UInt64(Self.multiRevealDuration * 1_000_000_000))
-                // 연출 완료 시점에 비로소 보유 상태 반영 (인벤토리 해금).
-                let results = Gacha.commitMulti(pulls)
-                revealedCount = 0   // 첫 프레임부터 0칸 → onAppear에서 한 칸씩 공개 (깜빡임 방지).
-                phase = .multiHatched(results)
-            }
-        } catch {
-            errorMessage = error.friendlyDescription
-            phase = .idle
-        }
-    }
-
-    /// 알 탭 처리. 탭마다 점점 강하게 흔들리고, 임계치에 도달하면 cracking → hatched로 자동 진전.
-    /// `hatchInProgress` 가드 — 임계 도달 후 250ms 동안 phase가 아직 `.egg`여서 추가 탭이
-    /// race로 두 번째 시퀀스를 시작시키는 것을 방지 (방치 시 commit이 두 번 호출되어 count +2).
-    private func tapEgg(_ pull: GachaPull) {
-        guard case .egg = phase, !hatchInProgress else { return }
-        eggTapCount += 1
-
-        let intensity = min(1.0, Double(eggTapCount) / Double(Self.eggTapsRequired))
-        let direction: Double = Bool.random() ? 1 : -1
-        let angle = direction * Double.random(in: 18...32) * intensity
-
-        withAnimation(.spring(response: 0.15, dampingFraction: 0.3)) {
-            eggShakeAngle = angle
-        }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 220_000_000)
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
-                eggShakeAngle = 0
-            }
-        }
-
-        if eggTapCount >= Self.eggTapsRequired {
-            hatchInProgress = true
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                crackStartedAt = Date()
-                phase = .cracking(pull)
-                try? await Task.sleep(nanoseconds: UInt64(Self.crackingDuration * 1_000_000_000))
-                revealStartedAt = Date()
-                phase = .revealing(pull)
-                try? await Task.sleep(nanoseconds: UInt64(Self.revealDuration * 1_000_000_000))
-                // 애니메이션 완료 시점에 비로소 보유 상태 반영 (인벤토리 해금).
-                let resolved = Gacha.commit(pull)
-                phase = .hatched(resolved)
-            }
-        }
-    }
-
-    // MARK: - Result area
-
-    @ViewBuilder
-    private var resultArea: some View {
-        Group {
-            switch phase {
-            case .idle:
-                if let msg = errorMessage {
-                    Text(msg).foregroundStyle(.red).transition(.opacity)
-                } else {
-                    Text("뽑기를 돌려 펫을 만나보세요")
-                        .foregroundStyle(.secondary)
-                        .transition(.opacity)
+            let pulls: [GachaPull]
+            if request.multiple {
+                pulls = try request.premium ? Gacha.rollPremiumMulti() : Gacha.rollMulti()
+            } else if request.premium {
+                if settings.premiumTickets == 0 && !RankPointLedger.shared.purchasePremiumTicket() {
+                    throw GachaError.insufficientRP
                 }
-            case .egg(let p):
-                eggView(p).transition(.opacity)
-            case .cracking(let p):
-                crackingView(p).transition(.opacity)
-            case .revealing(let p):
-                revealingView(p).transition(.opacity)
-            case .hatched(let p):
-                hatchedView(p).transition(.opacity)
-            case .preview(let k, let v):
-                // .id로 kind/variant 바뀔 때마다 view 재마운트 → PetPreviewView 안의 enteredAt이 리셋되어
-                // 슬라이드 애니메이션이 처음부터 다시 재생된다.
-                PetPreviewView(kind: k, variant: v, settings: settings)
-                    .id("\(k.rawValue)-\(v)")
-                    .transition(.opacity)
-            case .multiRolling(let pulls):
-                multiRollingView(pulls).transition(.opacity)
-            case .multiHatched(let results):
-                multiHatchedView(results).transition(.opacity)
+                pulls = [try Gacha.rollPremium()]
+            } else {
+                pulls = [try Gacha.roll(useTicket: settings.gachaTickets > 0)]
             }
+            // Resolve each paid draw once. Playback and window lifecycle only affect presentation.
+            let results = Gacha.commitMulti(pulls)
+            errorMessage = nil
+            hatchStep = reduceMotion ? HatchTray.finalStep(count: results.count) : 0
+            resultIndex = 0
+            phase = .tray(id: UUID(), premium: request.premium, results: results)
+        } catch {
+            errorMessage = error.friendlyDescription
+            phase = .idle
         }
-        .frame(maxWidth: .infinity, minHeight: 180)
-        .animation(.easeInOut(duration: 0.22), value: phaseKey)
     }
 
-    // 기존 previewView/previewBubble/usageProgressView/formatRemaining 메소드는
-    // 슬라이드 애니메이션 도입과 함께 PetPreviewView struct로 이동 (이 파일 하단 참고).
-
-    /// phase enum의 동등성 비교용 (associated value 무시한 단순 식별자).
-    /// `.animation(_:value:)`가 phase 변경을 감지하도록 한다.
-    private var phaseKey: Int {
+    @ViewBuilder private var resultArea: some View {
         switch phase {
-        case .idle:      return 0
-        case .egg:       return 1
-        case .cracking:  return 2
-        case .revealing: return 3
-        case .hatched:   return 4
-        case .preview:   return 5
-        case .multiRolling:  return 6
-        case .multiHatched:  return 7
-        }
-    }
-
-    private func eggView(_ pull: GachaPull) -> some View {
-        VStack(spacing: 8) {
-            ZStack {
-                if pullIsPremium { premiumAura(diameter: 150) }
-                eggSprite
-                    .frame(width: 96, height: 96)
-                    .rotationEffect(.degrees(eggShakeAngle), anchor: .bottom)
-                    .onTapGesture { tapEgg(pull) }
-                    .contentShape(Rectangle())
-            }
-
-            Text(pullIsPremium ? "sudo 권한 확인 중… 탭하여 부화 (\(eggTapCount)/\(Self.eggTapsRequired))"
-                               : "탭하여 부화 (\(eggTapCount)/\(Self.eggTapsRequired))")
-                .font(.caption)
-                .foregroundStyle(pullIsPremium ? Rarity.mythic.color.opacity(0.9) : Color.secondary)
-                .monospacedDigit()
-        }
-    }
-
-    /// 프리미엄(sudo pull) 전용 연출 오라 — 회전하는 진홍·금 광선 + 맥동 radial glow.
-    /// 등급과 무관하게 프리미엄 가챠 진입 자체를 일반 가챠와 시각적으로 구분한다.
-    @ViewBuilder
-    private func premiumAura(diameter: CGFloat) -> some View {
-        let mythic = Rarity.mythic.color
-        let gold = Color(red: 1.0, green: 0.82, blue: 0.35)
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            let spin = (t * 24).truncatingRemainder(dividingBy: 360)
-            let pulse = 0.85 + sin(t * 3) * 0.15
-            ZStack {
-                AngularGradient(
-                    gradient: Gradient(colors: [.clear, mythic.opacity(0.55), .clear,
-                                                gold.opacity(0.45), .clear, mythic.opacity(0.5), .clear]),
-                    center: .center)
-                    .rotationEffect(.degrees(spin))
-                    .blur(radius: 6)
-                    .blendMode(.screen)
-                RadialGradient(colors: [mythic.opacity(0.5), gold.opacity(0.18), .clear],
-                               center: .center, startRadius: 0, endRadius: diameter * 0.42)
-                    .scaleEffect(pulse)
-                    .blendMode(.screen)
-            }
-            .frame(width: diameter, height: diameter)
-            .allowsHitTesting(false)
-        }
-    }
-
-    /// 가챠 알 sprite. 자산 누락 시 EggShape으로 fallback.
-    @ViewBuilder
-    private var eggSprite: some View {
-        if let img = PetSprite.image(named: "Egg") {
-            Image(nsImage: img)
-                .resizable()
-                .interpolation(.none)
-                .aspectRatio(contentMode: .fit)
-        } else {
-            EggShape()
-                .fill(Color(white: 0.95))
-                .overlay(EggShape().stroke(Color.black.opacity(0.5), lineWidth: 1))
-        }
-    }
-
-    /// `.cracking` 단계 시각화.
-    /// - 0.0 ~ 0.6s: 균열 라인이 위에서 아래로 점진 그려짐 (trim).
-    /// - 그 후: 알이 살짝 더 빠르게 진동 (부화 임박).
-    private func crackingView(_ pull: GachaPull) -> some View {
-        let startedAt = crackStartedAt ?? Date()
-        return TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
-            let elapsed = ctx.date.timeIntervalSince(startedAt)
-            let crackProgress = min(1.0, elapsed / 0.6)
-            let pulseFreq = elapsed < 0.6 ? 12.0 : 22.0
-            let pulseAmp = elapsed < 0.6 ? 0.04 : 0.07
-            let pulse = 1.0 + sin(elapsed * pulseFreq) * pulseAmp
-            eggSprite
-                .overlay(
-                    CrackShape()
-                        .trim(from: 0, to: crackProgress)
-                        .stroke(Color.black, lineWidth: 1.5)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
-                )
-                .frame(width: 96, height: 96)
-                .scaleEffect(pulse)
-        }
-    }
-
-    /// 부화 직후 연출. 시간 구간 (revealStartedAt 기준):
-    ///   - 0.0 ~ 0.25s: 검은 배경 fade in + 알 burst-out (scale up + opacity down)
-    ///   - 0.0 ~ 0.5s : 흰 flash 페이드아웃 (깜빡임)
-    ///   - 0.5 ~ 1.5s : 어두운 실루엣
-    ///   - 1.5 ~ 2.2s : 색상 fade in (실루엣 → 풀컬러)
-    ///   - 마지막 0.4s: 검은 배경 fade out (hatched로 자연스럽게 연결)
-    private func revealingView(_ pull: GachaPull) -> some View {
-        let startedAt = revealStartedAt ?? Date()
-        return TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
-            let elapsed = ctx.date.timeIntervalSince(startedAt)
-            ZStack {
-                // 검은 배경 — 들어올 땐 0.25s fade in. 나갈 때는 부모 cross-fade(0.22s)에
-                // 맡기고 자체 fade out은 짧게(0.15s)만 — 두 효과가 겹쳐 굼뜨지 않게.
-                let bgFadeIn = min(1.0, elapsed / 0.25)
-                let fadeOutStart = Self.revealDuration - 0.15
-                let bgFadeOut = elapsed > fadeOutStart
-                    ? max(0, 1 - (elapsed - fadeOutStart) / 0.15)
-                    : 1.0
-                Color.black.opacity(bgFadeIn * bgFadeOut)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                // 알이 폭발하듯 사라짐 — cracking에서 살짝 진동 중이던 알이 그대로 fade out
-                if elapsed < 0.35 {
-                    let burst = elapsed / 0.35
-                    eggSprite
-                        .frame(width: 96, height: 96)
-                        .scaleEffect(1 + burst * 0.5)
-                        .opacity(1 - burst)
+        case .idle:
+            Text(errorMessage ?? "뽑기권을 선택해 펫을 만나보세요")
+                .foregroundStyle(errorMessage == nil ? Color.secondary : .red)
+                .frame(maxWidth: .infinity, minHeight: 90)
+        case .tray(let id, let premium, let results):
+            HatchTray(premium: premium, results: results, step: $hatchStep) { phase = .idle }
+                .id(id)
+            if !isOpening, results.indices.contains(resultIndex) {
+                if results.count > 1 {
+                    Picker("배치할 펫", selection: $resultIndex) {
+                        ForEach(results.indices, id: \.self) { index in
+                            Text("\(index + 1). \(PetMetaStore.shared.displayName(for: results[index].pull.kind))").tag(index)
+                        }
+                    }
                 }
-
-                // flash 깜빡임 — 프리미엄(sudo pull)은 진홍, 일반은 흰색.
-                if elapsed < 0.5 {
-                    let envelope = max(0, 1 - elapsed / 0.5)
-                    let blink = abs(sin(elapsed * 24))
-                    (pullIsPremium ? Rarity.mythic.color : Color.white).opacity(envelope * blink * 0.85)
-                }
-
-                // 프리미엄: 펫 뒤에서 회전하는 진홍·금 광선 (일반 가챠엔 없음).
-                if pullIsPremium && elapsed > 0.45 {
-                    premiumAura(diameter: 210)
-                        .opacity(min(1, (elapsed - 0.45) / 0.5))
-                }
-
-                // 펫 등장 (silhouette → fade in)
-                if let img = PetSprite.image(for: pull.kind, action: .sit, frameIndex: 0) {
-                    let appearAt: TimeInterval = 0.5
-                    let silhouetteUntil: TimeInterval = 1.5
-                    let revealDoneAt: TimeInterval = 2.2
-                    let progress: Double = {
-                        if elapsed < silhouetteUntil { return 0 }
-                        return min(1, (elapsed - silhouetteUntil) / (revealDoneAt - silhouetteUntil))
-                    }()
-                    let multiplier = max(0.15, progress)
-
-                    Image(nsImage: img)
-                        .resizable()
-                        .interpolation(.none)
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 84)
-                        .hueRotation(.degrees(WalkingCat.hueDegrees(for: pull.variantUnlocked ?? 0)))
-                        .colorMultiply(Color(white: multiplier))
-                        .saturation(progress)
-                        .opacity(elapsed < appearAt ? 0 : 1)
-                        .offset(y: Self.spriteRestY)  // hatched의 sprite와 동일 위치
-                }
+                let pull = results[resultIndex].pull
+                PetPlacementMenu(pet: PetSelection(kind: pull.kind, variant: pull.variantUnlocked ?? 0), open: open)
             }
-            .clipped()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func hatchedView(_ pull: GachaPull) -> some View {
-        // ZStack으로 revealing과 동일한 sprite 위치(spriteRestY)를 유지.
-        // 메타데이터는 sprite 아래에 별도 묶음으로 배치.
-        // 펜딩 컬렉션 컴플리트가 있으면 상단에 배너 오버레이 — `.hatched` 진입 시
-        // `Settings.pendingCollectionCelebration`이 set돼있으면 노출하고 onAppear에서 nil로 소비.
-        ZStack {
-            if let img = PetSprite.image(for: pull.kind, action: .sit, frameIndex: 0) {
-                Image(nsImage: img)
-                    .resizable()
-                    .interpolation(.none)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(height: 84)
-                    .hueRotation(.degrees(WalkingCat.hueDegrees(for: pull.variantUnlocked ?? 0)))
-                    .saturation((pull.variantUnlocked ?? 0) > 0 ? 1.15 : 1.0)
-                    .offset(y: Self.spriteRestY)
-            }
-
-            VStack(spacing: 5) {
-                Text(PetMetaStore.shared.displayName(for: pull.kind))
-                    .font(.title3.weight(.bold))
-                Text(pull.rarity.displayName)
-                    .font(.caption.weight(.bold))
-                    .padding(.horizontal, 10).padding(.vertical, 3)
-                    .background(pull.rarity.color.opacity(0.2))
-                    .foregroundStyle(pull.rarity.color)
-                    .clipShape(Capsule())
-
-                if let v = pull.variantUnlocked, v > 0 {
-                    Label("색상 변종 \(v) 해금!", systemImage: "sparkles")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.yellow)
-                } else if (settings.ownedPets[pull.kind]?.count ?? 0) == 1 {
-                    Label("새 펫!", systemImage: "star.fill")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.green)
-                } else {
-                    Text("중복 (\(settings.ownedPets[pull.kind]?.count ?? 0)마리째)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .offset(y: 50)  // sprite 아래에 배치 (sprite center=−38, 메타 center=+50 → ~88px 떨어짐)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .top) {
-            if let raw = settings.pendingCollectionCelebration,
-               let c = PetCollection(rawValue: raw) {
-                CollectionCompleteBanner(collection: c) {
+            if !isOpening, let raw = settings.pendingCollectionCelebration,
+               let collection = PetCollection(rawValue: raw) {
+                CollectionCompleteBanner(collection: collection) {
                     settings.pendingCollectionCelebration = nil
                 }
-                .padding(.top, 6)
-                .transition(.move(edge: .top).combined(with: .opacity))
             }
-        }
-        .animation(.easeInOut(duration: 0.3), value: settings.pendingCollectionCelebration)
-    }
-
-    // MARK: - 10연차 (multi pull)
-
-    /// 10연차 placeholder 연출 — 전용 에셋 도입 전까지의 임시 화면. 텍스트 없이 알이 격하게
-    /// 흔들/팝하고 뒤에서 glow가 throb, sparkle 링이 회전해 "곧 터질 듯한" 역동성을 준다.
-    /// 자산이 들어오면 이 함수와 `multiRevealDuration`만 교체하면 된다.
-    private func multiRollingView(_ pulls: [GachaPull]) -> some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !windowIsVisible)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
-            // 고주파 흔들림 + 팝 스케일 + 상하 바운스.
-            let wobble = sin(t * 24) * 16 + sin(t * 9) * 6
-            let pop = 1.0 + 0.14 * sin(t * 13)
-            let bob = sin(t * 17) * 5
-            let throb = abs(sin(t * 5))
-            ZStack {
-                // 뒤에서 맥동하는 glow.
-                Circle()
-                    .fill(Color.yellow)
-                    .frame(width: 120, height: 120)
-                    .scaleEffect(0.85 + 0.3 * throb)
-                    .blur(radius: 26)
-                    .opacity(0.25 + 0.35 * throb)
-                // 회전하는 sparkle 링.
-                ForEach(0..<6, id: \.self) { i in
-                    let ang = t * 2.4 + Double(i) * (.pi * 2 / 6)
-                    let radius = 58.0 + 10 * sin(t * 6 + Double(i))
-                    Image(systemName: "sparkle")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.yellow)
-                        .opacity(0.4 + 0.6 * abs(sin(t * 4 + Double(i))))
-                        .offset(x: cos(ang) * radius, y: sin(ang) * radius)
-                }
-                // 알.
-                eggSprite
-                    .frame(width: 96, height: 96)
-                    .scaleEffect(pop)
-                    .rotationEffect(.degrees(wobble), anchor: .bottom)
-                    .offset(y: bob)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// 결과 그리드 진입 시 0칸부터 한 칸씩 빠르게 공개. 재진입 대비 이전 Task는 취소.
-    private func startSequentialReveal(total: Int) {
-        revealTask?.cancel()
-        revealedCount = 0
-        revealTask = Task { @MainActor in
-            for i in 1...max(1, total) {
-                try? await Task.sleep(nanoseconds: UInt64(Self.multiRevealStagger * 1_000_000_000))
-                if Task.isCancelled { return }
-                revealedCount = i
-            }
-        }
-    }
-
-    /// 10연차 결과 그리드 — 2×5. halo로 신규/중복 구분, 상단 요약 + 하단 확인 버튼.
-    /// 컬렉션 컴플리트 배너는 `hatchedView`와 동일하게 상단 오버레이로 재사용.
-    private func multiHatchedView(_ results: [MultiPullResult]) -> some View {
-        let newCount = results.filter { $0.isNew }.count
-        let dupCount = results.count - newCount
-        let revealDone = revealedCount >= results.count
-        return VStack(spacing: 10) {
-            // 모든 칸 공개가 끝난 뒤에야 요약 노출 — 카운트 스포일러 방지. 자리는 항상 차지(레이아웃 고정).
-            HStack(spacing: 12) {
-                Label("신규 \(newCount)", systemImage: "sparkles")
-                    .foregroundStyle(.green)
-                Label("중복 \(dupCount)", systemImage: "arrow.triangle.2.circlepath")
-                    .foregroundStyle(.secondary)
-            }
-            .font(.system(size: 12, weight: .semibold))
-            .opacity(revealDone ? 1 : 0)
-            .animation(.easeIn(duration: 0.2), value: revealDone)
-
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 5), spacing: 10) {
-                ForEach(Array(results.enumerated()), id: \.offset) { (i, r) in
-                    // 슬롯은 항상 자리 차지(레이아웃 고정), 내용만 i < revealedCount일 때 팝-인.
-                    multiResultCell(r)
-                        .opacity(i < revealedCount ? 1 : 0)
-                        .scaleEffect(i < revealedCount ? 1 : 0.4)
-                        .animation(.spring(response: 0.28, dampingFraction: 0.55), value: revealedCount)
-                }
-            }
-
-            Button("확인") { phase = .idle }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
-        .onAppear { startSequentialReveal(total: results.count) }
-        .overlay(alignment: .top) {
-            if let raw = settings.pendingCollectionCelebration,
-               let c = PetCollection(rawValue: raw) {
-                CollectionCompleteBanner(collection: c) {
-                    settings.pendingCollectionCelebration = nil
-                }
-                .padding(.top, 6)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut(duration: 0.3), value: settings.pendingCollectionCelebration)
-    }
-
-    /// 결과 한 칸 — halo로 신규/중복 구분 (신규=밝은 등급색, 중복=회색+흐림). 별도 뱃지 없음.
-    private func multiResultCell(_ r: MultiPullResult) -> some View {
-        let variant = r.pull.variantUnlocked ?? 0
-        let haloColor = r.isNew ? r.pull.rarity.color : Color.gray
-        return VStack(spacing: 3) {
-            ZStack {
-                Circle()
-                    .fill(haloColor)
-                    .frame(width: 52, height: 52)
-                    .blur(radius: 9)
-                    .opacity(r.isNew ? 0.85 : 0.30)
-                if let img = PetSprite.image(for: r.pull.kind, action: .sit, frameIndex: 0) {
-                    Image(nsImage: img)
-                        .resizable()
-                        .interpolation(.none)
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 44, height: 44)
-                        .hueRotation(.degrees(WalkingCat.hueDegrees(for: variant)))
-                        .saturation(r.isNew ? (variant > 0 ? 1.15 : 1.0) : 0.55)
-                        .opacity(r.isNew ? 1.0 : 0.6)
-                }
-            }
-            Text(PetMetaStore.shared.displayName(for: r.pull.kind))
-                .font(.system(size: 9))
-                .lineLimit(1)
-                .foregroundStyle(r.isNew ? .primary : .secondary)
-                .frame(maxWidth: .infinity)
         }
     }
 
@@ -887,11 +409,6 @@ struct GachaView: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding(.vertical, 20)
                     }
-                    // 컬렉션 업적 섹션 — 검색/필터 중엔 숨겨 도감 결과에 집중.
-                    if !dexFilterActive {
-                        Divider().padding(.vertical, 4)
-                        collectionsAchievementSection()
-                    }
                 }
             }
         }
@@ -923,53 +440,15 @@ struct GachaView: View {
         return true
     }
 
-    // MARK: - Collections (셋 보너스 업적)
+    // MARK: - 도감 등급별 목록
 
-    /// 도감 섹션 접기/펼치기 토글 (SettingsView.CreditsView 패턴). id = Rarity.rawValue 또는 "collections".
+    /// 도감 섹션 접기/펼치기 토글 (SettingsView.CreditsView 패턴). id = Rarity.rawValue.
     private func toggleInventoryCollapsed(_ id: String) {
         withAnimation(.easeInOut(duration: 0.15)) {
             if settings.gachaInventoryCollapsed.contains(id) {
                 settings.gachaInventoryCollapsed.remove(id)
             } else {
                 settings.gachaInventoryCollapsed.insert(id)
-            }
-        }
-    }
-
-    /// 펫 컬렉션(셋 보너스) 뱃지 그리드 11개. 완성된 그룹은 accentColor + ✓,
-    /// 미완성은 회색 + 진행도(`5/8`). 코드네임/농담/보너스는 호버 시 `.help` tooltip으로 노출
-    /// — 뱃지 자체는 작고 균일한 사이즈(56px)로 깔끔하게 통일.
-    private func collectionsAchievementSection() -> some View {
-        let totalCompleted = settings.completedCollections.count
-        let totalCollections = PetCollection.allCases.count
-        let collapsed = settings.gachaInventoryCollapsed.contains("collections")
-        return VStack(alignment: .leading, spacing: 6) {
-            Button {
-                toggleInventoryCollapsed("collections")
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "trophy.fill")
-                        .foregroundStyle(.yellow)
-                    Text("업적")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Text("\(totalCompleted)/\(totalCollections)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                    Image(systemName: collapsed ? "chevron.down" : "chevron.up")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if !collapsed {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 10)], spacing: 12) {
-                    ForEach(PetCollection.allCases, id: \.self) { c in
-                        CollectionBadge(collection: c, settings: settings)
-                    }
-                }
             }
         }
     }
@@ -1025,7 +504,8 @@ struct GachaView: View {
                                     : (o.unlockedVariants.sorted().first ?? 0)
                                 // 직접 클릭 → 강조 해제. 영속화는 settings 안에서 처리.
                                 settings.acknowledgeHighlight(kind)
-                                phase = .preview(kind, v)
+                                dexSelection = PetSelection(kind: kind, variant: v)
+                                dexPreviewRequest += 1
                                 errorMessage = nil
                             }
                         )
@@ -1185,266 +665,21 @@ private struct CollectionCompleteBanner: View {
     }
 }
 
-/// 컬렉션 업적 뱃지. 원형 48px + SF Symbol + 진행도 caption — 카드보다 균일하고 컴팩트.
-/// 호버 시 popover로 displayName/subtitle/진행도/보너스 노출. `.help` modifier는 ScrollView
-/// 내부 LazyVGrid에서 hit-test가 안 잡히는 케이스가 있어 `.onHover` + `.popover` 조합으로
-/// 직접 우회. 미완성은 회색, 완성은 `accentColor`.
-private struct CollectionBadge: View {
-    let collection: PetCollection
-    @ObservedObject var settings: Settings
-
-    @State private var hovering: Bool = false
-
-    var body: some View {
-        let isComplete = settings.completedCollections.contains(collection.rawValue)
-        let isHighlighted = settings.pendingCollectionHighlights.contains(collection.rawValue)
-        let progress = collection.progress(settings)
-        let color: Color = isComplete ? collection.accentColor : Color.gray
-
-        VStack(spacing: 4) {
-            ZStack(alignment: .topTrailing) {
-                // 입체감 = (1) 위→아래 linear gradient (밝 → 어둡) +
-                //         (2) 좌상단 plusLighter radial 하이라이트 +
-                //         (3) drop shadow.
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                color.opacity(isComplete ? 1.00 : 0.40),
-                                color.opacity(isComplete ? 0.65 : 0.20),
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 48, height: 48)
-                    .overlay(
-                        // 좌상단 광택 — plusLighter blend로 밝게 보이는 spec highlight.
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [.white.opacity(isComplete ? 0.50 : 0.22), .clear],
-                                    center: UnitPoint(x: 0.30, y: 0.22),
-                                    startRadius: 1,
-                                    endRadius: 18
-                                )
-                            )
-                            .frame(width: 48, height: 48)
-                            .blendMode(.plusLighter)
-                            .allowsHitTesting(false)
-                    )
-                    .overlay(
-                        // 외곽 stroke — highlighted면 노란색·두꺼움(클릭 확인하기 전까지 강조).
-                        Circle()
-                            .stroke(
-                                isHighlighted ? Color.yellow : color.opacity(isComplete ? 0.95 : 0.45),
-                                lineWidth: isHighlighted ? 2.0 : 1.0
-                            )
-                    )
-                    .shadow(
-                        color: isHighlighted ? Color.yellow.opacity(0.65) : color.opacity(isComplete ? 0.55 : 0.18),
-                        radius: isHighlighted ? 6 : 4, x: 0, y: 2
-                    )
-                Image(systemName: collection.iconSystemImage)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white.opacity(isComplete ? 1.0 : 0.70))
-                    .shadow(color: .black.opacity(0.30), radius: 1, x: 0, y: 0.5)
-                    .frame(width: 48, height: 48)
-                    .allowsHitTesting(false)
-                if isHighlighted {
-                    // 신규 컴플리트 — 클릭으로 확인하기 전까지 ! 마크 유지.
-                    // (✓ 마크와 같은 위치에 표시 — 사용자가 클릭하면 ! → ✓로 자연 전환.)
-                    Text("!")
-                        .font(.system(size: 10, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                        .frame(width: 14, height: 14)
-                        .background(Circle().fill(Color.yellow))
-                        .overlay(Circle().stroke(Color.orange, lineWidth: 1))
-                        .shadow(color: Color.yellow.opacity(0.7), radius: 3)
-                        .offset(x: 4, y: -4)
-                        .allowsHitTesting(false)
-                } else if isComplete {
-                    // 완성 표식 — 우상단 노란 체크. 뱃지 가장자리 살짝 넘게 배치.
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.yellow)
-                        .background(Circle().fill(Color.black.opacity(0.55)))
-                        .offset(x: 4, y: -4)
-                        .allowsHitTesting(false)
-                }
-            }
-            Text(isComplete ? "✓" : "\(progress.collected)/\(progress.total)")
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(isComplete ? color : .secondary)
-                .monospacedDigit()
-        }
-        .frame(width: 60, height: 70)
-        // hit-test 영역을 frame 전체(원 + caption)로 — background가 없는 VStack은 hover 감지가
-        // 자식 view 영역으로만 한정되므로 명시.
-        .contentShape(Rectangle())
-        .onHover { hovering = $0 }
-        .onTapGesture {
-            // 클릭으로 강조 확인 — 호버 popover로 정보를 봤다고 자동 dismiss하지 않음.
-            // (`pendingHighlights`(펫 슬롯)와 동일 패턴 — 명시적 클릭만 acknowledge.)
-            settings.acknowledgeCollectionHighlight(collection.rawValue)
-        }
-        .popover(isPresented: $hovering, arrowEdge: .top) {
-            CollectionBadgeTooltip(
-                collection: collection,
-                isComplete: isComplete,
-                progress: progress,
-                completedAt: settings.collectionCompletedAt[collection.rawValue],
-                ownedPets: settings.ownedPets
-            )
-        }
-    }
-}
-
-/// 뱃지 호버 popover 내용. 시스템 popover 안에서 렌더링되므로 ScrollView clip 영향 없음.
-/// 컴플리트 조건(어떤 펫을 모아야 하는지)을 멤버 sprite + 이름 + 보유 ✓로 명시.
-///
-/// `@MainActor` 명시 — `spriteThumb`가 `PetSprite.image(...)`를 호출하는데, GitHub Actions의
-/// 엄격한 Swift concurrency 체크가 SwiftUI View의 `@ViewBuilder` 메서드를 nonisolated로
-/// 추론해서 actor 위반 에러를 냈음 (로컬 빌드는 통과). 명시적으로 격리.
-@MainActor
-private struct CollectionBadgeTooltip: View {
-    let collection: PetCollection
-    let isComplete: Bool
-    let progress: (collected: Int, total: Int)
-    let completedAt: Date?
-    let ownedPets: [PetKind: PetOwnership]
-
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy.MM.dd"
-        return f
-    }()
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // 헤더: 아이콘 + 코드네임 + 진행도.
-            HStack(spacing: 6) {
-                Image(systemName: collection.iconSystemImage)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(collection.accentColor)
-                Text(collection.displayName)
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                Spacer(minLength: 4)
-                Text("\(progress.collected)/\(progress.total)")
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(isComplete ? collection.accentColor : .secondary)
-            }
-            Text(collection.subtitle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Divider()
-            // 멤버 리스트 — sprite + 한국어 이름 + 보유 체크. 컴플리트 조건이 명시적으로 보임.
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(collection.members) { kind in
-                    let owned = (ownedPets[kind]?.count ?? 0) > 0
-                    HStack(spacing: 6) {
-                        spriteThumb(kind: kind, owned: owned)
-                        Text(PetMetaStore.shared.displayName(for: kind))
-                            .font(.caption2)
-                            .foregroundStyle(owned ? .primary : .secondary)
-                        Spacer(minLength: 0)
-                        Image(systemName: owned ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 10))
-                            .foregroundStyle(owned ? .green : .secondary.opacity(0.5))
-                    }
-                }
-            }
-            Divider()
-            // 상태/보너스
-            if isComplete {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.green)
-                    Text("컴플리트")
-                        .font(.caption.weight(.semibold))
-                    if let date = completedAt {
-                        Text("· \(Self.dateFormatter.string(from: date))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Text("+\(collection.bonusCoins) coin 적립됨")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("완성 시 +\(collection.bonusCoins) coin")
-                    .font(.caption2.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(collection.accentColor)
-            }
-        }
-        .padding(12)
-        .frame(width: 240, alignment: .leading)
-    }
-
-    /// 멤버 펫의 미니 sprite. 보유: 컬러 + 외곽선, 미보유: 흑백 + 흐림.
-    @ViewBuilder
-    private func spriteThumb(kind: PetKind, owned: Bool) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Color.secondary.opacity(0.10))
-            if let img = PetSprite.image(for: kind, action: .sit, frameIndex: 0) {
-                Image(nsImage: img)
-                    .resizable()
-                    .interpolation(.none)
-                    .aspectRatio(contentMode: .fit)
-                    .padding(1)
-                    .colorMultiply(owned ? .white : .black)
-                    .opacity(owned ? 1.0 : 0.45)
-            }
-        }
-        .frame(width: 18, height: 18)
-    }
-}
-
-/// 알 윤곽: 위가 좁고 아래가 넓은 oval. cubic curve 4개로 구성.
-struct EggShape: Shape {
+/// Stepped corners and thumb notches keep the ticket outline on the pixel grid.
+private struct DrawTicketShape: Shape {
     func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let w = rect.width, h = rect.height
-        // 위 정점에서 시작 → 우상 → 우하 → 하 정점 → 좌하 → 좌상 → 닫기.
-        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        p.addCurve(
-            to: CGPoint(x: rect.maxX, y: rect.midY + h * 0.12),
-            control1: CGPoint(x: rect.midX + w * 0.45, y: rect.minY),
-            control2: CGPoint(x: rect.maxX, y: rect.midY - h * 0.18)
-        )
-        p.addCurve(
-            to: CGPoint(x: rect.midX, y: rect.maxY),
-            control1: CGPoint(x: rect.maxX, y: rect.maxY - h * 0.05),
-            control2: CGPoint(x: rect.midX + w * 0.42, y: rect.maxY)
-        )
-        p.addCurve(
-            to: CGPoint(x: rect.minX, y: rect.midY + h * 0.12),
-            control1: CGPoint(x: rect.midX - w * 0.42, y: rect.maxY),
-            control2: CGPoint(x: rect.minX, y: rect.maxY - h * 0.05)
-        )
-        p.addCurve(
-            to: CGPoint(x: rect.midX, y: rect.minY),
-            control1: CGPoint(x: rect.minX, y: rect.midY - h * 0.18),
-            control2: CGPoint(x: rect.midX - w * 0.45, y: rect.minY)
-        )
-        return p
-    }
-}
-
-/// 알 표면을 가로지르는 지그재그 균열 라인.
-struct CrackShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: rect.midX, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.midX - rect.width * 0.18, y: rect.minY + rect.height * 0.22))
-        p.addLine(to: CGPoint(x: rect.midX + rect.width * 0.16, y: rect.minY + rect.height * 0.42))
-        p.addLine(to: CGPoint(x: rect.midX - rect.width * 0.14, y: rect.minY + rect.height * 0.62))
-        p.addLine(to: CGPoint(x: rect.midX + rect.width * 0.20, y: rect.minY + rect.height * 0.80))
-        p.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
-        return p
+        let w = rect.width, h = rect.height, mid = floor(h / 2)
+        let vertices: [CGPoint] = [
+            .init(x: 4, y: 0), .init(x: w-4, y: 0), .init(x: w-4, y: 3), .init(x: w, y: 3),
+            .init(x: w, y: mid-4), .init(x: w-4, y: mid-4), .init(x: w-4, y: mid+4), .init(x: w, y: mid+4),
+            .init(x: w, y: h-3), .init(x: w-4, y: h-3), .init(x: w-4, y: h), .init(x: 4, y: h),
+            .init(x: 4, y: h-3), .init(x: 0, y: h-3), .init(x: 0, y: mid+4), .init(x: 4, y: mid+4),
+            .init(x: 4, y: mid-4), .init(x: 0, y: mid-4), .init(x: 0, y: 3), .init(x: 4, y: 3)
+        ]
+        var path = Path()
+        path.addLines(vertices)
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -1627,7 +862,6 @@ private struct PetPreviewView: View {
         PetEffectShelf(kind: kind, settings: settings, onPreview: { previewEffect = $0 })
             .padding(.top, 4)
             .padding(.bottom, 6)
-        OwnedManualMasteryBadge(kind: kind)
         }
         .alert("레인보우 레어 해금 시도", isPresented: $showPrestigeConfirm) {
             Button("\(PetOwnership.prestigeAttemptCost)조각으로 시도") {
@@ -1963,12 +1197,15 @@ private struct PetPreviewView: View {
 final class GachaWindowController: NSWindowController, SingleWindowPresenting {
     static let shared = GachaWindowController()
 
+    private var navigation: TrainerNavigation!
+
     private convenience init() {
+        let navigation = TrainerNavigation()
         // 닫아도 창·hosting controller가 살아남는 구조(isReleasedWhenClosed = false + 싱글턴)라,
         // 감싸주지 않으면 닫힌 창의 TimelineView가 계속 프레임을 돈다. WindowVisibility.swift 참조.
-        let host = NSHostingController(rootView: GachaView().pauseAnimationsWhenHidden())
+        let host = NSHostingController(rootView: GachaView(navigation: navigation).pauseAnimationsWhenHidden())
         let window = NSWindow(contentViewController: host)
-        window.title = "가챠 · 도감"
+        window.title = "트레이너 메뉴"
         // resizable — 고정 560×640이던 시절엔 콘텐츠가 창보다 길어져도 사용자가 늘릴 방법이
         // 없어 그대로 잘렸다(도장 vibe 지역의 3번째 카테고리, 대련 시트 하단이 그랬다).
         // 각 탭은 최상위 ScrollView라 잘림 자체는 막혀 있지만, 넓게 쓰고 싶은 사용자에게
@@ -1983,21 +1220,18 @@ final class GachaWindowController: NSWindowController, SingleWindowPresenting {
         window.contentMinSize = NSSize(width: 560, height: 640)
         window.center()
         self.init(window: window)
+        self.navigation = navigation
         // 사용자가 늘린 크기·위치를 다음 실행에도 유지. center() 뒤에 걸어야 저장값이 우선한다.
         window.setFrameAutosaveName("GachaWindow")
     }
 
     /// 윈도우를 띄우면서 특정 탭으로 전환. `tab=nil`이면 마지막 선택 상태 유지.
-    /// 외부(SettingsView 등)가 "보드 열기" 같은 라우팅에 사용.
     func present(tab: GachaView.Tab? = nil) {
+        if let tab { navigation.tab = tab }
         bringToFront()
-        if let tab {
-            NotificationCenter.default.post(name: .gachaSwitchTab, object: tab)
-        }
     }
 }
 
-extension Notification.Name {
-    /// GachaView가 외부 요청으로 탭 전환할 때 사용. object = GachaView.Tab.
-    static let gachaSwitchTab = Notification.Name("gachaSwitchTab")
+final class TrainerNavigation: ObservableObject {
+    @Published var tab: GachaView.Tab = .shop
 }

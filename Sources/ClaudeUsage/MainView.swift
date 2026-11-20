@@ -249,7 +249,6 @@ struct MainView: View {
     var onSettings: () -> Void
     var onContributors: () -> Void
     var onBugReport: () -> Void
-    var onDailyFortune: () -> Void
     var onQuit: () -> Void
 
     /// 첫 소개 배너를 닫았는지. 신규 설치 전용이라 @AppStorage 로컬 플래그로 충분(서버 백업 불필요).
@@ -260,7 +259,7 @@ struct MainView: View {
             topBar
             // 아무 소스도 연결 안 된 신규 사용자에게만 1회 소개 — "게임만 보고 왔는데 왜 Claude?" 해소.
             // Claude/Cursor 중 하나라도 연결되면 자동으로 사라지므로 기존 사용자에겐 노출되지 않는다.
-            if !introDismissed, vm.claudeNeedsLogin, vm.cursorNeedsSetup {
+            if !introDismissed, vm.claudeNeedsLogin, vm.cursorNeedsSetup, vm.codexCurrent == nil {
                 introBanner
             }
             Divider().opacity(0.3)
@@ -297,7 +296,7 @@ struct MainView: View {
             Text("🐾").font(.system(size: 16))
             VStack(alignment: .leading, spacing: 2) {
                 Text("사용량이 곧 게임이 됩니다").font(.system(size: 11, weight: .semibold))
-                Text("이 앱은 Claude·Cursor 사용량을 펫·아레나로 바꿔줘요. 아래에서 로그인하면 쓴 만큼 코인·VP가 쌓이고, 그걸로 펫을 뽑고 대전합니다.")
+                Text("설정 → 서비스 연결에서 Claude·Cursor·Codex 중 사용하는 서비스를 선택하세요. 사용량으로 모은 코인은 트레이너 메뉴에서 펫을 뽑을 때 쓸 수 있어요.")
                     .font(.system(size: 9)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -320,128 +319,31 @@ struct MainView: View {
                     .foregroundStyle(.secondary)
                 versionChip
                 Spacer()
-                // 코인 잔액 — 클릭하면 가챠/도감 창 열림
-                Button {
-                    GachaWindowController.shared.present()
-                } label: {
-                    HStack(spacing: 3) {
-                        CoinIcon(size: 12)
-                        Text("\(settings.coins)")
-                            .font(.system(size: 11, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundStyle(.primary)
-                        // 티켓(일반·프리미엄 가챠권)은 메인 패널에 표시하지 않는다 — 상점(GachaView) 헤더에서만.
-                        // (통화 항목이 늘면 좁은 패널에서 숫자가 세로로 줄바꿈돼 깨졌음.)
-                    }
+                HStack(spacing: 3) {
+                    CoinIcon(size: 12)
+                    Text("\(settings.coins)")
                 }
-                .buttonStyle(.borderless)
-                .help("코인 잔액 — 클릭하여 가챠 열기")
-                // RP 잔액 — 클릭하면 랭킹. 랭킹 순위 보상으로 적립되는 화폐.
-                Button {
-                    GachaWindowController.shared.present(tab: .ranking)
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "diamond.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.cyan)
-                        Text("\(settings.rp)")
-                            .font(.system(size: 11, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundStyle(.primary)
-                    }
+                .help("코인 잔액")
+                HStack(spacing: 3) {
+                    Image(systemName: "diamond.fill").foregroundStyle(.cyan)
+                    Text("\(settings.rp)")
                 }
-                .buttonStyle(.borderless)
-                .help("RP — 클릭하여 랭킹 열기")
+                .help("RP 잔액")
                 if vm.claudeLoading || vm.cursorLoading || vm.codexLoading {
                     ProgressView().controlSize(.mini)
                 }
             }
-            // 2줄 — 액션 버튼(쪽지 · 게시판 · 운세) · 메뉴 우측 정렬
-            HStack(spacing: 12) {
-                Spacer()
-                // 쪽지 진입 — 미확인 수가 우상단 빨간 배지.
-                Button {
-                    DMWindowController.shared.present()
-                } label: {
-                    Image(systemName: "envelope.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.teal)
-                        .countBadge(dm.badgeCount)
-                }
-                .buttonStyle(.borderless)
-                .help(dm.badgeCount > 0 ? "쪽지·초대 \(dm.badgeCount)건" : "쪽지 열기")
-                // 게시판 진입 — 미확인 글 수가 우상단 빨간 배지로 표시.
-                Button {
-                    BoardWindowController.shared.present()
-                } label: {
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.cyan)
-                        .countBadge(vm.boardUnreadCount)
-                }
-                .buttonStyle(.borderless)
-                .help(vm.boardUnreadCount > 0 ? "게시판 (미확인 \(vm.boardUnreadCount)개)" : "게시판 열기")
-                // 오늘의 AI 퀴즈 — 오늘 안 풀었으면 빨간 dot 배지. 게시판 바로 옆.
-                Button {
-                    QuizWindowController.shared.present()
-                } label: {
-                    Image(systemName: "newspaper.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.orange)
-                        .dotBadge(!Self.kstCalendar.isDateInToday(settings.dailyQuizLastSolvedDate ?? .distantPast))
-                }
-                .buttonStyle(.borderless)
-                .help("오늘의 AI 퀴즈")
-                // 오늘의 개발 운세 — 오늘 한 번도 안 봤으면 빨간 dot 배지.
-                Button {
-                    onDailyFortune()
-                } label: {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 11))
-                        .foregroundStyle(AppColors.gold)
-                        .dotBadge(!Self.kstCalendar.isDateInToday(settings.dailyFortuneLastShownDate ?? .distantPast))
-                }
-                .buttonStyle(.borderless)
-                .help("오늘의 개발 운세")
-                // 공지사항 — 확성기. 언제든 패치 공지를 다시 볼 수 있음.
-                Button {
-                    AnnouncementWindowController.shared.presentBrowse()
-                } label: {
-                    Image(systemName: "megaphone.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Color.orange)
-                }
-                .buttonStyle(.borderless)
-                .help("공지사항")
-                // 사용 가이드 — 공지사항 옆. 기능별 설명 문서를 창으로 띄운다.
-                // 아직 한 번도 안 봤으면 알림 점 — 모든 사용자가 처음 한 번은 확인하도록 유도.
-                Button {
-                    GuideWindowController.shared.present()
-                } label: {
-                    Image(systemName: "book.closed.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.blue)
-                        .overlay(alignment: .topTrailing) {
-                            if !settings.hasViewedGuide {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 5, height: 5)
-                                    .offset(x: 4, y: -2)
-                            }
-                        }
-                }
-                .buttonStyle(.borderless)
-                .help("가이드")
+            .font(.system(size: 11, weight: .medium)).monospacedDigit()
+            HStack(spacing: 6) {
+                Button("트레이너 메뉴") { GachaWindowController.shared.present(tab: .home) }
+                Spacer(minLength: 2)
+                Button("설정", action: onSettings)
                 Menu {
                     Button("지금 새로고침") {
                         Task { await vm.refreshClaude(); await vm.refreshCursor(); await vm.refreshCodex() }
                     }
-                    Button("설정...") { onSettings() }
                     Button("기여자 보기...") { onContributors() }
                     Button("버그 리포트...") { onBugReport() }
-                    Divider()
-                    Button("Claude 재로그인") { onLogin() }
-                    Button("Claude 로그아웃") { vm.claudeLogout() }
                     Divider()
                     Button("종료") { onQuit() }
                 } label: {
@@ -451,7 +353,57 @@ struct MainView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
             }
+            .buttonStyle(.borderless)
+            .font(.system(size: 11))
+            .controlSize(.small)
+            panelShortcuts
         }
+    }
+
+    private var panelShortcuts: some View {
+        let inbox = dm.badgeCount + settings.guildsWithUnseenReplies.count + (settings.hasUnseenGuestbook ? 1 : 0)
+        let quizDue = !Self.kstCalendar.isDateInToday(settings.dailyQuizLastSolvedDate ?? .distantPast)
+        let fortuneDue = !Self.kstCalendar.isDateInToday(settings.dailyFortuneLastShownDate ?? .distantPast)
+        return HStack(spacing: 0) {
+            shortcut("메세지", icon: "envelope.fill", color: .teal, count: inbox) {
+                DMWindowController.shared.presentInbox()
+            }
+            shortcut("게시판", icon: "bubble.left.and.bubble.right.fill", color: .cyan, count: vm.boardUnreadCount) {
+                BoardWindowController.shared.present()
+            }
+            shortcut("퀴즈", icon: "newspaper.fill", color: .orange, status: quizDue ? "오늘 미참여" : nil) {
+                QuizWindowController.shared.present()
+            }
+            shortcut("운세", icon: "sparkles", color: AppColors.gold, status: fortuneDue ? "오늘 미확인" : nil) {
+                DailyFortuneWindowController.shared.present()
+            }
+            shortcut("공지", icon: "megaphone.fill", color: .orange) {
+                AnnouncementWindowController.shared.presentBrowse()
+            }
+            shortcut("가이드", icon: "book.closed.fill", color: .blue, status: settings.hasViewedGuide ? nil : "첫 안내") {
+                GuideWindowController.shared.present()
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private func shortcut(_ title: String, icon: String, color: Color, count: Int = 0,
+                          status: String? = nil, action: @escaping () -> Void) -> some View {
+        let detail = count > 0 ? "미확인 \(count)건" : status ?? ""
+        return Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 12))
+                    .foregroundStyle(color).frame(height: 15)
+                    .countBadge(count).dotBadge(status != nil)
+                Text(title).font(.system(size: 10)).lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(detail)
+        .help([title, detail].filter { !$0.isEmpty }.joined(separator: " · "))
     }
 
     /// 'Usage' 옆 버전 칩 — (...) 메뉴의 "업데이트 확인"을 대체하는 단일 진입점.

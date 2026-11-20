@@ -119,8 +119,6 @@ struct ManualBattleView: View {
             }
             Text("25턴부터 소모전 피해 · 40턴 종료 시 무승부").font(.caption).foregroundStyle(.secondary)
             if let message = session.serverStatusMessage { Text(message).font(.caption2).foregroundStyle(.secondary) }
-            masteryPreview
-            OwnedManualAchievementShelf(preview: session.archive.achievementPreview)
         }
     }
 
@@ -322,28 +320,6 @@ struct ManualBattleView: View {
                 }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
             }
-            masteryPreview
-            OwnedManualAchievementShelf(preview: session.isRemote ? nil : session.archive.achievementPreview)
-        }
-    }
-
-    private var masteryPreview: some View {
-        DisclosureGroup("레인보우 숙련 훈장") {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("공식 훈장은 서버 검증 대전에서 적립됩니다. 아래는 연습용 미리보기이며 능력치를 올리지 않습니다.").font(.caption2).foregroundStyle(.secondary)
-                ForEach((session.state?.teams[0].fighters.map(\.pet) ?? team).filter { $0.variant >= 4 }, id: \.kind) { pet in
-                    let record = session.archive.records[pet.kind.rawValue] ?? ManualMasteryRecord()
-                    let official = session.officialRecords[pet.kind.rawValue] ?? ManualMasteryRecord()
-                    HStack {
-                        Text("🏅 \(pet.kind.displayName)")
-                        Spacer()
-                        Text("공식 \(official.title) · \(official.wins)승").monospacedDigit()
-                    }.font(.caption)
-                    Text("연습 기록 \(record.wins)승 · 공식 A \(official.originalWins)/5 · B \(official.alternateWins)/5").font(.caption2)
-                    Text("A 문양 \(record.originalWins)/5 · B 문양 \(record.alternateWins)/5\(record.originalEmblem && record.alternateEmblem ? " · 쌍문양 달성" : "")").font(.caption2)
-                }
-                Text("1승 첫 발자국 → 10승 숙련 → 30승 베테랑 → 100승 마스터").font(.caption2)
-            }.padding(.top, 6)
         }
     }
 

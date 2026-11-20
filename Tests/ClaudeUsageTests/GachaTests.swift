@@ -13,6 +13,39 @@ import XCTest
 @MainActor
 final class GachaTests: SandboxedTestCase {
 
+    func testPremiumMultiPaysOnlyForMissingTickets() throws {
+        let s = Settings.shared
+        s.premiumTickets = 7
+        s.rp = 4_500
+        let initialCount = s.ownedPets.values.reduce(0) { $0 + $1.count }
+        let pulls = try Gacha.rollPremiumMulti()
+        XCTAssertEqual(pulls.count, 10)
+        XCTAssertTrue(pulls.allSatisfy { $0.rarity == .mythic || $0.rarity == .legendary })
+        XCTAssertEqual(s.premiumTickets, 0)
+        XCTAssertEqual(s.rp, 0)
+        XCTAssertEqual(s.ownedPets.values.reduce(0) { $0 + $1.count }, initialCount)
+        XCTAssertEqual(Gacha.commitMulti(pulls).count, 10)
+        XCTAssertEqual(s.ownedPets.values.reduce(0) { $0 + $1.count }, initialCount + 10)
+    }
+
+    func testPremiumMultiRejectsShortfallBeforeSpendingTickets() {
+        let s = Settings.shared
+        s.premiumTickets = 7
+        s.rp = 4_499
+        XCTAssertThrowsError(try Gacha.rollPremiumMulti()) {
+            XCTAssertEqual($0 as? GachaError, .insufficientRP)
+        }
+        XCTAssertEqual(s.premiumTickets, 7)
+        XCTAssertEqual(s.rp, 4_499)
+    }
+
+    func testPremiumMultiUsesAtMostTenTickets() throws {
+        Settings.shared.premiumTickets = 12
+        _ = try Gacha.rollPremiumMulti()
+        XCTAssertEqual(Settings.shared.premiumTickets, 2)
+        XCTAssertEqual(Gacha.premiumMultiCost(tickets: 0).rpCost, 15_000)
+    }
+
     // MARK: - 풀 정합성
 
     // 모든 PetKind가 정확히 한 등급에 속한다. 누락되면 그 펫은 가챠에서 영원히 안 나오고,

@@ -137,8 +137,7 @@ enum Gacha {
     }
 
     /// 잔액만 차감하고 결과(kind, rarity)를 결정한다.
-    /// **보유 상태(`ownedPets`)는 변경하지 않음** — `commit(_:)`을 부화 애니메이션
-    /// 완료 시점에 호출해서 반영해야 한다 (인벤토리 미리 해금되는 버그 방지).
+    /// 보유 상태는 호출자가 결제 직후 commit하고, 부화 연출에는 그 확정 결과를 전달한다.
     /// 반환되는 GachaPull의 `variantUnlocked`는 nil; commit 후의 결과로 채워진다.
     @discardableResult
     static func roll(useTicket: Bool) throws -> GachaPull {
@@ -155,7 +154,7 @@ enum Gacha {
     }
 
     /// RP 프리미엄 가챠권 1장으로 `[mythic+legendary]` 제한 풀 1뽑.
-    /// `roll(useTicket:)`과 동일하게 **보유 상태는 변경하지 않음** — `commit(_:)`을 부화 시점에 호출.
+    /// 일반권과 마찬가지로 반환한 draw를 commit해야 보유 상태에 반영된다.
     /// 가챠권 구매(RP 차감)는 `RankPointLedger.purchasePremiumTicket`에서 별도로 처리된다.
     @discardableResult
     static func rollPremium() throws -> GachaPull {
@@ -166,9 +165,28 @@ enum Gacha {
         return GachaPull(pulledAt: Date(), kind: kind, rarity: rarity, variantUnlocked: nil)
     }
 
+    static func premiumMultiCost(tickets: Int) -> (ticketsUsed: Int, rpCost: Int) {
+        let used = min(max(0, tickets), multiPullCount)
+        return (used, (multiPullCount - used) * RankPointLedger.premiumTicketCostRP)
+    }
+
+    static func rollPremiumMulti() throws -> [GachaPull] {
+        let settings = Settings.shared
+        let cost = premiumMultiCost(tickets: settings.premiumTickets)
+        if cost.rpCost > 0 {
+            guard RankPointLedger.shared.spend(cost.rpCost, reason: "premiumTicket") else {
+                throw GachaError.insufficientRP
+            }
+        }
+        settings.premiumTickets -= cost.ticketsUsed
+        return (0..<multiPullCount).map { _ in
+            let (kind, rarity) = drawKindElite()
+            return GachaPull(pulledAt: Date(), kind: kind, rarity: rarity, variantUnlocked: nil)
+        }
+    }
+
     /// 10연차 roll — 티켓/코인 선차감 후 10개의 (kind, rarity)만 결정한다.
-    /// 단일 `roll`과 동일하게 **보유 상태는 변경하지 않음** — `commitMulti(_:)`를 애니메이션
-    /// 완료 시점에 호출해 반영한다. 차감은 `multiPullCost(tickets:)` 정책을 따른다.
+    /// 차감은 `multiPullCost(tickets:)`를 따르고 보유 상태는 `commitMulti(_:)`에서 반영한다.
     @discardableResult
     static func rollMulti() throws -> [GachaPull] {
         let s = Settings.shared
@@ -205,7 +223,7 @@ enum Gacha {
         return out
     }
 
-    /// `roll(useTicket:)` 결과를 보유 상태에 반영. 부화 애니메이션의 hatched 진입 시점에 호출.
+    /// 확정한 draw를 보유 상태에 한 번 반영한다.
     /// - Returns: `variantUnlocked`가 채워진 새 `GachaPull` (UI 표시용).
     @discardableResult
     static func commit(_ pull: GachaPull) -> GachaPull {
@@ -257,11 +275,13 @@ enum GachaError: Error, LocalizedError {
     case noTickets
     case noPremiumTickets
     case insufficientCoins
+    case insufficientRP
 
     var errorDescription: String? {
         switch self {
         case .noTickets:         return "가챠권이 없습니다"
         case .noPremiumTickets:  return "프리미엄 가챠권이 없습니다"
+        case .insufficientRP: return "RP가 부족합니다"
         case .insufficientCoins: return "코인이 부족합니다"
         }
     }

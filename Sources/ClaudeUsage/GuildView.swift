@@ -8,6 +8,7 @@ import SwiftUI
 /// → 가입(내 길드: 사무실 씬 + 점수·멤버·초대 코드).
 /// 길드 랭킹 리스트·시상대는 랭킹 탭 → 길드 스코프로 이동 (GuildLeaderboardView).
 struct GuildView: View {
+    var guestbookFirst = false
     @ObservedObject var settings = Settings.shared
 
     @State private var info: RankingAPI.GuildInfoResponse?
@@ -85,6 +86,13 @@ struct GuildView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { startAutoRefresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .trainerAccountReady)) { note in
+            guard let origin = note.object as? NSWindow, origin === GachaWindowController.shared.window else { return }
+            refresh()
+        }
+        .onChange(of: settings.guildID) { _, id in
+            if !id.isEmpty && info?.guild.id != id { refresh() }
+        }
         .onDisappear { refreshTask?.cancel() }
         .alert("생성권 구매", isPresented: $confirmingPermitPurchase) {
             Button("구매 (\(CoinLedger.guildPermitCost) 코인)") { performPermitPurchase() }
@@ -167,7 +175,8 @@ struct GuildView: View {
     private var registerPrompt: some View {
         VStack(spacing: 10) {
             Image(systemName: "shield.lefthalf.filled").font(.system(size: 28)).foregroundStyle(.secondary)
-            Text("길드는 랭킹 참여자 전용입니다.\n설정 → 랭킹에서 참여를 시작하세요.")
+            AccountSettingsButton()
+            Text("길드에 가입하려면 공개 닉네임을 등록하세요.")
                 .font(.system(size: 12)).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -198,7 +207,7 @@ struct GuildView: View {
                 Divider()
                 browseSection
 
-                Text("받은 길드 초대는 상단 ✉️ 쪽지함에서 확인·수락할 수 있어요.")
+                Text("받은 길드 초대는 패널의 메세지에서 확인·수락할 수 있어요.")
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
             .padding(14)
@@ -604,12 +613,13 @@ struct GuildView: View {
     private func memberContent(_ info: RankingAPI.GuildInfoResponse) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if guestbookFirst { guestbookSection(info) }
                 scoreBanner(info.guild)
                 officeSection(info)
                 Divider()
                 membersSection(info)
                 Divider()
-                guestbookSection(info)
+                if !guestbookFirst { guestbookSection(info) }
                 Divider()
                 inviteCodeSection(info.guild)
                 if info.guild.isLeader {
@@ -919,7 +929,7 @@ struct GuildView: View {
             } catch {
                 self.error = error.localizedDescription
             }
-            // 받은 초대는 통합 인박스(쪽지함, DMViewModel)에서 조회·수락/거절한다.
+            // 받은 초대는 통합 인박스(메세지, DMViewModel)에서 조회·수락/거절한다.
             // 길드 랭킹 리스트는 랭킹 탭 → 길드 스코프로 이동 (RankingView.guildContent).
         }
     }

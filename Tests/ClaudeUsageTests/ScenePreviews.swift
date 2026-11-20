@@ -48,6 +48,50 @@ final class ScenePreviews: SandboxedTestCase {
         try renderTab(GachaView(), title: "탭-1-가챠", note: "뽑기 대기 상태. 알·비용·잔액 배치")
     }
 
+    func testRenderTrainerNavigation() throws {
+        let navigation = TrainerNavigation()
+        navigation.tab = .home
+        try renderTab(GachaView(navigation: navigation), title: "트레이너-메뉴", note: "최소 폭에서 목적별 진입")
+        navigation.tab = .dex
+        try PreviewRenderer.renderInWindow(GachaView(navigation: navigation), size: CGSize(width: 820, height: 680),
+                                           section: "트레이너", title: "도감-사이드바", appearance: .darkAqua)
+    }
+
+    func testRenderServiceConnections() throws {
+        let vm = ViewModel()
+        let navigation = SettingsNavigation()
+        navigation.page = .services
+        vm.claudeNeedsLogin = true
+        vm.cursorLastSuccess = Date(timeIntervalSince1970: 1_795_000_000)
+        vm.codexNeedsSetup = true
+        try PreviewRenderer.renderInWindow(SettingsView(navigation: navigation, vm: vm, login: {}),
+                                           size: CGSize(width: 420, height: 660), section: "트레이너", title: "서비스-연결")
+        vm.boardUnreadCount = 12
+        DMViewModel.shared.totalUnread = 3
+        defer { DMViewModel.shared.totalUnread = 0 }
+        try PreviewRenderer.renderInWindow(MainView(vm: vm, onLogin: {}, onSettings: {}, onContributors: {},
+                                                   onBugReport: {}, onQuit: {}),
+                                           size: CGSize(width: 260, height: 460), section: "트레이너", title: "패널")
+    }
+
+    func testRenderTrainerHonors() throws {
+        for category in TrainerHonorsView.Category.allCases {
+            try renderTab(TrainerHonorsView(initial: category), title: "훈장-\(category.rawValue)", note: "내 기록의 훈장 목록")
+        }
+    }
+
+    func testRenderPremiumHatchTray() throws {
+        let results = (Gacha.pool[.mythic]! + Gacha.pool[.legendary]!).prefix(10).enumerated().map { index, kind in
+            MultiPullResult(pull: GachaPull(pulledAt: Date(), kind: kind, rarity: index < 5 ? .mythic : .legendary,
+                                            variantUnlocked: nil), isNew: index.isMultiple(of: 2), count: index.isMultiple(of: 2) ? 1 : 2)
+        }
+        for step in [2, 7, HatchTray.finalStep(count: results.count)] {
+            let tray = HatchTray(premium: true, results: results, step: .constant(step)) {}
+            try PreviewRenderer.renderInWindow(tray.padding(), size: CGSize(width: 540, height: 310),
+                                               section: "부화실", title: "프리미엄-10회-\(step)")
+        }
+    }
+
     func testRenderPartyTab() throws {
         try renderTab(PartyView(), title: "탭-2-파티", note: "3소스 파티가 각각 3마리 채워진 상태")
     }
@@ -67,8 +111,8 @@ final class ScenePreviews: SandboxedTestCase {
                 settings.clearedBadges.insert(BadgeID(category: category, tier: tier).key)
             }
         }
-        try renderTab(GymView(initialRegion: .guild), title: "도장-설명-최소창", note: "길드 최초 가입 후 79일, 기본 화면의 한국어 설명")
-        try PreviewRenderer.renderInWindow(GymView(initialRegion: .guild), size: CGSize(width: 560, height: 1040),
+        try renderTab(ScrollView { GymBadgeShelf(initialRegion: .guild).padding() }, title: "도장-설명-최소창", note: "길드 최초 가입 후 79일, 기본 화면의 한국어 설명")
+        try PreviewRenderer.renderInWindow(ScrollView { GymBadgeShelf(initialRegion: .guild).padding() }, size: CGSize(width: 560, height: 1040),
             section: "도장 설명", title: "길드-전체", note: "현재 기록과 다음 지표 기준, 관장 도전 조건을 구분합니다.", appearance: .darkAqua)
         try PreviewRenderer.renderInWindow(
             BadgeTierTooltip(category: .guildTenure, tier: .staging, currentValue: 79, threshold: 90,

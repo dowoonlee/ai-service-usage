@@ -324,6 +324,7 @@ final class DMViewModel: ObservableObject {
             Settings.shared.guildName = resp.name
             Settings.shared.isGuildLeader = false
             DebugLog.log("DM: 길드 초대 수락 → [\(resp.name)] (\(resp.memberCount)명)")
+            GachaWindowController.shared.present(tab: .guild)
             await refreshInbox(silent: true, full: false)
         } catch {
             self.error = mapInviteError(error)
@@ -416,7 +417,7 @@ final class DMViewModel: ObservableObject {
         if case RankingAPI.RankingError.guildConflict(let code) = error {
             switch code {
             case "cannot_send", "cannot_send_self": return "보낼 수 없는 상대입니다."
-            case "no_key": return "상대가 아직 쪽지를 시작하지 않았어요. (상대가 v0.15.0으로 업데이트한 뒤 쪽지함을 한 번 열어야 받을 수 있어요)"
+            case "no_key": return "상대가 아직 쪽지를 시작하지 않았어요. (상대가 v0.15.0으로 업데이트한 뒤 메세지를 한 번 열어야 받을 수 있어요)"
             default: break
             }
         }
@@ -437,7 +438,7 @@ final class DMWindowController: NSWindowController, NSWindowDelegate, SingleWind
     private convenience init() {
         let host = NSHostingController(rootView: DMRootView())
         let window = NSWindow(contentViewController: host)
-        window.title = "쪽지"
+        window.title = "메세지"
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: 400, height: 520))
@@ -452,6 +453,11 @@ final class DMWindowController: NSWindowController, NSWindowDelegate, SingleWind
     func windowWillClose(_ notification: Notification) {
         PollGate.dmViewIsOpen = false
         DMViewModel.shared.stopAutoRefresh()
+    }
+
+    func presentInbox() {
+        if DMViewModel.shared.openPeer != nil { DMViewModel.shared.closeThread() }
+        present()
     }
 
     func present() {
@@ -481,7 +487,8 @@ private struct DMRootView: View {
             if !RankingAPI.isConfigured {
                 placeholder("쪽지 기능이 이 빌드에 포함되지 않았습니다.")
             } else if !settings.rankingRegistered {
-                placeholder("설정 → 랭킹에서 참여를 시작하세요.")
+                placeholder("쪽지를 이용하려면 랭킹 참여가 필요합니다.")
+                AccountSettingsButton()
             } else if vm.openPeer != nil {
                 DMThreadView(vm: vm)
             } else {
@@ -502,6 +509,10 @@ private struct DMRootView: View {
             Task { await vm.refreshInbox() }
             if vm.pendingComposeNickname != nil { composing = true }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .trainerAccountReady)) { note in
+            guard let origin = note.object as? NSWindow, origin === DMWindowController.shared.window else { return }
+            Task { await vm.refreshInbox() }
+        }
         .onChange(of: vm.pendingComposeNickname) { nick in
             if nick != nil { composing = true }
         }
@@ -515,6 +526,9 @@ private struct DMRootView: View {
 // MARK: - 인박스
 
 private struct DMInboxView: View {
+    @ObservedObject private var settings = Settings.shared
+    private struct ReplyGuild: Identifiable { let id: String }
+    @State private var replyGuild: ReplyGuild?
     @ObservedObject var vm: DMViewModel
     @Binding var composing: Bool
     @Binding var showingSettings: Bool
@@ -522,7 +536,7 @@ private struct DMInboxView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("쪽지").font(.system(size: 14, weight: .semibold))
+                Text("메세지").font(.system(size: 14, weight: .semibold))
                 Spacer()
                 if vm.loading { ProgressView().controlSize(.small) }
                 Button { composing = true } label: { Label("새 쪽지", systemImage: "square.and.pencil") }
@@ -534,6 +548,27 @@ private struct DMInboxView: View {
             Divider()
             if let error = vm.error {
                 Text(error).font(.system(size: 11)).foregroundStyle(.red).padding(10)
+            }
+            if settings.hasUnseenGuestbook || settings.hasUnseenGuestbookReplies {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if settings.hasUnseenGuestbook {
+                            Button("내 길드의 새 방명록 열기") { GachaWindowController.shared.present(tab: .guestbook) }
+                        }
+                        ForEach(settings.guildsWithUnseenReplies.sorted(), id: \.self) { id in
+                            Button {
+                                replyGuild = ReplyGuild(id: id)
+                            } label: {
+                                HStack {
+                                    Text("내 방명록에 달린 답글")
+                                    if let date = settings.guestbookReplyLatest[id] {
+                                        Text(date.formatted()).font(.caption)
+                                    }
+                                }
+                            }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                }.frame(maxHeight: 100)
             }
             if vm.threads.isEmpty && vm.visibleInvites.isEmpty {
                 Spacer()
@@ -557,6 +592,9 @@ private struct DMInboxView: View {
             Text("🔒 종단간 암호화 · 이 기기에서만 읽힘")
                 .font(.system(size: 9)).foregroundStyle(.secondary)
                 .padding(.vertical, 6)
+        }
+        .sheet(item: $replyGuild) { guild in
+            GuildVisitView(guildId: guild.id, guildName: "길드", guestbookFirst: true)
         }
     }
 

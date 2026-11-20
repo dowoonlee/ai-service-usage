@@ -84,6 +84,10 @@ struct DailyQuizView: View {
         }
         .frame(minWidth: 480, minHeight: 560)
         .onAppear { Task { await vm.load() } }
+        .onReceive(NotificationCenter.default.publisher(for: .trainerAccountReady)) { note in
+            guard let origin = note.object as? NSWindow, origin === QuizWindowController.shared.window else { return }
+            Task { await vm.load() }
+        }
     }
 
     private var header: some View {
@@ -127,6 +131,7 @@ struct DailyQuizView: View {
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 340)
+                if !Settings.shared.rankingRegistered || Keychain.loadRankingHmacKey() == nil { AccountSettingsButton() }
                 Button("다시 시도") { Task { await vm.load() } }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

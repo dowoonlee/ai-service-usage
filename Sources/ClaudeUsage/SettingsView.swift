@@ -1,88 +1,119 @@
 import AppKit
 import SwiftUI
 
+enum SettingsPage: String, CaseIterable {
+    case general = "일반", services = "서비스 연결", account = "계정 · 공개 프로필"
+}
+
+@MainActor
+final class SettingsNavigation: ObservableObject {
+    @Published var page: SettingsPage = .general
+    weak var origin: NSWindow?
+    weak var window: NSWindow?
+
+    func returnToOrigin() {
+        guard let origin, origin.isVisible else { return }
+        self.origin = nil
+        window?.close()
+        origin.makeKeyAndOrderFront(nil)
+        NotificationCenter.default.post(name: .trainerAccountReady, object: origin)
+    }
+}
+
 struct SettingsView: View {
+    @ObservedObject var navigation: SettingsNavigation
+    let vm: ViewModel
+    let login: () -> Void
     @ObservedObject var settings = Settings.shared
 
     var body: some View {
-        Form {
-            Section("표시") {
-                HStack {
-                    Text("창 투명도")
-                    Slider(value: $settings.panelOpacity, in: 0.4...1.0)
-                    Text("\(Int(settings.panelOpacity * 100))%")
-                        .font(.system(size: 11)).monospacedDigit()
-                        .frame(width: 40, alignment: .trailing)
+        VStack {
+            Picker("설정", selection: $navigation.page) {
+                ForEach(SettingsPage.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented).labelsHidden().padding([.horizontal, .top])
+            Form {
+                switch navigation.page {
+                case .services: ServiceConnectionsView(vm: vm, login: login)
+                case .account:
+                    Section("GitHub 연동") { GitHubLinkView(settings: settings, onConnected: {
+                        if settings.rankingRegistered { navigation.returnToOrigin() }
+                    }) }
+                    Section("랭킹 참여 · 계정 복구") {
+                        RankingSectionView(onCompleted: navigation.returnToOrigin, settings: settings)
+                    }
+                case .general: generalSettings
                 }
-                Toggle("사용 페이스 예측 표시", isOn: $settings.showPace)
-                Toggle("업데이트 후 패치 공지 표시", isOn: $settings.patchNotesEnabled)
-                Toggle("메뉴바 모드 활성화", isOn: $settings.showMenuBar)
-                Text("메뉴바 모드를 설정하면 패널 close 시 메뉴바에 펫이 표시됩니다.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                if settings.showMenuBar {
-                    Picker("메뉴바에 표시할 펫", selection: $settings.menuBarPetSource) {
-                        ForEach(MenuBarPetSource.allCases) { src in
-                            Text(src.displayName).tag(src)
-                        }
+            }.formStyle(.grouped)
+            if navigation.origin != nil {
+                Button("원래 화면으로 돌아가기", action: navigation.returnToOrigin).padding(.bottom)
+            }
+        }.frame(width: 420, height: 660)
+    }
+
+    @ViewBuilder private var generalSettings: some View {
+        Section("표시") {
+            HStack {
+                Text("창 투명도")
+                Slider(value: $settings.panelOpacity, in: 0.4...1.0)
+                Text("\(Int(settings.panelOpacity * 100))%")
+                    .font(.system(size: 11)).monospacedDigit()
+                    .frame(width: 40, alignment: .trailing)
+            }
+            Toggle("사용 페이스 예측 표시", isOn: $settings.showPace)
+            Toggle("업데이트 후 패치 공지 표시", isOn: $settings.patchNotesEnabled)
+            Toggle("메뉴바 모드 활성화", isOn: $settings.showMenuBar)
+            Text("메뉴바 모드를 설정하면 패널 close 시 메뉴바에 펫이 표시됩니다.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            if settings.showMenuBar {
+                Picker("메뉴바에 표시할 펫", selection: $settings.menuBarPetSource) {
+                    ForEach(MenuBarPetSource.allCases) { src in
+                        Text(src.displayName).tag(src)
                     }
                 }
-            }
-            Section("날씨") {
-                Toggle("실제 날씨 효과(비·눈)", isOn: $settings.weatherEffectEnabled)
-                if settings.weatherEffectEnabled {
-                    Picker("위치", selection: $settings.weatherLocation) {
-                        ForEach(WeatherLocation.allCases) { loc in
-                            Text(loc.displayName).tag(loc)
-                        }
-                    }
-                }
-                Text("선택한 위치의 현재 날씨가 비·눈·뇌우면 패널에 파티클이 내립니다.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                Toggle("시즌 연출 (겨울 눈·모자 등)", isOn: $settings.seasonalEffectsEnabled)
-                Text("시즌 중 펫 머리 장식, 패널 가랑눈, 시즌 대사를 켭니다. 실제 날씨 효과가 꺼져 있으면 눈도 내리지 않습니다.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            Section("2026 리캡") {
-                Button("2026 리캡 보기") { RecapWindowController.shared.present() }
-                Text("올해 사용량과 가챠·도장·아레나 기록을 한 편으로 돌아봅니다.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            Section("시작") {
-                Toggle("로그인 시 자동 시작", isOn: Binding(
-                    get: { settings.launchAtLogin },
-                    set: { settings.setLaunchAtLogin($0) }
-                ))
-            }
-            Section("알림") {
-                Toggle("임계치 알림 사용", isOn: $settings.notifyEnabled)
-                ThresholdEditor(settings: settings)
-                    .disabled(!settings.notifyEnabled)
-                Text("같은 주기 내에서는 임계치별로 한 번만 알림이 옵니다.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            Section("GitHub 연동") {
-                GitHubLinkView(settings: settings)
-            }
-            Section("랭킹") {
-                RankingSectionView(settings: settings)
-            }
-            Section("실험") {
-                Toggle("펫 이름·대사·설명을 서버에서 받기", isOn: $settings.experimentalRemotePetMeta)
-                Text("켜면 앱 업데이트 없이 펫 텍스트가 갱신됩니다. 네트워크 실패·미설정 시 기본값으로 표시.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-            }
-            Section("정보") {
-                CreditsView()
             }
         }
-        .formStyle(.grouped)
-        .frame(width: 380, height: 700)
+        Section("날씨") {
+            Toggle("실제 날씨 효과(비·눈)", isOn: $settings.weatherEffectEnabled)
+            if settings.weatherEffectEnabled {
+                Picker("위치", selection: $settings.weatherLocation) {
+                    ForEach(WeatherLocation.allCases) { loc in
+                        Text(loc.displayName).tag(loc)
+                    }
+                }
+            }
+            Text("선택한 위치의 현재 날씨가 비·눈·뇌우면 패널에 파티클이 내립니다.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Toggle("시즌 연출 (겨울 눈·모자 등)", isOn: $settings.seasonalEffectsEnabled)
+            Text("시즌 중 펫 머리 장식, 패널 가랑눈, 시즌 대사를 켭니다. 실제 날씨 효과가 꺼져 있으면 눈도 내리지 않습니다.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        Section("시작") {
+            Toggle("로그인 시 자동 시작", isOn: Binding(
+                get: { settings.launchAtLogin },
+                set: { settings.setLaunchAtLogin($0) }
+            ))
+        }
+        Section("알림") {
+            Toggle("임계치 알림 사용", isOn: $settings.notifyEnabled)
+            ThresholdEditor(settings: settings)
+                .disabled(!settings.notifyEnabled)
+            Text("같은 주기 내에서는 임계치별로 한 번만 알림이 옵니다.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        Section("실험") {
+            Toggle("펫 이름·대사·설명을 서버에서 받기", isOn: $settings.experimentalRemotePetMeta)
+            Text("켜면 앱 업데이트 없이 펫 텍스트가 갱신됩니다. 네트워크 실패·미설정 시 기본값으로 표시.")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+        }
+        Section("정보") {
+            CreditsView()
+        }
+
     }
 
 }
@@ -129,6 +160,7 @@ private struct ThresholdEditor: View {
 // GitHub Device Flow UI — 빌드 시 GITHUB_CLIENT_ID 미설정이면 자동으로 비활성 안내만 표시.
 private struct GitHubLinkView: View {
     @ObservedObject var settings: Settings
+    let onConnected: () -> Void
 
     enum FlowState {
         case idle
@@ -256,6 +288,7 @@ private struct GitHubLinkView: View {
         Task { @MainActor in
             serverLinkError = await GitHubServerLink.reconcileIfNeeded(force: true)
             serverLinking = false
+            if serverLinkError == nil { onConnected() }
         }
     }
 
@@ -284,6 +317,7 @@ private struct GitHubLinkView: View {
                 // 이미 랭킹에 등록된 계정이면 서버에도 연결을 알린다 — 안 그러면 게시판 게이트가
                 // 풀리지 않는다(#293). 미등록이면 no-op이고, 등록 때 register가 함께 보낸다.
                 serverLinkError = await GitHubServerLink.reconcileIfNeeded(force: true)
+                if serverLinkError == nil { onConnected() }
                 // 연결 직후 첫 sync — 과거 PR 일괄 보너스 트리거.
                 await ContributorBonus.shared.sync()
             } catch is CancellationError {
@@ -296,8 +330,10 @@ private struct GitHubLinkView: View {
 }
 
 // 랭킹 옵트인/관리 UI. 옵트인 시점에 처리방침 동의 + 닉네임 확정 + 서버 register.
-// 등록 후엔 닉네임 변경/계정 삭제/복구 코드 재표시/보드 열기 액션을 노출.
+// 등록 후엔 닉네임 변경/계정 삭제/복구 코드 재표시 액션을 노출.
 private struct RankingSectionView: View {
+    var onCompleted: () -> Void = {}
+    @State private var returnAfterRecoveryCode = false
     @ObservedObject var settings: Settings
 
     enum FlowState: Equatable {
@@ -494,7 +530,6 @@ private struct RankingSectionView: View {
             }
 
             HStack(spacing: 8) {
-                Button("보드 열기") { GachaWindowController.shared.present(tab: .ranking) }
                 Button("복구 코드") { showRecoveryCode = true }
                     .buttonStyle(.borderless).font(.system(size: 11))
                 Spacer()
@@ -504,6 +539,12 @@ private struct RankingSectionView: View {
                     Text("계정 삭제").foregroundStyle(.red)
                 }
                 .buttonStyle(.borderless).font(.system(size: 11))
+            }
+        }
+        .onChange(of: showRecoveryCode) { _, visible in
+            if !visible && returnAfterRecoveryCode {
+                returnAfterRecoveryCode = false
+                onCompleted()
             }
         }
         .alert("복구 코드", isPresented: $showRecoveryCode) {
@@ -538,6 +579,7 @@ private struct RankingSectionView: View {
                     settings.rankingLastSubmittedTotal = settings.rankingSubmittableTotal
                 }
                 settings.rankingEnabled = newValue
+                if newValue { onCompleted() }
             }
         )
     }
@@ -699,6 +741,7 @@ private struct RankingSectionView: View {
                 settings.rankingRegistered = true
                 settings.rankingEnabled = true
                 state = .idle
+                returnAfterRecoveryCode = true
                 showRecoveryCode = true
             } catch {
                 state = .error(error.localizedDescription)
@@ -729,6 +772,7 @@ private struct RankingSectionView: View {
                     settings.applyBackup(backup)
                 }
                 showRecoveryEntry = false
+                onCompleted()
             } catch {
                 state = .error(error.localizedDescription)
                 showRecoveryEntry = false
@@ -821,6 +865,7 @@ private struct RankingSectionView: View {
                 settings.githubServerLinkedUserID = settings.githubUserID
                 state = .idle
                 showRecoveryEntry = false
+                onCompleted()
             } catch is CancellationError {
                 state = .idle
             } catch {
@@ -1038,17 +1083,36 @@ private struct CreditsView: View {
 
 @MainActor
 final class SettingsWindowController: NSWindowController, SingleWindowPresenting {
-    convenience init() {
-        let host = NSHostingController(rootView: SettingsView())
+    private var navigation: SettingsNavigation!
+    convenience init(vm: ViewModel, login: @escaping () -> Void) {
+        let navigation = SettingsNavigation()
+        let host = NSHostingController(rootView: SettingsView(navigation: navigation, vm: vm, login: login))
         let window = NSWindow(contentViewController: host)
         window.title = "설정"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         window.center()
         self.init(window: window)
+        self.navigation = navigation
+        navigation.window = window
     }
 
-    func present() {
+    func present(_ page: SettingsPage, origin: NSWindow?) {
+        navigation.origin = origin === window ? nil : origin
+        navigation.page = page
         bringToFront()
+    }
+}
+
+
+extension Notification.Name {
+    static let trainerAccountReady = Notification.Name("trainerAccountReady")
+}
+
+struct AccountSettingsButton: View {
+    var body: some View {
+        Button("랭킹 참여 · 계정 복구") {
+            NotificationCenter.default.post(name: .openRankingSettings, object: nil)
+        }
     }
 }

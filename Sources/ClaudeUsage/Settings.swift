@@ -1655,6 +1655,32 @@ final class Settings: ObservableObject {
         m.append(sel)
         partyPresets[i].members = m
     }
+    /// 결과 화면에서 교체를 고른 동안 프리셋이 바뀌어도 지정한 펫만 교체한다.
+    func replacePartyMember(_ previous: PetKind, in id: UUID, with pet: PetSelection) -> Bool {
+        guard let owner = ownedPets[pet.kind], owner.unlockedVariants.contains(pet.variant),
+              let preset = preset(for: id), !preset.members.contains(where: { $0.kind == pet.kind }),
+              let index = preset.members.firstIndex(where: { $0.kind == previous }) else { return false }
+        var members = preset.members
+        members[index] = pet
+        setPresetMembers(id, members)
+        return true
+    }
+
+    func placeInBattleTeam(_ pet: PetKind, replacing previous: PetKind?) -> Bool {
+        var team = battleTeam.filter { ownedPets[$0] != nil }
+        guard ownedPets[pet] != nil, !team.contains(pet) else { return false }
+        if let previous {
+            guard let index = team.firstIndex(of: previous) else { return false }
+            team[index] = pet
+        } else {
+            guard team.count < 5 else { return false }
+            team.append(pet)
+        }
+        battleTeamKeepsEmptySlots = team.count < 5
+        battleTeam = team
+        return true
+    }
+
     func removeFromPreset(_ id: UUID, kind: PetKind) {
         guard let i = partyPresets.firstIndex(where: { $0.id == id }) else { return }
         partyPresets[i].members.removeAll { $0.kind == kind }

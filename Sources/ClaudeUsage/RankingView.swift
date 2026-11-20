@@ -51,7 +51,9 @@ struct RankingView: View {
             if !RankingAPI.isConfigured {
                 placeholderView("랭킹 기능이 이 빌드에 포함되지 않았습니다.")
             } else if !settings.rankingRegistered {
-                placeholderView("설정 → 랭킹에서 참여를 시작하세요.")
+                VStack { placeholderView("공개 닉네임으로 랭킹에 참여하세요.")
+                    AccountSettingsButton().padding()
+                }
             } else {
                 if settings.tenantReverifyDueAt != nil { reverifyBanner }
                 if !tenantAnnouncements.isEmpty { tenantAnnouncementBanner }
@@ -65,7 +67,10 @@ struct RankingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { startAutoRefresh() }
-        // 주기 갱신은 sync가 밀어준다 — 자체 폴링 루프 없음.
+        .onReceive(NotificationCenter.default.publisher(for: .trainerAccountReady)) { note in
+            guard let origin = note.object as? NSWindow, origin === GachaWindowController.shared.window else { return }
+            refresh()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .rankingSynced)) { note in
             guard let payload = note.object as? RankingSyncPayload else { return }
             applySynced(payload)

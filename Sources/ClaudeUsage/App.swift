@@ -109,6 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 어긋나게 배치해 공지 창과 겹치지 않게 한다(TenantVerifyWindowController.present).
         TenantVerifyPromptManager.shared.checkOnLaunch()
 #if DEBUG
+        if AppEnv.isSandboxed && CommandLine.arguments.contains("--trainer-menu") {
+            GachaWindowController.shared.present(tab: .home)
+        }
         // 로컬 미리보기 — `AIUSAGE_ANNOUNCE_DEMO=1 swift run` 이면 샘플 공지 창을 즉시 띄운다.
         // 번들/Supabase 없는 dev 실행에서도 UI 확인용. 정상 경로엔 영향 없음.
         if ProcessInfo.processInfo.environment["AIUSAGE_ANNOUNCE_DEMO"] != nil {
@@ -195,9 +198,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if menuBarPetTimer == nil { startMenuBarPetTimer() }
     }
 
-    func presentSettings() {
-        if settingsWC == nil { settingsWC = SettingsWindowController() }
-        settingsWC?.present()
+    func presentSettings(_ page: SettingsPage = .general, returningTo origin: NSWindow? = nil) {
+        if settingsWC == nil { settingsWC = SettingsWindowController(vm: vm, login: { [weak self] in self?.presentLogin() }) }
+        settingsWC?.present(page, origin: origin)
     }
 
     private func setupPanel() {
@@ -244,7 +247,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             onSettings: { [weak self] in self?.presentSettings() },
             onContributors: { ContributorsWindowController.shared.present() },
             onBugReport: { BugReportWindowController.shared.present() },
-            onDailyFortune: { DailyFortuneWindowController.shared.present() },
             onQuit: { NSApp.terminate(nil) }
         )
         // macOS 15.x 에서 NSHostingView 가 zero frame 으로 시작하면 첫 layout pass 의 safe-area
@@ -434,14 +436,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let menu = NSMenu()
         let toggleTitle = (panel?.isVisible == true) ? "패널 숨기기" : "패널 보기"
         menu.addItem(withTitle: toggleTitle, action: #selector(togglePanelMenuAction), keyEquivalent: "")
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "설정…", action: #selector(presentSettingsMenuAction), keyEquivalent: ",")
-        // 업데이트 확인 — 패널의 버전 칩과 같은 동작이지만 진입점을 하나 더 둔다.
-        // v0.17.27에서 패널 전체가 클릭을 못 받는 회귀가 나갔을 때, 유일한 진입점이 그 칩이라
-        // 사용자가 앱 안에서 업데이트할 방법이 없었다. AppKit 메뉴는 SwiftUI가 막혀도 살아 있다.
-        menu.addItem(withTitle: "업데이트 확인…", action: #selector(checkForUpdatesMenuAction), keyEquivalent: "")
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "종료", action: #selector(quitMenuAction), keyEquivalent: "q")
+        if panel?.isVisible != true {
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "설정…", action: #selector(presentSettingsMenuAction), keyEquivalent: ",")
+            menu.addItem(withTitle: "업데이트 확인…", action: #selector(checkForUpdatesMenuAction), keyEquivalent: "")
+            menu.addItem(.separator())
+            menu.addItem(withTitle: "종료", action: #selector(quitMenuAction), keyEquivalent: "q")
+        }
         for menuItem in menu.items where menuItem.action != nil {
             menuItem.target = self
         }
@@ -455,7 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func togglePanelMenuAction() { togglePanel() }
     @objc private func presentSettingsMenuAction() { presentSettings() }
-    @objc private func openRankingSettingsAction() { presentSettings() }
+    @objc private func openRankingSettingsAction() { presentSettings(.account, returningTo: NSApp.keyWindow) }
     @objc private func checkForUpdatesMenuAction() { Updater.shared.checkForUpdates() }
     @objc private func quitMenuAction() { NSApp.terminate(nil) }
 

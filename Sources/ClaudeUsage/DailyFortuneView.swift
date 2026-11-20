@@ -168,6 +168,10 @@ struct DailyFortuneView: View {
         }
         .frame(width: 400, height: 600)
         .task { await vm.load() }
+        .onReceive(NotificationCenter.default.publisher(for: .trainerAccountReady)) { note in
+            guard let origin = note.object as? NSWindow, origin === DailyFortuneWindowController.shared.window else { return }
+            Task { await vm.load() }
+        }
     }
 
     private var header: some View {
@@ -341,7 +345,6 @@ struct DailyFortuneView: View {
                     Button("설정 열기") {
                         // 기존 ranking-section open notification 재사용 — App.swift 가 받아서 SettingsWindow 띄움.
                         NotificationCenter.default.post(name: .openRankingSettings, object: nil)
-                        DailyFortuneWindowController.shared.dismiss()
                     }
                     .buttonStyle(.borderedProminent)
                 } else {

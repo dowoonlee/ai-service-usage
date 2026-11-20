@@ -11,8 +11,6 @@ struct GymView: View {
     @State private var selectedRegion: BadgeRegion = .coffee
     /// 시즌 이벤트 섬을 골랐는지. 섬은 `BadgeRegion`이 아니라 따로 든다 — 고르면 관장·카테고리 자리에 보스 카드가 온다.
     @State private var eventSelected = false
-    /// 호버된 뱃지 ID (BadgeID.key). nil이면 tooltip 숨김.
-    @State private var hoveredKey: String?
     /// 진행 중인 관장 배틀(sheet 트리거). nil이면 배틀 창 닫힘.
     @State private var activeBattle: GymBattleRequest?
 
@@ -52,8 +50,6 @@ struct GymView: View {
                     seasonBossSection(season: season, boss: boss)
                 } else {
                     gymLeaderSection
-                    Divider()
-                    categorySection
                 }
             }
             .padding(16)
@@ -273,6 +269,40 @@ struct GymView: View {
         }
     }
 
+    // MARK: - Tier 색 / 굵기
+
+    fileprivate static func strokeColor(for tier: BadgeTier) -> Color {
+        switch tier {
+        case .localhost:  return Color(white: 0.50)
+        case .dev:        return Color(red: 0.20, green: 0.50, blue: 0.95)
+        case .staging:    return Color(red: 0.18, green: 0.62, blue: 0.55)
+        case .production: return Color(red: 1.0,  green: 0.78, blue: 0.0)
+        }
+    }
+
+
+}
+
+struct GymBadgeShelf: View {
+    @ObservedObject var settings = Settings.shared
+    @State private var selectedRegion: BadgeRegion
+    @State private var hoveredKey: String?
+
+    init(initialRegion: BadgeRegion = .coffee) {
+        _selectedRegion = State(initialValue: initialRegion)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("지역", selection: $selectedRegion) {
+                ForEach(BadgeRegion.allCases, id: \.self) { region in
+                    Text("\(region.continent.displayName) · \(region.displayName)").tag(region)
+                }
+            }
+            categorySection
+        }
+    }
+
     // MARK: - Category section
 
     /// tier 셀 고정 높이 — placeholder 행과 동기화해야 하므로 상수화 (tierCell의 frame과 동일 값).
@@ -295,6 +325,7 @@ struct GymView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 Spacer()
+                if settings.masteredRegions.contains(selectedRegion.rawValue) { Label("지역 마스터", systemImage: "crown.fill") }
             }
             Text("활동 기록으로 관장 도전 자격을 얻고, 관장을 격파하면 뱃지와 코인을 받습니다.")
                 .font(.system(size: 10)).foregroundStyle(.secondary)
@@ -312,7 +343,7 @@ struct GymView: View {
             ForEach(BadgeTier.allCases, id: \.self) { tier in
                 Text(tier.displayName)
                     .font(.system(size: 9, weight: .medium, design: .monospaced))
-                    .foregroundStyle(Self.strokeColor(for: tier))
+                    .foregroundStyle(GymView.strokeColor(for: tier))
                     .frame(maxWidth: .infinity)
             }
         }
@@ -358,7 +389,7 @@ struct GymView: View {
         let cleared = settings.clearedBadges.contains(id.key)
         let threshold = category.thresholds[tier] ?? 0
         let progress: Double = threshold > 0 ? min(1.0, Double(currentValue) / Double(threshold)) : 0
-        let strokeColor = Self.strokeColor(for: tier)
+        let strokeColor = GymView.strokeColor(for: tier)
         let gemColor = Color(hex: category.gemColorHex)
         let isHovered = (hoveredKey == id.key)
 
@@ -492,17 +523,6 @@ struct GymView: View {
                 radius: 4)
     }
 
-
-    // MARK: - Tier 색 / 굵기
-
-    private static func strokeColor(for tier: BadgeTier) -> Color {
-        switch tier {
-        case .localhost:  return Color(white: 0.50)
-        case .dev:        return Color(red: 0.20, green: 0.50, blue: 0.95)
-        case .staging:    return Color(red: 0.18, green: 0.62, blue: 0.55)
-        case .production: return Color(red: 1.0,  green: 0.78, blue: 0.0)
-        }
-    }
 
     /// tier 별 stroke 굵기 — production일수록 진함.
     private static func strokeWidth(for tier: BadgeTier) -> CGFloat {

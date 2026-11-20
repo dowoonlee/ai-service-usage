@@ -63,10 +63,11 @@ struct ManualAchievementShelf: View {
 }
 
 struct OwnedManualAchievementShelf: View {
+    var expanded = false
     var preview: ManualAchievementProgress?
     @ObservedObject private var store = ManualAchievementStore.shared
     @ObservedObject private var settings = Settings.shared
     var body: some View {
-        ManualAchievementShelf(progress: store.progress(owner: settings.rankingDeviceID), preview: preview)
+        ManualAchievementShelf(progress: store.progress(owner: settings.rankingDeviceID), preview: preview, expanded: expanded)
     }
 }
